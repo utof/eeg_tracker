@@ -1,0 +1,4 @@
+_local/
+__pycache__/
+*.f32
+logs/
