@@ -1,0 +1,55 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Headband check</title>
+<style>
+:root{color-scheme:dark}body{margin:0;background:#101214;color:#e8e6e1;font:16px/1.4 system-ui,sans-serif}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:18px;font-weight:600;margin:0 0 4px}#top{color:#9aa0a6;font-size:14px;margin-bottom:12px}
+.ch{display:grid;grid-template-columns:64px 1fr;gap:12px;align-items:center;padding:10px 0;border-top:1px solid #24282c}
+.name{font-weight:600;font-size:18px}.where{color:#9aa0a6;font-size:12px}
+.badge{display:inline-block;padding:2px 10px;border-radius:99px;font-size:13px;font-weight:600;color:#101214}
+.good{background:#7fd1a0}.fair{background:#e6c35c}.bad{background:#e8836f}
+.nums{color:#9aa0a6;font-size:13px;margin-left:8px}canvas{width:100%;height:56px;display:block;margin-top:6px}
+#alpha{margin:14px 0;padding:12px;border-radius:10px;background:#181b1e}
+button{font:inherit;padding:10px 16px;border-radius:10px;border:1px solid #3a4046;background:#1d2125;color:inherit}
+#hint{color:#9aa0a6;font-size:14px;margin-top:12px}
+</style><main>
+<h1>Headband check</h1><div id="top">connecting…</div>
+<div id="chs"></div>
+<div id="alpha"></div>
+<button onclick="fetch('contact',{method:'POST'});this.textContent='Checking contact (7 s)…';setTimeout(()=>this.textContent='Re-check contact',8000)">Re-check contact</button>
+<div id="hint">Green on all four = good. Red: part the hair under that electrode, press it to the skin, sit still.
+Alpha test: close your eyes for 20 s; the bar for the back pair should grow.</div></main>
+<script>
+const W={O1:'back left',O2:'back right',T3:'left side',T4:'right side'};
+const chs=document.getElementById('chs');const cv={};
+for(const n of ['O1','O2','T3','T4']){const d=document.createElement('div');d.className='ch';
+ d.innerHTML=`<div><div class=name>${n}</div><div class=where>${W[n]}</div></div><div><span id=b${n} class="badge bad">…</span><span id=n${n} class=nums></span><canvas id=c${n} width=600 height=56></canvas></div>`;chs.append(d);cv[n]=d.querySelector('canvas').getContext('2d')}
+function draw(g,y){g.clearRect(0,0,600,56);g.strokeStyle='#8ab4f8';g.lineWidth=1.2;g.beginPath();
+ y.forEach((v,i)=>{const px=i*600/(y.length-1),py=28-Math.max(-27,Math.min(27,v*27/100));i?g.lineTo(px,py):g.moveTo(px,py)});g.stroke()}
+// power per 0.25 Hz bin up to 51 Hz, Hann window
+function spectrum(x,fs){const N=x.length,out=[],df=fs/N,K=Math.floor(51/df);
+ const w=x.map((v,i)=>v*(0.5-0.5*Math.cos(2*Math.PI*i/(N-1))));
+ for(let k=0;k<=K;k++){let re=0,im=0;const a=2*Math.PI*k/N;for(let i=0;i<N;i++){re+=w[i]*Math.cos(a*i);im-=w[i]*Math.sin(a*i)}out.push((re*re+im*im))}
+ return {p:out,df,N}}
+function band(s,a,b){let t=0,n=0;for(let k=Math.ceil(a/s.df);k*s.df<b;k++){t+=s.p[k];n++}return n?t/n:0}
+function smooth(x,fs){const h=Math.round(fs/2),o=[];let acc=0;const q=[];
+ for(let i=0;i<x.length;i++){acc+=x[i];q.push(x[i]);if(q.length>h)acc-=q.shift();o.push(x[i]-acc/q.length)}
+ const r=[];for(let i=4;i<o.length;i+=5)r.push((o[i]+o[i-1]+o[i-2]+o[i-3]+o[i-4])/5);return r}
+async function tick(){try{const s=await (await fetch('state')).json();
+ document.getElementById('top').textContent=`${s.status} · battery ${s.battery}% · recorded ${s.minutes} min · last data ${s.age}s ago`;
+ let best={r:0,pk:0};
+ s.names.forEach((n,c)=>{const x=s.data[c];if(x.length<s.fs*2)return;const sp=spectrum(x,s.fs);
+  let tot=0;for(let k=Math.ceil(1/sp.df);k*sp.df<=40;k++)tot+=sp.p[k];
+  const rms=Math.sqrt(2*tot/(0.375*sp.N*sp.N)),hum=band(sp,49,51)/Math.max(band(sp,30,45),1e-9);
+  const flat=Math.max(...x.map(Math.abs))<0.5,ct=s.contact[n];
+  const grade=(flat||rms>60||ct===null)?'bad':(rms>30||hum>200)?'fair':'good';
+  const word=(flat||ct===null)?'not touching':grade=='bad'?'noisy':grade;
+  const b=document.getElementById('b'+n);b.className='badge '+grade;b.textContent=word;
+  document.getElementById('n'+n).textContent=`${rms.toFixed(0)} µV · hum ${hum>200?'high':hum>20?'some':'low'} · contact ${ct===null?'none':Math.round(ct/1000)+' kΩ'}`;
+  draw(cv[n],smooth(x,s.fs));
+  if(n=='O1'||n=='O2'){const r=band(sp,8,12)/Math.max((band(sp,4,7)+band(sp,14,20))/2,1e-9);
+   if(r>best.r){let pk=7,pv=0;for(let k=Math.ceil(7/sp.df);k*sp.df<=13;k++)if(sp.p[k]>pv){pv=sp.p[k];pk=k*sp.df}best={r,pk}}}});
+ document.getElementById('alpha').innerHTML=`Alpha at the back: <b>${best.r.toFixed(1)}×</b> its neighbours, peak ${best.pk.toFixed(1)} Hz
+  <div style="height:10px;background:#24282c;border-radius:5px;margin-top:8px"><div style="height:10px;border-radius:5px;background:#7fd1a0;width:${Math.min(100,best.r*20)}%"></div></div>`
+ }catch(e){document.getElementById('top').textContent='no answer from the laptop'}setTimeout(tick,500)}
+tick()</script>
