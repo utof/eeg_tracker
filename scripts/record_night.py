@@ -28,10 +28,6 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8765, help="live check page; 0 = off")
     a = ap.parse_args()
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-    data = open(out / f"{stamp}.f32", "ab")
-    logf = open(out / f"{stamp}.log", "a")
-    idxf = open(out / f"{stamp}.idx", "ab")
     lock = threading.Lock(); buf: list[bytes] = []; idx: list[bytes] = []; total = 0; seen = [0]
 
     def log(msg: str) -> None:
@@ -47,10 +43,19 @@ def main() -> None:
         raise SystemExit("no BrainBit found: is it switched on?")
     info = sc.sensors()[0]
     s = sc.create_sensor(info)
+    # files only once a headband is found, so restarts while it is off leave no empty files
+    stamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    data = open(out / f"{stamp}.f32", "ab")
+    logf = open(out / f"{stamp}.log", "a")
+    idxf = open(out / f"{stamp}.idx", "ab")
     log(f"connected {info.Name} {info.Address} serial {info.SerialNumber} battery {s.batt_power}% signal {info.RSSI} dBm")
 
     last = {}
-    s.resistDataReceived = lambda _s, d: last.update(O1=d.O1, O2=d.O2, T3=d.T3, T4=d.T4)
+    resist_n = [0]
+
+    def on_resist(_s, d) -> None:
+        resist_n[0] += 1; last.update(O1=d.O1, O2=d.O2, T3=d.T3, T4=d.T4)
+    s.resistDataReceived = on_resist
     try:
         s.exec_command(SensorCommand.StartResist); time.sleep(6); s.exec_command(SensorCommand.StopResist)
         log("contact ohms " + " ".join(f"{k}={v:.0f}" for k, v in last.items()))
@@ -112,10 +117,16 @@ def main() -> None:
             time.sleep(1)
             if want_contact.is_set():
                 want_contact.clear(); live["status"] = "checking contact"
+                n0 = resist_n[0]
                 try:
-                    s.exec_command(SensorCommand.StopSignal); s.exec_command(SensorCommand.StartResist)
-                    time.sleep(6); s.exec_command(SensorCommand.StopResist); s.exec_command(SensorCommand.StartSignal)
-                    log("contact ohms " + " ".join(f"{k}={v:.0f}" for k, v in last.items()))
+                    s.exec_command(SensorCommand.StopSignal); time.sleep(1)
+                    s.exec_command(SensorCommand.StartResist); time.sleep(6)
+                    s.exec_command(SensorCommand.StopResist); time.sleep(1)
+                    s.exec_command(SensorCommand.StartSignal)
+                    if resist_n[0] > n0:
+                        log("contact ohms " + " ".join(f"{k}={v:.0f}" for k, v in last.items()))
+                    else:
+                        log("contact re-check: no resistance data arrived")
                 except Exception as e:
                     log(f"contact re-check failed: {e}")
                 live["status"] = "recording"
@@ -132,14 +143,21 @@ def main() -> None:
                 last_report = time.time(); last_total = total
                 stalled = stalled + 1 if got == 0 else 0
                 if stalled or s.state != SensorState.StateInRange:
+                    if stalled >= 4:  # 40 s without data: a fresh process is the path known to work
+                        log("still no data; exiting so record_night.sh starts a fresh recorder")
+                        raise SystemExit(3)
                     try:
-                        log(f"no data, state {s.state.name}; reconnecting")
-                        if s.state != SensorState.StateInRange:
-                            s.connect()
+                        log(f"no data, state {s.state.name}; restarting stream (try {stalled})")
+                        try: s.exec_command(SensorCommand.StopSignal)
+                        except Exception: pass
+                        if stalled >= 2 or s.state != SensorState.StateInRange:
+                            try: s.disconnect()
+                            except Exception: pass
+                            time.sleep(2); s.connect(); time.sleep(1)
                         s.exec_command(SensorCommand.StartSignal)
-                        log(f"reconnected, battery {s.batt_power}%")
+                        log(f"stream restarted, battery {s.batt_power}%")
                     except Exception as e:  # keep trying all night
-                        log(f"reconnect failed: {e}")
+                        log(f"stream restart failed: {e}")
     except KeyboardInterrupt:
         pass
     finally:
