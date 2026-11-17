@@ -41,12 +41,15 @@ def main() -> None:
         raise SystemExit("no BrainBit found: is it switched on?")
     info = sc.sensors()[0]
     s = sc.create_sensor(info)
-    log(f"connected {info.Name} {info.Address} serial {info.SerialNumber} battery {s.batt_power}%")
+    log(f"connected {info.Name} {info.Address} serial {info.SerialNumber} battery {s.batt_power}% signal {info.RSSI} dBm")
 
     last = {}
     s.resistDataReceived = lambda _s, d: last.update(O1=d.O1, O2=d.O2, T3=d.T3, T4=d.T4)
-    s.exec_command(SensorCommand.StartResist); time.sleep(6); s.exec_command(SensorCommand.StopResist)
-    log("contact ohms " + " ".join(f"{k}={v:.0f}" for k, v in last.items()))
+    try:
+        s.exec_command(SensorCommand.StartResist); time.sleep(6); s.exec_command(SensorCommand.StopResist)
+        log("contact ohms " + " ".join(f"{k}={v:.0f}" for k, v in last.items()))
+    except Exception as e:  # a weak link must not stop the recording
+        log(f"contact check failed: {e}")
 
     def on_signal(_s, samples) -> None:
         now = time.time()
@@ -54,7 +57,13 @@ def main() -> None:
             idx.append(IDX.pack(now, seen[0])); seen[0] += len(samples)
             buf.extend(REC.pack(x.PackNum, x.O1, x.O2, x.T3, x.T4) for x in samples)
     s.signalDataReceived = on_signal
-    s.exec_command(SensorCommand.StartSignal)
+    for attempt in range(10):
+        try:
+            if s.state != SensorState.StateInRange:
+                s.connect()
+            s.exec_command(SensorCommand.StartSignal); break
+        except Exception as e:
+            log(f"start failed ({attempt + 1}/10): {e}"); time.sleep(3)
     log("recording started, 250 Hz, Ctrl+C to stop")
 
     t0 = time.time(); last_report = t0; last_total = 0; stalled = 0
