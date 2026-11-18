@@ -37,7 +37,10 @@ measures; eye direction, heart rate and breathing are not.
 - Jaw tension is muscle, not stress.
 - Heart rate from these electrodes is only an experiment (tested in 2 people); breathing, snoring and sleeping
   position: no study gets them from EEG electrodes.
-- The headband's signal may stop at 70 Hz (developer page) or 100 Hz (product page); the setup test settles which.
+- The developer page says the signal stops at 70 Hz, but on the first recorded night muscle stayed 13-15 dB above
+  quiet waking up to 124 Hz, so the app uses 55-120 Hz; the setup test's clenches confirm it.
+- In sleep, eye-movement steps on T3-T4 came as often in deep sleep as in dream sleep on the first two recordings,
+  so the app does not use them to find dream sleep.
 
 ## How the app uses this
 
@@ -46,9 +49,13 @@ measures; eye direction, heart rate and breathing are not.
   muscle. A blink is a slow swing at O1/O2 over 40 µV and 5 times its usual size.
 - Setup test: blinks, glances and clenches on tones in about 2 minutes, each scored against the quiet moments
   around it; "visible" at twice the background or more.
-- Planned: one shared detector for blinks, eye movements, jaw (20-70 Hz) and body movement, feeding meditation
-  feedback, the drift-off detector, the night counts and the signal-quality flags. Night movement: three or more
-  channels jumping past about 200 µV at once.
+- The shared detectors (built; docs/detectors.md): a blink is a dip of 50 µV or more on all four channels,
+  0.04-0.2 s wide, cancelled in T3-T4 (morning check-in: 3.1 a minute with eyes open, 0.5 with eyes closed); a
+  sideways glance is a 40 µV step in T3-T4 (left and right wait for the setup test); jaw is 55-120 Hz at T3 and T4
+  over 4 times each side's own level, both sides together (86 % of the first night's loudest muscle seconds were
+  caught, 7-8 % of the quietest); movement is three or more channels jumping past 200 µV at once.
+- Meditation and drifting off: two blinks in half a minute mean open eyes, so the drift-off detector does not
+  call you asleep then.
 - Planned: the night count shown as "jaw-muscle bursts per hour, 7-day trend", never as bruxism; hands-free
   gestures (a double clench marks a moment, a long clench pauses the sound).
 

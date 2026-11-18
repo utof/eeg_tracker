@@ -8,11 +8,19 @@
 //
 // Time: the session length counts seconds of signal after calibration (the core's sample clock), so a drop
 // pauses the countdown instead of eating the session, and a test can run a session in a fraction of a second.
+//
+// Beside the feedback core, the shared detectors (app/lib/detectors) see the same samples: blinks, eye movements,
+// jaw and movement bursts, epoch quality, and the drift-off detector, whose "lights off" is the calibration's
+// close-eyes cue (its 60 s eyes-closed baseline is the calibration minute). Its drowsy / probably-asleep state
+// joins the core's drowsy gate in the "drifting" chip; both are exposed for later features (dream catcher,
+// sleep-sound auto-stop).
 import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import '../detectors/detectors.dart';
+import '../detectors/drift_off.dart';
 import '../feedback/features.dart' show channelNames, fs;
 import '../feedback/mapping.dart';
 import '../feedback/session.dart';
@@ -127,6 +135,16 @@ class MeditationController extends ChangeNotifier {
   int get bells => _tracker?.bells ?? 0;
   bool get active => stage.index >= Stage.connecting.index && stage.index <= Stage.ending.index;
 
+  /// What the electrodes saw in the session running now (or the last one): blinks, eye movements, bursts,
+  /// movement, epoch quality. For later features; the screen does not show it yet.
+  Detectors? get seen => _seen;
+
+  /// The drift-off detector of this session, from the close-eyes cue on (null before it).
+  DriftOff? get drift => _drift;
+
+  /// The drift-off detector's state now (null before its baseline is complete).
+  DriftState? get driftState => _drift?.state == DriftState.baseline ? null : _drift?.state;
+
   /// The feedback core of the session running now (its log), for tests and tools.
   @visibleForTesting
   Session? get session => _session;
@@ -136,6 +154,9 @@ class MeditationController extends ChangeNotifier {
   FeedbackSound? _sound;
   Session? _session;
   MeditationTracker? _tracker;
+  Detectors? _seen;
+  DriftOff? _drift;
+  int _lostSamples = 0;
   DateTime? _startedAt;
   StreamSubscription<List<Sample>>? _signalSub;
   StreamSubscription<bool>? _rangeSub;
@@ -188,6 +209,7 @@ class MeditationController extends ChangeNotifier {
       s.log.note({'app': 'eeg_tracker meditation', 'lengthS': sessionLength.inSeconds, 'headband': band.name});
       _session = s;
       _tracker = MeditationTracker(sessionLength);
+      _seen = Detectors(onSecond: _onSecond);
       _startedAt = _now();
       calPhase = 'open';
       calSecondsLeft = Cal.openS.toInt();
@@ -217,6 +239,9 @@ class MeditationController extends ChangeNotifier {
     _band = null;
     _session = null;
     _tracker = null;
+    _seen = null;
+    _drift = null;
+    _lostSamples = 0;
     _sound = null;
     _lastData = null;
     _signalAt = null;
@@ -265,7 +290,10 @@ class MeditationController extends ChangeNotifier {
     final s = _session;
     if (s == null || _ended || batch.isEmpty) return;
     final now = _now(), last = _lastData;
-    if (last != null && now.difference(last).inMicroseconds / 1e6 > gapPauseS + batch.length / fs) _gapPending = true;
+    if (last != null && now.difference(last).inMicroseconds / 1e6 > gapPauseS + batch.length / fs) {
+      _gapPending = true;
+      _lostSamples = 0; // unknown length
+    }
     _lastData = now;
     var rows = <List<double>>[];
     final steps = <StepResult>[];
@@ -273,16 +301,24 @@ class MeditationController extends ChangeNotifier {
       final prev = _lastPack;
       if (prev != null) {
         final skip = (x.pack - prev - 1) % packetWrap;
-        if (skip >= gapSamples && skip <= maxGapSamples) _gapPending = true;
+        if (skip >= gapSamples && skip <= maxGapSamples) {
+          _gapPending = true;
+          _lostSamples = skip;
+        }
       }
       _lastPack = x.pack;
       if (_gapPending) {
         if (rows.isNotEmpty) steps.addAll(s.push(rows));
         rows = [];
         s.gap();
+        // the detectors hold the last value over the hole (as the BDF does); unknown length: one second
+        _seen?.hold(_lostSamples > 0 ? math.min(_lostSamples, maxGapSamples) : fs);
         _gapPending = false;
+        _lostSamples = 0;
       }
-      rows.add([x.o1 * 1e6, x.o2 * 1e6, x.t3 * 1e6, x.t4 * 1e6]); // the SDK gives volts; the core takes µV
+      final row = [x.o1 * 1e6, x.o2 * 1e6, x.t3 * 1e6, x.t4 * 1e6]; // the SDK gives volts; the core takes µV
+      rows.add(row);
+      if (row.every((v) => v.isFinite)) _seen?.push(row);
     }
     steps.addAll(s.push(rows));
     for (final r in steps) {
@@ -299,6 +335,8 @@ class MeditationController extends ChangeNotifier {
       sound.cue();
       calPhase = 'closed';
       _closedFromN = r.n;
+      final seen = _seen;
+      if (seen != null) _drift = DriftOff(seen.n ~/ fs); // lights off: the eyes close now
     } else if (r.cue == 'calibration-done') {
       sound.cue();
       sound.bed(on: true);
@@ -314,10 +352,18 @@ class MeditationController extends ChangeNotifier {
     } else if (r.phase == 'run') {
       sound.glide(r.targets);
       if (r.ring) sound.bell();
-      tracker.add(r);
+      tracker.add(r, drift: driftState);
       chip = tracker.chip;
       if (tracker.done) unawaited(_finish(complete: true));
     }
+  }
+
+  /// Each whole second from the detectors (one second late): the drift-off detector's input after lights off.
+  void _onSecond(Second sec) {
+    final d = _drift;
+    if (d == null || sec.k < d.lightsOff) return;
+    final a = sec.backAlpha;
+    d.second(sec.k, a.alpha, a.clean, sec.movement, sec.sem, sec.blinks);
   }
 
   void _tick() {
@@ -423,7 +469,20 @@ class MeditationController extends ChangeNotifier {
       note: s.note,
       logFile: '${st?.stemFor(start) ?? 'session'}.session.json',
     );
+    _seen?.finish();
     s.log.note({'sound': sound?.info(), 'end': complete ? 'length reached' : 'stopped', 'runS': t.runSeconds});
+    final d = _drift, seen = _seen;
+    if (seen != null) {
+      s.log.note({
+        'detectors': {
+          'blinks': seen.blinks.length,
+          'eyeMoves': seen.eyeMoves.length,
+          'bursts': {for (final k in BurstKind.values) k.name: seen.bursts.where((b) => b.kind == k).length},
+          'epochs': {for (final q in EpochQuality.values) q.name: seen.epochs.where((e) => e.quality == q).length},
+          if (d != null) 'drift': {'lightsOffS': d.lightsOff, 'baseline': d.baselineAlpha, 'onsetS': d.onset, 'asleepAtS': d.asleepAt},
+        },
+      });
+    }
     if (st != null) {
       try {
         await st.save(summary, s.log);

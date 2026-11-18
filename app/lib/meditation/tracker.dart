@@ -4,10 +4,12 @@
 //   settled  : eyes-closed alpha above your line, with no muscle, blink or drowsiness flag
 //   settling : no flag, alpha under the line
 //   restless : jaw or neck muscle, blinks or eye movement, or the electrodes moving
-//   drifting : the shared drift-to-sleep detector (or eyes open: it cannot tell them apart)
+//   drifting : the core's drift-to-sleep gate, or the shared drift-off detector (app/lib/detectors) saying
+//              drowsy or probably asleep (the core's gate cannot tell eyes open from dozing)
 // No "depth" or score: there is no reliable meditation-depth signal at these electrodes.
 import 'dart:math' as math;
 
+import '../detectors/drift_off.dart' show DriftState;
 import '../feedback/mapping.dart' show jawBlock;
 import '../feedback/session.dart';
 
@@ -15,8 +17,9 @@ enum Moment { calibrating, settled, settling, restless, drifting, noSignal }
 
 enum Restless { jaw, blinks, movement }
 
-/// One moment per analysis step of the run phase. Null outside it.
-({Moment moment, Restless? why})? momentOf(StepResult r) {
+/// One moment per analysis step of the run phase. Null outside it. [drift]: the drift-off detector's state
+/// (null before its baseline); drowsy or asleep makes an otherwise calm step a drifting one.
+({Moment moment, Restless? why})? momentOf(StepResult r, {DriftState? drift}) {
   if (r.phase != 'run') return null;
   if (r.quality == 'poor') {
     return r.channels['O1'] == 'noisy' || r.channels['O2'] == 'noisy'
@@ -32,6 +35,7 @@ enum Restless { jaw, blinks, movement }
     case 'drowsy':
       return (moment: Moment.drifting, why: null);
   }
+  if (drift == DriftState.drowsy || drift == DriftState.asleep) return (moment: Moment.drifting, why: null);
   return (moment: (r.z ?? 0) > 0 ? Moment.settled : Moment.settling, why: null);
 }
 
@@ -64,6 +68,9 @@ class MeditationTracker {
   int _sinceDrowsy = 1 << 30;
   int bells = 0;
 
+  /// Seconds into the session when the drift-off detector first said "probably asleep" (null: it did not).
+  double? asleepS;
+
   /// Each restless or drifting moment: seconds into the session and its kind ('jaw', 'blinks', 'movement',
   /// 'drifting'), for the marks on the report's track.
   final List<(double, String)> marks = [];
@@ -83,10 +90,11 @@ class MeditationTracker {
   /// Mean calm (the sound: 0 = brightest rain, 1 = calmest) per 30 s, the last bin as far as it got.
   List<double> get calm => [..._calm, if (_binN > 0) _binSum / _binN];
 
-  void add(StepResult r) {
-    final m = momentOf(r);
+  void add(StepResult r, {DriftState? drift}) {
+    final m = momentOf(r, drift: drift);
     if (m == null) return;
     _steps++;
+    if (drift == DriftState.asleep) asleepS ??= runSeconds;
     if (r.ring) bells++;
     _recent.add(m.moment);
     if (_recent.length > 20) _recent.removeAt(0);
@@ -157,6 +165,7 @@ class MeditationTracker {
     restless: {for (final e in restless.entries) e.key: e.value},
     drifting: drifting,
     drowsyS: _round1(drowsySeconds),
+    asleepS: asleepS == null ? null : _round1(asleepS!),
     calm: [for (final c in calm) (c * 1000).round() / 1000],
     marks: [for (final (t, k) in marks) (_round1(t), k)],
     iafHz: iafHz,
@@ -180,6 +189,7 @@ class MeditationSummary {
     required this.restless,
     required this.drifting,
     required this.drowsyS,
+    this.asleepS,
     required this.calm,
     this.marks = const [],
     required this.iafHz,
@@ -202,6 +212,10 @@ class MeditationSummary {
   final Map<Restless, int> restless;
   final int drifting;
   final double drowsyS;
+
+  /// Seconds into the session when the drift-off detector said "probably asleep" (3 min of faded alpha), or
+  /// null. Kept for later features (dream catcher, sound auto-stop); the screen shows it as drifting time.
+  final double? asleepS;
 
   /// Mean calm per 30 s, 0..1.
   final List<double> calm;
@@ -231,6 +245,7 @@ class MeditationSummary {
     'restless': {for (final e in restless.entries) e.key.name: e.value},
     'drifting': drifting,
     'drowsyS': drowsyS,
+    if (asleepS != null) 'asleepS': asleepS,
     'calm': calm,
     'calmBinS': calmBinS,
     'marks': [for (final (t, k) in marks) [t, k]],
@@ -273,7 +288,7 @@ class MeditationSummary {
         }
       }
     }
-    final iaf = j['iafHz'];
+    final iaf = j['iafHz'], asleep = num_(j['asleepS']);
     return MeditationSummary(
       start: start,
       lengthMin: lengthMin,
@@ -285,6 +300,7 @@ class MeditationSummary {
       restless: restless,
       drifting: drifting,
       drowsyS: drowsyS,
+      asleepS: asleep != null && asleep <= runS + 0.05 ? asleep : null,
       calm: calmV,
       marks: marks,
       iafHz: iaf is num && iaf.isFinite ? iaf.toDouble() : null,
