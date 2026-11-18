@@ -259,7 +259,7 @@ class AtSetupView extends StatelessWidget {
             color: Night.inkMuted,
           ),
           if (m.checkOn) ...[
-            const SectionHeading('Replay check is on'),
+            const SectionHeading('Replay check'),
             const Para(checkReminder, top: 0),
             if (m.checkStatus != null) Para(m.checkStatus!, color: Night.inkMuted, top: 8),
           ],
@@ -528,7 +528,9 @@ class _AtAfterViewState extends State<AtAfterView> {
         Checklist(items: sideEffectItems, ticked: _effects, onChanged: (v) => setState(() => _effects = v)),
         if (widget.asksGuess) ...[
           const SectionHeading('Replay check'),
-          CheckQuestions(answers: _check, onChanged: (v) => setState(() => _check = v), withControl: false),
+          CheckQuestions(
+            heading: false,
+            answers: _check, onChanged: (v) => setState(() => _check = v), withControl: false),
         ],
         const SectionHeading('Notes (optional)'),
         TextField(

@@ -38,6 +38,7 @@ class RatingAnswers {
 class CheckQuestions extends StatelessWidget {
   const CheckQuestions({
     super.key,
+    this.heading = true,
     required this.answers,
     required this.onChanged,
     this.withCalm = true,
@@ -46,6 +47,9 @@ class CheckQuestions extends StatelessWidget {
   final RatingAnswers answers;
   final ValueChanged<RatingAnswers> onChanged;
   final bool withCalm;
+
+  /// The "Live or replay?" heading; off where the page has its own heading for the check.
+  final bool heading;
 
   /// False where the page asks "in control" itself (alpha-theta asks it in every session).
   final bool withControl;
@@ -61,7 +65,7 @@ class CheckQuestions extends StatelessWidget {
             'not at all',
             'very calm',
           )),
-        const SectionHeading('Live or replay?'),
+        if (heading) const SectionHeading('Live or replay?'),
         ChoiceQuestion<String>(
           question: 'Did this session\'s sound follow your brain live, or replay an earlier session?',
           choices: const [('live', 'Live'), ('replay', 'Replay'), ('unsure', 'Not sure')],

@@ -166,7 +166,7 @@ class ReplayResultsView extends StatelessWidget {
       if (r.deviations > 0) _Line('Played live instead of a replay', '${r.deviations}'),
       _Line('Still sealed', '${r.hidden}', detail: 'sessions after this set', rule: false),
       const SectionHeading('What this means'),
-      for (final n in r.note) Para(n, top: 0),
+      for (final (i, n) in r.note.indexed) Para(n, top: i == 0 ? 0 : 12),
     ];
   }
 }
@@ -196,7 +196,7 @@ class _Line extends StatelessWidget {
             child: Text(label, style: text.bodyLarge?.copyWith(color: Night.inkMuted)),
           ),
           const SizedBox(width: 16),
-          Flexible(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [

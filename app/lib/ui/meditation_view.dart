@@ -430,7 +430,7 @@ class MeditationView extends StatelessWidget {
             ),
           ),
           if (m.checkOn) ...[
-            const SectionHeading('Replay check is on'),
+            const SectionHeading('Replay check'),
             const _Note(Icons.shuffle, checkReminder),
             if (m.checkStatus != null) Para(m.checkStatus!, color: Night.inkMuted, top: 0),
           ],
@@ -662,7 +662,10 @@ class _Legend extends StatelessWidget {
       runSpacing: 6,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        Text('Line: how calm the sound was', style: style),
+        Text(
+          m.kind == SessionKind.alphaTheta ? 'Line: stream (low) to ocean (high)' : 'Line: how calm the sound was',
+          style: style,
+        ),
         Row(mainAxisSize: MainAxisSize.min, children: [tick(Night.caution), const SizedBox(width: 6), Text('restless', style: style)]),
         Row(mainAxisSize: MainAxisSize.min, children: [tick(Night.problem), const SizedBox(width: 6), Text('drifting', style: style)]),
       ],
