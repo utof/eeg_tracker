@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-VERSION = 1  # of <night>.report.json; a report of another version is rebuilt
+VERSION = 2  # of <night>.report.json; a report of another version is rebuilt (2: adds `extras`)
 FS = 250
 REC_BYTES = 20  # one <I4f record in a .f32
 IDX = struct.Struct("<dQ")

@@ -55,7 +55,7 @@ new samples exist; files of the same name made by hand are first renamed `<date>
 
 | Field | Meaning |
 |---|---|
-| `version` | 1; a report of another version is rebuilt |
+| `version` | 2 (since 2026-11-18: `extras` added, every other field as in 1); a report of another version is rebuilt |
 | `night_of` | the evening's date, as the file name |
 | `built`, `scoring_s` | when it was written (ISO with offset) and how long joining and scoring took |
 | `data_start`, `data_end` | first and last moment of the joined recordings, gaps included |
@@ -67,6 +67,8 @@ new samples exist; files of the same name made by hand are first renamed `<date>
 | `model`, `cross_check` | the stager and the second model with the whole night's agreement, as in `eeg_sleep_night` |
 | `note`, `validated` | "first guess; the scorer is not yet validated on this headband", `false` |
 | `rules` | `split_min` 60, `min_period_sleep_min` 10, `wake_up_over_min` 5 (below) |
+| `extras` | what the shared detectors saw over the same samples (below); `null` when unscored or when that pass failed |
+| `extras_error` | why the detectors' pass failed, else `null` |
 
 A sleep period is a stretch of asleep epochs (N1 N2 N3 R by AnySleep) that no 60+ minutes of wake or missing data
 interrupt; a stretch with under 10 minutes asleep is scorer noise and only counts in `stray_sleep_min`. Each period
@@ -75,6 +77,23 @@ has `start`, `end` (first and last asleep epoch, ISO with offset), `asleep_min`,
 epochs with over 5 minutes scored awake) and `wake_up_list` `[{start, awake_min}]`, `missing_min`, `agreement`
 `{five_stage, wake_nrem_rem, epochs}` of AnySleep and YASA over the epochs both scored (`null` if none) and
 `confidence` (AnySleep's mean top probability).
+
+### `extras` (night extras, DECISIONS 140-146)
+
+Written by `analysis/night_extras.py` on the laptop and `app/lib/sleep/extras.dart` on the phone with the same rules
+and numbers. Readers should check `extras` is an object before using it (older reports have none).
+
+| Field | Meaning |
+|---|---|
+| `version` | 1 (of this object) |
+| `rules`, `validated` | the detectors used (DECISIONS 85-87, planning values), `false` |
+| `epoch_s` | 30 |
+| `quality` | one character per 30 s from `data_start`, the same epochs as `stages`: `g` good, `d` degraded (noisy: a channel unusable, 3+ s of movement or muscle in half the epoch), `m` missing (over 5 s of gap or no usable channel) |
+| `night` | the whole recording: `min`, `good_min`, `degraded_min`, `missing_min`, `jaw_bursts` (both sides), `one_sided_bursts`, `movement_bursts` (muscle with movement inside), `moves` (3+ channels jumping at once) |
+| `asleep` | the same over the asleep epochs (N1 N2 N3 R) inside the sleep periods (so `min` equals `total.asleep_min`), plus `jaw_per_hour` and `moves_per_hour` (to 0.1, halves up; `null` with no sleep). `jaw_per_hour` is the night's number for a trend: muscle bursts, not a bruxism count |
+| `hours` | per clock hour: `start` (ISO with offset; the first hour starts at `data_start`, the others on the hour), `from_s` (seconds from `data_start`), `min`, `asleep_min`, then the fields of `night`. The first and last hours are partial |
+
+A burst or a movement counts in the epoch where it starts; one starting after the last whole epoch is left out.
 
 ## The phone's `files/nights/<date>.report.json`
 
@@ -85,7 +104,9 @@ differences: `source` is `phone`; `model` names the phone's version (`anysleep-m
 pieces-1h+15min`); there is no picture, BDF or second model, so `hypnogram`, `sleep_json`, `bdf`, `cross_check`
 and each period's `agreement` are `null`; `epoch_s` is 30 and `stages` holds one character per 30 s from
 `data_start` (`W 1 2 3 R`, `-` where over 5 s of the epoch was missing), like the `hypnogram` of
-`eeg_sleep_night`. While a night is being scored a `<date>.scoring` file sits beside it; if it is still there when
+`eeg_sleep_night`. `extras` and `extras_error` are as above (the phone runs the detectors beside the sleep model;
+a pass that fails leaves `extras` `null` and the night still scored). While a night is being scored a `<date>.scoring`
+file sits beside it; if it is still there when
 no scoring runs, the last attempt stopped (its text is the error, empty if the app was killed) and the app waits
 for "Try again". The report is not exported yet.
 

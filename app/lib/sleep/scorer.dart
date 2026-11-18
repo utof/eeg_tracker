@@ -1,12 +1,16 @@
 // Scores finished nights on the phone after Stop (DECISIONS row 97): for each night whose report is missing or
 // out of date (night_files.py's rule), the recordings are joined and prepared in a background isolate, the three
 // AnySleep runs score it piece by piece, the stages are split into sleep periods and `files/nights/<date>.report.json`
-// is written. A `<date>.scoring` marker stays while it works: if the app dies while scoring (memory, a kill), the
-// marker is still there next time and that night waits for "Try again" instead of crashing the app on every start.
+// is written. Beside them a second background isolate runs the shared detectors over the same samples for the
+// report's extras (jaw, movement, signal quality; extras.dart): little memory (the files are streamed), and done before the model
+// on the laptop; if it fails the report is still written, without extras. A `<date>.scoring` marker stays while it
+// works: if the app dies while scoring (memory, a kill), the marker is still there next time and that night waits
+// for "Try again" instead of crashing the app on every start.
 import 'dart:io';
 import 'dart:isolate';
 
 import '../recorder/nights.dart';
+import 'extras.dart';
 import 'model.dart';
 import 'prep.dart';
 import 'report.dart';
@@ -36,6 +40,7 @@ class SleepScorer {
     this.closeRun,
     this.runCount = 3,
     this.prepare = prepareInBackground,
+    this.see = seeInBackground,
     this.model = phoneModelId,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
@@ -46,6 +51,9 @@ class SleepScorer {
   final Future<void> Function(StageRun run)? closeRun;
   final int runCount;
   final PrepareFn prepare;
+
+  /// The detectors' pass for the extras.
+  final SeeFn see;
   final String model;
   final DateTime Function() _clock;
 
@@ -93,9 +101,16 @@ class SleepScorer {
     try {
       final inputs = inputsOf(night);
       progress?.call('Preparing the recording');
+      // the detectors' pass runs beside the preparation and the model; it never fails the night
+      var seeing = true;
+      final seen = Future.sync(() => see(night.recordings)).then<(NightSeen?, String?)>(
+        (s) => (s, null),
+        onError: (Object e) => (null, '$e'),
+      ).whenComplete(() => seeing = false);
       final input = await prepare(night.recordings);
       Map<String, dynamic> rep;
       if (input == null) {
+        await seen;
         final start = night.start;
         rep = buildReport(
           nightOf: night.name,
@@ -115,6 +130,8 @@ class SleepScorer {
           progress: (r, k, n) => progress?.call('Sleep model, run $r of $runCount${n > 1 ? ', part $k of $n' : ''}'),
         );
         final s = stagesOf(probs, input.gap);
+        if (seeing) progress?.call('Counting jaw, movement and signal');
+        final (found, whyNot) = await seen;
         rep = buildReport(
           nightOf: night.name,
           built: _clock(),
@@ -125,6 +142,8 @@ class SleepScorer {
           model: model,
           stages: s.stages,
           confidence: s.confidence,
+          seen: found,
+          extrasError: whyNot,
         );
       }
       store.write(rep);

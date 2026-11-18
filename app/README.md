@@ -18,7 +18,8 @@ for a state, with an optional beat, and with the headband shows what your brain 
 - Screen: `lib/ui/`, design in `../DESIGN.md`.
 - Meditation: `lib/feedback/` (the laptop page's feedback core in Dart), `lib/sound/` (flutter_soloud),
   `lib/meditation/` (session and report), `lib/ui/meditation_*.dart`; DECISIONS rows 72-77.
-- Sleep report: `lib/sleep/` and `lib/ui/sleep_*.dart`, scored on the phone after Stop (below); DECISIONS rows 95-99.
+- Sleep report: `lib/sleep/` and `lib/ui/sleep_*.dart`, scored on the phone after Stop (below); DECISIONS rows 95-99,
+  night extras (jaw, movement, signal quality) rows 140-146.
 - Replay check: `lib/training/` (schedule, frozen plan, replay, results), `lib/ui/training_settings_screen.dart`,
   `lib/ui/check_views.dart`, `lib/ui/replay_results_screen.dart`; DECISIONS rows 100-103.
 - Alpha-theta: `lib/alphatheta/` (rules, engine, notebook), `lib/sound/alpha_theta_sound.dart`,
@@ -53,7 +54,9 @@ check-in's numbers against a fixture made by the laptop's Python (`test/fixtures
 sound-for-states sessions the same way, and `test/state_synth_test.dart` checks the made sound (loudness, pulse
 edges, the beat in the sound or only between the ears) without an audio device.
 `test/sleep_prep_test.dart` checks the sleep model's input against a fixture made by the laptop's Python
-(`test/fixtures/make_sleep_fixture.py`). The meditation tests stream a synthetic headband through whole
+(`test/fixtures/make_sleep_fixture.py`); `test/night_extras_cross_check_test.dart` checks the night extras against
+`analysis/night_extras.py` (fixture made by `analysis/make_extras_fixture.py`), and `tool/night_extras.dart` runs them
+over a whole recorded night on the laptop for comparison (docs/detectors.md). The meditation tests stream a synthetic headband through whole
 sessions; `test/feedback_cross_check_test.dart` checks the Dart core against a session made by the JavaScript
 core (`node app/test/fixtures/make_js_session.mjs` from the repo root remakes it after a change to the JS core).
 
@@ -96,11 +99,19 @@ rows 95-99). The main screen then shows last night's time asleep under the strip
 night: time asleep and time not recorded, a chart of the stages on the clock (missing data hatched amber, sleep
 periods numbered), each period's start and end, deep, dream and light sleep, wake-ups over 5 minutes and missing
 minutes, and the past nights. It is a first guess: the model is not validated on this headband (the **i** button
-shows `docs/evidence/sleep-scoring.md`). It also runs when the app is opened between nights, for any night whose
+shows `docs/evidence/sleep-scoring.md`).
+
+The night extras come from the shared detectors (`lib/detectors/`), run over the same samples in a second background
+isolate while the model works: the note under the totals says how much of your sleep was read through noise; a
+**Signal** line under the chart marks noisy stretches (amber dots) and stretches with no usable electrode (solid
+amber); **Jaw and movement** gives jaw-muscle bursts and movements per hour asleep with the earlier nights' jaw numbers
+(a trend, not a teeth-grinding test; its **i** shows `docs/evidence/jaw-and-blinks.md`) and the night hour by hour;
+the past nights show "jaw N an hour". If that pass fails, the report is still there without them. It also runs when the app is opened between nights, for any night whose
 report is missing or 10+ minutes behind, and never while a night records.
 
 - Code: `lib/sleep/` (preparation as `scripts/score_sleep.py`, the model, sleep periods as
-  `scripts/sleep_report.py`, the report file), `lib/ui/sleep_*.dart`. Models: `assets/models/` (see its README
+  `scripts/sleep_report.py`, the night extras as `analysis/night_extras.py`, the report file),
+  `lib/ui/sleep_*.dart`. Models: `assets/models/` (see its README
   for how they were made and checked). Reports: `files/nights/<date>.report.json` (`docs/data-format.md`).
 - If scoring stops (for example the phone runs out of memory), the main screen says so and offers **Try again**;
   it does not retry by itself.
@@ -118,10 +129,22 @@ prepare and 26 s for the model; a phone is likely 3-10 times slower.
 2. Note the clock time. The Sleep section says "Scoring the night of ...: Preparing the recording", then "Sleep
    model, run 1 of 3, part 1 of 8" and so on.
 3. When the time asleep appears, note the clock time again; open **Sleep report**: the line at the bottom says
-   "Scored on this phone in ..." (that is the measured time).
+   "Scored on this phone in ..." (that is the measured time). If "Counting jaw, movement and signal" showed after
+   the model's last part, note for how long: that is the detectors' pass running behind the model.
 4. Tell the assistant: hours recorded, the time it took, and whether the phone got warm or the app closed. If it
    says scoring stopped, tap **Try again** once and report what happens. With USB debugging on, also send
    `adb shell dumpsys meminfo io.github.utof.eeg_tracker | head -40` taken during "Sleep model, run 2 of 3".
+
+### Owner step: the night extras (the next morning, 2 minutes)
+
+1. Open **Sleep report** after the night is scored. Read the note under the totals: how much of your sleep was read
+   through noise. Under the chart, the **Signal** line: do the amber stretches fall where you remember turning over,
+   touching the headband or lying on it?
+2. Scroll to **Jaw and movement**: jaw-muscle bursts and movements an hour asleep. On the laptop's copy of your first
+   night they were about 23 and 19. Is a night you slept badly higher?
+3. Tell the assistant the two numbers, the noise share, and anything that looks wrong in **Hour by hour** (for
+   example an hour you were awake and talking with no jaw bursts). The setup test's 5 clenches will check the jaw
+   limits.
 
 ## Morning check-in
 

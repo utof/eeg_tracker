@@ -8,6 +8,7 @@
 // and per 30 s epoch counted from the first sample. Channels are electrode minus the forehead reference
 // (DECISIONS 78): a blink dips all four, T3-T4 cancels it and carries sideways eye movements.
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import '../feedback/features.dart' show fs, percentile, median;
 import 'filters.dart';
@@ -163,13 +164,15 @@ class Second {
   }
 }
 
-/// A fixed-size history of doubles indexed by absolute sample number.
+/// A history of doubles indexed by absolute sample number; the size is a power of two.
 class _Ring {
-  _Ring(this.size) : _a = List.filled(size, 0);
-  final int size;
-  final List<double> _a;
-  double operator [](int i) => _a[i % size];
-  void operator []=(int i, double v) => _a[i % size] = v;
+  _Ring(int size) : _a = Float64List(size), _mask = size - 1 {
+    assert(size & _mask == 0);
+  }
+  final Float64List _a;
+  final int _mask;
+  double operator [](int i) => _a[i & _mask];
+  void operator []=(int i, double v) => _a[i & _mask] = v;
 }
 
 class _BurstSpan {
@@ -213,13 +216,14 @@ class Detectors {
   final List<_Ring> _f = [for (var c = 0; c < 4; c++) _Ring(_ringSize)];
   final _Ring _m = _Ring(_ringSize), _d = _Ring(_ringSize), _s = _Ring(_ringSize);
   final List<bool> _miss = List.filled(_ringSize, false);
+  final Float64List _fv = Float64List(4);
   List<double>? _last;
 
   // the second being filled
   Second _cur = Second(0);
-  final List<double> _rawLo = List.filled(4, 0), _rawHi = List.filled(4, 0), _rawAbs = List.filled(4, 0);
-  final List<double> _qLo = List.filled(4, 0), _qHi = List.filled(4, 0);
-  final List<double> _sumA = List.filled(2, 0), _sumT = List.filled(2, 0), _sumM = List.filled(4, 0);
+  final Float64List _rawLo = Float64List(4), _rawHi = Float64List(4), _rawAbs = Float64List(4);
+  final Float64List _qLo = Float64List(4), _qHi = Float64List(4);
+  final Float64List _sumA = Float64List(2), _sumT = Float64List(2), _sumM = Float64List(4);
   double _sumS = 0;
   int _inSecond = 0;
 
@@ -235,20 +239,21 @@ class Detectors {
 
   /// One row of µV (O1, O2, T3, T4). [missing]: a held value standing in for a lost sample.
   void push(List<double> row, {bool missing = false}) {
-    if (row.length != 4 || row.any((v) => !v.isFinite)) {
+    if (row.length != 4 || !row[0].isFinite || !row[1].isFinite || !row[2].isFinite || !row[3].isFinite) {
       throw ArgumentError.value(row, 'row', 'four finite µV values');
     }
     _last = row;
     final t = n;
-    final f = [for (var c = 0; c < 4; c++) _blink[c].step(row[c])];
+    final f = _fv;
     for (var c = 0; c < 4; c++) {
+      f[c] = _blink[c].step(row[c]);
       _f[c][t] = f[c];
     }
     final m = (f[0] + f[1] + f[2] + f[3]) / 4, d = f[2] - f[3];
     _m[t] = m;
     _d[t] = d;
     _s[t] = t >= EyeRule.step ? d - _d[t - EyeRule.step] : 0;
-    _miss[t % _ringSize] = missing;
+    _miss[t & (_ringSize - 1)] = missing;
     _accumulate(row, missing);
     n++;
     _checkBlink(t - BlinkRule.half);
@@ -317,7 +322,7 @@ class Detectors {
 
   bool _anyMissing(int from, int to) {
     for (var j = from; j <= to; j++) {
-      if (_miss[j % _ringSize]) return true;
+      if (_miss[j & (_ringSize - 1)]) return true;
     }
     return false;
   }
@@ -335,12 +340,14 @@ class Detectors {
   void _checkBlink(int i) {
     const h = BlinkRule.half;
     if (i < BlinkRule.base0) return;
+    // the lowest point within ±0.3 s (strictly lower than everything before it); nearest samples first, so most
+    // samples are turned down after one or two comparisons
     final mi = _m[i];
-    for (var j = i - h; j < i; j++) {
-      if (!(mi < _m[j])) return;
-    }
     for (var j = i + 1; j <= i + h; j++) {
       if (mi > _m[j]) return;
+    }
+    for (var j = i - 1; j >= i - h; j--) {
+      if (!(mi < _m[j])) return;
     }
     if (_anyMissing(i - BlinkRule.base0, i + h)) return;
     final base = List<double>.filled(4, 0), depth = List<double>.filled(4, 0);
@@ -372,11 +379,11 @@ class Detectors {
     const h = EyeRule.half, k = EyeRule.step;
     if (i < h + k) return;
     final si = _s[i].abs();
-    for (var j = i - h; j < i; j++) {
-      if (!(si > _s[j].abs())) return;
-    }
     for (var j = i + 1; j <= i + h; j++) {
       if (si < _s[j].abs()) return;
+    }
+    for (var j = i - 1; j >= i - h; j--) {
+      if (!(si > _s[j].abs())) return;
     }
     if (si < EyeRule.minUv || _anyMissing(i - h - k, i + h)) return;
     if ((_m[i] - _m[i - k]).abs() > EyeRule.commonShare * si) return;
