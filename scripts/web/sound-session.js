@@ -129,7 +129,7 @@ export class Session {
       this.note = `calibrated: eyes closed gave ${(10 ** (closed - open)).toFixed(1)}x eyes-open alpha`;
     } else {
       this.note = enough
-        ? `no clear alpha rise with eyes closed (${(10 ** (closed - open)).toFixed(1)}x); using your recent range`
+        ? `no clear alpha rise with eyes closed (${(10 ** (closed - open)).toFixed(1)}x the eyes-open level); using your recent range`
         : 'calibration had too little clean signal; using your recent range';
     }
   }
