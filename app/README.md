@@ -72,6 +72,50 @@ compressed; only the named ABI is packaged and native libraries are compressed, 
 `android/app/proguard-rules.pro` keeps ONNX Runtime's Java classes). The neurosdk2 1.0.21 plugin shrinks its own release build without keep
 rules, which stripped its `Neurosdk2Plugin` class; `android/build.gradle.kts` builds that one plugin unshrunk.
 
+## Emulator smoke test
+
+What `flutter test` cannot reach (ONNX Runtime, SoLoud, the microphone, the folder picker, the foreground service,
+NeuroSDK2's native library) runs on an x86_64 Android emulator on the laptop, no phone needed (first run 2026-11-18,
+DECISIONS rows 160-161). It found two bugs: Export data could not open (an isolate closure that sent the whole page)
+and Android's own files were exported. What it cannot test: the headband (no Bluetooth device), real sound and
+microphone (the emulator's host audio is a dummy here), the phone's speed and Xiaomi's background rules.
+
+```bash
+source ~/.local/share/linsa/env.sh
+export ANDROID_SERIAL=emulator-5554        # always: another device (the phone) may be on USB
+# once: an AVD (API 36 google_apis x86_64, 3 GB RAM)
+avdmanager create avd -n eeg_smoke -k 'system-images;android-36;google_apis;x86_64' -d pixel_6
+# build while the emulator is off (memory), then boot it headless
+cd app && systemd-run --user --scope -q -p MemoryMax=4500M flutter build apk --release \
+  --target-platform android-x64 -Pkotlin.compiler.execution.strategy=in-process   # R8 + AOT, as on the phone
+systemd-run --user --scope -q -p MemoryMax=4500M emulator -avd eeg_smoke -no-window -no-snapshot \
+  -no-boot-anim -timezone Europe/Moscow -gpu swiftshader_indirect &
+adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.apk
+```
+
+1. **A recorded night into the app's private folder** (google_apis images allow `adb root`; copy real files, not
+   links, and give them the app's owner and SELinux label, or the app cannot read them):
+   `adb root; adb push <night files>/. /data/local/tmp/rec/`, then in `adb shell`: `cp` them into
+   `/data/data/io.github.utof.eeg_tracker/files/recordings/`, `chown` to the app's user, and
+   `chcon` with the context `ls -Z` shows on that folder. Opening the app scores the night; pull
+   `files/nights/<date>.report.json` and compare its `stages` with the laptop's `<date>.sleep.json`.
+2. **Every screen**: `python3 tool/emu.py texts` lists what is on screen, `tap "Sleep report" --exact` taps it,
+   `find`, `scroll`, `back`, `shot <file>` (Flutter's labels reach Android's accessibility tree). Watch
+   `adb logcat --pid=$(adb shell pidof io.github.utof.eeg_tracker)`. A debug build (`--debug`) also reports
+   overflows and assertions; `adb shell wm density 440` gives the owner's 11T width (393 dp),
+   `adb shell settings put system font_scale 1.3` large text.
+3. **The sound engines** (meditation, alpha-theta and the check-in only sound with a headband):
+   `flutter build apk --debug --target-platform android-x64 -t tool/sound_smoke.dart`, install, open, then
+   `adb logcat | grep SMOKE`: one `SMOKE ok` line per engine. Reinstall the app afterwards.
+4. **Export data**: pick or create `Download/EEG` in the picker, export, then
+   `adb pull /sdcard/Download/EEG/eeg-export <dir>` and `python3 scripts/import_phone.py <dir> --dest <scratch>`
+   (not the real `_local`).
+5. **Start night** without a headband: the service starts ("Searching ... The app keeps looking"); Stop ends it.
+
+The night of 2026-11-17 (58 recordings, 12.9 h) scored on the emulator in 99 s with a peak of 438 MB (PSS; 561 MB
+RSS) and the same stages as the laptop's ONNX check (96.6 % of epochs agree with the laptop's one-pass scoring; see
+`assets/models/README.md`). The emulator's speed is the laptop's, not a phone's.
+
 ## Meditate
 
 1. Make sure no night is being recorded (the headband talks to one thing at a time). Put the headband on and
