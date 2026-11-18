@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
+import 'package:eeg_tracker/sleep/extras.dart';
 import 'package:eeg_tracker/sleep/model.dart';
 import 'package:eeg_tracker/sleep/onnx_runs.dart';
 import 'package:eeg_tracker/sleep/periods.dart';
@@ -177,6 +178,7 @@ void main() {
         store: store,
         openRun: (run) async => fake(calls),
         prepare: (files) async => prepareNight(files),
+        see: (files) async => seeNight(files),
       );
       final due = scorer.due();
       expect(due.map((n) => n.name), ['2026-11-18']);
@@ -188,11 +190,33 @@ void main() {
       expect(report.periods.single.asleepMin, 10);
       expect(report.periods.single.deepMin, 2);
       expect(store.read('2026-11-18')!.json['stages'], startsWith('WWWW2222'));
+      final extras = report.extras!; // the detectors' pass over the same samples
+      expect(extras.quality, hasLength(28));
+      expect(extras.asleep.min, 10);
+      expect(report.json['extras_error'], isNull);
       expect(store.markerFor('2026-11-18').existsSync(), isFalse);
       expect(scorer.due(), isEmpty);
 
       writeRun(DateTime(2026, 11, 18, 23, 20), 12); // 12 minutes more the same night: out of date again
       expect(scorer.due().single.recordings, hasLength(2));
+    });
+
+    test('a failed detectors\' pass leaves the report without extras, saying why', () async {
+      writeRun(DateTime(2026, 11, 18, 23, 0), 14);
+      final steps = <String>[];
+      final scorer = SleepScorer(
+        recordingsDir: recordings,
+        store: store,
+        openRun: (run) async => fake([]),
+        prepare: (files) async => prepareNight(files),
+        see: (files) => Future.delayed(const Duration(milliseconds: 50), () => throw StateError('no memory')),
+      );
+      final report = await scorer.score(scorer.due().single, progress: steps.add);
+      expect(report.scored, isTrue);
+      expect(report.periods.single.asleepMin, 10);
+      expect((report.extras, report.json['extras_error']), (null, 'Bad state: no memory'));
+      expect(steps.last, 'Counting jaw, movement and signal'); // the model was done first
+      expect(store.markerFor('2026-11-18').existsSync(), isFalse);
     });
 
     test('a failed or interrupted night is blocked until "Try again"', () async {
