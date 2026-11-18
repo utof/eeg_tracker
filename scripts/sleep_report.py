@@ -9,7 +9,8 @@ For every night with data in the last --hours hours (night_files.py: recordings 
 evening date) whose report is missing or lacks 10+ minutes of newer samples, it joins the recordings with
 to_bdf.py's code into <nights>/<date>.bdf, scores it with score_sleep.py's code (<date>.sleep.json and
 <date>.hypnogram.png), splits the AnySleep stages into sleep periods, runs the shared detectors over the same samples
-for the night extras (analysis/night_extras.py: jaw, movement and signal quality, as on the phone), writes
+for the night extras (analysis/night_extras.py: jaw, movement and signal quality, as on the phone) and the
+drift-off detector from the night's lights off against the model's sleep onset (analysis/night_drift.py), writes
 <date>.report.json
 (docs/data-format.md) and appends the eeg_sleep_night event (export_events.py). Nights already up to date are
 skipped, so running it twice does nothing the second time. One run at a time (a lock file); it lowers its own
@@ -102,9 +103,11 @@ def _extras(seen: tuple | None, stages: list[str], found: list[dict], start: dat
 
 
 def make_report(name: str, night: nf.Night, scored: dict | None, seconds: float, data: tuple[datetime, float],
-                seen: tuple | None = None, extras_error: str | None = None) -> dict:
-    """<name>.report.json from score_sleep's result (None when there was too little data to score) and what the
-    detectors saw (`night_extras.events`, None when that pass did not run)."""
+                seen: tuple | None = None, extras_error: str | None = None, drift: dict | None = None,
+                drift_error: str | None = None) -> dict:
+    """<name>.report.json from score_sleep's result (None when there was too little data to score), what the
+    detectors saw (`night_extras.events`, None when that pass did not run) and the drift-off detector from lights
+    off (`night_drift.night`, None when it did not run; drift_error says why)."""
     start, length_s = data
     at = lambda t: t.astimezone().isoformat(timespec="seconds")  # noqa: E731
     rep: dict = dict(version=nf.VERSION, night_of=name, built=at(datetime.now()), scoring_s=round(seconds, 1),
@@ -118,13 +121,20 @@ def make_report(name: str, night: nf.Night, scored: dict | None, seconds: float,
                                           periods=0, recorded_min=round(length_s / 60, 1), missing_min=0.0,
                                           stray_sleep_min=0.0),
                    hypnogram=None, sleep_json=None, bdf=None, model=None, cross_check=None, extras=None,
-                   extras_error=extras_error)
+                   extras_error=extras_error, drift_off=None, drift_off_error=None)
         return rep
     import export_events
     ep = scored["epochs"]
     t0 = datetime.fromisoformat(scored["start"])
     t = lambda i: at(t0 + timedelta(seconds=EPOCH * i))  # noqa: E731
     found, stray = periods([e["anysleep"] for e in ep], [e["yasa"] for e in ep], [max(e["p"]) for e in ep])
+    drift_off, drift_error = None, extras_error or drift_error  # a failed detectors' pass ran no drift-off either
+    if drift is not None and drift_error is None:
+        import night_drift as nd
+        try:
+            drift_off = nd.report(drift, [e["anysleep"] for e in ep], start)
+        except Exception as e:  # noqa: BLE001 - the night is still scored without it; the report says why
+            drift_error = f"{type(e).__name__}: {e}"
     try:
         extras = _extras(seen, [e["anysleep"] for e in ep], found, start, at)
     except Exception as e:  # noqa: BLE001 - the night is still scored without the extras; the report says why
@@ -144,7 +154,7 @@ def make_report(name: str, night: nf.Night, scored: dict | None, seconds: float,
                bdf=f"{name}.bdf", model=export_events.MODEL,
                cross_check=dict(model=export_events.CROSS, agreement_5_stage=s.get("agreement_5_stage"),
                                 agreement_w_nrem_rem=s.get("agreement_w_nrem_rem")),
-               extras=extras, extras_error=extras_error)
+               extras=extras, extras_error=extras_error, drift_off=drift_off, drift_off_error=drift_error)
     return rep
 
 
@@ -174,11 +184,18 @@ def build(night: nf.Night, a: argparse.Namespace, status: nf.Job) -> dict:
         rep = make_report(name, night, None, time.time() - t_start, (start, length_s))
     else:
         status.step("Counting jaw, movement and signal")
-        seen, why = None, None
+        seen, why, drift, drift_why = None, None, None, None
         try:  # before scoring, so its memory is free again when the model runs
             sys.path.insert(0, str(ROOT / "analysis"))
             import night_extras as nx
-            seen = nx.events(nx.see(uv, notes))
+            full = nx.see(uv, notes)
+            seen = nx.events(full)
+            try:  # the drift-off detector from the night's lights off (night_drift.py)
+                import night_drift as nd
+                drift = nd.night(full, nf.lights_off(night), int(start.timestamp()))
+            except Exception as e:  # noqa: BLE001 - the extras and the stages do not need it
+                drift_why = f"{type(e).__name__}: {e}"
+            del full
         except Exception as e:  # noqa: BLE001 - the night is still scored without the extras
             why = f"{type(e).__name__}: {e}"
         part = folder / f"{name}.part.bdf"
@@ -191,7 +208,7 @@ def build(night: nf.Night, a: argparse.Namespace, status: nf.Job) -> dict:
         status.step("Drawing the chart")
         score_sleep.save(scored, folder / name, title=f"Night of {name}")
         status.step("Finding sleep periods")
-        rep = make_report(name, night, scored, time.time() - t_start, (start, length_s), seen, why)
+        rep = make_report(name, night, scored, time.time() - t_start, (start, length_s), seen, why, drift, drift_why)
     tmp = folder / f"{name}.report.tmp"
     tmp.write_text(json.dumps(rep, indent=1)); os.replace(tmp, folder / f"{name}.report.json")
     if rep["scored"]:
@@ -255,6 +272,9 @@ def main(argv: list[str] | None = None) -> int:
         for n in todo:
             status.write(nights=[x.name for x in todo])
             build(n, a, status)
+        if todo:
+            print(nf.drift_check_line(*nf.drift_check([r for p in nf.reports(a.nights) if (r := nf.read_json(p))])),
+                  flush=True)
         status.write(state="done", step="Done", error=None)
         return 0
     except BaseException as e:

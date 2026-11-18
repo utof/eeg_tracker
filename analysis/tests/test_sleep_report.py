@@ -94,10 +94,11 @@ def test_nights_chain_recordings_and_name_them_by_the_evening():
 def test_stale_when_missing_old_or_10_minutes_behind():
     night = nf.Night("2026-11-17", [_rec("a.f32", 0, 1, 60), _rec("b.f32", 2, 3, 30)])
     rep = {"version": nf.VERSION, "inputs": [{"file": "a.f32", "bytes": night.recs[0].size},
-                                             {"file": "b.f32", "bytes": night.recs[1].size}]}
+                                             {"file": "b.f32", "bytes": night.recs[1].size}], "drift_off": None}
     assert nf.is_stale(night, None)
     assert nf.is_stale(night, dict(rep, version=0))
     assert not nf.is_stale(night, rep)
+    assert nf.is_stale(night, {k: v for k, v in rep.items() if k != "drift_off"})  # written before drift_off: once
     def behind(minutes: float) -> dict:
         b = {"file": "b.f32", "bytes": int((30 - minutes) * 60 * nf.FS) * nf.REC_BYTES}
         return dict(rep, inputs=[rep["inputs"][0], b])
@@ -181,6 +182,9 @@ def test_a_second_run_skips_an_up_to_date_night(tmp_path, fake_scorer, capsys):
     assert len(x["quality"]) == 24 and x["asleep"]["min"] == 10.0 and x["night"]["min"] == 12.0
     assert x["hours"][0]["start"] == rep["data_start"] and x["hours"][0]["from_s"] == 0
     assert sum(h["min"] for h in x["hours"]) == 12.0
+    d = rep["drift_off"]  # no Lights off marker: the detector counts from the night's start (night_drift.py)
+    assert rep["drift_off_error"] is None and d["source"] == "night start" and d["lights_off"] == rep["data_start"]
+    assert d["model_onset_min"] == 1.0 and d["counted"] is False  # PATTERN: 2 awake epochs, then sleep
     before = (rep_file.read_bytes(), rep_file.stat().st_mtime_ns)
 
     assert sr.main(args) == 0  # nothing new: nothing scored, nothing written, nothing exported
@@ -197,6 +201,21 @@ def test_a_second_run_skips_an_up_to_date_night(tmp_path, fake_scorer, capsys):
     assert len(ev) == 2 and ev[1]["data"]["replaces"] == ev[0]["id"]
 
 
+def test_a_lights_off_marker_sets_where_the_detector_and_the_model_count_from(tmp_path, fake_scorer, capsys):
+    rec, nights, export, args = dirs(tmp_path)
+    start = datetime.now().replace(microsecond=0) - timedelta(minutes=40)
+    f = write_rec(rec, start, 24)
+    with open(f.with_suffix(".markers.jsonl"), "a") as m:  # the night screen's Lights off, 12 min 5 s in
+        m.write(json.dumps({"t": start.timestamp() + 725, "i": 725 * nf.FS, "text": "lights off"}) + "\n")
+    assert sr.main(args) == 0
+    rep = nf.read_report(nights, nf.evening_date(start.timestamp()))
+    d = rep["drift_off"]
+    assert d["source"] == "button" and d["lights_off_s"] == 750 and d["tapped"].endswith(rep["data_start"][-6:])
+    assert d["model_onset_s"] == 780 and d["model_onset_min"] == 0.5  # lights off at epoch 25 (awake); sleep from 26
+    assert d["onset_s"] is None and (d["agree"], d["counted"]) == (False, True)  # noise has no alpha to fade
+    assert "drift-off check: 0 of 1 night" in capsys.readouterr().out
+
+
 def test_too_little_data_gives_an_unscored_report(tmp_path, fake_scorer):
     rec, nights, export, args = dirs(tmp_path)
     start = datetime.now().replace(microsecond=0) - timedelta(minutes=10)
@@ -204,6 +223,7 @@ def test_too_little_data_gives_an_unscored_report(tmp_path, fake_scorer):
     assert sr.main(args) == 0
     rep = nf.read_report(nights, nf.evening_date(start.timestamp()))
     assert rep and not rep["scored"] and rep["periods"] == [] and rep["hypnogram"] is None
+    assert "drift_off" in rep and rep["drift_off"] is None
     assert fake_scorer == [] and not events(export)
     assert not nf.stale_nights(rec, nights, time.time())
 

@@ -138,8 +138,9 @@ def read_report(nights_dir: Path, name: str) -> dict | None:
 
 
 def is_stale(night: Night, report: dict | None) -> bool:
-    """True when the night has no report, an older kind of report, or 10+ minutes of samples the report lacks."""
-    if report is None or report.get("version") != VERSION:
+    """True when the night has no report, an older kind of report (another version, or version 2 from before
+    `drift_off`), or 10+ minutes of samples the report lacks."""
+    if report is None or report.get("version") != VERSION or "drift_off" not in report:
         return True
     done = {i.get("file"): int(i.get("bytes", 0)) for i in report.get("inputs", []) if isinstance(i, dict)}
     now = {r.path.name: r.size for r in night.recs}
@@ -147,6 +148,63 @@ def is_stale(night: Night, report: dict | None) -> bool:
         return True  # a file went away or shrank: the report no longer matches the files
     new = sum(size - done.get(f, 0) for f, size in now.items()) // REC_BYTES
     return new >= NEW_DATA_MIN * 60 * FS
+
+
+# ---- lights off and the drift-off check (DECISIONS 180-184; analysis/night_drift.py, app/lib/sleep/drift.dart) ----
+
+LIGHTS_OFF_MARKER = "lights off"  # written by the phone's Lights off button
+CHECK_NIGHTS, CHECK_NEEDED = 5, 4  # the drift-off detector is trusted at 4 of the newest 5 counted nights
+
+
+def lights_off_from(text: str) -> str | None:
+    """The app's marker texts that mean lights off, by who gave it; None for any other marker."""
+    if text == LIGHTS_OFF_MARKER:
+        return "button"
+    if text.startswith("dream catcher: lights off"):
+        return "dream catcher"
+    if text == "sound: quiet minute (eyes closed)":
+        return "sound"
+    return None
+
+
+def lights_off(night: Night) -> tuple[float, str] | None:
+    """The latest lights-off marker (by its unix time) in the night's .markers.jsonl files; None without one. Lines
+    that are not markers are skipped."""
+    best: tuple[float, str] | None = None
+    for r in night.recs:
+        try:
+            lines = r.path.with_suffix(".markers.jsonl").read_text().splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                m = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(m, dict) or not isinstance(m.get("text"), str):
+                continue
+            t, src = m.get("t"), lights_off_from(m["text"])
+            if src and isinstance(t, (int, float)) and not isinstance(t, bool) and t == t and abs(t) != float("inf"):
+                if best is None or t >= best[0]:
+                    best = (float(t), src)
+    return best
+
+
+def drift_check(reports: list[dict]) -> tuple[int, int]:
+    """(agree, nights) over the newest 5 nights that count (`drift_off.counted`: lights off given, sleep found)."""
+    counted = sorted(((r.get("night_of", ""), r["drift_off"].get("agree") is True) for r in reports
+                      if isinstance(r.get("drift_off"), dict) and r["drift_off"].get("counted") is True), reverse=True)
+    newest = counted[:CHECK_NIGHTS]
+    return sum(1 for _, a in newest if a), len(newest)
+
+
+def drift_check_line(agree: int, nights: int) -> str:
+    if nights == 0:
+        return "drift-off check: no night with lights off yet (trusted at 4 of 5 nights within 5 minutes)"
+    head = f"drift-off check: {agree} of {nights} night{'' if nights == 1 else 's'} within 5 minutes of the sleep model"
+    if nights < CHECK_NIGHTS:
+        return f"{head} so far (trusted at 4 of 5)"
+    return f"{head} (the newest 5): {'trusted' if agree >= CHECK_NEEDED else 'not yet trusted (needs 4 of 5)'}"
 
 
 def stale_nights(rec_dir: Path, nights_dir: Path, now: float, hours: float = WINDOW_H) -> list[Night]:
