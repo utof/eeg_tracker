@@ -1,0 +1,128 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sleep</title>
+<style>
+:root{color-scheme:dark}
+body{margin:0;background:#101214;color:#e8e6e1;font:18px/1.45 system-ui,sans-serif}
+main{max-width:640px;margin:0 auto;padding:20px 16px 40px}
+a.back{display:inline-block;margin:0 0 10px;color:#8ab4f8;text-decoration:none;font-size:14px}
+h1{font-size:24px;font-weight:600;margin:0 0 8px}
+h2{font-size:19px;font-weight:600;margin:26px 0 2px}
+p{margin:8px 0}.muted{color:#9aa0a6;font-size:15px}.err{color:#e8836f}
+.label{color:#9aa0a6;font-size:15px;margin:10px 0 0}
+.big{font-size:40px;font-weight:300;line-height:1.15;font-variant-numeric:tabular-nums}
+.period{padding:12px 0;border-top:1px solid #24282c}
+.when{font-weight:600;font-variant-numeric:tabular-nums}
+.stages{display:flex;gap:6px 16px;flex-wrap:wrap;font-size:15px;color:#c9c6bf;margin:4px 0 2px}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+.deep{background:#3b6ea5}.dream{background:#b28de8}.light{background:#8ab4f8}
+#busy{margin:12px 0;padding:14px 16px;border-radius:12px;background:#181b1e;border:1px solid #2a2f34}
+#busy p{margin:4px 0 0}
+img{display:block;width:100%;height:auto;border-radius:8px;margin-top:14px;background:#fff}
+.hidden{display:none}
+</style>
+<main>
+<a class="back" href="/">← Headband check</a>
+<h1 id="title">Sleep</h1>
+<div id="busy" class="hidden" role="status"><b>Scoring your sleep, about 3 minutes</b><p class="muted" id="step"></p></div>
+<p id="msg" class="muted">Loading…</p>
+<div id="nights"></div>
+<p class="muted">First guess; the scorer is not yet validated on this headband.</p>
+<div id="morning"></div>
+</main>
+<script type="module">
+// Asks the recorder hub for the sleep report (GET /sleep-report); if there are newer recordings than the report,
+// starts the update (POST /sleep-report, scripts/sleep_report.py) and checks every 5 s until it is done.
+import { addInfo } from './info.js';
+import { esc, morningHtml } from './morning-result.js';
+addInfo(document.getElementById('title'), 'sleep-scoring');
+
+const $ = (id) => document.getElementById(id);
+const hm = (min) => {
+  const m = Math.round(min || 0), h = Math.floor(m / 60);
+  return h ? `${h} h ${m % 60} min` : `${m} min`;
+};
+const clock = (iso) => esc(String(iso).slice(11, 16)); // the laptop's clock time, as recorded
+const day = (date) => new Date(`${date}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+let asked = false;
+let timer = null;
+
+function period(p) {
+  const woke = p.wake_ups ? `woke ${p.wake_ups} time${p.wake_ups > 1 ? 's' : ''} (over 5 min)` : 'no wake-ups over 5 min';
+  const extra = [woke];
+  if (p.missing_min >= 1) extra.push(`${hm(p.missing_min)} missing`);
+  if (p.agreement) extra.push(`two models agree ${Math.round(p.agreement.five_stage * 100)} %`);
+  return `<div class="period"><div class="when">${clock(p.start)}–${clock(p.end)} · ${hm(p.asleep_min)} asleep</div>
+    <div class="stages"><span><i class="dot deep"></i>Deep ${hm(p.deep_min)}</span>
+    <span><i class="dot dream"></i>Dream ${hm(p.dream_min)}</span><span><i class="dot light"></i>Light ${hm(p.light_min)}</span></div>
+    <div class="muted">${extra.join(' · ')}</div></div>`;
+}
+
+function night(r) {
+  const span = `${clock(r.data_start)}–${clock(r.data_end)}`;
+  let html = `<section><h2>Night of ${esc(day(r.night_of))}</h2>`;
+  if (!r.scored) return `${html}<p class="muted">Under 5 minutes recorded (${span}): nothing to score.</p></section>`;
+  const t = r.total;
+  html += `<p class="label">Total sleep</p><div class="big">${hm(t.asleep_min)}</div>
+    <p class="muted">${t.periods ? `${t.periods} sleep${t.periods > 1 ? 's' : ''} · ` : ''}recorded ${span}` +
+    `${t.missing_min >= 1 ? ` · ${hm(t.missing_min)} missing` : ''}</p>`;
+  html += r.periods.length ? r.periods.map(period).join('') : '<p>No sleep found in this recording.</p>';
+  if (r.hypnogram) {
+    const src = `hypnogram.png?date=${encodeURIComponent(r.night_of)}&v=${encodeURIComponent(r.built)}`;
+    html += `<img src="${src}" alt="Chart of the night: sleep stages over time from two models; grey is missing data">`;
+  }
+  return `${html}</section>`;
+}
+
+function show(s) {
+  const busy = s.running;
+  $('busy').classList.toggle('hidden', !busy);
+  if (busy) {
+    const p = s.progress || {};
+    const secs = p.started && s.now ? Math.max(0, Math.round(s.now - p.started)) : 0;
+    $('step').textContent = `${p.step || 'Starting'} · ${secs >= 60 ? `${Math.floor(secs / 60)} min ` : ''}${secs % 60} s so far`;
+  }
+  const reports = [s.report, ...(s.recent || [])].filter(Boolean);
+  $('nights').innerHTML = reports.map(night).join('');
+  const msg = $('msg');
+  msg.className = 'muted';
+  if (s.failed && !busy) {
+    msg.className = 'err';
+    msg.textContent = `Could not score: ${s.failed}`;
+  } else if (busy) {
+    msg.textContent = reports.length ? 'Showing the last report until the new one is ready.' : '';
+  } else {
+    const at = new Date(s.updated * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    msg.textContent = reports.length ? `Updated ${at}.`
+      : 'No sleep recorded in the last 20 hours. Sleep with the headband on and the recorder running.';
+  }
+}
+
+async function tick() {
+  clearTimeout(timer);
+  try {
+    let s = await (await fetch('sleep-report', { cache: 'no-store' })).json();
+    if (s.error) throw new Error(s.error);
+    if (s.stale && !s.running && !asked) { // newer recordings than the report: update it, once per visit
+      asked = true;
+      const r = await (await fetch('sleep-report', { method: 'POST' })).json();
+      if (r.error) throw new Error(r.error);
+      s = await (await fetch('sleep-report', { cache: 'no-store' })).json();
+    }
+    show(s);
+    if (s.running) timer = setTimeout(tick, 5000);
+  } catch (e) {
+    const offline = e instanceof TypeError; // fetch failed: try again; anything else needs a look at the laptop
+    $('msg').className = 'err';
+    $('msg').textContent = offline ? 'No answer from the laptop. Is the recorder running?' : `Error: ${e.message}`;
+    if (offline) timer = setTimeout(tick, 5000);
+  }
+}
+async function morning() { // the newest morning check-in result, under the sleep periods
+  try {
+    const m = await (await fetch('morning-report', { cache: 'no-store' })).json();
+    $('morning').innerHTML = m.report ? morningHtml(m.report) : '';
+  } catch { /* the sleep part says when the laptop does not answer */ }
+}
+tick();
+morning();
+</script>
