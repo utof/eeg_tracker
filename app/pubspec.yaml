@@ -1,0 +1,24 @@
+name: eeg_tracker
+description: "EEG Tracker: records a BrainBit headband all night on Android."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # BrainBit's own plugin; its core is a closed binary (DECISIONS row 3). Pinned: the research note read 1.0.21.
+  neurosdk2: 1.0.21
+  # Foreground service whose TaskHandler isolate owns the whole BrainBit session (DECISIONS row 2).
+  flutter_foreground_task: ^11.0.3
+  permission_handler: ^12.0.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
