@@ -7,6 +7,7 @@ import 'dart:ui' as ui;
 import 'package:eeg_tracker/meditation/controller.dart';
 import 'package:eeg_tracker/meditation/tracker.dart';
 import 'package:eeg_tracker/ui/meditation_view.dart';
+import 'package:eeg_tracker/ui/phase_track.dart';
 import 'package:eeg_tracker/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -16,27 +17,42 @@ import 'screens_test.dart' show loadFonts;
 
 const _contact = {'O1': 4.2e5, 'O2': 1.6e6, 'T3': 8.1e5, 'T4': null};
 
-MeditationSummary _s(DateTime start, {double runS = 600, double settledS = 330, int bells = 14, bool complete = true}) =>
-    MeditationSummary(
-      start: start,
-      lengthMin: 10,
-      runS: runS,
-      complete: complete,
-      settledS: settledS,
-      longestSettledS: 52,
-      bells: bells,
-      restless: {Restless.jaw: 2, Restless.blinks: 7, Restless.movement: 1},
-      drifting: 1,
-      drowsyS: 34,
-      calm: [0.35, 0.42, 0.51, 0.58, 0.49, 0.62, 0.66, 0.6, 0.71, 0.55, 0.68, 0.73, 0.64, 0.7, 0.59, 0.66, 0.72, 0.69, 0.75, 0.71]
-          .sublist(0, (runS / 30).ceil().clamp(1, 20)),
-      marks: <(double, String)>[(42, 'jaw'), (95, 'blinks'), (130, 'blinks'), (188, 'movement'), (260, 'blinks'), (333, 'drifting'), (410, 'jaw'), (512, 'blinks')]
-          .where((m) => m.$1 < runS)
-          .toList(),
-      iafHz: 9.75,
-      note: '',
-      logFile: '',
-    );
+const List<(double, String)> _allMarks = [
+  (42, 'jaw'),
+  (95, 'blinks'),
+  (130, 'blinks'),
+  (188, 'movement'),
+  (260, 'blinks'),
+  (333, 'drifting'),
+  (410, 'jaw'),
+  (512, 'blinks'),
+];
+const List<double> _calm = [
+  0.35, 0.42, 0.51, 0.58, 0.49, 0.62, 0.66, 0.6, 0.71, 0.55, 0.68, 0.73, 0.64, 0.7, 0.59, 0.66, 0.72, 0.69, 0.75, 0.71, //
+];
+
+/// A made-up summary whose counts agree with its marks, as the tracker's do.
+MeditationSummary _s(DateTime start, {double runS = 600, double settledS = 330, int bells = 14, bool complete = true}) {
+  final marks = _allMarks.where((m) => m.$1 < runS).toList();
+  int count(String k) => marks.where((m) => m.$2 == k).length;
+  return MeditationSummary(
+    start: start,
+    lengthMin: 10,
+    runS: runS,
+    complete: complete,
+    settledS: settledS,
+    longestSettledS: 52,
+    bells: bells,
+    restless: {for (final r in Restless.values) r: count(r.name)},
+    drifting: count('drifting'),
+    drowsyS: count('drifting') * 34,
+    calm: _calm.sublist(0, (runS / 30).ceil().clamp(1, 20)),
+    marks: marks,
+    iafHz: 9.75,
+    note: '',
+    logFile: '',
+  );
+}
 
 final _earlier = [
   for (var d = 0; d < 6; d++) _s(DateTime(2026, 11, 17 - d, 21, 10), settledS: 240.0 + 15 * d, bells: 9 + d),
@@ -144,6 +160,16 @@ void main() {
       });
     }
   }
+
+  test('the track keeps eyes closed twice eyes open at every length, and fills the width', () {
+    for (final minutes in [5, 10, 20]) {
+      final w = trackWidths(392, minutes * 60.0);
+      expect(w[1], closeTo(2 * w[0], 1e-9), reason: '$minutes min');
+      expect(w[0], greaterThanOrEqualTo(22));
+      expect(w.reduce((a, b) => a + b) + 12, closeTo(392, 1e-9));
+      expect(w[2], greaterThan(w[1]));
+    }
+  });
 
   testWidgets('the length choice and the actions reach their callbacks', (tester) async {
     int? picked;

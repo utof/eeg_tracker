@@ -1,6 +1,8 @@
 // The meditation screen's layout from a plain view model, so every state renders in tests without a phone.
 // Structure (.impeccable/surfaces/app-lib-ui-meditation-screen-dart.md): status mark and word, the phase
 // track, two readouts (time left, bells), then the state's own section; one action pinned at the bottom.
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../meditation/controller.dart' show Stage;
@@ -165,8 +167,8 @@ MeditationViewModel meditationModel({
       }
       return m(
         'Eyes open',
-        'Look at the green dot. Jaw loose, shoulders soft. A low tone tells you to close your eyes.',
-        MarkShape.filled,
+        'Rest your eyes on the green dot below. Jaw loose, shoulders soft. A low tone tells you to close them.',
+        MarkShape.ring,
         Night.live,
         open: 1 - calSecondsLeft / 30,
         live: TrackPart.open,
@@ -218,8 +220,8 @@ MeditationViewModel meditationModel({
       return m(
         'Session over',
         message,
-        MarkShape.filled,
-        Night.live,
+        MarkShape.ring,
+        Night.inkMuted,
         open: 1,
         closed: 1,
         session: runSeconds / lengthS,
@@ -231,13 +233,13 @@ MeditationViewModel meditationModel({
       return m(
         r.complete ? 'Session over' : 'Stopped early',
         comparison,
-        MarkShape.filled,
-        Night.live,
+        MarkShape.ring,
+        Night.inkMuted,
         open: 1,
         closed: 1,
         session: r.runS / lengthS,
         timeLeft: r.settledS.round(),
-        timeLabel: 'settled, of ${_minSecWords(r.runS)}',
+        timeLabel: 'settled: ${(r.settledShare * 100).round()} % of ${_minSecWords(r.runS)}',
         bellCount: r.bells,
       );
     case Stage.failed:
@@ -335,7 +337,6 @@ class MeditationView extends StatelessWidget {
             child: SegmentedButton<int>(
               segments: [for (final v in sessionMinutes) ButtonSegment(value: v, label: Text('$v min'))],
               selected: {m.minutes},
-              showSelectedIcon: false,
               onSelectionChanged: (s) => onMinutes(s.first),
               style: SegmentedButton.styleFrom(
                 minimumSize: const Size.fromHeight(52),
@@ -369,7 +370,10 @@ class MeditationView extends StatelessWidget {
       case Stage.calibrating:
       case Stage.running:
       case Stage.ending:
-        return [if (m.contact.isNotEmpty) ...[const SectionHeading('Contact at the start'), _Contact(m.contact)]];
+        return [
+          if (m.live == TrackPart.open) const _Spot(),
+          if (m.contact.isNotEmpty) ...[const SectionHeading('Contact at the start'), _Contact(m.contact)],
+        ];
       case Stage.report:
         return _report(context, m.report!);
     }
@@ -377,11 +381,9 @@ class MeditationView extends StatelessWidget {
 
   List<Widget> _report(BuildContext context, MeditationSummary r) {
     final text = Theme.of(context).textTheme;
-    final pct = (r.settledShare * 100).round();
     String two(int v) => v.toString().padLeft(2, '0');
     return [
       const SectionHeading('This session'),
-      _Row('Settled', '${_minSecWords(r.settledS)} · $pct %'),
       _Row('Longest settled stretch', _minSecWords(r.longestSettledS)),
       _Row(
         'Restless moments',
@@ -395,16 +397,17 @@ class MeditationView extends StatelessWidget {
         '${r.drifting}',
         detail: r.drowsyS > 0 ? '${_minSecWords(r.drowsyS)} in all' : null,
       ),
-      _Row('Alpha peak', r.iafHz == null ? 'not clear' : '${(r.iafHz! * 4).round() / 4} Hz'),
+      _Row('Alpha peak', r.iafHz == null ? 'not clear' : '${(r.iafHz! * 4).round() / 4} Hz', rule: false),
       const SectionHeading('Earlier sessions'),
       if (model.earlier.isEmpty)
         Text('This is the first session on this phone.', style: text.bodyLarge?.copyWith(color: Night.inkMuted))
       else
-        for (final e in model.earlier.take(5))
+        for (final (i, e) in model.earlier.take(5).indexed)
           _Row(
             '${nightLabel(e.start)}, ${two(e.start.hour)}:${two(e.start.minute)}',
             '${(e.settledShare * 100).round()} % settled',
             detail: '${_minSecWords(e.runS)} · ${e.bells} ${e.bells == 1 ? 'bell' : 'bells'}',
+            rule: i < math.min(5, model.earlier.length) - 1,
           ),
       Padding(
         padding: const EdgeInsets.only(top: 28),
@@ -509,6 +512,20 @@ class StateMark extends StatelessWidget {
   );
 }
 
+/// The eyes-open spot: one still dot, centred in the screen's middle band, nothing moving near it.
+class _Spot extends StatelessWidget {
+  const _Spot();
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: 'Green dot to look at',
+    child: const SizedBox(
+      height: 220,
+      child: Center(child: StateMark(shape: MarkShape.filled, color: Night.live, size: 28)),
+    ),
+  );
+}
+
 class _Legend extends StatelessWidget {
   const _Legend(this.m);
   final MeditationViewModel m;
@@ -597,17 +614,20 @@ class _Contact extends StatelessWidget {
 
 /// One line of the report: a muted label, the value right-aligned, an optional detail under the value.
 class _Row extends StatelessWidget {
-  const _Row(this.label, this.value, {this.detail});
+  const _Row(this.label, this.value, {this.detail, this.rule = true});
   final String label;
   final String value;
   final String? detail;
+
+  /// A hairline under the row; off for the last row of a section (the next heading draws its own).
+  final bool rule;
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Night.rule))),
+      decoration: rule ? const BoxDecoration(border: Border(bottom: BorderSide(color: Night.rule))) : null,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

@@ -76,6 +76,15 @@ class PhaseTrack extends StatelessWidget {
   }
 }
 
+const double _gap = 6, _minPart = 22;
+
+/// Widths of the eyes-open, eyes-closed and session cells in [total] dp (6 dp gaps between them).
+List<double> trackWidths(double total, double sessionSeconds) {
+  final span = total - 2 * _gap, sum = 90 + sessionSeconds;
+  final open = math.max(_minPart, span * 30 / sum);
+  return [open, 2 * open, span - 3 * open];
+}
+
 /// Colour of a mark kind on the report's line.
 Color markColor(String kind) => kind == 'drifting' ? Night.problem : Night.caution;
 
@@ -96,15 +105,11 @@ class _TrackPainter extends CustomPainter {
   final double calmBinSeconds;
   final List<(double, String)> marks;
 
-  static const double _gap = 6, _minPart = 22, _radius = 6;
+  static const double _radius = 6;
 
-  /// Segment widths proportional to 30 s, 60 s and the session, the two short ones at least [_minPart].
-  List<double> _widths(double total) {
-    final span = total - 2 * _gap, secs = [30.0, 60.0, sessionSeconds];
-    final sum = secs.reduce((a, b) => a + b);
-    final open = math.max(_minPart, span * secs[0] / sum), closed = math.max(_minPart, span * secs[1] / sum);
-    return [open, closed, span - open - closed];
-  }
+  /// Segment widths proportional to 30 s, 60 s and the session; the eyes-open cell is at least [_minPart] wide
+  /// (a few dp at 20 min), and eyes closed stays exactly twice it, so the two keep their real ratio.
+  List<double> _widths(double total) => trackWidths(total, sessionSeconds);
 
   @override
   void paint(Canvas canvas, Size size) {

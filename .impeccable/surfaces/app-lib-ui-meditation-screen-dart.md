@@ -2,7 +2,7 @@
 version: 1
 slug: "app-lib-ui-meditation-screen-dart"
 primary_target: "app/lib/ui/meditation_screen.dart"
-related_targets: ["app/lib/ui/meditation_view.dart"]
+related_targets: ["app/lib/ui/meditation_view.dart","app/lib/ui/phase_track.dart"]
 ---
 
 # Meditation screen (app/lib/ui/meditation_screen.dart)
@@ -46,6 +46,15 @@ SIGNATURE: the phase track: segments proportional to real durations, filled as t
 outlined green; after the session its segment draws the calm line, ticks at each restless (amber) and
 drifting (red) moment.
 
-FORM: three-phase track, surface structure 5 of 7; seed:e6ed47dd70029d435d0c9ce157c6ccbd.
+FORM: three-phase track, surface structure 5 of 7; seed:975b700a15f303e1.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review and the verdict.
+
+## Finish review (2026-11-18) and open points
+
+Disposition "fix", eight findings, all applied: track keeps eyes closed exactly twice eyes open (22 dp floor
+on eyes open only); finished sessions wear the idle ring, not the green "good" mark; the eyes-open spot is a
+still 28 dp dot mid-screen; the length selector keeps Material's check mark; no double rule in the report;
+the settled share moved into the readout label; screen fixtures keep counts and marks one-to-one.
+For the owner (DESIGN.md not changed without approval): DESIGN.md says "Start night is the only filled
+button" and "no sounds"; this screen adds one filled primary of its own and is a sound practice by design.
