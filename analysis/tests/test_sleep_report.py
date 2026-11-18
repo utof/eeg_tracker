@@ -176,6 +176,11 @@ def test_a_second_run_skips_an_up_to_date_night(tmp_path, fake_scorer, capsys):
     assert not list(nights.glob("*.part.*"))
     assert json.loads((nights / f"{name}.sleep.json").read_text())["source"] == f"{name}.bdf"
     assert len(events(export)) == 1
+    x = rep["extras"]  # the shared detectors over the same samples, as the phone's report (night_extras.py)
+    assert rep["version"] == 2 and rep["extras_error"] is None
+    assert len(x["quality"]) == 24 and x["asleep"]["min"] == 10.0 and x["night"]["min"] == 12.0
+    assert x["hours"][0]["start"] == rep["data_start"] and x["hours"][0]["from_s"] == 0
+    assert sum(h["min"] for h in x["hours"]) == 12.0
     before = (rep_file.read_bytes(), rep_file.stat().st_mtime_ns)
 
     assert sr.main(args) == 0  # nothing new: nothing scored, nothing written, nothing exported

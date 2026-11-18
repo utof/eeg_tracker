@@ -8,7 +8,9 @@ The recorder hub starts it from the Sleep page (POST /sleep-report) under system
 For every night with data in the last --hours hours (night_files.py: recordings chained in time, named by the
 evening date) whose report is missing or lacks 10+ minutes of newer samples, it joins the recordings with
 to_bdf.py's code into <nights>/<date>.bdf, scores it with score_sleep.py's code (<date>.sleep.json and
-<date>.hypnogram.png), splits the AnySleep stages into sleep periods, writes <date>.report.json
+<date>.hypnogram.png), splits the AnySleep stages into sleep periods, runs the shared detectors over the same samples
+for the night extras (analysis/night_extras.py: jaw, movement and signal quality, as on the phone), writes
+<date>.report.json
 (docs/data-format.md) and appends the eeg_sleep_night event (export_events.py). Nights already up to date are
 skipped, so running it twice does nothing the second time. One run at a time (a lock file); it lowers its own
 CPU priority and stops itself past --max-minutes or --max-mb, so the recorder keeps going.
@@ -87,8 +89,22 @@ def periods(stages: list[str], other: list[str] | None = None, conf: list[float]
     return out, stray
 
 
-def make_report(name: str, night: nf.Night, scored: dict | None, seconds: float, data: tuple[datetime, float]) -> dict:
-    """<name>.report.json from score_sleep's result (None when there was too little data to score)."""
+def _extras(seen: tuple | None, stages: list[str], found: list[dict], start: datetime, at) -> dict | None:
+    """The report's `extras` (night_extras.summary) with each hour's clock time; None without the detectors' pass."""
+    if seen is None:
+        return None
+    import night_extras as nx
+    quality, bursts, moves = seen
+    x = nx.summary(quality, bursts, moves, stages, [(p["first"], p["last"]) for p in found], nx.first_edge_s(start))
+    for h in x["hours"]:
+        h["start"] = at(start + timedelta(seconds=h["from_s"]))
+    return x
+
+
+def make_report(name: str, night: nf.Night, scored: dict | None, seconds: float, data: tuple[datetime, float],
+                seen: tuple | None = None, extras_error: str | None = None) -> dict:
+    """<name>.report.json from score_sleep's result (None when there was too little data to score) and what the
+    detectors saw (`night_extras.events`, None when that pass did not run)."""
     start, length_s = data
     at = lambda t: t.astimezone().isoformat(timespec="seconds")  # noqa: E731
     rep: dict = dict(version=nf.VERSION, night_of=name, built=at(datetime.now()), scoring_s=round(seconds, 1),
@@ -101,13 +117,18 @@ def make_report(name: str, night: nf.Night, scored: dict | None, seconds: float,
         rep.update(periods=[], total=dict(asleep_min=0.0, light_min=0.0, deep_min=0.0, dream_min=0.0, wake_ups=0,
                                           periods=0, recorded_min=round(length_s / 60, 1), missing_min=0.0,
                                           stray_sleep_min=0.0),
-                   hypnogram=None, sleep_json=None, bdf=None, model=None, cross_check=None)
+                   hypnogram=None, sleep_json=None, bdf=None, model=None, cross_check=None, extras=None,
+                   extras_error=extras_error)
         return rep
     import export_events
     ep = scored["epochs"]
     t0 = datetime.fromisoformat(scored["start"])
     t = lambda i: at(t0 + timedelta(seconds=EPOCH * i))  # noqa: E731
     found, stray = periods([e["anysleep"] for e in ep], [e["yasa"] for e in ep], [max(e["p"]) for e in ep])
+    try:
+        extras = _extras(seen, [e["anysleep"] for e in ep], found, start, at)
+    except Exception as e:  # noqa: BLE001 - the night is still scored without the extras; the report says why
+        extras, extras_error = None, f"{type(e).__name__}: {e}"
     out = []
     for p in found:
         sm = p["stage_min"]
@@ -122,7 +143,8 @@ def make_report(name: str, night: nf.Night, scored: dict | None, seconds: float,
     rep.update(periods=out, total=total, hypnogram=f"{name}.hypnogram.png", sleep_json=f"{name}.sleep.json",
                bdf=f"{name}.bdf", model=export_events.MODEL,
                cross_check=dict(model=export_events.CROSS, agreement_5_stage=s.get("agreement_5_stage"),
-                                agreement_w_nrem_rem=s.get("agreement_w_nrem_rem")))
+                                agreement_w_nrem_rem=s.get("agreement_w_nrem_rem")),
+               extras=extras, extras_error=extras_error)
     return rep
 
 
@@ -151,6 +173,14 @@ def build(night: nf.Night, a: argparse.Namespace, status: nf.Job) -> dict:
     if length_s < 10 * EPOCH:
         rep = make_report(name, night, None, time.time() - t_start, (start, length_s))
     else:
+        status.step("Counting jaw, movement and signal")
+        seen, why = None, None
+        try:  # before scoring, so its memory is free again when the model runs
+            sys.path.insert(0, str(ROOT / "analysis"))
+            import night_extras as nx
+            seen = nx.events(nx.see(uv, notes))
+        except Exception as e:  # noqa: BLE001 - the night is still scored without the extras
+            why = f"{type(e).__name__}: {e}"
         part = folder / f"{name}.part.bdf"
         to_bdf.write(part, start, uv, notes)
         del uv
@@ -161,7 +191,7 @@ def build(night: nf.Night, a: argparse.Namespace, status: nf.Job) -> dict:
         status.step("Drawing the chart")
         score_sleep.save(scored, folder / name, title=f"Night of {name}")
         status.step("Finding sleep periods")
-        rep = make_report(name, night, scored, time.time() - t_start, (start, length_s))
+        rep = make_report(name, night, scored, time.time() - t_start, (start, length_s), seen, why)
     tmp = folder / f"{name}.report.tmp"
     tmp.write_text(json.dumps(rep, indent=1)); os.replace(tmp, folder / f"{name}.report.json")
     if rep["scored"]:
