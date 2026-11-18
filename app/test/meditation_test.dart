@@ -5,6 +5,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:eeg_tracker/detectors/detectors.dart' show EpochQuality;
+import 'package:eeg_tracker/detectors/drift_off.dart';
 import 'package:eeg_tracker/feedback/demo.dart';
 import 'package:eeg_tracker/feedback/session.dart';
 import 'package:eeg_tracker/meditation/controller.dart';
@@ -178,6 +180,27 @@ void main() {
     expect(sum.settledShare, closeTo(t.settledSeconds / 300, 0.01));
   });
 
+  test('tracker: the drift-off detector saying drowsy or asleep makes calm steps drifting', () {
+    final s = Session(), demo = DemoSignal(7)..blinks = false..jawBursts = false;
+    final plain = MeditationTracker(const Duration(minutes: 1)), drifted = MeditationTracker(const Duration(minutes: 1));
+    while (!plain.done) {
+      demo.eyes = demo.t < 30 ? 'open' : 'closed';
+      for (final r in s.push(demo.next(25))) {
+        plain.add(r);
+        drifted.add(r, drift: plain.runSeconds > 30 ? DriftState.asleep : DriftState.awake);
+      }
+    }
+    expect(plain.asleepS, isNull);
+    expect(drifted.asleepS, closeTo(30.1, 0.05));
+    expect(drifted.drowsySeconds, greaterThanOrEqualTo(29.9));
+    expect(drifted.settledSeconds, lessThanOrEqualTo(plain.settledSeconds));
+    final sum = drifted.summary(start: DateTime(2026, 11, 18), complete: true, iafHz: null, note: '', logFile: 'x');
+    expect(MeditationSummary.fromJson(jsonDecode(jsonEncode(sum.toJson())))!.asleepS, sum.asleepS);
+    expect(sum.toJson().containsKey('asleepS'), isTrue);
+    expect(plain.summary(start: DateTime(2026, 11, 18), complete: true, iafHz: null, note: '', logFile: 'x').toJson(),
+        isNot(contains('asleepS')), reason: 'older readers see the same file as before');
+  });
+
   test('summary: JSON round trip; damaged or foreign files are refused', () {
     final s = summaryOf();
     final back = MeditationSummary.fromJson(jsonDecode(jsonEncode(s.toJson())))!;
@@ -240,6 +263,32 @@ void main() {
     expect(jsonEncode(again.log.lines), jsonEncode(log['lines']), reason: 'the phone session replays line for line');
     expect((log['info']! as List).any((i) => (i as Map).containsKey('sound')), isTrue);
     expect(c.comparison, startsWith('Session 1.'));
+    c.dispose();
+  });
+
+  test('drift-off in a session: lights off at the close-eyes cue, alpha fades, probably asleep within 4 min', () async {
+    final demo = DemoSignal(11)
+      ..blinks = false
+      ..jawBursts = false
+      ..wanders = false;
+    final band = DemoBand(demo);
+    final fade = Timer.periodic(const Duration(milliseconds: 1), (_) => demo.alphaGain = demo.t > 150 ? 0.1 : 1);
+    addTearDown(fade.cancel);
+    final c = MeditationController(finder: Finder([band]), sound: SilentSound.new, timing: fast);
+    await c.start(const Duration(minutes: 6));
+    await until(c, () => c.stage == Stage.report, max: const Duration(seconds: 60));
+    final d = c.drift!;
+    expect(d.lightsOff, inInclusiveRange(29, 31), reason: 'the close-eyes cue comes after 30 s eyes open');
+    expect(d.baselineAlpha, greaterThan(50));
+    expect(d.onset, inInclusiveRange(150, 185));
+    expect(d.asleepAt! - d.onset!, 179);
+    final r = c.report!;
+    expect(r.asleepS, isNotNull);
+    expect(r.asleepS! + 90, closeTo(d.asleepAt! + 1, 3), reason: 'run seconds start after the 90 s calibration');
+    expect(r.drifting, greaterThanOrEqualTo(1));
+    expect(c.seen!.epochs.where((e) => e.quality == EpochQuality.good).length, greaterThan(10));
+    final info = c.session!.log.info.firstWhere((i) => i.containsKey('detectors'))['detectors']! as Map<String, Object?>;
+    expect((info['drift']! as Map<String, Object?>)['onsetS'], d.onset);
     c.dispose();
   });
 
