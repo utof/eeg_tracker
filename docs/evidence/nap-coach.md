@@ -34,7 +34,7 @@ night, never with a sleep lab, and no study has tested an EEG-timed nap alarm.
 ## Where the data does not support it
 
 - No study has shown that an EEG-timed nap or alarm makes you less groggy than a plain timer. A bedroom alarm
-  with light, sound and warmth did no better than a normal one.
+  with light, sound and temperature did no better than a normal one.
 - The live stages are AnySleep, the same sleep model as the morning report, read 2 minutes behind the newest
   data. On one recorded night they agreed with the model's own full-night scoring on most 30-second stretches;
   that shows the live version is consistent with the full one, not that either is right on this headband.

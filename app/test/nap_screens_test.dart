@@ -45,7 +45,7 @@ final _length = _nap(
   end: NapEnd.length,
   length: 20,
   onsetS: 540,
-  live: const NapLiveInfo(mode: LiveMode.light, why: 'One check took 16.2 s with the full model, so it now uses 1 of its 3 runs.', calls: 31, medianMs: 7400, maxMs: 16200, poorEpochs: 4),
+  live: const NapLiveInfo(mode: LiveMode.light, why: 'Two checks in a row took over 15 s (the last 16.2 s) with the full model, so it now uses 1 of its 3 runs.', calls: 31, medianMs: 7400, maxMs: 16200, poorEpochs: 4),
 );
 final _stopped = _nap(DateTime(2026, 11, 17, 13, 50), stages: '${'.' * 4}${'W' * 12}', end: NapEnd.stopped, onsetS: null,
     live: const NapLiveInfo(mode: LiveMode.timer, why: 'The sleep model stopped (no ONNX Runtime), so the timer alone ends the nap.'));
@@ -65,7 +65,7 @@ final Map<String, NapViewModel> states = {
   'face_waiting': const NapViewModel(stage: NapStage.resting, seconds: 400, drift: DriftState.drowsy,
       liveNote: 'The sleep model waits for last night\'s scoring to finish; the timer covers until then.'),
   'face_timer': const NapViewModel(stage: NapStage.resting, lengthMin: 45, seconds: 1400, drift: DriftState.asleep, live: NapLive.timer,
-      liveNote: 'The sleep model is too slow on this phone (17.9 s for one check), so the timer alone ends the nap.'),
+      liveNote: 'The sleep model is too slow on this phone (two checks over 15 s, the last 17.9 s), so the timer alone ends the nap.'),
   'face_poor': const NapViewModel(stage: NapStage.resting, seconds: 900, drift: DriftState.awake, live: NapLive.poor,
       liveNote: 'The headband\'s signal is lost; the timer ends the nap until it is back.'),
   'wake_deep': const NapViewModel(stage: NapStage.waking, seconds: 1620, end: NapEnd.deepSleep),

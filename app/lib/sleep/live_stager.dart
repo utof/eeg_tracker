@@ -6,8 +6,9 @@
 // It never blocks the screen: the window is copied (a few milliseconds), scaled in a background isolate, and the
 // model runs on the ONNX plugin's own thread. A call that is still running when the next epoch completes is not
 // queued: the next call starts as soon as it ends, on the newest epoch, and hands out every epoch since the last one
-// it gave (those few read slightly further behind). It times every call and steps down when one is too slow for the
-// 30 s rhythm: 3 runs, then 1 run, then the timer only (no model); a model that fails also leaves the timer only.
+// it gave (those few read slightly further behind). It times every call and steps down when two in a row are too slow
+// for the 30 s rhythm (one slow call is often the models opening, or a hiccup): 3 runs, then 1 run, then the timer
+// only (no model); a model that fails also leaves the timer only.
 // A window with over half of its epochs lost is not scored (its scaling would be set by the held stretches, which sit
 // at about 0 after the high-pass): its epochs come out as gaps, as do lost epochs in a scored window.
 // Callers must work without stages: a nap still ends at its length.
@@ -26,7 +27,7 @@ const int behindEpochs = 4;
 /// AnySleep's shortest input: the first call comes once 5 minutes are in.
 const int liveMinEpochs = 10;
 
-/// A call slower than this (prepare + model) steps down: it must fit the 30 s rhythm with room to spare.
+/// Two calls in a row slower than this (prepare + model) step down: they must fit the 30 s rhythm with room to spare.
 const Duration slowCall = Duration(seconds: 15);
 
 enum LiveMode {
@@ -124,6 +125,7 @@ class LiveStager {
   int skipped = 0;
 
   Future<void>? _running;
+  int _slowInARow = 0;
   int _scoredUpTo = -1; // the last epoch handed out
   bool _closed = false;
 
@@ -185,7 +187,11 @@ class LiveStager {
         onStage?.call(stages.last);
       }
       _scoredUpTo = math.max(_scoredUpTo, newest);
-      if (ms > slow.inMilliseconds) _stepDown(ms);
+      _slowInARow = ms > slow.inMilliseconds ? _slowInARow + 1 : 0;
+      if (_slowInARow >= 2) {
+        _slowInARow = 0;
+        _stepDown(ms);
+      }
     } catch (e) {
       if (_closed) return;
       mode = LiveMode.timer;
@@ -206,10 +212,10 @@ class LiveStager {
     final s = (ms / 1000).toStringAsFixed(1);
     if (mode == LiveMode.full) {
       mode = LiveMode.light;
-      why = 'One check took $s s with the full model, so it now uses 1 of its 3 runs.';
+      why = 'Two checks in a row took over ${slow.inSeconds} s (the last $s s) with the full model, so it now uses 1 of its 3 runs.';
     } else {
       mode = LiveMode.timer;
-      why = 'The sleep model is too slow on this phone ($s s for one check), so the timer alone ends the nap.';
+      why = 'The sleep model is too slow on this phone (two checks over ${slow.inSeconds} s, the last $s s), so the timer alone ends the nap.';
     }
     onChange?.call();
   }

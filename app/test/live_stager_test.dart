@@ -140,7 +140,7 @@ void main() {
     expect([for (final st in s.stages) (st.epoch, st.behind)], [(0, 9), (1, 8), (2, 7), (3, 6), (4, 5), (5, 4), (6, 6), (7, 5), (8, 4)]);
   });
 
-  test('too slow: 3 runs, then 1 run, then the timer alone, each step said in a sentence', () async {
+  test('too slow twice in a row: 3 runs, then 1 run, then the timer alone, each step said in a sentence', () async {
     final clock = FakeClock();
     final m = ScriptedModel((_) => 'N2', clock: clock, costMs: 9000);
     var changes = 0;
@@ -149,15 +149,22 @@ void main() {
     expect(s.mode, LiveMode.full);
     m.costMs = 16000;
     await feed(s, 1, from: 12);
+    expect(s.mode, LiveMode.full, reason: 'one slow check (opening the models, a hiccup) changes nothing');
+    m.costMs = 9000;
+    await feed(s, 1, from: 13);
+    m.costMs = 16000;
+    await feed(s, 1, from: 14);
+    expect(s.mode, LiveMode.full, reason: 'the slow checks were not in a row');
+    await feed(s, 1, from: 15);
     expect(s.mode, LiveMode.light);
     expect(s.why, contains('16.0 s'));
     expect(s.why, contains('1 of its 3 runs'));
-    await feed(s, 1, from: 13);
+    await feed(s, 2, from: 16);
     expect(m.seen.last.runs, 1);
     expect(s.mode, LiveMode.timer);
     expect(s.why, contains('timer alone'));
     final n = m.seen.length;
-    await feed(s, 3, from: 14);
+    await feed(s, 3, from: 18);
     expect(m.seen, hasLength(n), reason: 'no model calls on the timer');
     expect(changes, 2);
     expect(s.callTimes!.max, 16000);
