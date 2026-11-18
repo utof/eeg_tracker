@@ -7,10 +7,12 @@ import 'dart:typed_data';
 
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/sleep/model.dart';
+import 'package:eeg_tracker/sleep/onnx_runs.dart';
 import 'package:eeg_tracker/sleep/periods.dart';
 import 'package:eeg_tracker/sleep/prep.dart';
 import 'package:eeg_tracker/sleep/report.dart';
 import 'package:eeg_tracker/sleep/scorer.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const w = 'W', n1 = 'N1', n2 = 'N2', n3 = 'N3', r = 'R', gap = 'gap';
@@ -208,6 +210,25 @@ void main() {
       expect(scorer.due(), hasLength(1));
     });
 
+    test('the bundled models: the real three load from the assets, a copy is made once and renewed on change',
+        () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      for (var r = 1; r <= anySleepRuns; r++) {
+        final data = await rootBundle.load(anySleepAsset(r));
+        expect(data.lengthInBytes, greaterThan(5e6)); // listed in pubspec.yaml and present
+      }
+      final dir = Directory('${root.path}/models');
+      final bundle = _Bundle(Uint8List.fromList(List.generate(1000, (i) => i % 251)));
+      final first = await modelFile(1, dir, bundle: bundle);
+      final again = await modelFile(1, dir, bundle: bundle);
+      expect(again.path, first.path);
+      bundle.bytes = Uint8List.fromList(List.generate(1000, (i) => (i * 7) % 251)); // a new export, same size
+      final updated = await modelFile(1, dir, bundle: bundle);
+      expect(updated.path, isNot(first.path));
+      expect(dir.listSync().map((f) => f.uri.pathSegments.last), [updated.uri.pathSegments.last]);
+      expect(updated.readAsBytesSync(), bundle.bytes);
+    });
+
     test('pieces cover every epoch once and each sees its context', () {
       expect(pieces(pieceEpochs + 2 * contextEpochs), [(w0: 0, w1: 180, c0: 0, c1: 180)]);
       expect(pieces(181), hasLength(2));
@@ -227,6 +248,14 @@ void main() {
           throwsStateError);
     });
   });
+}
+
+class _Bundle extends CachingAssetBundle {
+  _Bundle(this.bytes);
+  Uint8List bytes;
+
+  @override
+  Future<ByteData> load(String key) async => ByteData.sublistView(bytes);
 }
 
 class _FakeRun implements StageRun {

@@ -234,7 +234,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
         SleepScorer(
           recordingsDir: Directory(dir),
           store: NightReportStore(nightsDirFor(dir)),
-          openRun: OnnxStageRun.open,
+          openRun: (run) => OnnxStageRun.open(run, modelsDir: modelsDirFor(dir)),
           closeRun: (run) => (run as OnnxStageRun).close(),
         ),
       )..addListener(_onScoring);
