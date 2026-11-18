@@ -7,6 +7,7 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 | Raw recording | `<stamp>.f32`, `<stamp>.idx`, `<stamp>.log`, `<stamp>.markers.jsonl` (one set per recorder run) | `scripts/record_night.py` (laptop); the phone app will write the same kind of add-only chunks |
 | One night | `<night>.bdf` (BDF+, 24-bit, µV), `<night>.sleep.json`, `<night>.hypnogram.png` | `scripts/to_bdf.py`, `scripts/score_sleep.py` |
 | Sleep report | `_local/nights/<date>.report.json` beside that night's `<date>.bdf`, `.sleep.json`, `.hypnogram.png` | `scripts/sleep_report.py` (the Sleep page starts it) |
+| Sleep report on the phone | `files/nights/<date>.report.json` in the app's private folder | the phone app after Stop (`app/lib/sleep/scorer.dart`) |
 | Morning check-in | `<start>.morning.json` (or `<start>.setup.json` for a setup test alone) | `scripts/morning_check.py` |
 | Events for other apps | `<root>/events/<dev>/eeg-YYYY-MM.jsonl`, `<root>/events/<dev>/breaks-YYYY-MM.jsonl` | `scripts/export_events.py`, `scripts/break_hints.py` |
 
@@ -73,6 +74,19 @@ has `start`, `end` (first and last asleep epoch, ISO with offset), `asleep_min`,
 epochs with over 5 minutes scored awake) and `wake_up_list` `[{start, awake_min}]`, `missing_min`, `agreement`
 `{five_stage, wake_nrem_rem, epochs}` of AnySleep and YASA over the epochs both scored (`null` if none) and
 `confidence` (AnySleep's mean top probability).
+
+## The phone's `files/nights/<date>.report.json`
+
+The phone app scores a finished night itself (`app/lib/sleep/`, DECISIONS rows 95-98) and writes one report per
+night into its private `files/nights/` folder, next to `files/recordings/`. Nights are cut by the same chain rule,
+the report is rebuilt by the same 10-minute rule, and it has the fields of the laptop's report above, with these
+differences: `source` is `phone`; `model` names the phone's version (`anysleep-mid-fusion-3runs@88e13e3 onnx-f16
+pieces-1h+15min`); there is no picture, BDF or second model, so `hypnogram`, `sleep_json`, `bdf`, `cross_check`
+and each period's `agreement` are `null`; `epoch_s` is 30 and `stages` holds one character per 30 s from
+`data_start` (`W 1 2 3 R`, `-` where over 5 s of the epoch was missing), like the `hypnogram` of
+`eeg_sleep_night`. While a night is being scored a `<date>.scoring` file sits beside it; if it is still there when
+no scoring runs, the last attempt stopped (its text is the error, empty if the app was killed) and the app waits
+for "Try again". The report is not exported yet.
 
 ## Morning check-in markers and `<start>.morning.json`
 

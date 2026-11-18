@@ -55,7 +55,7 @@ Update the status column whenever something lands.
 |---|---|---|---|
 | 1 | Laptop recorder + live check page | working; survives Bluetooth drops (restarts itself) | `scripts/record_night.sh` |
 | 2 | Night → one BDF+ file | working | `scripts/to_bdf.py` |
-| 3 | Sleep scoring + hypnogram chart | working on test data; first real night 2026-11-18 | `scripts/score_sleep.py` |
+| 3 | Sleep scoring + hypnogram chart | working on test data; first real night 2026-11-18; **on the phone too** (2026-11-18, branch `feat/app-sleep-report`): AnySleep as ONNX scores each night after Stop, a sleep report screen with the chart, periods and past nights; agrees with the laptop on 96.6 % of 30-s epochs of the owner's night; phone speed not yet measured | `scripts/score_sleep.py`; app: `lib/sleep/`, DECISIONS 95-99 |
 | 4 | Export to utof_tracker's event format | working; utof_tracker does not read it yet (needs the owner's OK to change it) | `scripts/export_events.py` |
 | 5 | Android recorder app (one tap, screen off all night) | code + tests done; first release APK built 2026-11-18 (30 MB, sent to the owner); phone test pending | branch `feat/android-recorder` |
 | 6 | Morning check-in (eyes closed / open, ratings) + setup test | page, analysis, export and tests done on the fake headband; first real morning pending | `scripts/web/morning.html`, `scripts/morning_check.py` |
@@ -85,6 +85,11 @@ findings are on `_local/research/2026-11-18-findings.html`.
 
 1. **Phone app** (battery line and packet count: done 2026-11-18): a once-a-minute phone battery line and a per-night count of missing packets in the log
    (assistant, small); then the owner's phone test (below); then merge `feat/android-recorder`. (Research D)
+   - **Sleep report in the app** (row 3; owner: "the app is what I'm gonna be using"): built 2026-11-18 on
+     `feat/app-sleep-report` (from `feat/app-meditation`): the night prepared in Dart exactly as on the laptop,
+     AnySleep's three runs as ONNX (19.7 MB), scored after Stop, report screen (DECISIONS 95-99). Next: the
+     owner's one-night speed test (`app/README.md`, "Sleep report"); then the morning check-in in the app and
+     exporting the report with a night.
 2. ~~**Meditation feedback in the app**~~ (row 21): v1 built 2026-11-18 on `feat/app-meditation`: the core in
    Dart, `flutter_soloud` at 48 kHz, the meditation screen and report (DECISIONS 72-77). Next: the owner listens
    and runs a few sessions (below); then the no-feedback block and the learning verdict. (Research A, D)
@@ -119,6 +124,9 @@ findings are on `_local/research/2026-11-18-findings.html`.
 - **Extended setup test** (2 min, `morning.html`): blinks, left-right glances, clenches; it confirms the 55-120 Hz jaw band
   on real clenches, gives µV per degree for glances on T3-T4, and settles the blink sign on 20 cued blinks.
 - **First real morning check-in** (`morning.html`).
+- **Sleep report on the phone** (one morning, about 15 minutes; `app/README.md` on `feat/app-sleep-report`,
+  "Owner step"): after a recorded night press Stop and note how long the phone takes to show the time asleep,
+  whether the app stays open, and whether the report looks like the night you remember.
 
 ## Decisions waiting for the owner
 

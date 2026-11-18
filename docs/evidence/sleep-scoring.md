@@ -38,7 +38,11 @@ headband has never been checked against a lab recording, and the five-stage deta
 ## How the app uses this
 
 - AnySleep (three runs averaged, all four channels, plus a filter that removes slow drift) is the main model; YASA on
-  the O1-T3 pair is the second opinion. Where they disagree, the chart shows low confidence.
+  the O1-T3 pair is the second opinion on the laptop. Where they disagree, the chart shows low confidence.
+- The phone scores the night itself after you press Stop, with the same three AnySleep runs made smaller for
+  the phone; on a test stretch of a recorded night they gave the same stage as on the laptop for every 30
+  seconds. The phone goes through the night one hour at a time, which changes about 3 in every 100 thirty-second
+  stretches compared with the laptop's single pass. The phone has no second opinion.
 - A 30-second stretch missing more than 5 seconds of data is not scored: missing data never becomes "awake" or
   "deep".
 - An upgrade (AnySleep fine-tuned on public nights reshaped to this headband's channels) is adopted only if it
@@ -61,6 +65,8 @@ headband has never been checked against a lab recording, and the five-stage deta
 ## Libraries and models
 
 - [AnySleep](https://github.com/dslaborg/AnySleep) (MIT; code and weights): the main sleep model.
+- [ONNX Runtime](https://github.com/microsoft/onnxruntime) 1.28 (MIT) through
+  [flutter_onnxruntime](https://github.com/masicai/flutter_onnxruntime) 1.9.0 (MIT): runs AnySleep on the phone.
 - [YASA](https://github.com/raphaelvallat/yasa) 0.8.1 (BSD-3): the second opinion.
 - [MNE](https://pypi.org/project/mne/) (BSD-3): reads and filters the recording.
 - [pyedflib](https://github.com/holgern/pyedflib/blob/master/LICENSE) (BSD-3): reads and writes BDF+ files.

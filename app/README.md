@@ -14,6 +14,7 @@ a guided eyes-closed session whose sound follows your alpha rhythm (below).
 - Screen: `lib/ui/`, design in `../DESIGN.md`.
 - Meditation: `lib/feedback/` (the laptop page's feedback core in Dart), `lib/sound/` (flutter_soloud),
   `lib/meditation/` (session and report), `lib/ui/meditation_*.dart`; DECISIONS rows 72-77.
+- Sleep report: `lib/sleep/` and `lib/ui/sleep_*.dart`, scored on the phone after Stop (below); DECISIONS rows 95-99.
 
 ## Build and test
 
@@ -25,8 +26,9 @@ flutter test --concurrency=1               # writer, recorder rules (fake headba
 flutter build apk --release --target-platform android-arm64
 ```
 
-`flutter test` also renders the night screen in four states and the meditation screen in eleven to
-`build/screens/*.png` (normal and 130 % text). The meditation tests stream a synthetic headband through whole
+`flutter test` also renders the night screen in four states, the meditation screen in eleven and the sleep
+report in eight to `build/screens/*.png` (normal and 130 % text). `test/sleep_prep_test.dart` checks the
+sleep model's input against a fixture made by the laptop's Python (`test/fixtures/make_sleep_fixture.py`). The meditation tests stream a synthetic headband through whole
 sessions; `test/feedback_cross_check_test.dart` checks the Dart core against a session made by the JavaScript
 core (`node app/test/fixtures/make_js_session.mjs` from the repo root remakes it after a change to the JS core).
 
@@ -59,6 +61,40 @@ a treatment, and no "meditation depth" is measured. Each session is kept in the 
 in the laptop page's session format, so it can be replayed). They are not exported yet.
 
 If the headband drops out, the countdown pauses ("No signal") and the app reconnects by itself.
+
+## Sleep report
+
+After **Stop** the app scores the night on the phone (AnySleep, the laptop's sleep model, three runs; DECISIONS
+rows 95-99). The main screen then shows last night's time asleep under the strip; **Sleep report** opens the
+night: time asleep and time not recorded, a chart of the stages on the clock (missing data hatched amber, sleep
+periods numbered), each period's start and end, deep, dream and light sleep, wake-ups over 5 minutes and missing
+minutes, and the past nights. It is a first guess: the model is not validated on this headband (the **i** button
+shows `docs/evidence/sleep-scoring.md`). It also runs when the app is opened between nights, for any night whose
+report is missing or 10+ minutes behind, and never while a night records.
+
+- Code: `lib/sleep/` (preparation as `scripts/score_sleep.py`, the model, sleep periods as
+  `scripts/sleep_report.py`, the report file), `lib/ui/sleep_*.dart`. Models: `assets/models/` (see its README
+  for how they were made and checked). Reports: `files/nights/<date>.report.json` (`docs/data-format.md`).
+- If scoring stops (for example the phone runs out of memory), the main screen says so and offers **Try again**;
+  it does not retry by itself.
+- ONNX Runtime cannot run inside `flutter test`, so the models are checked in Python:
+  `uv run --project analysis --group onnx --with pytest pytest analysis/tests/test_anysleep_onnx.py` (from the
+  repo root), and on a recorded night with `scripts/export_anysleep_onnx.py --check-only --night ...`.
+
+### Owner step: how long does the phone take? (once, about 15 minutes)
+
+Nothing about the phone's speed or memory has been measured yet. On the laptop a 12.9-hour night took 17 s to
+prepare and 26 s for the model; a phone is likely 3-10 times slower.
+
+1. Record a night as usual (or use the first real one). In the morning press **Stop** and leave the app open on
+   the main screen, phone on the charger or not (write down which).
+2. Note the clock time. The Sleep section says "Scoring the night of ...: Preparing the recording", then "Sleep
+   model, run 1 of 3, part 1 of 8" and so on.
+3. When the time asleep appears, note the clock time again; open **Sleep report**: the line at the bottom says
+   "Scored on this phone in ..." (that is the measured time).
+4. Tell the assistant: hours recorded, the time it took, and whether the phone got warm or the app closed. If it
+   says scoring stopped, tap **Try again** once and report what happens. With USB debugging on, also send
+   `adb shell dumpsys meminfo io.github.utof.eeg_tracker | head -40` taken during "Sleep model, run 2 of 3".
 
 ## If the headband drops out
 
