@@ -99,7 +99,13 @@ change you hear maps to something measured.
   pipeline for 10 minutes of demo signal, calibrated and not: calm above 0.8 in eyes-closed minutes and below
   0.2 in eyes-open minutes, bells only in eyes-closed minutes, never within 8 s of a jaw burst starting.
 - `node tests/web/fake_live_check.mjs`: the page in headless Chromium against the recorder running the fake
-  headband (see the comment at the top of that file for how to run it).
+  headband (see the comment at the top of that file for how to run it). Two 6-minute runs on 2026-11-18:
+  calibrated (calibration said "eyes closed gave 17.0x eyes-open alpha"): mean calm 0.997 in eyes-closed minutes,
+  0.014 in eyes-open minutes, 38 bells, all in eyes-closed minutes; without calibration: 0.856 vs 0.033,
+  36 bells. In both, bells were blocked at every analysis step inside a jaw burst, no bell came within 8 s of a
+  burst starting, roughness reached its maximum during bursts, and the page logged no errors.
+- With a strong steady alpha (the fake) a bell rings about every 3.2 s. That may feel busy on a real head;
+  if so, raise the 3 s hold or add a gap between bells (DECISIONS row 20).
 
 ## Not checked yet
 
