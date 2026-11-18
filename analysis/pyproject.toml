@@ -1,0 +1,27 @@
+# Environment for the PC-side analysis scripts (scripts/to_bdf.py, scripts/score_sleep.py).
+# Run from the repo root:  uv run --project analysis python scripts/score_sleep.py night.bdf
+# Not for the recorder: it must stay numpy-free (scripts/record_night.sh has its own environment).
+[project]
+name = "eeg-tracker-analysis"
+version = "0.1.0"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "numpy>=2.2",
+  "scipy>=1.14",
+  "mne>=1.13",
+  "yasa>=0.8.1",
+  "pyedflib>=0.1.42",
+  "matplotlib>=3.9",
+  "torch>=2.6",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

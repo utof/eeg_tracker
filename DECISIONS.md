@@ -82,3 +82,5 @@ Follow-ups (cloud session, merged 2026-11-18) in `docs/research/`: `anysleep.md`
   starts a fresh recorder after a stall (row 17). Serves a live check page on port 8765 (signal, hum, contact).
 - `scripts/to_bdf.py`: joins one night's files into a BDF+ file with gap annotations and prints a quality summary.
 - `scripts/brainbit_probe.py`: scan, connect, contact, 5 s of signal.
+- `scripts/score_sleep.py`: AnySleep (3 runs averaged, 4 channels, 0.3 Hz high-pass added by us) and YASA (O1-T3) per 30 s epoch;
+  epochs missing over 5 s are not scored; writes JSON and a hypnogram PNG. Environment: `analysis/` (uv, CPU torch).

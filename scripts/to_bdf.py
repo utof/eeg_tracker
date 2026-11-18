@@ -102,10 +102,11 @@ def main() -> None:
     total = len(uv) / FS
     missing = sum(d for _, d, t in notes if t == "BAD_gap")
     epochs = int(total // 30)
-    bad = sum(any(o < (e + 1) * 30 and o + d > e * 30 for o, d, t in notes if t.startswith("BAD")) for e in range(epochs))
+    bad = sum(sum(max(0.0, min(o + d, (e + 1) * 30) - max(o, e * 30)) for o, d, t in notes if t.startswith("BAD")) > 5
+              for e in range(epochs))
     print(f"{dst}: starts {start:%Y-%m-%d %H:%M:%S}, {total / 3600:.2f} h, {len(a.files)} file(s), "
           f"{sum(t == 'BAD_gap' for _, _, t in notes)} gaps, {missing / 60:.1f} min missing, "
-          f"{bad}/{epochs} 30-s epochs touch a gap")
+          f"{bad}/{epochs} 30-s epochs miss over 5 s")
     for c, name in enumerate(NAMES):
         x = uv[:, c]; railed = np.mean(np.abs(x) >= LIM * 0.999)
         print(f"  {name}: at the rail {railed:6.1%}   spread {np.std(x - np.median(x)):10.1f} uV")
