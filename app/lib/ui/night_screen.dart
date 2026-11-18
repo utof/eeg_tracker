@@ -8,6 +8,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import '../dream/store.dart';
 import '../phone.dart';
+import '../morning/store.dart';
 import '../recorder/headband.dart';
 import '../recorder/nights.dart';
 import '../recorder/recorder_service.dart';
@@ -18,6 +19,8 @@ import '../sleep/scorer.dart';
 import 'dream_screen.dart';
 import 'dream_view.dart' show clock;
 import 'meditation_screen.dart';
+import 'morning_screen.dart';
+import 'morning_section.dart';
 import 'nearby.dart';
 import 'night_strip.dart';
 import 'night_view.dart';
@@ -25,6 +28,7 @@ import 'phone_checks.dart';
 import 'sleep_report_screen.dart';
 import 'sleep_scoring.dart';
 import 'theme.dart';
+import 'trends_screen.dart';
 
 const String _xiaomiDoneKey = 'xiaomiChecked';
 
@@ -143,6 +147,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   Completer<void>? _stopped;
   SleepScoring? _scoring;
   String? _dreamLine;
+  String? _checkedInAt;
 
   @override
   void initState() {
@@ -215,7 +220,9 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     final sc = _scoring;
     if (sc == null) return;
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => SleepReportScreen(scoring: sc, nightOf: nightOf)),
+      MaterialPageRoute<void>(
+        builder: (_) => SleepReportScreen(scoring: sc, nightOf: nightOf),
+      ),
     );
   }
 
@@ -232,6 +239,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     final xiaomiDone = await FlutterForegroundTask.getData<bool>(key: _xiaomiDoneKey) ?? false;
     final dir = _dir ?? await _safe<String?>(Phone.recordingsDir, null);
     final nights = dir == null || running ? const <NightFiles>[] : _listNights(dir);
+    final checkedInAt = dir == null ? null : _checkedInToday(dir);
     if (running) FlutterForegroundTask.sendDataToTask(statusCommand);
     if (dir != null && _scoring == null) {
       _scoring = SleepScoring(
@@ -257,6 +265,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       _xiaomiDone = xiaomiDone;
       _dir = dir;
       _dreamLine = dreamLine;
+      _checkedInAt = checkedInAt;
     });
   }
 
@@ -269,6 +278,14 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       if (DateTime.now().difference(s.start) > const Duration(hours: 24)) return null;
       final n = s.answers;
       return 'Last session: ${n == 1 ? '1 answer' : '$n answers'}, ${nightLabel(s.start)} ${clock(s.start)}.';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String? _checkedInToday(String dir) {
+    try {
+      return checkedInTodayAt(MorningStore(morningsDirFor(dir)).list(), DateTime.now());
     } catch (_) {
       return null;
     }
@@ -381,6 +398,16 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     unawaited(_refresh());
   }
 
+  /// The check-in owns the headband while it runs, so it too starts only between nights.
+  Future<void> _checkIn() async {
+    if (_running) return;
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const MorningScreen()));
+    unawaited(_refresh());
+  }
+
+  Future<void> _trends() =>
+      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TrendsScreen(recordingsDir: _dir)));
+
   Future<void> _fix(FixAction a) async {
     switch (a) {
       case FixAction.requestNearby:
@@ -462,6 +489,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onDream: _dream,
       onSleepReport: sleep == null ? null : () => _openSleep(sleep.nightOf),
       onRetrySleep: sleep == null ? null : () => _scoring?.retry(sleep.nightOf),
+      morning: MorningSection(doneAt: _checkedInAt, onCheckIn: _checkIn, onTrends: _trends),
     );
   }
 }

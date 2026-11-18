@@ -100,6 +100,7 @@ class NightView extends StatelessWidget {
     this.onDream,
     this.onSleepReport,
     this.onRetrySleep,
+    this.morning,
   });
 
   final NightViewModel model;
@@ -111,6 +112,9 @@ class NightView extends StatelessWidget {
   final VoidCallback? onDream;
   final VoidCallback? onSleepReport;
   final VoidCallback? onRetrySleep;
+
+  /// The Morning section (check-in and trends; morning_section.dart), shown between nights after Sleep.
+  final Widget? morning;
 
   @override
   Widget build(BuildContext context) {
@@ -133,6 +137,7 @@ class NightView extends StatelessWidget {
             const SectionHeading('Sleep'),
             _Sleep(sleep, onOpen: onSleepReport, onRetry: onRetrySleep),
           ],
+          if (!m.running && morning != null) ...[const SectionHeading('Morning'), morning!],
           // Before the night the phone settings matter most; during it, the headband.
           if (m.running) ...headband,
           const SectionHeading('Phone'),

@@ -9,10 +9,13 @@ import '../alphatheta/rules.dart';
 import 'theme.dart';
 
 class ReactionPanel extends StatefulWidget {
-  const ReactionPanel({super.key, required this.onDone, this.lengthS = 60, this.seed});
+  const ReactionPanel({super.key, required this.onDone, this.lengthS = 60, this.seed, this.onTest});
 
   /// The median reaction (ms), or null with too few taps.
   final ValueChanged<int?> onDone;
+
+  /// The finished test itself (taps, false starts, lapses), for a caller that keeps more than the median.
+  final ValueChanged<ReactionTest>? onTest;
   final int lengthS;
   final int? seed;
 
@@ -80,6 +83,8 @@ class _ReactionPanelState extends State<ReactionPanel> {
       _result = _test?.median;
     });
     widget.onDone(_result);
+    final t = _test;
+    if (t != null) widget.onTest?.call(t);
   }
 
   @override

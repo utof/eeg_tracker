@@ -2,10 +2,11 @@
 
 Records a BrainBit headband all night on an Android phone. The main screen: Start night, Stop, the state,
 minutes recorded, seconds since the last data, a half-hour strip of what was saved, battery, signal,
-contact per channel, and phone settings that could stop the recording. Between nights, **Meditate** opens
-a guided eyes-closed session whose sound follows your alpha rhythm (below); from there, **Alpha-theta** training
-and the **replay check** (both below). Also between nights, the **Dream catcher** asks what is on your mind as you
-drift off and records your answers (below).
+contact per channel, and phone settings that could stop the recording. Between nights, the **Morning** section
+opens the **morning check-in** and the **trends** page (below), and **Meditate** opens a guided eyes-closed
+session whose sound follows your alpha rhythm (below); from there, **Alpha-theta** training and the **replay
+check** (both below). Also between nights, the **Dream catcher** asks what is on your mind as you drift off and
+records your answers (below).
 
 - Files: `<stamp>.f32/.idx/.log` in the app's private folder (other apps cannot read it), the same format as
   `scripts/record_night.py` (`docs/data-format.md`); join a night with `scripts/to_bdf.py`. Only "Export a
@@ -23,6 +24,9 @@ drift off and records your answers (below).
   `lib/ui/alpha_theta_*.dart`; DECISIONS rows 104-107.
 - Dream catcher: `lib/dream/` (rounds, answer end, files, headband link, session), `lib/sound/dream_sound.dart`,
   `lib/ui/dream_*.dart`; DECISIONS rows 110-116.
+- Morning check-in and trends: `lib/morning/` (the laptop's `morning_check.py` in Dart, the session, the files),
+  `lib/trends/` (days, your usual, sleep pressure, the forecast gate), `lib/ui/morning_*.dart`,
+  `lib/ui/trends_*.dart`; DECISIONS rows 120-129.
 
 ## Build and test
 
@@ -35,9 +39,12 @@ flutter build apk --release --target-platform android-arm64
 ```
 
 `flutter test` also renders the night screen in four states, the meditation screen in eleven, the sleep report in
-eight, the replay check's and alpha-theta's pages in nineteen and the dream catcher in thirteen to
-`build/screens/*.png` (normal and 130 % text). `test/dream_test.dart` runs whole dream catcher sessions on a fake
-headband whose alpha fades and comes back, with a fake microphone.
+eight, the replay check's and alpha-theta's pages in nineteen, the dream catcher in thirteen and the
+check-in, trends and Morning section in eighteen to `build/screens/*.png` (normal and 130 % text).
+`test/dream_test.dart` runs whole dream catcher sessions on a fake
+headband whose alpha fades and comes back, with a fake microphone. `test/morning_cross_check_test.dart` checks the
+check-in's numbers against a fixture made by the laptop's Python (`test/fixtures/make_morning_fixture.py`); with
+`MORNING_F32=<check-in .f32> MORNING_JSON=<its .morning.json>` it also runs a whole recorded check-in.
 `test/sleep_prep_test.dart` checks the sleep model's input against a fixture made by the laptop's Python
 (`test/fixtures/make_sleep_fixture.py`). The meditation tests stream a synthetic headband through whole
 sessions; `test/feedback_cross_check_test.dart` checks the Dart core against a session made by the JavaScript
@@ -108,6 +115,50 @@ prepare and 26 s for the model; a phone is likely 3-10 times slower.
 4. Tell the assistant: hours recorded, the time it took, and whether the phone got warm or the app closed. If it
    says scoring stopped, tap **Try again** once and report what happens. With USB debugging on, also send
    `adb shell dumpsys meminfo io.github.utof.eeg_tracker | head -40` taken during "Sleep model, run 2 of 3".
+
+## Morning check-in
+
+About 6 minutes after waking, between nights (the headband talks to one thing at a time). The phone does what the
+laptop's morning page did and works the numbers out itself, the same way (DECISIONS rows 120-129).
+
+1. Stop the night first. Headband on, switched on; sit comfortably, sound on.
+2. On the main screen, **Morning** section: **Morning check-in**, then **Check contact**. Each electrode gets a word
+   (good, fair, noisy, not touching). The back two (O1, O2) matter most: part the hair, press, sit still, **Check
+   contact again** if needed. Then **Start: eyes closed**.
+3. A low tone: eyes closed for 2 minutes (the screen goes dim). A rising pair of tones: look at the dot for 2
+   minutes. A last tone ends the recording. Without signal the countdown waits and says so. **Stop** keeps nothing.
+4. The questions: sleepiness (1-9, the words of each step shown), mood, tension, yesterday's cups of coffee or
+   strong tea (and whether one came in the 8 hours before sleep), drinks of alcohol, caffeine this morning. Then,
+   if you like, the 1-minute reaction test (tap when the green dot appears). **Save**.
+5. This morning's numbers, each beside yesterday's and your usual (from 7 days), with an arrow and words only when
+   a number is beyond your normal spread (from 14 days). **See trends** opens the trends page.
+
+Kept in `files/mornings/` (the result in the laptop's format, and the raw signal with the page's markers;
+`docs/data-format.md`); not exported yet. The **i** button shows `docs/evidence/morning-check-in.md`.
+
+## Trends
+
+**Trends** (Morning section, or after a check-in) shows today's entry: last night's sleep, the morning's numbers,
+practice minutes, coffee and alcohol, each with yesterday's value and your usual; then sleep pressure, an estimate
+from your sleep times ("like 9 hours awake after a regular night", with a 36-hour curve); the last 14 days as
+small lines; the earlier days; and tomorrow's sleepiness forecast, which stays hidden until 60 mornings are rated
+and it beats "same as yesterday" by 5 %. With a few days, the page says what is still missing. The **i** button
+shows `docs/evidence/trends.md`.
+
+### Owner step: the first phone check-ins (about 10 minutes, the next two mornings)
+
+Nothing of this has run on the phone yet; the numbers were checked against the laptop on the recorded check-in of
+2026-11-18 (the same to the last digit).
+
+1. In the morning, Stop the night, wait for the sleep report (or not), then do a **Morning check-in** as above.
+2. Notice: did the tones play and were they soft enough; did the screen stay on and dim with the eyes closed; did
+   the contact words match what you felt (try lifting O1 a moment: it should say "not touching" or "noisy"); did
+   the countdown ever wait for the signal.
+3. After Save: the numbers should be close to the laptop's from your first check-in (alpha speed about 9.6 Hz,
+   eyes-closed rise about 2.6x); a very different alpha speed means contact was poor.
+4. Open **Trends**: last night's sleep, the check-in's numbers and the sleep pressure should be there, with "usual
+   after N more days".
+5. Tell the assistant what felt wrong or slow. If the app closed or stalled, note at which step.
 
 ## Replay check (off unless you switch it on)
 

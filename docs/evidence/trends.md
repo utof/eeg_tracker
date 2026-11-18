@@ -2,9 +2,9 @@
 
 ## What it does
 
-Planned. A page with a few numbers (sleep, morning alertness, drowsiness now, tension), each shown next to your
-usual range and "same as yesterday", plus a sleep-pressure curve built from your sleep log. Forecasts stay hidden
-until they prove useful for you.
+A page in the phone app with a few numbers per day (sleep, morning sleepiness and reaction time, mood, tension,
+the alpha numbers, practice, coffee and alcohol), each shown next to yesterday's and your usual, plus a
+sleep-pressure curve built from your sleep log. Forecasts stay hidden until they prove useful for you.
 
 ## Evidence for this headband: some
 
@@ -37,14 +37,20 @@ an EEG sleep-pressure number and next-day forecasts are weak, and no study shows
 
 ## How the app uses this
 
-- "Your usual": the middle value and range of your last 14 valid days; arrows only after 28 days. No single brain
-  score, no red or green health colours.
-- Sleep pressure comes from your sleep log (time awake, last night) and is labelled as such. An EEG-adjusted
-  number appears only if it beats the log-only one on days it has not seen.
-- Forecasts stay hidden until about 60 days of ratings exist and they beat "same as yesterday" by at least 5%;
-  then they are shown in words, with a range and a track record.
-- Planned: caffeine, alcohol and sleepiness taps in the morning check-in; weeks of recovery after an illness kept
-  out of "your usual".
+- "Your usual": the middle value of your last 28 days with a value, shown from 7 days. A day runs from 04:00 to
+  04:00; a night counts for the day you woke from it. No single brain score, no red or green health colours.
+- Arrows from 14 days, and only when a day is beyond your normal day-to-day spread (twice a robust spread) and
+  beyond the smallest change that matters: 1 hour of sleep, 2 points on a rating, 10 % in reaction time. Each
+  arrow says in words what it means, with your normal range.
+- "Same as yesterday": every number shows yesterday's beside it.
+- Sleep pressure comes from your sleep log (sleep periods of the phone's sleep reports; builds with an 18-hour
+  time scale while awake, drains with a 4-hour one asleep), labelled as an estimate. Your body clock and coffee
+  are not in it, and it stops where a night is missing. An EEG-adjusted number appears only if it beats the
+  log-only one on days it has not seen.
+- One forecast, tomorrow morning's sleepiness (half yesterday, half your 28-day mean), stays hidden until 60 days
+  of ratings exist and it beats "same as yesterday" by at least 5 % over the last 60 days; then it is shown in
+  words, with a range and its track record, and only after that morning's rating.
+- Planned: weeks of recovery after an illness kept out of "your usual".
 
 ## Sources
 
@@ -68,6 +74,7 @@ an EEG sleep-pressure number and next-day forecasts are weak, and no study shows
   (BSD-3): the main forecast model (a slowly drifting personal level plus a weekday effect).
 - [Chronos-2](https://github.com/amazon-science/chronos-forecasting) (Apache-2.0): a pretrained forecaster, only as
   an extra competitor.
-- The sleep-pressure model is this project's own code (MIT).
+- The sleep-pressure model and the forecast are this project's own code (MIT); the statsmodels and Chronos lines
+  above are for later laptop comparisons, not in the app.
 
 Checked: 2026-11-18

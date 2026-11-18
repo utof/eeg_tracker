@@ -96,9 +96,13 @@ class SliderQuestion extends StatelessWidget {
     required this.ends,
     this.step = 1,
     this.unit = '',
+    this.caption,
   });
 
   final String question;
+
+  /// Words for the chosen value, shown under the slider (the sleepiness scale's labels).
+  final String Function(int value)? caption;
 
   /// Null until moved: the thumb rests in the middle, the readout says "not set".
   final int? value;
@@ -139,6 +143,14 @@ class SliderQuestion extends StatelessWidget {
             thumbColor: v == null ? Night.inkMuted : Night.ink,
             onChanged: (d) => onChanged(d.round()),
           ),
+          if (caption != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                v == null ? 'Move the slider to answer.' : caption!(v),
+                style: (v == null ? muted : text.bodyLarge)?.copyWith(height: 1.3),
+              ),
+            ),
           Row(
             children: [
               Expanded(child: Text(ends.$1, style: muted)),

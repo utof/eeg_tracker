@@ -36,17 +36,20 @@ electrodes match lab electrodes; what a day-to-day change means for your day is 
 ## How the app uses this
 
 - Contact check, then 2 min eyes closed, then 2 min eyes open on a dot, with soft tones at each change; then the
-  ratings. Each change is marked in the recording.
+  ratings. Each change is marked in the recording. The phone app runs the same routine itself, between nights
+  (the main screen's Morning section), and gives the same numbers as the laptop on the same signal.
 - Only clean data counts: the signal is cut into 2-second pieces, and a piece is dropped if it swings over 150 µV,
   is flat, or is far noisier than the rest of the phase. The first 3 s and last 1 s of each phase are skipped,
   and each channel needs 20 s of clean data per phase.
 - Alpha speed is the centre of the power that rises above the smooth background curve in 7-14 Hz, eyes closed;
   it stays empty when there is no clear peak.
-- Each morning is compared with the middle value and range of your last 14 check-ins: "within / above / below your
-  range". A note says so until 5 exist. Never a score, never a norm from other people.
-- Planned: quick taps for caffeine, alcohol and medication, and a fresh baseline when medication or hardware
-  changes.
-- The same page has a 2-minute setup test (blinks, glances, jaw clenches); see "What the electrodes see".
+- The laptop compares each morning with the middle value and range of your last 14 check-ins: "within / above /
+  below your range". A note says so until 5 exist. Never a score, never a norm from other people.
+- On the phone the ratings are followed by quick taps: cups of coffee or strong tea the day before (and whether one
+  came in the 8 hours before sleep), drinks of alcohol, caffeine before the check-in; then an optional 1-minute
+  reaction test (the median of your taps). The numbers go to the trends page, compared with your own usual.
+- Planned: a medication tap, and a fresh baseline when medication or hardware changes.
+- The laptop page also has a 2-minute setup test (blinks, glances, jaw clenches); see "What the electrodes see".
 
 ## Sources
 
