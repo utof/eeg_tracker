@@ -1,12 +1,15 @@
 // The sleep report's layout, from a report and plain values, so it renders in tests without a phone: the asleep
-// total and missing time, the honest note, the chart, the sleep periods as numbered log entries, and the past
-// nights. Design: DESIGN.md and .impeccable/surfaces/app-lib-ui-sleep-report-screen-dart.md.
+// total and missing time, the honest note (with how much of the sleep was read through noise), the chart with its
+// Signal lane, the sleep periods as numbered log entries, jaw and movement with the night hour by hour
+// (sleep_extras_view.dart), and the past nights. Design: DESIGN.md and .impeccable/surfaces/app-lib-ui-sleep-report-screen-dart.md.
 import 'package:flutter/material.dart';
 
+import '../detectors/detectors.dart' show EpochQuality;
 import '../recorder/nights.dart' show nightLabel;
 import '../sleep/report.dart';
 import 'parts.dart';
 import 'sleep_chart.dart';
+import 'sleep_extras_view.dart';
 import 'theme.dart';
 
 /// `6 h 27 min` as readout parts (numbers big, units small).
@@ -33,6 +36,7 @@ class SleepReportView extends StatelessWidget {
     this.scoringStep,
     this.blocked,
     this.onInfo,
+    this.onExtrasInfo,
     this.onOpenNight,
     this.onRetry,
     this.onLicences,
@@ -52,6 +56,9 @@ class SleepReportView extends StatelessWidget {
   /// Why the last scoring of this night stopped ('' when the app stopped while scoring), or null.
   final String? blocked;
   final VoidCallback? onInfo;
+
+  /// The "i" of the jaw and movement section.
+  final VoidCallback? onExtrasInfo;
   final void Function(SleepReport night)? onOpenNight;
   final VoidCallback? onRetry;
   final VoidCallback? onLicences;
@@ -100,6 +107,9 @@ class SleepReportView extends StatelessWidget {
     int epochOf(DateTime t) => (t.difference(r.dataStart).inSeconds / 30).round();
     final bands = [for (final p in periods) (epochOf(p.start), epochOf(p.end) - 1)];
     final missing = r.missingMin;
+    final x = r.extras;
+    final quality = x?.quality;
+    final noisyMin = x?.night.degradedMin ?? 0, unusableMin = x?.night.missingMin ?? 0;
     return [
       IntrinsicHeight(
         child: Row(
@@ -119,7 +129,8 @@ class SleepReportView extends StatelessWidget {
       ),
       const SizedBox(height: 16),
       Text(
-        'A first guess: the sleep model is not yet validated on this headband.',
+        'A first guess: the sleep model is not yet validated on this headband.'
+        '${x == null ? '' : ' ${noiseSentence(x)}'}',
         style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
       ),
       const SizedBox(height: 28),
@@ -127,12 +138,19 @@ class SleepReportView extends StatelessWidget {
         start: r.dataStart,
         stages: stages,
         periods: bands,
+        quality: quality,
         label: 'Sleep chart, ${clock(r.dataStart)} to ${clock(r.dataEnd)}: '
             '${periods.length == 1 ? '1 sleep period' : '${periods.length} sleep periods'}, '
-            '${durationText(missing)} not recorded.',
+            '${durationText(missing)} not recorded'
+            '${x == null ? '' : '; signal noisy for ${durationText(noisyMin)}, no usable electrode for '
+                '${durationText(unusableMin)}'}.',
       ),
       const SizedBox(height: 12),
-      _Legend(showGap: stages.contains('gap')),
+      _Legend(
+        showGap: stages.contains('gap'),
+        showNoisy: quality?.contains(EpochQuality.degraded) ?? false,
+        showUnusable: quality?.contains(EpochQuality.missing) ?? false,
+      ),
       const SectionHeading('Sleep periods'),
       if (periods.isEmpty)
         Text(
@@ -150,6 +168,7 @@ class SleepReportView extends StatelessWidget {
           style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
         ),
       ],
+      if (x != null) ExtrasSection(extras: x, earlier: earlierJaw(r.nightOf, others), onInfo: onExtrasInfo),
     ];
   }
 }
@@ -191,8 +210,10 @@ class _Blocked extends StatelessWidget {
 }
 
 class _Legend extends StatelessWidget {
-  const _Legend({required this.showGap});
+  const _Legend({required this.showGap, this.showNoisy = false, this.showUnusable = false});
   final bool showGap;
+  final bool showNoisy;
+  final bool showUnusable;
 
   @override
   Widget build(BuildContext context) {
@@ -222,6 +243,8 @@ class _Legend extends StatelessWidget {
               Text('no data', style: style),
             ],
           ),
+        if (showNoisy) const SignalSwatch(EpochQuality.degraded),
+        if (showUnusable) const SignalSwatch(EpochQuality.missing),
       ],
     );
   }
@@ -329,9 +352,11 @@ class _NightRow extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final r = report;
     final n = r.periods.length;
+    final jaw = r.extras?.asleep.jawPerHour;
     final detail = !r.scored
         ? 'too short to score'
-        : '${durationText(r.asleepMin)} asleep · ${n == 1 ? '1 period' : '$n periods'}';
+        : '${durationText(r.asleepMin)} asleep · ${n == 1 ? '1 period' : '$n periods'}'
+              '${jaw == null ? '' : ' · jaw ${rateText(jaw)}'}';
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(6),

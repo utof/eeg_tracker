@@ -5,6 +5,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:eeg_tracker/detectors/detectors.dart';
+import 'package:eeg_tracker/sleep/extras.dart';
 import 'package:eeg_tracker/sleep/model.dart';
 import 'package:eeg_tracker/sleep/report.dart';
 import 'package:eeg_tracker/ui/night_view.dart';
@@ -27,7 +29,29 @@ List<String> _stages() => [
   ..._run('R', 26), ..._run('W', 70), ..._run('N1', 5), ..._run('N2', 25), ..._run('R', 14), ..._run('W', 9),
 ];
 
-SleepReport _report(String nightOf, DateTime start, List<String> stages) => SleepReport(
+/// Made-up detector output for [stages]: missing where the data is, a loose electrode for a few minutes while
+/// awake, noisy stretches here and there; jaw bursts more often awake, movements on turning.
+NightSeen _seen(List<String> stages, {int jawEveryS = 200}) {
+  final q = [
+    for (var e = 0; e < stages.length; e++)
+      stages[e] == 'gap' || (stages[e] == 'W' && e % 140 < 6)
+          ? EpochQuality.missing
+          : (e % 97 < 9 || (stages[e] == 'W' && e % 11 < 4))
+          ? EpochQuality.degraded
+          : EpochQuality.good,
+  ];
+  final n = stages.length * 30;
+  return NightSeen(
+    quality: q,
+    bursts: [
+      for (var k = 40; k < n; k += stages[k ~/ 30] == 'W' ? 90 : jawEveryS) Burst(k, k + 2, BurstKind.jaw, 6),
+      for (var k = 75; k < n; k += 410) Burst(k, k + 1, BurstKind.oneSided, 5),
+    ]..sort((a, b) => a.start.compareTo(b.start)),
+    moves: [for (var k = 130; k < n; k += stages[k ~/ 30] == 'W' ? 150 : 520) (k, k + 1)],
+  );
+}
+
+SleepReport _report(String nightOf, DateTime start, List<String> stages, {int jawEveryS = 200}) => SleepReport(
   jsonDecode(
         jsonEncode(
           buildReport(
@@ -40,6 +64,7 @@ SleepReport _report(String nightOf, DateTime start, List<String> stages) => Slee
             model: phoneModelId,
             stages: stages,
             confidence: List.filled(stages.length, 0.74),
+            seen: _seen(stages, jawEveryS: jawEveryS),
           ),
         ),
       )
@@ -49,8 +74,10 @@ SleepReport _report(String nightOf, DateTime start, List<String> stages) => Slee
 final _start = DateTime(2026, 11, 17, 23, 40);
 final _main = _report('2026-11-17', _start, _stages());
 final _others = [
-  _report('2026-11-16', DateTime(2026, 11, 16, 23, 55), [..._run('W', 20), ..._run('N2', 200), ..._run('R', 60), ..._run('W', 10)]),
-  _report('2026-11-15', DateTime(2026, 11, 16, 0, 30), [..._run('W', 30), ..._run('N2', 150), ..._run('N3', 40), ..._run('W', 15)]),
+  _report('2026-11-16', DateTime(2026, 11, 16, 23, 55), [..._run('W', 20), ..._run('N2', 200), ..._run('R', 60), ..._run('W', 10)],
+      jawEveryS: 260),
+  _report('2026-11-15', DateTime(2026, 11, 16, 0, 30), [..._run('W', 30), ..._run('N2', 150), ..._run('N3', 40), ..._run('W', 15)],
+      jawEveryS: 150),
   SleepReport(
     jsonDecode(
           jsonEncode(
@@ -119,6 +146,11 @@ void main() {
   test('the made-up night has the periods the screens show', () {
     expect(_main.periods.length, 2);
     expect(_main.missingMin, 25);
+    final x = _main.extras!;
+    expect(x.hours.length, greaterThan(8));
+    expect(x.asleep.jawPerHour, greaterThan(10));
+    expect(x.asleep.degradedMin, greaterThan(0));
+    expect(x.night.missingMin, greaterThan(25));
   });
 
   for (final scale in [1.0, 1.3]) {
@@ -153,35 +185,61 @@ void main() {
     }
   }
 
-  testWidgets('the whole report on one tall page, for a look', (tester) async {
-    tester.view.physicalSize = const Size(1210, 6600); // 440 x 2400 dp
-    tester.view.devicePixelRatio = 2.75;
-    addTearDown(tester.view.reset);
-    final key = GlobalKey();
-    await tester.pumpWidget(
-      MaterialApp(theme: nightTheme(), home: RepaintBoundary(key: key, child: _reportStates['report'])),
-    );
-    expect(tester.takeException(), isNull);
-    final boundary = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-    await tester.runAsync(() async {
-      final image = await boundary.toImage(pixelRatio: 2.0);
-      final png = await image.toByteData(format: ui.ImageByteFormat.png);
-      File('build/screens/sleep_report_full.png')
-        ..createSync(recursive: true)
-        ..writeAsBytesSync(png!.buffer.asUint8List());
+  for (final scale in [1.0, 1.3]) {
+    testWidgets('the whole report on one tall page at ${(scale * 100).round()} % text, for a look', (tester) async {
+      tester.view.physicalSize = Size(1210, scale == 1.0 ? 6600 : 8800); // 440 dp wide
+      tester.view.devicePixelRatio = 2.75;
+      addTearDown(tester.view.reset);
+      final key = GlobalKey();
+      await tester.pumpWidget(
+        MediaQuery(
+          data: MediaQueryData.fromView(tester.view).copyWith(textScaler: TextScaler.linear(scale)),
+          child: MaterialApp(theme: nightTheme(), home: RepaintBoundary(key: key, child: _reportStates['report'])),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+      final boundary = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      await tester.runAsync(() async {
+        final image = await boundary.toImage(pixelRatio: 2.0);
+        final png = await image.toByteData(format: ui.ImageByteFormat.png);
+        File('build/screens/sleep_report_full${scale == 1.0 ? '' : '_text130'}.png')
+          ..createSync(recursive: true)
+          ..writeAsBytesSync(png!.buffer.asUint8List());
+      });
     });
-  });
+  }
 
   testWidgets('the whole report scrolls into view without overflow', (tester) async {
     tester.view.physicalSize = const Size(1210, 2695);
     tester.view.devicePixelRatio = 2.75;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: _reportStates['report']));
-    await tester.scrollUntilVisible(find.text('Licences'), 400);
-    expect(find.text('Sleep periods'), findsOneWidget);
-    expect(find.text('Past nights'), findsOneWidget);
+    expect(find.textContaining('through noise (movement, muscle or a loose electrode)'), findsOneWidget);
+    // top to bottom, in order (the list builds only what is near the screen)
+    for (final heading in ['Sleep periods', 'Jaw and movement', 'Hour by hour', 'Past nights', 'Licences']) {
+      await tester.scrollUntilVisible(find.text(heading), 300);
+      expect(find.text(heading), findsOneWidget);
+      if (heading == 'Jaw and movement') expect(find.text('Jaw muscle bursts'), findsOneWidget);
+      if (heading == 'Hour by hour') {
+        await tester.scrollUntilVisible(find.textContaining('Jaw on earlier nights: '), -300);
+        await tester.scrollUntilVisible(find.text('Hour by hour'), 300);
+      }
+    }
     expect(find.text('Tue 17 Nov'), findsNothing); // the open night is not in its own list
     expect(find.textContaining('too short to score'), findsOneWidget);
+    expect(find.textContaining(' · jaw '), findsNWidgets(2)); // the past nights with extras
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('an older report without extras shows no extras', (tester) async {
+    final json = Map<String, dynamic>.of(_main.json)..remove('extras');
+    await tester.pumpWidget(MaterialApp(
+      theme: nightTheme(),
+      home: SleepReportView(nightOf: '2026-11-17', report: SleepReport(json)),
+    ));
+    await tester.scrollUntilVisible(find.text('Sleep periods'), 400);
+    expect(find.text('Jaw and movement'), findsNothing);
+    expect(find.textContaining('through noise'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }
