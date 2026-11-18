@@ -359,8 +359,10 @@ def analyse(path: Path, sess: list[dict], fs: float = FS) -> dict:
         c = NAMES.index(name)
         channels[name] = channel_measures(cut["eyes_closed"][:, c], cut["eyes_open"][:, c] if "eyes_open" in cut else None, fs)
     start = datetime.fromtimestamp(w["t"]).astimezone()
+    end = datetime.fromtimestamp(max(t1 for _i0, _i1, _t0, t1 in w["win"].values())).astimezone()
     return dict(
-        version=VERSION, source=path.name, start=start.isoformat(timespec="seconds"), date=start.date().isoformat(),
+        version=VERSION, source=path.name, start=start.isoformat(timespec="seconds"),
+        end=end.isoformat(timespec="seconds"), date=start.date().isoformat(),
         phase_s={ph: round((i1 - i0) / fs, 1) for ph, (i0, i1, _a, _b) in w["win"].items()},
         channels=channels, back=back_summary(channels), ratings=w["ratings"], setup_test=None,
         method=dict(segment_s=SEG_S, reject_p2p_uv=P2P_UV, reject_rel_spread=REL_SPREAD, alpha_band_hz=list(ALPHA),
