@@ -28,9 +28,16 @@ async function keepAwake() { try { wake = await navigator.wakeLock.request('scre
 
 // ---- contact
 async function checkContact() {
-  $('begin').disabled = true; $('cstat').textContent = 'Checking contact (about 7 seconds)…';
-  try { await fetch('contact', { method: 'POST' }); } catch (e) { $('cstat').textContent = 'No answer from the laptop.'; return; }
-  await sleep(8500);
+  // The recorder measures contact by restarting itself (DECISIONS 17): its page server is away for ~20-40 s.
+  $('begin').disabled = true; $('cstat').textContent = 'Checking contact: the recorder restarts, about 30 seconds…';
+  let before = null;  // minutes recorded by the current recorder: the fresh one starts again near 0
+  try { before = (await (await fetch('state', { cache: 'no-store' })).json()).minutes; } catch (e) { /* restarting */ }
+  try { await fetch('contact', { method: 'POST' }); } catch (e) { /* it may already be restarting */ }
+  await sleep(6000);
+  for (let i = 0; i < 40; i++) {  // wait until the fresh recorder answers with new data (up to ~80 s)
+    try { const s = await (await fetch('state', { cache: 'no-store' })).json(); if (s.age < 3 && s.minutes > 0 && (before === null || s.minutes < before)) break; } catch (e) { /* still restarting */ }
+    await sleep(2000);
+  }
   $('cstat').textContent = 'Contact and signal now (updates every second):'; $('begin').disabled = false;
 }
 async function pollState() {
@@ -43,7 +50,7 @@ async function pollState() {
         <div class="muted">${ohm === null ? 'no contact' : Math.round(ohm / 1000) + ' kΩ'} · ${g.spread.toFixed(0)} µV</div>
         <span class="badge ${g.grade}">${g.word}</span></div>`;
     }).join('');
-  } catch (e) { $('cstat').textContent = 'No answer from the laptop.'; }
+  } catch (e) { $('cstat').textContent = 'Waiting for the laptop (the recorder may be reconnecting)…'; }
 }
 
 // ---- eyes closed / eyes open
