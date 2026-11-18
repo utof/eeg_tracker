@@ -9,7 +9,7 @@ const root = new URL('../../', import.meta.url);
 const read = (p) => readFileSync(new URL(p, root), 'utf8');
 const GRADES = ['strong', 'some', 'weak', 'none'];
 const PAGES = ['scripts/live_page.html', 'scripts/web/eyes.html', 'scripts/web/beats.html', 'scripts/web/sound.html',
-  'scripts/web/morning.html'];
+  'scripts/web/morning.html', 'scripts/web/sleep.html'];
 const REQUIRED = ['sleep-recording', 'sleep-scoring', 'morning-check-in', 'eyes-test', 'brain-sound', 'sound-for-states',
   'break-hints', 'meditation-feedback', 'alpha-theta', 'replay-check', 'dream-catcher', 'trends', 'jaw-and-blinks',
   'noise-cleaning', 'helmet'];

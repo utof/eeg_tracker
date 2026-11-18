@@ -22,8 +22,18 @@ uv run --project analysis python scripts/score_sleep.py night.bdf   # night.slee
 python3 scripts/export_events.py night.sleep.json    # eeg_sleep_night event for utof_tracker
 ```
 
+**Sleep page (automatic report).** After waking, open `http://localhost:8765/sleep.html` (the "Sleep" button on the
+check page) while the recorder runs. If there are newer recordings than the last report, it scores them by itself
+(about 3 minutes; `scripts/sleep_report.py`, started by the recorder under `systemd-run` with a 3500 MB memory cap)
+and then shows total sleep, each sleep period (asleep, deep / dream / light, wake-ups over 5 minutes, missing
+minutes) and the chart. A night is the recordings chained together, named by the evening's date; a late-morning
+sleep after the night lands in the same report. By hand: `uv run --project analysis python scripts/sleep_report.py`
+(writes `_local/nights/<date>.report.json` with the night's `.bdf`, `.sleep.json` and chart, and exports the event).
+
 Morning check-in (about 5 minutes): while the recorder runs, open `http://localhost:8765/morning.html`
-(`?short=1` for 60 s phases), then:
+(`?short=1` for 60 s phases). After Save, the page works the result out by itself (about 30 s: the recorder runs
+`morning_check.py` and `export_events.py`, memory-capped like the sleep report) and shows the numbers next to your
+earlier mornings; the Sleep page shows the newest one too. By hand:
 
 ```bash
 uv run --project analysis python scripts/morning_check.py _local/recordings   # <start>.morning.json + summary
@@ -67,4 +77,5 @@ MIT licence.
 The recorder restarts itself after every Bluetooth drop and for every contact re-check, and its pages go away for
 20-40 s each time. `python3 scripts/page_server.py` (port 8770) never restarts: it serves the pages itself and
 passes live data through from the recorder, answering "reconnecting" while the recorder is away. Use
-`http://<laptop>:8770/` instead of port 8765.
+`http://<laptop>:8770/` instead of port 8765. It answers the Sleep page and the morning result itself, so they
+work while the headband is off or charging (the recorder has no page server then).

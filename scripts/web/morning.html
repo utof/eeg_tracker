@@ -21,6 +21,7 @@ button.main{background:#2a5d43;border-color:#3d7a5a}button:disabled{opacity:.5;c
 .scale button b{min-width:1.2em}.scale button.on{background:#2a5d43;border-color:#7fd1a0}
 .hidden{display:none}
 #cue{font-size:34px;text-align:center;margin:48px 0 12px;min-height:1.4em}
+h2{font-size:19px;font-weight:600;margin:20px 0 6px}
 </style>
 <main>
 <a href="/" style="display:inline-block;margin:0 0 10px;color:#8ab4f8;text-decoration:none;font-size:14px">← Headband check</a>
@@ -64,8 +65,9 @@ button.main{background:#2a5d43;border-color:#3d7a5a}button:disabled{opacity:.5;c
 
   <section id="done" class="hidden">
     <h1 id="dtitle">Saved</h1>
-    <p id="dsay">Thank you. To see how this morning compares with your earlier ones, run on the laptop:</p>
-    <pre class="muted" style="white-space:pre-wrap">uv run --project analysis python scripts/morning_check.py _local/recordings</pre>
+    <p id="dsay">Thank you.</p>
+    <pre id="dcmd" class="muted hidden" style="white-space:pre-wrap">uv run --project analysis python scripts/morning_check.py _local/recordings</pre>
+    <div id="result"></div>
     <div class="row"><button onclick="location.reload()">Back to start</button></div>
   </section>
   <p id="err" class="muted"></p>
