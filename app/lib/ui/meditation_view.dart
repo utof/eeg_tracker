@@ -410,6 +410,8 @@ class MeditationView extends StatelessWidget {
   List<Widget> _body(BuildContext context) {
     final m = model;
     switch (m.stage) {
+      case Stage.failed when m.kind == SessionKind.alphaTheta:
+        return const []; // alpha-theta's own setup page holds the length and the notes
       case Stage.setup:
       case Stage.failed:
         return [

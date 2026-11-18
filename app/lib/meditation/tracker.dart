@@ -372,19 +372,30 @@ class MeditationSummary {
       earlier: use.length,
     );
   }
-  final shares = [for (final s in use) s.settledShare]..sort();
-  final low = shares.first, high = shares.last, pct = (now.settledShare * 100).round();
-  final where = now.settledShare > high
+  // alpha-theta compares the share of awake, clean time with theta above its line; meditation the settled share
+  final at = now.kind == SessionKind.alphaTheta;
+  double share(MeditationSummary s) => at ? thetaShare(s) : s.settledShare;
+  final shares = [for (final s in use) share(s)]..sort();
+  final mine = share(now);
+  final low = shares.first, high = shares.last, pct = (mine * 100).round();
+  final where = mine > high
       ? 'above'
-      : now.settledShare < low
+      : mine < low
       ? 'below'
       : 'within';
   final range = '${(low * 100).round()}-${(high * 100).round()} %';
   final trend = count < 8 ? ' A trend needs about 8 sessions.' : '';
+  final what = at ? 'Theta above its line $pct % of the awake time' : 'Settled $pct % of the time';
   return (
-    line: 'Settled $pct % of the time: $where the range of your last ${use.length} sessions ($range).$trend',
+    line: '$what: $where the range of your last ${use.length} sessions ($range).$trend',
     low: low,
     high: high,
     earlier: use.length,
   );
+}
+
+/// Alpha-theta: the share of awake, clean time with theta above its line (0 when unknown).
+double thetaShare(MeditationSummary s) {
+  final t = s.at?['thetaS'], c = s.at?['countedS'];
+  return t is num && c is num && c > 0 ? t / c : 0;
 }

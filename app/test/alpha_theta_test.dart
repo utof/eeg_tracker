@@ -12,6 +12,7 @@ import 'package:eeg_tracker/alphatheta/rules.dart';
 import 'package:eeg_tracker/feedback/demo.dart';
 import 'package:eeg_tracker/meditation/controller.dart';
 import 'package:eeg_tracker/meditation/store.dart';
+import 'package:eeg_tracker/meditation/tracker.dart';
 import 'package:eeg_tracker/sound/feedback_sound.dart';
 import 'package:eeg_tracker/sound/session_sound.dart';
 import 'package:eeg_tracker/training/control.dart';
@@ -328,5 +329,30 @@ void main() {
     expect(c.tally!.asleepS, greaterThan(30));
     expect(c.session!.log.info.any((i) => i['event'] == 'asleep: bed faded'), isTrue);
     c.dispose();
+  });
+
+  test('comparison: alpha-theta compares theta time above its line, not settled time', () {
+    MeditationSummary at(DateTime d, double thetaS) => MeditationSummary(
+      kind: SessionKind.alphaTheta,
+      start: d,
+      lengthMin: 15,
+      runS: 900,
+      complete: true,
+      settledS: 800,
+      longestSettledS: 60,
+      bells: 40,
+      restless: {for (final r in Restless.values) r: 0},
+      drifting: 0,
+      drowsyS: 0,
+      calm: const [0.5],
+      iafHz: 10,
+      note: '',
+      logFile: '',
+      at: {'thetaS': thetaS, 'countedS': 600.0},
+    );
+    final earlier = [for (var d = 1; d <= 4; d++) at(DateTime(2026, 11, d), 120.0 + 30 * d)];
+    final line = compareWithEarlier(at(DateTime(2026, 11, 9), 300), earlier).line;
+    expect(line, startsWith('Theta above its line 50 % of the awake time: above the range of your last 4 sessions (25-40 %)'));
+    expect(line, isNot(contains('Settled')));
   });
 }
