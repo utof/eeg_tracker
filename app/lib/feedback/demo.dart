@@ -20,17 +20,21 @@ double wander(double t) =>
 
 int _imul(int a, int b) => (a * b) & 0xFFFFFFFF;
 
-/// mulberry32 uniforms in [0, 1), then Box-Muller normals.
-double Function() gaussian(int seed) {
+/// mulberry32: uniforms in [0, 1), the same sequence as the JS generator for a seed (exact integer maths).
+double Function() uniform(int seed) {
   var a = seed & 0xFFFFFFFF;
-  double u() {
+  return () {
     a = (a + 0x6d2b79f5) & 0xFFFFFFFF;
     var t = a;
     t = _imul(t ^ (t >> 15), t | 1);
     t ^= (t + _imul(t ^ (t >> 7), t | 61)) & 0xFFFFFFFF;
     return ((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296;
-  }
+  };
+}
 
+/// mulberry32 uniforms, then Box-Muller normals.
+double Function() gaussian(int seed) {
+  final u = uniform(seed);
   return () {
     final u1 = u();
     final r = math.sqrt(-2 * math.log(u1 == 0 ? 1e-12 : u1));
