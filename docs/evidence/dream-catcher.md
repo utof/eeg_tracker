@@ -2,9 +2,9 @@
 
 ## What it does
 
-Planned. As you drift off, the app notices the half-dream moment (the alpha wave at the back of the head fading),
-quietly asks "what's going through your mind?", records your spoken answer, and lets you drift again: 3-4 rounds.
-For creative ideas.
+Built in the phone app (2026-11-18), not yet tried on a head. As you drift off, the app notices the half-dream
+moment (the alpha wave at the back of the head fading), quietly asks "what's going through your mind?", records
+your spoken answer, and lets you drift again: 3-4 rounds. For creative ideas.
 
 ## Evidence for this headband: some
 
@@ -34,18 +34,27 @@ well.
 
 ## How the app uses this
 
-- It uses the shared drift-off detector (docs/detectors.md): a "lights off" button starts a 60-second
-  eyes-closed baseline; the prompt comes once alpha has stayed under half its starting level for a minute (30-60
-  s after it flattened), with no movement and no blinks.
-- A timer is always the fallback: a random moment inside your usual time to fall asleep.
-- One round: the theme cue and the question; recording until 3 s of silence or 30 s; a one-tap "were you
-  drifting?"; then "you can drift off again". The next round waits for alpha to come back and fade again, at
-  least 2 minutes later.
-- 3-4 rounds, a 45-minute cap, prompts in your own recorded voice from the speaker at low volume, and a gentle
-  wake sound at the end.
+- Its own screen, opened from the main screen between nights; it holds the headband while it runs. The screen stays
+  on but black and as dim as the phone allows; keep the app open.
+- Once: you record two short prompts in your own voice. The theme ("Think of a tree... and drift off") plays at
+  lights off and after each answer, as you drift off (Dormio's incubation); the question plays at each round. Not
+  recorded: a low tone and two rising notes instead.
+- "Lights off" starts the shared drift-off detector (docs/detectors.md): the first 60 eyes-closed seconds are your
+  starting level. The first question comes when alpha has stayed under half that level for a minute (30-60 s after
+  it flattened), with no movement and no blinks.
+- A timer is always the fallback: a random moment inside your usual time to fall asleep (10-20 minutes until the
+  app has 3 of your own first rounds).
+- One round: the question; your answer recorded until 3 s of silence (or 10 s without a voice, or 30 s); a one-tap
+  "were you drifting?" (two big halves of the screen); then the theme again: "you can drift off again". The next
+  round waits for alpha to come back and fade again, at least 2 minutes later, or 4-7 minutes at most.
+- 3 or 4 rounds and a 45-minute cap. At the end, your choice: a gentle rising wake tone, or no tone and the night
+  recording starts by itself.
+- The session's EEG is saved as part of that night, with every question as a marker, so the morning sleep report
+  covers the drift-off and the detector can be checked against the sleep model.
+- Afterwards the screen lists the rounds: play each answer and type a note.
 - The detector ships only when its sleep onset falls within 5 minutes of the sleep model's on 4 of 5 recorded
-  nights (2 so far, both within half a minute).
-- Optional: a home "insight test" that rotates prompted rest, unprompted rest and awake rest on different days.
+  nights (2 so far, both within half a minute); until then the timers make every round happen anyway.
+- Optional later: a home "insight test" that rotates prompted rest, unprompted rest and awake rest on different days.
 
 ## Sources
 
@@ -61,6 +70,7 @@ well.
 
 - This project's own drift-off detector (MIT), grown from the brain sound's sleep guard; no machine-learning
   model.
-- The offline speech-to-text tool for the answers is not chosen yet.
+- The microphone: `record` 7.2.0 (BSD-3-Clause); answers are kept as sound files on the phone.
+- Speech-to-text for the answers is not built; an offline tool is a later idea.
 
 Checked: 2026-11-18

@@ -77,7 +77,7 @@ Update the status column whenever something lands.
 | 25 | Shared detectors ("what the electrodes see") and the drift-off detector | **built 2026-11-18**: Python reference checked on the night, the morning sleep and the check-in; Dart port in the app (same events on recorded excerpts), wired into meditation's "drifting". Sleep onset within 0.5 min of AnySleep on both recorded onsets (2 of the 5 nights it needs); blinks 3.1 a minute eyes open vs 0.5 closed; 86 % of loud muscle seconds flagged. Waits for the setup test (blink depth, glances, clenches) and 3 more lights-off nights | branch `feat/app-detectors`, [docs/detectors.md](docs/detectors.md), DECISIONS 85-89 |
 | 22 | Alpha-theta training (eyes closed, back of the head; 10 sessions, the first 3 only 15 min, then decide; side-effect checklist every session; alertness check before driving; stop button; "practice, not treatment"; a note that strong memories can come up) | **built in the phone app** (2026-11-18; not yet heard or run on the phone): screening, consent and stop plan, check-in and after-session checklist with pause rules, the length rule and the decision after 10, stream-to-ocean sound with chime and gong, the drift-off detector as sleep guard (fade, rising wake tone), grounding, a 1-minute reaction test before you leave; tested with a fake headband | branch `feat/app-replay-alphatheta`, `app/lib/alphatheta`, DECISIONS 104-107 |
 | 23 | Replayed-feedback check: some sessions secretly replay an earlier session's feedback; after enough sessions, live vs replayed is compared (feeling, the trained signal, ratings) | **built in the phone app** (2026-11-18; not yet run on the phone): toggle off by default with the reminder before every session, 4 live donor sessions per kind, then shuffled blocks of 4 drawn from a phone-made secret with the plan and the order's SHA-256 frozen first, own-replay of the sound with live gates, no live bell count, guess / control / randomness after each session, results per 12 with a permutation test; tested end to end with a fake headband | branch `feat/app-replay-alphatheta`, `app/lib/training`, DECISIONS 100-103 |
-| 20 | Dream catcher (owner: "definitely build"): at sleep onset, ask what you're thinking, record the answer, let you drift again, 3-4 rounds | planned; its trigger exists: the drift-off detector's "drowsy" (1 min of faded alpha) with the random-time timer as fallback (row 25) | see Ideas |
+| 20 | Dream catcher (owner: "definitely build"): at sleep onset, ask what you're thinking, record the answer, let you drift again, 3-4 rounds | **built in the phone app** (2026-11-18; not yet run on a phone or a head): your own recorded theme and question (tones if none), Lights off with the 60 s baseline, round 1 at the detector's "drowsy" or a random moment in the usual time to fall asleep, later rounds when alpha came back and faded again (2 min apart at least, 4-7 min at most), answers recorded until 3 s of quiet, a two-halves "were you drifting?" tap, 3 or 4 rounds, 45 min cap, wake tone or the night starts by itself; its EEG is part of that night with markers; answers list with playback and notes; tested with a fake headband and microphone. Next: the owner's first nap (`app/README.md`, "Dream catcher") | branch `feat/app-dream-catcher`, `app/lib/dream`, DECISIONS 110-116 |
 
 ## What comes next, in order (updated 2026-11-18 after research round 2)
 
@@ -109,7 +109,10 @@ findings are on `_local/research/2026-11-18-findings.html`.
    public (Neiry's MIT `web_sdk_neiry`); a 15-minute probe with the headband on, then a Python driver for the laptop
    (no process restarts: reconnects in seconds, no unpairing, no crashes, contact all night if command 5 works), then
    Dart in the app. BrainBit's library stays as a fallback. (Research D; DECISIONS 68, 84)
-7. **Dream catcher** (row 20), then the nap preset. (Research C: a rule plus a timer is the proven design)
+7. ~~**Dream catcher**~~ (row 20): built 2026-11-18 on `feat/app-dream-catcher` (from `feat/app-line`; DECISIONS
+   110-116). Next: the owner's first try (a 20-minute nap, `app/README.md`, "Dream catcher"), then tune the voice and
+   round timings from it; later speech-to-text for the answers. Then the nap preset. (Research C: a rule plus a timer
+   is the proven design)
 8. **State and trends page** (row 10): a sleep-pressure curve from the sleep log (not from EEG yet), "your usual"
    and "same as yesterday" next to every number; caffeine, alcohol and sleepiness taps in the morning check-in.
    Forecasts stay hidden until 60 days of ratings exist and they beat "same as yesterday" by 5 %. (Research B, C)
@@ -138,6 +141,10 @@ findings are on `_local/research/2026-11-18-findings.html`.
 - **Sleep report on the phone** (one morning, about 15 minutes; `app/README.md` on `feat/app-sleep-report`,
   "Owner step"): after a recorded night press Stop and note how long the phone takes to show the time asleep,
   whether the app stays open, and whether the report looks like the night you remember.
+- **First dream catcher nap** (about 20-45 min, `app/README.md` on `feat/app-dream-catcher`, "Owner step"): record
+  both prompts and set the volume; 3 rounds, Wake me; tell the assistant whether the questions came half-asleep,
+  too early or too late, whether the prompts' volume and the dim screen were right, whether answers were cut off or
+  ran on, and whether the Drifting / Awake tap worked half-asleep.
 
 ## Decisions waiting for the owner
 

@@ -4,7 +4,8 @@ Records a BrainBit headband all night on an Android phone. The main screen: Star
 minutes recorded, seconds since the last data, a half-hour strip of what was saved, battery, signal,
 contact per channel, and phone settings that could stop the recording. Between nights, **Meditate** opens
 a guided eyes-closed session whose sound follows your alpha rhythm (below); from there, **Alpha-theta** training
-and the **replay check** (both below).
+and the **replay check** (both below). Also between nights, the **Dream catcher** asks what is on your mind as you
+drift off and records your answers (below).
 
 - Files: `<stamp>.f32/.idx/.log` in the app's private folder (other apps cannot read it), the same format as
   `scripts/record_night.py` (`docs/data-format.md`); join a night with `scripts/to_bdf.py`. Only "Export a
@@ -20,6 +21,8 @@ and the **replay check** (both below).
   `lib/ui/check_views.dart`, `lib/ui/replay_results_screen.dart`; DECISIONS rows 100-103.
 - Alpha-theta: `lib/alphatheta/` (rules, engine, notebook), `lib/sound/alpha_theta_sound.dart`,
   `lib/ui/alpha_theta_*.dart`; DECISIONS rows 104-107.
+- Dream catcher: `lib/dream/` (rounds, answer end, files, headband link, session), `lib/sound/dream_sound.dart`,
+  `lib/ui/dream_*.dart`; DECISIONS rows 110-116.
 
 ## Build and test
 
@@ -32,7 +35,9 @@ flutter build apk --release --target-platform android-arm64
 ```
 
 `flutter test` also renders the night screen in four states, the meditation screen in eleven, the sleep report in
-eight and the replay check's and alpha-theta's pages in nineteen to `build/screens/*.png` (normal and 130 % text).
+eight, the replay check's and alpha-theta's pages in nineteen and the dream catcher in thirteen to
+`build/screens/*.png` (normal and 130 % text). `test/dream_test.dart` runs whole dream catcher sessions on a fake
+headband whose alpha fades and comes back, with a fake microphone.
 `test/sleep_prep_test.dart` checks the sleep model's input against a fixture made by the laptop's Python
 (`test/fixtures/make_sleep_fixture.py`). The meditation tests stream a synthetic headband through whole
 sessions; `test/feedback_cross_check_test.dart` checks the Dart core against a session made by the JavaScript
@@ -148,6 +153,56 @@ memories or feelings, and leave you drowsy for a while.
 
 Sessions are kept in `files/alpha-theta/` (`<time>.alphatheta.json`, `<time>.session.json` and `journal.json` with
 your answers), app-private like the meditations; the replay check's files are in `files/replay-check/`.
+
+## Dream catcher
+
+At bedtime or a nap: as you drift off, the app asks what is going through your mind, records your answer, and lets
+you drift again, 3 or 4 times. For ideas, not for sleep. The **i** button shows what the research says
+(`docs/evidence/dream-catcher.md`).
+
+1. Between nights, on the main screen scroll to **Dream catcher** and tap it.
+2. Once: under **Your prompts**, tap **Record** and say the theme, for example "Think of a tree... and drift off",
+   then **Stop**. Do the same for the question, for example "What is going through your mind?". Tap the play
+   button to hear one and set the phone's volume so you can just hear it lying down. **Record again** replaces it.
+   Without your own prompts the app plays a low tone (theme) and two rising notes (question).
+3. Under **Tonight** pick 3 or 4 rounds and how it ends: **Wake me** (a soft rising tone at the end) or **Record
+   the night** (no tone; the night recording starts by itself afterwards).
+4. Headband on and switched on, lie down, phone near your head with the screen up. Tap **Lights off**. The first
+   time Android asks for the microphone (and Nearby devices); allow both.
+5. The screen goes black and dim. The theme plays; close your eyes and think of it. The first minute sets your
+   starting level.
+6. When your alpha fades (or at a random moment, if it does not), the question plays. Answer aloud, in a few
+   words or more; recording stops after 3 seconds of quiet. Then the screen shows two halves: tap **Drifting**
+   (top) or **Awake** (bottom), or nothing. The theme plays again: drift off.
+7. After the last round, or 45 minutes after Lights off: the wake tone, or the night starts and the app goes back
+   to the main screen showing "Recording". **Stop** ends at any time and keeps the answers.
+8. Afterwards (or in the morning) open **Dream catcher**: the last session's rounds are at the top. Play each
+   answer and type what it was about; the note is saved as you type. Earlier sessions are at the bottom.
+
+Keep the app open with the screen on during a session: locking the phone can stop it (Android stops the
+microphone for apps in the background). Files, app-private like the meditations: `files/dream-catcher/<time>.dream.json`
+(the rounds, the drift-off detector's epochs) and `<time>-r<n>.wav` (your answers), your prompts in
+`files/dream-catcher/prompts/`. The session's EEG is a normal recording in `files/recordings/` with every question
+as a marker, so it is part of that night: the sleep report includes it and **Export a night** copies it.
+
+### Owner step: the first try (a 20-minute nap, once)
+
+Nothing of this has run on a phone yet: not the microphone, the prompt volume, the dim screen, or the detector
+asking at the right moment.
+
+1. In the afternoon or at bedtime, with no night recording: open **Dream catcher**, record both prompts, play
+   them, set the volume. Pick **3 rounds** and **Wake me**.
+2. Lights off, lie down, eyes closed. Let it run to the wake tone (up to 45 minutes) or press **Stop** after the
+   first answer if you just want to see it work.
+3. Tell the assistant:
+   - Did the questions come at a good moment (half asleep), too early (wide awake) or too late (already asleep)?
+     Each round's line says "alpha faded" (the detector) or "timer".
+   - Were the prompts too loud, too quiet, or fine? Did the dim screen bother you?
+   - Did an answer get cut off while you paused, or keep recording long after you stopped? (The answer's line says
+     how it ended.)
+   - Could you tap Drifting / Awake half-asleep?
+4. With **Record the night** on a later evening, check in the morning that the night recorded and that **Sleep
+   report** covers the time from Lights off.
 
 ## If the headband drops out
 

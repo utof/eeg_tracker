@@ -133,6 +133,7 @@ class _DreamScreenState extends State<DreamScreen> {
   }
 
   Future<String?> _startNight() async {
+    _finder.dispose(anyLost: _c.leftLost); // the headband is free: the recorder's own scanner takes over
     final r = await startRecorderService(_recordings);
     return r is ServiceRequestFailure ? 'did not start: ${r.error}' : null;
   }
