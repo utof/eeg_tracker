@@ -109,6 +109,8 @@ findings are on `_local/research/2026-11-18-findings.html`.
    public (Neiry's MIT `web_sdk_neiry`); a 15-minute probe with the headband on, then a Python driver for the laptop
    (no process restarts: reconnects in seconds, no unpairing, no crashes, contact all night if command 5 works), then
    Dart in the app. BrainBit's library stays as a fallback. (Research D; DECISIONS 68, 84)
+   Status 2026-11-18: driver, recorder (`DRIVER=ble`) and probe built and tested on a fake headband, branch
+   `feat/own-ble-driver` (DECISIONS 90-92, docs/own-ble-driver.md); next: the probe with the headband on.
 7. ~~**Dream catcher**~~ (row 20): built 2026-11-18 on `feat/app-dream-catcher` (from `feat/app-line`; DECISIONS
    110-116). Next: the owner's first try (a 20-minute nap, `app/README.md`, "Dream catcher"), then tune the voice and
    round timings from it; later speech-to-text for the answers. Then the nap preset. (Research C: a rule plus a timer
@@ -161,6 +163,9 @@ findings are on `_local/research/2026-11-18-findings.html`.
   both prompts and set the volume; 3 rounds, Wake me; tell the assistant whether the questions came half-asleep,
   too early or too late, whether the prompts' volume and the dim screen were right, whether answers were cut off or
   ran on, and whether the Drifting / Awake tap worked half-asleep.
+- **Own-driver probe** (about 15 min, docs/own-ble-driver.md): stop the recorder, run `scripts/ble_probe.py`, follow
+  the spoken steps (eyes closed / open, lift each electrode for 4 s). Settles the channel order, the scale and
+  whether contact can be measured all night.
 
 ## Decisions waiting for the owner
 

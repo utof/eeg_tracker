@@ -4,7 +4,7 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 
 | Layer | Files | Written by |
 |---|---|---|
-| Raw recording | `<stamp>.f32`, `<stamp>.idx`, `<stamp>.log`, `<stamp>.markers.jsonl` (one set per recorder run) | `scripts/record_night.py` (laptop); the phone app will write the same kind of add-only chunks |
+| Raw recording | `<stamp>.f32`, `<stamp>.idx`, `<stamp>.log`, `<stamp>.markers.jsonl` (one set per recorder run) | `scripts/record_night.py` or `scripts/record_ble.py` (laptop, both through `scripts/recorder_hub.py`); the phone app will write the same kind of add-only chunks |
 | One night | `<night>.bdf` (BDF+, 24-bit, µV), `<night>.sleep.json`, `<night>.hypnogram.png` | `scripts/to_bdf.py`, `scripts/score_sleep.py` |
 | Sleep report | `_local/nights/<date>.report.json` beside that night's `<date>.bdf`, `.sleep.json`, `.hypnogram.png` | `scripts/sleep_report.py` (the Sleep page starts it) |
 | Sleep report on the phone | `files/nights/<date>.report.json` in the app's private folder | the phone app after Stop (`app/lib/sleep/scorer.dart`) |
@@ -18,7 +18,9 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 - `.f32`: records of `<I4f` (little-endian): BrainBit packet number, then O1 O2 T3 T4 in **volts** as the
   headband sent them. 250 records a second.
 - `.idx`: one `<dQ` record per batch that arrived: unix time of arrival (float seconds) and the index of the
-  batch's first record. Gaps are found from these times; packet numbers can repeat.
+  batch's first record. Gaps are found from these times; packet numbers can repeat. With our own driver (`record_ble.py`) one run
+  spans the whole night: a Bluetooth drop leaves a gap in these times inside the same file, and the packet number
+  starts again after each reconnect.
 - `.log`: plain text, one line per event: connection (model, signal strength), contact resistance in ohms, a
   sample count and battery reading every 10 s, stalls and restarts. On the phone a run that ends in a drop logs
   `drop (out of range | no data | run failed); last data <time>; reconnecting`, then one line per try,

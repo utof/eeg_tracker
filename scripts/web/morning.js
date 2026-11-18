@@ -29,14 +29,19 @@ async function keepAwake() { try { wake = await navigator.wakeLock.request('scre
 
 // ---- contact
 async function checkContact() {
-  // The recorder measures contact by restarting itself (DECISIONS 17): its page server is away for ~20-40 s.
-  $('begin').disabled = true; $('cstat').textContent = 'Checking contact: the recorder restarts, about 30 seconds…';
-  let before = null;  // minutes recorded by the current recorder: the fresh one starts again near 0
-  try { before = (await (await fetch('state', { cache: 'no-store' })).json()).minutes; } catch (e) { /* restarting */ }
+  // The SDK recorder measures contact by restarting itself (DECISIONS 17): its page server is away for ~20-40 s.
+  // The own-driver recorder (record_ble.py) measures it in-process for ~6 s and then moves contact_t.
+  $('begin').disabled = true; $('cstat').textContent = 'Checking contact, up to 30 seconds…';
+  let before = null, beforeT = null;  // minutes recorded by the current recorder: a fresh one starts again near 0
+  try { const s = await (await fetch('state', { cache: 'no-store' })).json(); before = s.minutes; beforeT = s.contact_t; } catch (e) { /* restarting */ }
   try { await fetch('contact', { method: 'POST' }); } catch (e) { /* it may already be restarting */ }
   await sleep(6000);
-  for (let i = 0; i < 40; i++) {  // wait until the fresh recorder answers with new data (up to ~80 s)
-    try { const s = await (await fetch('state', { cache: 'no-store' })).json(); if (s.age < 3 && s.minutes > 0 && (before === null || s.minutes < before)) break; } catch (e) { /* still restarting */ }
+  for (let i = 0; i < 40; i++) {  // wait until the recorder answers with new data and a new contact (up to ~80 s)
+    try {
+      const s = await (await fetch('state', { cache: 'no-store' })).json();
+      const fresh = before === null || s.minutes < before || (s.contact_t != null && s.contact_t !== beforeT);
+      if (s.age < 3 && s.minutes > 0 && fresh) break;
+    } catch (e) { /* still restarting */ }
     await sleep(2000);
   }
   $('cstat').textContent = 'Contact and signal now (updates every second):'; $('begin').disabled = false;
