@@ -21,7 +21,7 @@ compares today with the last 14 earlier *.morning.json files in that folder (med
 If the recording also holds a setup test (setup:* markers from the same page), it reports whether blinks,
 left-right glances (T3 minus T4) and jaw clenches stand out from the background (signal-to-noise per event type).
 """
-import argparse, json, sys
+import argparse, json, subprocess, sys
 from datetime import datetime
 from pathlib import Path
 
@@ -29,6 +29,7 @@ import numpy as np
 from scipy import signal
 
 sys.path.insert(0, str(Path(__file__).parent))
+import night_files as nf  # noqa: E402
 from to_bdf import load  # noqa: E402
 
 FS = 250
@@ -300,6 +301,36 @@ def compare(today, past: list) -> str:
     return f"  (your last {len(past)}: median {fmt(med)}, range {fmt(lo)}-{fmt(hi)}: {where}{note})"
 
 
+ROWS = [("Alpha strength, eyes closed (µV²)", "back.alpha_ec_uv2", "{:.1f}"),
+        ("Eyes-closed rise (closed / open)", "back.ec_rise", "{:.1f}x"),
+        ("Alpha speed (Hz)", "back.iaf_hz", "{:.2f}"),
+        ("1/f slope, eyes closed", "back.aperiodic_slope_ec", "{:.2f}"),
+        ("Clean data (%)", "back.clean_share", "{:.0f}"),  # shown and compared in percent
+        ("Sleepiness (KSS 1-9)", "ratings.kss", "{}"), ("Mood (1-5)", "ratings.mood", "{}"),
+        ("Tension (1-5)", "ratings.tension", "{}")]
+
+
+def compared(res: dict, past: list[dict]) -> list[dict]:
+    """One row per measure: today's value as text and how it compares with the earlier check-ins (the summary below
+    and the pages show these, stored as "compared" in the result)."""
+    out = []
+    for label, key, fmt in ROWS:
+        k = 100 if key == "back.clean_share" else 1
+        v = get(res, key)
+        v = round(v * k, 4) if v is not None else None
+        earlier = [round(x * k, 4) for x in (get(r, key) for r in past) if x is not None]
+        text = ("not enough clean data" if v is None and key.startswith("back") else "not rated" if v is None
+                else fmt.format(v))
+        row = dict(key=key, label=label, value=v, text=text, earlier=len(earlier),
+                   comparison=compare(v, earlier).strip().strip("()"))
+        if v is not None and earlier:
+            lo, hi = min(earlier), max(earlier)
+            row.update(median=float(np.median(earlier)), low=lo, high=hi,
+                       where="within" if lo <= v <= hi else "above" if v > hi else "below")
+        out.append(row)
+    return out
+
+
 def summary(res: dict, past: list[dict]) -> str:
     b = res["back"]; ch = res["channels"]
     L = [f"Morning check-in {res['start'][:16].replace('T', ' ')}: "
@@ -310,17 +341,9 @@ def summary(res: dict, past: list[dict]) -> str:
         f"{n} {ch[n]['clean_share_ec'] * 100:.0f}% closed / "
         + (f"{ch[n]['clean_share_eo'] * 100:.0f}% open" if ch[n]['clean_share_eo'] is not None else "no open phase")
         for n in BACK))
-    rows = [("Alpha strength, eyes closed (µV²)", "back.alpha_ec_uv2", "{:.1f}"),
-            ("Eyes-closed rise (closed / open)", "back.ec_rise", "{:.1f}x"),
-            ("Alpha speed (Hz)", "back.iaf_hz", "{:.2f}"),
-            ("1/f slope, eyes closed", "back.aperiodic_slope_ec", "{:.2f}"),
-            ("Sleepiness (KSS 1-9)", "ratings.kss", "{}"), ("Mood (1-5)", "ratings.mood", "{}"),
-            ("Tension (1-5)", "ratings.tension", "{}")]
-    for label, key, fmt in rows:
-        v = get(res, key)
-        L.append(f"  {label}: " + ("not enough clean data" if v is None and key.startswith("back") else
-                                    "not rated" if v is None else fmt.format(v))
-                 + compare(v, [get(r, key) for r in past]))
+    for row in compared(res, past):
+        if row["key"] != "back.clean_share":  # printed per channel above
+            L.append(f"  {row['label']}: {row['text']}" + (f"  ({row['comparison']})" if row["comparison"] else ""))
     if b.get("iaf_hz") is None and b.get("alpha_ec_uv2") is not None:
         L.append("  No clear alpha peak with eyes closed today (contact, or an alert / tense start can do this).")
     st = res.get("setup_test")
@@ -371,11 +394,7 @@ def analyse(path: Path, sess: list[dict], fs: float = FS) -> dict:
         device=dict(model="BrainBit Black", channels=NAMES), validated=False)
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("inputs", nargs="+", type=Path, help="a recordings folder, or <stamp>.f32 files")
-    ap.add_argument("--out-dir", type=Path, help="where to write and look for earlier *.morning.json (default: next to the recording)")
-    a = ap.parse_args()
+def run(a: argparse.Namespace) -> None:
     paths = sorted({p for x in a.inputs for p in ([*x.glob("*.f32")] if x.is_dir() else [x])})
     if not paths:
         raise SystemExit("no .f32 recordings found")
@@ -404,12 +423,44 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     stamp = datetime.fromisoformat(res["start"]).strftime("%Y-%m-%d-%H%M%S")
     dst = out / f"{stamp}.{kind}.json"
+    past = history(out, res["start"]) if kind == "morning" else []
+    if kind == "morning":
+        res["compared"] = compared(res, past)
     dst.write_text(json.dumps(res, indent=1, ensure_ascii=False) + "\n")
     if kind == "morning":
-        print(summary(res, history(out, res["start"])))
+        print(summary(res, past))
     else:
         print(json.dumps(res["setup_test"], indent=1))
     print(f"-> {dst}")
+    if a.export and kind == "morning":  # the eeg_morning_check event for other apps (docs/data-format.md)
+        r = subprocess.run([sys.executable, str(Path(__file__).parent / "export_events.py"), str(dst), "--root",
+                            str(a.export)], capture_output=True, text=True, timeout=120)
+        print((r.stdout + r.stderr).strip())
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("inputs", nargs="+", type=Path, help="a recordings folder, or <stamp>.f32 files")
+    ap.add_argument("--out-dir", type=Path, help="where to write and look for earlier *.morning.json (default: next to the recording)")
+    ap.add_argument("--export", type=Path, help="also append the eeg_morning_check event under this root (e.g. _local/export)")
+    ap.add_argument("--job-dir", type=Path, help="hold morning-report.lock and write morning-report.status.json here "
+                    "(the recorder hub passes its nights folder), so only one runs at a time")
+    a = ap.parse_args()
+    if not a.job_dir:
+        run(a); return
+    job = nf.Job(a.job_dir, "morning-report")
+    if not job.acquire():
+        print("another morning analysis is running; nothing to do"); return
+    try:
+        job.step("Working out this morning's numbers")
+        run(a)
+        job.write(state="done", step="Done", error=None)
+    except BaseException as e:
+        msg = str(e) if isinstance(e, SystemExit) else f"{type(e).__name__}: {e}"
+        job.write(state="failed", error=msg[:300])
+        raise
+    finally:
+        job.release()
 
 
 if __name__ == "__main__":

@@ -61,7 +61,7 @@ Update the status column whenever something lands.
 | 6 | Morning check-in (eyes closed / open, ratings) + setup test | page, analysis, export and tests done on the fake headband; first real morning pending | `scripts/web/morning.html`, `scripts/morning_check.py` |
 | 7 | Brain-reactive sound (alpha → calmer sound, jaw blocks) | feedback core v1 done (research A pass 2, item 1): live stream input, alpha in ~0.15 s around your own alpha peak, a target line held for 3-min blocks, at most 6 bells a minute, muscle / blink / drifting-to-sleep gates (shared `sleep-guard.js`), training and relax modes, a session log that replays exactly; tested on the demo and the fake headband. Real-head bench tests pending. The page is a stopgap: the pure modules port to the phone app | `scripts/web/sound.html`, [docs/brain-sound.md](docs/brain-sound.md) |
 | 8 | Break hints stage 0 (ActivityWatch) | code + tests done; not yet run on the owner's laptop | `scripts/break_hints.py`, docs/break-hints.md |
-| 9 | Night extras: jaw clench count, movement, signal quality per hour | next, as part of the shared "what the electrodes see" detector (jaw band 20-70 Hz: the headband's signal stops at 70 Hz) | - |
+| 9 | Night extras: jaw clench count, movement, signal quality per hour | next, as part of the shared "what the electrodes see" detector (jaw band 55-120 Hz: the signal does not stop at 70 Hz, checks of 2026-11-18) | - |
 | 10 | State and trends page (numbers + arrows vs your usual, 14-day lines; laptop first, then phone) | after 6 and 3 | - |
 | 11 | utof_tracker importer for `eeg_*` events | waits for the owner's OK | - |
 | 12 | Calibration for any electrode positions (helmet) | after the helmet exists | DECISIONS row 4 |
@@ -83,22 +83,26 @@ Update the status column whenever something lands.
 The owner's features first (wish 16: the phone app leads). Each step names the research behind it; the full
 findings are on `_local/research/2026-11-18-findings.html`.
 
-1. **Phone app**: a once-a-minute phone battery line and a per-night count of missing packets in the log
+1. **Phone app** (battery line and packet count: done 2026-11-18): a once-a-minute phone battery line and a per-night count of missing packets in the log
    (assistant, small); then the owner's phone test (below); then merge `feat/android-recorder`. (Research D)
 2. ~~**Meditation feedback in the app**~~ (row 21): v1 built 2026-11-18 on `feat/app-meditation`: the core in
    Dart, `flutter_soloud` at 48 kHz, the meditation screen and report (DECISIONS 72-77). Next: the owner listens
    and runs a few sessions (below); then the no-feedback block and the learning verdict. (Research A, D)
 3. **Shared detectors** (rows 9, 18, 20, 21): "what the electrodes see" (blinks, eye movements on T3-T4, jaw
-   20-70 Hz, movement) and the drift-off detector grown from `sleep-guard.js`, with a "lights off" button; it
+   55-120 Hz, movement) and the drift-off detector grown from `sleep-guard.js`, with a "lights off" button; it
    ships when its sleep onset falls within 5 minutes of AnySleep's on 4 of 5 recorded nights. (Research B, C)
 4. ~~"i" evidence notes~~ (wish 14): done 2026-11-18: 15 notes in `docs/evidence/`, "i" buttons on every page;
    the app will bundle the same files.
 5. **Replayed-feedback check** (row 23), then **alpha-theta** (row 22). (Research A)
-6. **Dream catcher** (row 20), then the nap preset. (Research C: a rule plus a timer is the proven design)
-7. **State and trends page** (row 10): a sleep-pressure curve from the sleep log (not from EEG yet), "your usual"
+6. **Our own headband connection** (replaces BrainBit's library; owner asked 2026-11-18): the protocol is mostly
+   public (Neiry's MIT `web_sdk_neiry`); a 15-minute probe with the headband on, then a Python driver for the laptop
+   (no process restarts: reconnects in seconds, no unpairing, no crashes, contact all night if command 5 works), then
+   Dart in the app. BrainBit's library stays as a fallback. (Research D; DECISIONS 68, 84)
+7. **Dream catcher** (row 20), then the nap preset. (Research C: a rule plus a timer is the proven design)
+8. **State and trends page** (row 10): a sleep-pressure curve from the sleep log (not from EEG yet), "your usual"
    and "same as yesterday" next to every number; caffeine, alcohol and sleepiness taps in the morning check-in.
    Forecasts stay hidden until 60 days of ratings exist and they beat "same as yesterday" by 5 %. (Research B, C)
-8. **Data safety**: a checksum file per night, a catalog, an encrypted restic backup to the `архив` drive and a
+9. **Data safety**: a checksum file per night, a catalog, an encrypted restic backup to the `архив` drive and a
    monthly restore test (does not change DECISIONS 37). (Research D)
 
 ## Next tests that need the owner
@@ -112,8 +116,8 @@ findings are on `_local/research/2026-11-18-findings.html`.
 - **First meditations on the phone** (5-10 min each, `app/README.md` on `feat/app-meditation`): does the sound
   start and feel right (levels, rain, bells), does it follow eyes closing within about a second on wired
   headphones, does the chip say "restless" on a clench, and is the report believable.
-- **Extended setup test** (2 min, `morning.html`): blinks, left-right glances, clenches; it tells where the jaw signal
-  stops and whether eye movements show on T3-T4.
+- **Extended setup test** (2 min, `morning.html`): blinks, left-right glances, clenches; it confirms the 55-120 Hz jaw band
+  on real clenches, gives µV per degree for glances on T3-T4, and settles the blink sign on 20 cued blinks.
 - **First real morning check-in** (`morning.html`).
 
 ## Decisions waiting for the owner
@@ -123,6 +127,8 @@ findings are on `_local/research/2026-11-18-findings.html`.
 - Clear the GitHub billing lock, so GitHub builds the app on every change (the laptop can build it too).
 - Morning check-in eyes-closed phase: keep 2 minutes or make it 3 (research D).
 - Order a spare magnetic charging cable for the headband (order by about 28 November; see the parts report).
+- Backups: an encrypted restic backup of the recordings to the `архив` drive needs a password you keep (a password
+  manager or paper); say where it should live and the assistant sets it up. Today the recordings exist in one copy.
 
 ## Ideas for later (after the wishes above are built)
 
@@ -130,8 +136,8 @@ Anyone, including the assistant, adds ideas here. When one is started, move it i
 
 | Idea | What it is | Notes |
 |---|---|---|
-| Smart alarm | wakes you within a chosen window at a moment of light sleep, not deep sleep | needs live sleep staging on the phone |
-| Nap coach | a nap that ends before deep sleep starts (so no groggy wake-up) | same live staging |
+| Smart alarm | wakes you within a chosen window at a moment of light sleep, not deep sleep | AnySleep works live about 2 min behind the newest data (DECISIONS 79); needs the phone speed test |
+| Nap coach | a nap that ends before deep sleep starts (so no groggy wake-up) | same as the smart alarm (DECISIONS 79) |
 | Dream catcher (now row 20 above) | as you drift off, the app notices the half-dream stage (back-of-head alpha fading), quietly asks "what are you thinking about?", records your spoken answer, lets you drift again; 3-4 rounds. For creative ideas | MIT's Dormio; a 2021 study found 15 s in that stage tripled insight on a puzzle; needs only O1/O2 |
 | Lucid dream cues | soft sound cues during dream sleep (REM) to become aware you are dreaming | evidence weak; fun |
 | Hands-free controls | a double jaw clench or a look left-right as a switch: pause sound, mark a moment | jaw and eye movements are what these electrodes see best |
@@ -152,7 +158,7 @@ or delete any of these.
 | Evening study, morning review | a plain reminder to study in the evening and review in the morning | some (B) |
 | Open BrainBit driver | our own Bluetooth code instead of the closed SDK; contact quality all night | protocol mostly public via Neiry's MIT package; legal for your own device (D) |
 | Sleep-scorer upgrade | AnySleep fine-tuned on public nights reshaped to the headband's channels (CHAT has them); adopt only if clearly better | some (C; needs the 58 GB download) |
-| Live sleep stages on the phone | a small model for the smart alarm and nap coach, after 20-30 own nights | Traumschreiber (MIT, Nov 2026) already runs AnySleep on a phone (C, D) |
+| Live sleep stages on the phone | AnySleep itself, 2 min behind the newest data (DECISIONS 79); a small model only if the phone is too slow | Traumschreiber (MIT, Nov 2026) already runs AnySleep on a phone (C, D) |
 | "Was this you?" | a warning when someone else wears the headband, after a month of nights | about 6 % error with two enrolment days (D) |
 | Helmet layout | 8 sites M1 M2 F7 F8 Fz C3 C4 Pz plus the forehead reference, then 16; noted in `eeg_ads1299_lab` as a planning assumption | some (B) |
 | Noise repair (ZUNA) | re-draw bad stretches on the laptop, mainly for the helmet | untested on 4 channels (C; Apache-2.0) |

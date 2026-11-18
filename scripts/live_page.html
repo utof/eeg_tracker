@@ -18,6 +18,7 @@ nav a:hover,nav a:focus-visible{border-color:#8ab4f8;outline:none}nav b{display:
 </style><main>
 <h1>Headband check</h1><div id="top">connecting…</div>
 <nav>
+<a href="sleep.html"><b>Sleep</b><span>last night and naps, scored</span></a>
 <a href="morning.html"><b>Morning check-in</b><span>2-min eyes closed/open test + ratings</span></a>
 <a href="eyes.html"><b>Eyes open or closed</b><span>beeps high when open, low when closed</span></a>
 <a href="sound.html"><b>Brain sound</b><span>sound that follows your brain</span></a>
@@ -45,7 +46,7 @@ function smooth(x,fs){const h=Math.round(fs/2),o=[];let acc=0;const q=[];
  for(let i=0;i<x.length;i++){acc+=x[i];q.push(x[i]);if(q.length>h)acc-=q.shift();o.push(x[i]-acc/q.length)}
  const r=[];for(let i=4;i<o.length;i+=5)r.push((o[i]+o[i-1]+o[i-2]+o[i-3]+o[i-4])/5);return r}
 async function tick(){try{const s=await (await fetch('state')).json();
- document.getElementById('top').textContent=`${s.status} · battery ${s.battery_note || s.battery + "%"} · recorded ${s.minutes} min · last data ${s.age}s ago`;
+ document.getElementById('top').textContent=s.status==='reconnecting'?'Reconnecting to the headband (back in about 30 s)…':`${s.status} · battery ${s.battery_note || s.battery + "%"} · recorded ${s.minutes} min · last data ${s.age}s ago`;
  let best={r:0,pk:0};
  s.names.forEach((n,c)=>{const x=s.data[c];if(x.length<s.fs*2)return;const sp=spectrum(x,s.fs);
   let tot=0;for(let k=Math.ceil(1/sp.df);k*sp.df<=40;k++)tot+=sp.p[k];

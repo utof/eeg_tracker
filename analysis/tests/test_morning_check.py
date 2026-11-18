@@ -115,7 +115,8 @@ def write_recording(path, uv, marks):
     path.with_suffix(".markers.jsonl").write_text("".join(json.dumps(m) + "\n" for m in marks))
 
 
-def test_end_to_end_with_history(tmp_path, monkeypatch, capsys):
+def write_checkin(folder):
+    """2026-11-18 07:00: 60 s eyes closed with strong 10 Hz alpha, 60 s eyes open with weak alpha, ratings 5 3 2."""
     n = 130 * FS
     uv = np.column_stack([pink(n) for _ in range(4)])
     for c in (0, 1):
@@ -126,7 +127,11 @@ def test_end_to_end_with_history(tmp_path, monkeypatch, capsys):
              [(1, "morning:start"), (2, "morning:eyes_closed:start"), (62, "morning:eyes_closed:end"),
               (66, "morning:eyes_open:start"), (126, "morning:eyes_open:end"),
               (128, 'morning:ratings {"kss":5,"mood":3,"tension":2}'), (128.5, "morning:end")]]
-    write_recording(tmp_path / "2026-11-18-070000.f32", uv, marks)
+    write_recording(folder / "2026-11-18-070000.f32", uv, marks)
+
+
+def test_end_to_end_with_history(tmp_path, monkeypatch, capsys):
+    write_checkin(tmp_path)
     for d in range(3):  # earlier check-ins in the same folder
         (tmp_path / f"2026-11-1{d}-070000.morning.json").write_text(json.dumps(
             dict(start=f"2026-11-1{d}T07:00:00+00:00", back=dict(alpha_ec_uv2=100.0 + d, ec_rise=5.0, iaf_hz=9.8),
@@ -140,6 +145,38 @@ def test_end_to_end_with_history(tmp_path, monkeypatch, capsys):
     assert res["ratings"] == {"kss": 5, "mood": 3, "tension": 2}
     assert res["phase_s"] == {"eyes_closed": 60.0, "eyes_open": 60.0}
     assert "your last 3" in out and "only 3 earlier" in out
+    rows = {r["key"]: r for r in res["compared"]}  # what the pages show
+    assert len(rows) == 8 and rows["back.alpha_ec_uv2"]["earlier"] == 3 and rows["ratings.mood"]["earlier"] == 0
+    assert rows["back.alpha_ec_uv2"]["comparison"] in out and rows["ratings.kss"]["where"] == "above"
+    assert rows["back.clean_share"]["text"] == f"{res['back']['clean_share'] * 100:.0f}"
+
+
+def test_run_for_the_hub_one_at_a_time_and_exported(tmp_path, monkeypatch, capsys):
+    """What POST /morning-report runs: --job-dir holds the lock and writes progress, --export appends the event."""
+    import fcntl
+    import night_files as nf
+    rec, jobs, export = tmp_path / "rec", tmp_path / "nights", tmp_path / "export"
+    rec.mkdir()
+    write_checkin(rec)
+    argv = ["morning_check.py", str(rec), "--export", str(export), "--job-dir", str(jobs)]
+    monkeypatch.setattr("sys.argv", argv)
+    mc.main()
+    assert json.loads((jobs / "morning-report.status.json").read_text())["state"] == "done"
+    assert (jobs / "morning-report.lock").read_text() == ""
+    ev = [json.loads(ln) for f in export.glob("events/*/eeg-*.jsonl") for ln in f.read_text().splitlines()]
+    assert [e["type"] for e in ev] == ["eeg_morning_check"]
+    st = nf.morning_state(rec, jobs)
+    assert not st["running"] and "failed" not in st and st["report"]["start"] == ev[0]["data"]["start"]
+    assert all(r["earlier"] == 0 for r in st["report"]["compared"])
+    with open(jobs / "morning-report.lock", "a+") as held:  # a second run while one holds the lock does nothing
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        mc.main()
+    assert "another morning analysis is running" in capsys.readouterr().out
+    empty = tmp_path / "empty"; empty.mkdir()
+    monkeypatch.setattr("sys.argv", ["morning_check.py", str(empty), "--job-dir", str(jobs)])
+    with pytest.raises(SystemExit):
+        mc.main()
+    assert nf.morning_state(empty, jobs)["failed"] == "no .f32 recordings found"
 
 
 def test_setup_test_snr():

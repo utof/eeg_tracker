@@ -1,5 +1,6 @@
 // Guided morning check-in. Served by scripts/record_night.py; markers go to POST /marker.
 import { KSS, MOOD, TENSION, phaseSeconds, morningPlan, marker, validRatings, setupPlan, clock, gradeChannel } from './morning-core.js';
+import { morningHtml } from './morning-result.js';
 
 const $ = (id) => document.getElementById(id);
 const show = (id) => { for (const s of document.querySelectorAll('main > section')) s.classList.toggle('hidden', s.id !== id); };
@@ -28,9 +29,16 @@ async function keepAwake() { try { wake = await navigator.wakeLock.request('scre
 
 // ---- contact
 async function checkContact() {
-  $('begin').disabled = true; $('cstat').textContent = 'Checking contact (about 7 seconds)…';
-  try { await fetch('contact', { method: 'POST' }); } catch (e) { $('cstat').textContent = 'No answer from the laptop.'; return; }
-  await sleep(8500);
+  // The recorder measures contact by restarting itself (DECISIONS 17): its page server is away for ~20-40 s.
+  $('begin').disabled = true; $('cstat').textContent = 'Checking contact: the recorder restarts, about 30 seconds…';
+  let before = null;  // minutes recorded by the current recorder: the fresh one starts again near 0
+  try { before = (await (await fetch('state', { cache: 'no-store' })).json()).minutes; } catch (e) { /* restarting */ }
+  try { await fetch('contact', { method: 'POST' }); } catch (e) { /* it may already be restarting */ }
+  await sleep(6000);
+  for (let i = 0; i < 40; i++) {  // wait until the fresh recorder answers with new data (up to ~80 s)
+    try { const s = await (await fetch('state', { cache: 'no-store' })).json(); if (s.age < 3 && s.minutes > 0 && (before === null || s.minutes < before)) break; } catch (e) { /* still restarting */ }
+    await sleep(2000);
+  }
   $('cstat').textContent = 'Contact and signal now (updates every second):'; $('begin').disabled = false;
 }
 async function pollState() {
@@ -43,7 +51,7 @@ async function pollState() {
         <div class="muted">${ohm === null ? 'no contact' : Math.round(ohm / 1000) + ' kΩ'} · ${g.spread.toFixed(0)} µV</div>
         <span class="badge ${g.grade}">${g.word}</span></div>`;
     }).join('');
-  } catch (e) { $('cstat').textContent = 'No answer from the laptop.'; }
+  } catch (e) { $('cstat').textContent = 'Waiting for the laptop (the recorder may be reconnecting)…'; }
 }
 
 // ---- eyes closed / eyes open
@@ -88,6 +96,36 @@ async function save() {
   await mark(marker.ratings(ratings)); await mark(marker.end());
   if (wake) wake.release().catch(() => {});
   show('done');
+  results();
+}
+
+// ---- results without asking: the laptop analyses the check-in (POST /morning-report runs scripts/morning_check.py)
+async function results() {
+  const ask = async (init) => {
+    const r = await (await fetch('morning-report', init)).json();
+    if (r.error) throw new Error(r.error);
+    return r;
+  };
+  $('dsay').textContent = 'Working it out, about 30 s…';
+  try {
+    const go = await ask({ method: 'POST' });
+    const since = go.now - 2; // the laptop's clock: a result file written after this is today's
+    for (let i = 0; i < 90; i++) {
+      await sleep(2000);
+      const s = await ask({ cache: 'no-store' });
+      if (s.running) continue;
+      if (s.failed) throw new Error(s.failed);
+      if (!s.report || !(s.updated >= since)) throw new Error('no new result was written');
+      $('dsay').textContent = 'Thank you. Your numbers this morning:';
+      $('result').innerHTML = morningHtml(s.report, { title: false });
+      return;
+    }
+    throw new Error('it is taking over 3 minutes');
+  } catch (e) {
+    $('dsay').textContent = e instanceof TypeError ? 'Saved, but the laptop did not answer to work it out. On the laptop:'
+      : `Saved, but working it out failed (${e.message}). On the laptop:`;
+    $('dcmd').classList.remove('hidden');
+  }
 }
 
 // ---- setup test
@@ -104,6 +142,7 @@ async function runSetup() {
   if (wake) wake.release().catch(() => {});
   $('dtitle').textContent = 'Setup test saved';
   $('dsay').textContent = 'To see which events the electrodes picked up, run on the laptop:';
+  $('dcmd').classList.remove('hidden');
   show('done');
 }
 

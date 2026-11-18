@@ -6,6 +6,7 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 |---|---|---|
 | Raw recording | `<stamp>.f32`, `<stamp>.idx`, `<stamp>.log`, `<stamp>.markers.jsonl` (one set per recorder run) | `scripts/record_night.py` (laptop); the phone app will write the same kind of add-only chunks |
 | One night | `<night>.bdf` (BDF+, 24-bit, µV), `<night>.sleep.json`, `<night>.hypnogram.png` | `scripts/to_bdf.py`, `scripts/score_sleep.py` |
+| Sleep report | `_local/nights/<date>.report.json` beside that night's `<date>.bdf`, `.sleep.json`, `.hypnogram.png` | `scripts/sleep_report.py` (the Sleep page starts it) |
 | Morning check-in | `<start>.morning.json` (or `<start>.setup.json` for a setup test alone) | `scripts/morning_check.py` |
 | Events for other apps | `<root>/events/<dev>/eeg-YYYY-MM.jsonl`, `<root>/events/<dev>/breaks-YYYY-MM.jsonl` | `scripts/export_events.py`, `scripts/break_hints.py` |
 
@@ -41,6 +42,38 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 of the two models) and `epochs`: one object per 30 s with `t`, `anysleep` and `yasa` (`W N1 N2 N3 R`, or
 `gap` when over 5 s of the epoch is filled in), and `p` (AnySleep probabilities in the order W N1 N2 N3 R).
 
+## `<date>.report.json` (the Sleep page)
+
+`scripts/sleep_report.py` writes one per night into `_local/nights/` (the folder next to the recordings). A night
+is the recordings chained in time: a recording joins the previous one's night when it starts under 3 hours after
+that one's last data or has the same evening date, and never 24 hours or more after the night's first recording
+(`scripts/night_files.py`). `<date>` is the evening's date of the first recording (its start minus 12 hours, as
+`night_of`). While a night grows, its four files are replaced whole (never edited in place) once 10+ minutes of
+new samples exist; files of the same name made by hand are first renamed `<date>-manual.*`.
+
+| Field | Meaning |
+|---|---|
+| `version` | 1; a report of another version is rebuilt |
+| `night_of` | the evening's date, as the file name |
+| `built`, `scoring_s` | when it was written (ISO with offset) and how long joining and scoring took |
+| `data_start`, `data_end` | first and last moment of the joined recordings, gaps included |
+| `inputs` | `[{file, bytes}]`: the `.f32` files and their sizes when read; the report is out of date once they hold 10+ minutes more |
+| `scored` | `false` when under 5 minutes were recorded (then `periods` is empty and the file fields are `null`) |
+| `periods` | sleep periods, below |
+| `total` | the whole night: `asleep_min light_min deep_min dream_min wake_ups periods` summed over the periods, `recorded_min` (scored time), `missing_min` (time lost to gaps), `stray_sleep_min` (asleep epochs outside any period) |
+| `hypnogram`, `sleep_json`, `bdf` | file names beside the report |
+| `model`, `cross_check` | the stager and the second model with the whole night's agreement, as in `eeg_sleep_night` |
+| `note`, `validated` | "first guess; the scorer is not yet validated on this headband", `false` |
+| `rules` | `split_min` 60, `min_period_sleep_min` 10, `wake_up_over_min` 5 (below) |
+
+A sleep period is a stretch of asleep epochs (N1 N2 N3 R by AnySleep) that no 60+ minutes of wake or missing data
+interrupt; a stretch with under 10 minutes asleep is scorer noise and only counts in `stray_sleep_min`. Each period
+has `start`, `end` (first and last asleep epoch, ISO with offset), `asleep_min`, `light_min` (N1 + N2), `deep_min`
+(N3), `dream_min` (R), `awake_min` (W inside), `stage_min` `{W N1 N2 N3 R}`, `wake_ups` (stretches between asleep
+epochs with over 5 minutes scored awake) and `wake_up_list` `[{start, awake_min}]`, `missing_min`, `agreement`
+`{five_stage, wake_nrem_rem, epochs}` of AnySleep and YASA over the epochs both scored (`null` if none) and
+`confidence` (AnySleep's mean top probability).
+
 ## Morning check-in markers and `<start>.morning.json`
 
 `scripts/web/morning.html` writes these marker texts, in order: `morning:start`, `morning:eyes_closed:start`,
@@ -52,8 +85,14 @@ ignored). The setup test writes `setup:start`, `setup:blink` (at each cue), `set
 `scripts/morning_check.py` writes `version`, `source`, `start`, `end`, `date`, `phase_s` (seconds between the
 markers of each phase), `channels` (per back channel: the fields of the event below plus `clean_s_ec`,
 `clean_s_eo` and `alpha_peak_above_1f`), `back` (O1 and O2 combined), `ratings`, `setup_test` (or `null`),
-`method` (the analysis settings), `device`, `validated`. Earlier `*.morning.json` files in the same folder are
-the history it compares with.
+`method` (the analysis settings), `device`, `validated`, and `compared`: one row per measure shown on the pages
+(`key` such as `back.iaf_hz`, `label`, `value`, `text` as printed, `earlier` = how many earlier check-ins have it,
+`comparison` = the printed "your last N: median, range: within / above / below your range" text, and when there
+are earlier ones `median`, `low`, `high`, `where`; clean data in percent). Earlier `*.morning.json` files in the
+same folder are the history it compares with (the last 14 before this one). Started by the morning page
+(`POST /morning-report`), it runs with `--job-dir <nights> --export <root>`: one run at a time
+(`morning-report.lock`, progress in `morning-report.status.json`, output in `morning-report.log`), and it appends
+the `eeg_morning_check` event itself.
 
 ## Events (for utof_tracker and anything else)
 

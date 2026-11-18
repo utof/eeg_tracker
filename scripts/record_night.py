@@ -4,7 +4,7 @@ Output in --out: <stamp>.f32 (records: uint32 PackNum + 4 float32 volts O1 O2 T3
 <stamp>.idx (one record per arriving batch: float64 unix time + uint64 index of its first sample;
 used to find gaps, since packet numbers can repeat), <stamp>.log (wall-clock lines: contact check, sample counts every 10 s, disconnects).
 """
-import argparse, collections, json, os, queue, struct, threading, time
+import argparse, collections, json, os, queue, struct, threading, time, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime
 from pathlib import Path
@@ -12,10 +12,16 @@ from pathlib import Path
 from neurosdk.cmn_types import SensorCommand, SensorFamily, SensorState
 from neurosdk.scanner import Scanner
 
+SDK_LIB = sorted({ln.split()[-1] for ln in open("/proc/self/maps") if "libneurosdk2.so" in ln})  # which copy is loaded
+
 try:
     import battery as batt  # scripts/battery.py: drops the gauge's stuck values, time left from the trend
 except Exception:
     batt = None
+try:
+    import night_files as nf  # scripts/night_files.py: the Sleep page's report job (standard library only)
+except Exception:
+    nf = None
 
 REC = struct.Struct("<I4f")
 IDX = struct.Struct("<dQ")
@@ -33,6 +39,7 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8765, help="live check page; 0 = off")
     a = ap.parse_args()
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
+    nights_dir, export_dir = out.resolve().parent / "nights", out.resolve().parent / "export"  # next to --out
     lock = threading.Lock(); buf: list[bytes] = []; idx: list[bytes] = []; total = 0; seen = [0]
 
     def log(msg: str) -> None:
@@ -55,6 +62,7 @@ def main() -> None:
     idxf = open(out / f"{stamp}.idx", "ab")
     markf = open(out / f"{stamp}.markers.jsonl", "a")  # page markers: {"t": unix time, "i": sample index, "text"}
     log(f"connected {info.Name} {info.Address} serial {info.SerialNumber} battery {s.batt_power}% signal {info.RSSI} dBm")
+    log(f"sdk library {'patched (keeps other Bluetooth devices)' if SDK_LIB and all('patched' in x for x in SDK_LIB) else SDK_LIB}")
     for attr in ("features", "commands", "parameters"):  # what this headband offers (e.g. pulse or motion sensors)
         try: log(f"{attr} {getattr(s, attr)}")
         except Exception as e: log(f"{attr} unavailable: {e}")
@@ -101,6 +109,8 @@ def main() -> None:
             name = self.path.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
             if name == "contact":
                 want_contact.set(); self._send(b"ok", "text/plain")
+            elif name in ("sleep-report", "morning-report"):
+                self.report_api(name, post=True)
             elif name == "marker":  # body: plain text, e.g. "eyes closed start"
                 n = min(int(self.headers.get("Content-Length") or 0), 2000)
                 text = self.rfile.read(n).decode("utf-8", "replace").strip()[:200] or "marker"
@@ -111,6 +121,31 @@ def main() -> None:
                 self._send(b"ok", "text/plain")
             else:
                 self.send_error(404)
+
+        def report_api(self, name: str, post: bool = False) -> None:
+            """Results without asking (scripts/night_files.py): POST /sleep-report starts scripts/sleep_report.py and
+            POST /morning-report scripts/morning_check.py, detached and memory-capped; GET on either says how it is
+            going and returns the newest result; GET /hypnogram.png?date= serves a night's chart. Runs in this
+            request's thread only; any failure becomes {"error": ...} and never reaches the recording."""
+            try:
+                if nf is None:
+                    raise RuntimeError("scripts/night_files.py did not load")
+                if name == "morning-report":
+                    body = nf.start_morning(out, nights_dir, export_dir) if post else nf.morning_state(out, nights_dir)
+                    self._send(json.dumps(body).encode(), "application/json"); return
+                if name == "hypnogram.png":
+                    date = urllib.parse.parse_qs(self.path.partition("?")[2]).get("date", [None])[0]
+                    png = nf.hypnogram(nights_dir, date)
+                    if png is None:
+                        self.send_error(404); return
+                    self._send(png.read_bytes(), "image/png"); return
+                body = nf.start_job(out, nights_dir, export_dir) if post else nf.job_state(out, nights_dir)
+            except Exception as e:
+                body = {"error": f"{type(e).__name__}: {e}"}
+            try:
+                self._send(json.dumps(body).encode(), "application/json")
+            except Exception:
+                pass
 
         def stream(self) -> None:
             """Server-sent events: a hello line, then every batch as {"i": first sample, "t": arrival, "uv": [[O1,O2,T3,T4]...]}
@@ -135,6 +170,8 @@ def main() -> None:
         def do_GET(self) -> None:
             if self.path.split("?")[0].rstrip("/").endswith("/stream"):
                 self.stream(); return
+            if self.path.split("?")[0].rstrip("/").rsplit("/", 1)[-1] in ("sleep-report", "morning-report", "hypnogram.png"):
+                self.report_api(self.path.split("?")[0].rstrip("/").rsplit("/", 1)[-1]); return
             if self.path.rstrip("/").endswith("state"):
                 with lock:
                     rows = list(ring)[-FS * 4:]
