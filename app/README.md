@@ -1,8 +1,9 @@
-# EEG Tracker: Android recorder
+# EEG Tracker: Android recorder and meditation
 
-Records a BrainBit headband all night on an Android phone. One screen: Start night, Stop, the state,
+Records a BrainBit headband all night on an Android phone. The main screen: Start night, Stop, the state,
 minutes recorded, seconds since the last data, a half-hour strip of what was saved, battery, signal,
-contact per channel, and phone settings that could stop the recording.
+contact per channel, and phone settings that could stop the recording. Between nights, **Meditate** opens
+a guided eyes-closed session whose sound follows your alpha rhythm (below).
 
 - Files: `<stamp>.f32/.idx/.log` in the app's private folder (other apps cannot read it), the same format as
   `scripts/record_night.py` (`docs/data-format.md`); join a night with `scripts/to_bdf.py`. Only "Export a
@@ -11,6 +12,8 @@ contact per channel, and phone settings that could stop the recording.
 - Recorder: a foreground service of type `connectedDevice` (`lib/recorder/recorder_service.dart`) whose
   isolate owns the BrainBit session (`lib/recorder/night_recorder.dart`, rules in DECISIONS row 17 and rows 49-54).
 - Screen: `lib/ui/`, design in `../DESIGN.md`.
+- Meditation: `lib/feedback/` (the laptop page's feedback core in Dart), `lib/sound/` (flutter_soloud),
+  `lib/meditation/` (session and report), `lib/ui/meditation_*.dart`; DECISIONS rows 72-77.
 
 ## Build and test
 
@@ -22,12 +25,40 @@ flutter test --concurrency=1               # writer, recorder rules (fake headba
 flutter build apk --release --target-platform android-arm64
 ```
 
-`flutter test` also renders the screen in four states to `build/screens/*.png` (normal and 130 % text).
+`flutter test` also renders the night screen in four states and the meditation screen in eleven to
+`build/screens/*.png` (normal and 130 % text). The meditation tests stream a synthetic headband through whole
+sessions; `test/feedback_cross_check_test.dart` checks the Dart core against a session made by the JavaScript
+core (`node app/test/fixtures/make_js_session.mjs` from the repo root remakes it after a change to the JS core).
 
 The first build on the owner's laptop (2026-11-18) took about 5 minutes and fits under
 `systemd-run --user --scope -p MemoryMax=4500M`. Release builds work: `flutter build apk --release
 --target-platform android-arm64` (30 MB). The neurosdk2 1.0.21 plugin shrinks its own release build without keep
 rules, which stripped its `Neurosdk2Plugin` class; `android/build.gradle.kts` builds that one plugin unshrunk.
+
+## Meditate
+
+1. Make sure no night is being recorded (the headband talks to one thing at a time). Put the headband on and
+   switch it on. Use wired headphones or the phone's speaker: Bluetooth headphones add about 0.3 s, so the
+   sound comes late.
+2. On the main screen scroll to **Meditation** and tap **Meditate**. Pick 5, 10 or 20 minutes and tap
+   **Start meditation**.
+3. The app finds the headband and checks contact (keep still a few seconds).
+4. Calibration, 1½ minutes in silence: look at the green dot with your eyes open for 30 s; at the low tone close
+   your eyes and relax for 60 s (longer if the signal was not quiet enough: keep the jaw loose).
+5. A second tone and the sound starts: rain, wind and a low drone. When the alpha rhythm at the back of your head
+   rises above your own line, the rain softens and the drone warms; stay there a few seconds and a bell rings
+   (at most 6 a minute). A tight jaw, blinks or drifting toward sleep pause the bells. Nothing to do: just notice.
+   The screen stays on; keep the app open (locking the phone can stop the session).
+6. A third tone ends the session. The report shows minutes settled, bells, restless moments (jaw, blinks,
+   movement), drifting moments, a line of how calm the sound was, and how this session compares with earlier
+   ones (a range from the 4th session). **Stop** ends early and keeps what there was (not during calibration).
+
+The **i** button shows what the research says (`docs/evidence/meditation-feedback.md`): a guided practice, not
+a treatment, and no "meditation depth" is measured. Each session is kept in the app's private folder,
+`files/meditations/<time>.meditation.json` (the summary) and `<time>.session.json` (every sample and decision,
+in the laptop page's session format, so it can be replayed). They are not exported yet.
+
+If the headband drops out, the countdown pauses ("No signal") and the app reconnects by itself.
 
 ## If the headband drops out
 

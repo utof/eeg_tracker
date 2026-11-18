@@ -73,7 +73,7 @@ Update the status column whenever something lands.
 | 18 | Sound for states: measure "did I get there", stop when asleep, learn what works for you | after research + 6 | - |
 | 24 | Research round 2 (18 lanes: neurofeedback and sound feedback; more from four electrodes; EEG machine learning 2025-26; app tech and data) + parts | done 2026-11-18 (second pass via API, $119.79); all findings on one page | `_local/research/2026-11-18-findings.html` |
 | 19 | Research: sound for states; states and their markers; more features | done 2026-11-18 | `_local/research/2026-11-18-06-brain-states-sound-and-features.md` |
-| 21 | Meditation feedback: live (sound + settled / restless / drowsy) and a report after each session, progress across sessions | **high priority (owner)**, next after the 3 running lanes | builds on `feat/brain-sound` (live sound) and the morning check-in's alpha measures |
+| 21 | Meditation feedback: live (sound + settled / restless / drowsy) and a report after each session, progress across sessions | **v1 in the phone app** (2026-11-18): the feedback core ported to Dart (agrees with the JS core on a JS-made session), sound with `flutter_soloud`, a meditation screen (5 / 10 / 20 min, silent calibration, state chip, report with a calm line, comparison with earlier sessions, the "i" note); tested with a fake headband; not yet heard or run on the phone. Later: a no-feedback block, the learning verdict at 8 / 12 sessions, Bluetooth route detection | branch `feat/app-meditation` (from `feat/android-recorder`), `app/lib/feedback`, `app/lib/meditation`, DECISIONS 72-77 |
 | 22 | Alpha-theta training (eyes closed, back of the head; 10 sessions, the first 3 only 15 min, then decide; side-effect checklist every session; alertness check before driving; stop button; "practice, not treatment"; a note that strong memories can come up) | planned, after meditation feedback and the replay check | uses the meditation feedback engine; plan changed by research A pass 2 (`_local/research/2026-11-18-07-neurofeedback-and-sound-feedback-pass2.md`): alpha-theta is the protocol with the most reported side effects |
 | 23 | Replayed-feedback check: some sessions secretly replay an earlier session's feedback; after enough sessions, live vs replayed is compared (feeling, the trained signal, ratings) | planned with 21/22 | toggle, off by default; reminder text before each meditation while it is on |
 | 20 | Dream catcher (owner: "definitely build"): at sleep onset, ask what you're thinking, record the answer, let you drift again, 3-4 rounds | planned, right after the current features | see Ideas |
@@ -85,9 +85,9 @@ findings are on `_local/research/2026-11-18-findings.html`.
 
 1. **Phone app**: a once-a-minute phone battery line and a per-night count of missing packets in the log
    (assistant, small); then the owner's phone test (below); then merge `feat/android-recorder`. (Research D)
-2. **Meditation feedback in the app** (row 21): port the tested feedback core (DECISIONS 41-48) to Dart, sound
-   through `flutter_soloud` at 48 kHz; the meditation mode (session template, settled / restless / drifting, a
-   report after each session). The laptop bench tests come first. (Research A, D)
+2. ~~**Meditation feedback in the app**~~ (row 21): v1 built 2026-11-18 on `feat/app-meditation`: the core in
+   Dart, `flutter_soloud` at 48 kHz, the meditation screen and report (DECISIONS 72-77). Next: the owner listens
+   and runs a few sessions (below); then the no-feedback block and the learning verdict. (Research A, D)
 3. **Shared detectors** (rows 9, 18, 20, 21): "what the electrodes see" (blinks, eye movements on T3-T4, jaw
    20-70 Hz, movement) and the drift-off detector grown from `sleep-guard.js`, with a "lights off" button; it
    ships when its sleep onset falls within 5 minutes of AnySleep's on 4 of 5 recorded nights. (Research B, C)
@@ -109,6 +109,9 @@ findings are on `_local/research/2026-11-18-findings.html`.
 - **Sound feedback bench tests** (6 x about 5 min, `sound.html`): a normal run with the headband on; 20 minutes
   reclined (does it catch dozing?); a few jaw clenches; a forced-roughness check; wired vs Bluetooth headphones;
   20 blinks on cue.
+- **First meditations on the phone** (5-10 min each, `app/README.md` on `feat/app-meditation`): does the sound
+  start and feel right (levels, rain, bells), does it follow eyes closing within about a second on wired
+  headphones, does the chip say "restless" on a clench, and is the report believable.
 - **Extended setup test** (2 min, `morning.html`): blinks, left-right glances, clenches; it tells where the jaw signal
   stops and whether eye movements show on T3-T4.
 - **First real morning check-in** (`morning.html`).
