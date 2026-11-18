@@ -218,7 +218,9 @@ In the morning the sleep report has **Falling asleep** after the sleep periods: 
 by the detector and by the sleep model, whether they agree (within 5 minutes), and the check: the detector is
 trusted once 4 of 5 nights with Lights off agree. Its **i** shows the drift-off note (`docs/evidence/dream-catcher.md`).
 Both are guesses, so the check shows that they agree, not that either is right. Nights recorded before this change get
-the same comparison (counted from their start) when they are scored again, and so does the laptop's sleep report.
+the same comparison (counted from their start, or from a dream catcher's lights off): after installing this version
+the app scores each night it already has once more, between nights, which takes the same few minutes a night as
+before. The laptop's sleep report writes the same.
 
 - Code: `lib/recorder/live_drift.dart` (live), `lib/sleep/drift.dart` (the morning's comparison and the check),
   `lib/ui/lights_off_view.dart`; Python `analysis/night_drift.py`. `tool/live_drift.dart` replays a recorded night
