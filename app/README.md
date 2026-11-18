@@ -115,6 +115,16 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    a minute per model part), but only with `hw.cpu.ncore=2` in the AVD's `config.ini`: the translator's stand-in
    `/proc/cpuinfo` lists 2 processors, and with 4 cores in sysfs ONNX Runtime's CPU detection (cpuinfo) crashes
    while the library loads, at app start. That crash is the emulator's, not the phone's.
+7. **Sessions with the phone locked** (DECISIONS rows 190-197):
+   `flutter build apk --debug --target-platform android-x64 -t tool/screen_off_smoke.dart`, install, grant
+   `RECORD_AUDIO`, `BLUETOOTH_CONNECT` and `POST_NOTIFICATIONS` with `adb shell pm grant`, open the app, wait for
+   `SMOKE sound on` in logcat, then lock: `adb shell input keyevent 26`. Expect a `SMOKE tick` line every 5 s (a
+   frozen app would leave a gap), `SMOKE mic ok` with levels above -90 dBFS and `SMOKE night ok`. Meanwhile
+   `adb shell dumpsys activity services io.github.utof.eeg_tracker` shows `SessionService` with
+   `isForeground=true types=0x00000092`, and `adb shell dumpsys media.audio_flinger` one active track on an
+   output thread that is not in standby. In the app itself: **Sound**, **Sound only**, **Start**, lock, and
+   `adb shell input keyevent 86` (the media Stop key) ends the session like Stop on the lock screen. Reinstall
+   the app afterwards.
 
 The night of 2026-11-17 (58 recordings, 12.9 h) scored on the emulator in 99 s with a peak of 438 MB (PSS; 561 MB
 RSS) and the same stages as the laptop's ONNX check (96.6 % of epochs agree with the laptop's one-pass scoring; see
@@ -133,7 +143,8 @@ RSS) and the same stages as the laptop's ONNX check (96.6 % of epochs agree with
 5. A second tone and the sound starts: rain, wind and a low drone. When the alpha rhythm at the back of your head
    rises above your own line, the rain softens and the drone warms; stay there a few seconds and a bell rings
    (at most 6 a minute). A tight jaw, blinks or drifting toward sleep pause the bells. Nothing to do: just notice.
-   The screen stays on; keep the app open (locking the phone can stop the session).
+   The screen stays on. You can lock the phone with the power button: the session goes on, and **Stop** is on
+   the lock screen (see "Sessions with the phone locked").
 6. A third tone ends the session. The report shows minutes settled, bells, restless moments (jaw, blinks,
    movement), drifting moments, a line of how calm the sound was, and how this session compares with earlier
    ones (a range from the 4th session). **Stop** ends early and keeps what there was (not during calibration).
@@ -277,7 +288,7 @@ memories or feelings, and leave you drowsy for a while.
    free, wired headphones. The same 1½ minutes of silent calibration as meditation, then 15 minutes (the first three
    sessions) or 20 or 25.
 4. If you fall asleep, the sound fades and a soft rising tone wakes you. **Stop** is always there and does not ask;
-   the sound fades over about 10 seconds.
+   the sound fades over about 10 seconds. You can lock the phone during the session; it goes on.
 5. Afterwards: a minute of eyes-open grounding, the questions (with the replay check's guess when it applies), then
    **Before you leave**: a sleepiness rating and a 1-minute reaction test. If you are slower than usual or sleepy,
    do not drive or cycle yet; the retest opens after 10 minutes. Then the report.
@@ -313,8 +324,9 @@ you drift again, 3 or 4 times. For ideas, not for sleep. The **i** button shows 
 8. Afterwards (or in the morning) open **Dream catcher**: the last session's rounds are at the top. Play each
    answer and type what it was about; the note is saved as you type. Earlier sessions are at the bottom.
 
-Keep the app open with the screen on during a session: locking the phone can stop it (Android stops the
-microphone for apps in the background). Files, app-private like the meditations: `files/dream-catcher/<time>.dream.json`
+The screen stays on (black and dim) during a session. You can lock the phone: the session goes on and still
+records your answers, but the **Drifting / Awake** halves need the screen, so a locked round counts as not
+answered. Do not swipe the app away. Files, app-private like the meditations: `files/dream-catcher/<time>.dream.json`
 (the rounds, the drift-off detector's epochs) and `<time>-r<n>.wav` (your answers), your prompts in
 `files/dream-catcher/prompts/`. The session's EEG is a normal recording in `files/recordings/` with every question
 as a marker, so it is part of that night: the sleep report includes it and **Export a night** copies it.
@@ -358,10 +370,13 @@ no beat is proven to put your brain into a state.
    **Let the headband go**.
 6. Tap **Start**. With the headband: lie or sit as you will during the sound, eyes closed for fall asleep, relax and
    break; the first minute is silent. The sound then starts by itself (or tap **Start the sound now**). The screen
-   stays on and black; for eyes-closed states also dim. Keep the app open: locking the phone can stop the sound.
+   goes black (dim for eyes-closed states) and says **You can lock the phone**: lock it, or let the screen turn off.
+   The sound, the headband and the stop-when-asleep rule go on. **Stop** is also on the lock screen. If you want
+   the screen lit as before, choose **Screen: Stays on** on the setup page.
 7. Fall asleep: the sound fades out over 2.5 minutes once you are probably asleep, and is silent 45 minutes after
-   lights off at the latest. The screen then stays dim and turns off by itself. Other states end at their timer.
-   **Stop** fades out over 3 seconds.
+   lights off at the latest; with **Record the night** the night recording then starts, also on a locked phone. An
+   unlocked screen stays dim and turns off by itself. Other states end at their timer. **Stop** fades out over
+   3 seconds.
 8. Afterwards: what was measured in plain words, and one question, "did it help you get there?" (1-5). After a
    night, open **Sound** in the morning to answer it.
 
@@ -383,8 +398,44 @@ Nothing of this has been heard on a phone yet: not the levels, the beds, the bea
    - In the morning: did the sound stop by itself, did the night record from then (the sleep report starts at
      lights off), and what did the result say ("probably asleep N min after lights off")? Did that match how you
      felt?
-   - Did the dim black screen bother you, and did you want to lock the phone instead?
+   - Did the dim black screen bother you? (You can lock the phone now: see the next owner step.)
    - The session file's `stalls` (0 is right; the assistant can read it from an exported night or over USB).
+
+## Sessions with the phone locked
+
+Sound for states, meditation, alpha-theta and the dream catcher go on when the phone is locked (since 2026-11-19,
+DECISIONS rows 190-197). While a session runs, the app shows a notification with the session's name and **Stop**,
+also on the lock screen; Android then treats the app like a music player and does not put it to sleep. The night
+recording is separate and unchanged.
+
+- **Sound for states**: the screen is not kept on any more. Lock the phone or let it turn off.
+  **Screen: Stays on** on the setup page brings the old lit screen back.
+- **Meditation, alpha-theta, dream catcher**: the screen still stays on by itself; press the power button if you
+  want it dark.
+- **Fall asleep, then Record the night**: the night starts by itself on a locked phone. The first time, if the app
+  is not yet allowed to run in the background, Start asks for it and that one session keeps its screen on.
+- Do not swipe the app away from Recents during a session: that ends it.
+- The same Xiaomi settings as for the night matter here (main screen, **Phone**: Autostart, battery "No
+  restrictions").
+
+Not tried on a phone yet. On the emulator, with the screen off, the sound engine kept playing and being fed for two
+minutes, the microphone recorded real sound, and the night recording started from the locked session
+(`tool/screen_off_smoke.dart`, "Emulator smoke test" step 7).
+
+### Owner step: lock the phone during a session (15 minutes, then one bedtime)
+
+1. Daytime, no night recording: **Sound**, **Relax**, Ocean, **Measure**, 10 minutes, headband on. Tap **Start**.
+   When the sound has started, press the power button. Put the phone down and listen.
+2. After about 5 minutes wake the screen without unlocking: is there a card with **Relax** and **Stop**? Leave it.
+3. Let it run to the end. Then unlock. Tell the assistant:
+   - Did the sound play the whole 10 minutes, without gaps or an early stop?
+   - Does the result show what was measured for the whole time (not "No signal")?
+   - How the lock-screen card looked, and whether **Stop** there works (try it in another short session).
+4. At bedtime: note the battery percent. **Fall asleep**, **Measure**, **Record the night**, **Screen: Can lock**.
+   Start, lock the phone, sleep.
+5. In the morning tell the assistant: did the sound stop by itself, did the night record from then, and the battery
+   percent at lights off and in the morning. Send the session file's `stalls` and `end` (Export data has it).
+6. If a locked session stopped early: choose **Screen: Stays on** for now and say so; that is the old behaviour.
 
 ## If the headband drops out
 

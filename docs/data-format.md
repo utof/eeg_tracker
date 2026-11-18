@@ -138,6 +138,9 @@ the start of the quiet minute with the headband, the start of the sound without 
 | `night` | fall asleep with "Record the night": `started`, or why it did not start |
 | `rating` | your answer to "did it help you get there?", 1 (not at all) to 5 (clearly), `null` = not answered |
 
+Next to the sessions, `files/sound-states/settings.json` holds one choice, `{"screenStaysOn": true}` (Screen:
+Stays on; absent or false: the phone can be locked during a session, DECISIONS row 193).
+
 ## Morning check-in markers and `<start>.morning.json`
 
 `scripts/web/morning.html` writes these marker texts, in order: `morning:start`, `morning:eyes_closed:start`,
