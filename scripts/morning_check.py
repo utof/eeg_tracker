@@ -381,6 +381,9 @@ def main() -> None:
         raise SystemExit("no .f32 recordings found")
     found = find_latest(paths, "morning")
     setup = find_latest(paths, "setup")
+    if not found and any(sessions(read_markers(p), "morning") for p in paths):
+        print("Morning check-in markers found, but none with a finished eyes-closed phase holding data "
+              "(stopped early, or the recorder was not receiving).", file=sys.stderr)
     if not found and not setup:
         raise SystemExit("no morning check-in or setup test markers found (did the page reach the recorder?)")
     if found:
