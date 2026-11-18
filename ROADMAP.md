@@ -83,7 +83,7 @@ Update the status column whenever something lands.
 The owner's features first (wish 16: the phone app leads). Each step names the research behind it; the full
 findings are on `_local/research/2026-11-18-findings.html`.
 
-1. **Phone app**: a once-a-minute phone battery line and a per-night count of missing packets in the log
+1. **Phone app** (battery line and packet count: done 2026-11-18): a once-a-minute phone battery line and a per-night count of missing packets in the log
    (assistant, small); then the owner's phone test (below); then merge `feat/android-recorder`. (Research D)
 2. **Meditation feedback in the app** (row 21): port the tested feedback core (DECISIONS 41-48) to Dart, sound
    through `flutter_soloud` at 48 kHz; the meditation mode (session template, settled / restless / drifting, a
@@ -94,11 +94,15 @@ findings are on `_local/research/2026-11-18-findings.html`.
 4. ~~"i" evidence notes~~ (wish 14): done 2026-11-18: 15 notes in `docs/evidence/`, "i" buttons on every page;
    the app will bundle the same files.
 5. **Replayed-feedback check** (row 23), then **alpha-theta** (row 22). (Research A)
-6. **Dream catcher** (row 20), then the nap preset. (Research C: a rule plus a timer is the proven design)
-7. **State and trends page** (row 10): a sleep-pressure curve from the sleep log (not from EEG yet), "your usual"
+6. **Our own headband connection** (replaces BrainBit's library; owner asked 2026-11-18): the protocol is mostly
+   public (Neiry's MIT `web_sdk_neiry`); a 15-minute probe with the headband on, then a Python driver for the laptop
+   (no process restarts: reconnects in seconds, no unpairing, no crashes, contact all night if command 5 works), then
+   Dart in the app. BrainBit's library stays as a fallback. (Research D; DECISIONS 68, 84)
+7. **Dream catcher** (row 20), then the nap preset. (Research C: a rule plus a timer is the proven design)
+8. **State and trends page** (row 10): a sleep-pressure curve from the sleep log (not from EEG yet), "your usual"
    and "same as yesterday" next to every number; caffeine, alcohol and sleepiness taps in the morning check-in.
    Forecasts stay hidden until 60 days of ratings exist and they beat "same as yesterday" by 5 %. (Research B, C)
-8. **Data safety**: a checksum file per night, a catalog, an encrypted restic backup to the `архив` drive and a
+9. **Data safety**: a checksum file per night, a catalog, an encrypted restic backup to the `архив` drive and a
    monthly restore test (does not change DECISIONS 37). (Research D)
 
 ## Next tests that need the owner
