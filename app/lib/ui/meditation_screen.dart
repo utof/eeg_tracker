@@ -1,6 +1,8 @@
 // The meditation mode (DECISIONS rows 72-75): pick a length, calibrate in silence, meditate with sound that
 // follows the alpha rhythm, then a short report. Owns the headband while it runs, from this screen; only when
 // no night is being recorded. Layout in meditation_view.dart.
+// From here: the training settings (the replay check's toggle, DECISIONS rows 100-103) and alpha-theta training
+// (rows 104-107), until the main screen gets its own entries.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -11,9 +13,13 @@ import '../meditation/store.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
 import '../sound/soloud_sound.dart';
+import '../training/check_store.dart';
+import '../training/control.dart';
+import 'alpha_theta_screen.dart';
 import 'evidence_sheet.dart';
 import 'meditation_view.dart';
 import 'nearby.dart';
+import 'training_settings_screen.dart';
 
 class MeditationScreen extends StatefulWidget {
   const MeditationScreen({super.key});
@@ -29,6 +35,8 @@ class _MeditationScreenState extends State<MeditationScreen> {
   bool _nightRunning = false;
   bool _screenOn = false;
   Stage _lastStage = Stage.setup;
+  String? _recordings;
+  String? _checkPreview;
 
   @override
   void initState() {
@@ -40,12 +48,40 @@ class _MeditationScreenState extends State<MeditationScreen> {
   Future<void> _prepare() async {
     try {
       final rec = await Phone.recordingsDir();
-      if (rec != null) _c.store = MeditationStore(meditationsDirFor(rec));
+      if (rec != null) {
+        _recordings = rec;
+        _c.store = MeditationStore(meditationsDirFor(rec));
+        _loadCheck();
+      }
     } catch (_) {
       // without the folder the session still runs; it is just not saved
     }
     final running = await FlutterForegroundTask.isRunningService;
     if (mounted) setState(() => _nightRunning = running);
+  }
+
+  /// The replay check's toggle as saved, and the words the setup shows while it is on.
+  void _loadCheck() {
+    final rec = _recordings, store = _c.store;
+    if (rec == null || store == null || _c.active) return;
+    final files = filesDirFor(rec);
+    final on = SettingsStore(files).load().replayCheck;
+    final cs = on ? CheckStore(files, SessionKind.meditation) : null;
+    _c.checkStore = cs;
+    _checkPreview = cs == null ? null : previewStatus(cs, donorCandidates(store, store.list()));
+  }
+
+  Future<void> _openSettings() async {
+    final rec = _recordings;
+    if (rec == null) return _say('The app\'s folder is not known yet, so settings cannot be saved.');
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TrainingSettingsScreen(recordingsDir: rec)));
+    if (!mounted) return;
+    setState(_loadCheck);
+  }
+
+  Future<void> _openAlphaTheta() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AlphaThetaScreen()));
+    if (mounted) setState(_loadCheck);
   }
 
   void _changed() {
@@ -89,6 +125,7 @@ class _MeditationScreenState extends State<MeditationScreen> {
       await Phone.openSettings('bluetooth');
       return;
     }
+    _loadCheck();
     await _c.start(Duration(minutes: _minutes));
   }
 
@@ -141,6 +178,8 @@ class _MeditationScreenState extends State<MeditationScreen> {
       comparison: c.comparison,
       earlier: c.earlier,
       nightRunning: _nightRunning,
+      checkOn: c.stage == Stage.setup || c.stage == Stage.failed ? c.checkStore != null : c.checkOn,
+      checkStatus: c.stage == Stage.setup || c.stage == Stage.failed ? _checkPreview : c.checkStatus,
     );
     return PopScope(
       canPop: !c.active,
@@ -156,6 +195,9 @@ class _MeditationScreenState extends State<MeditationScreen> {
         onStop: _stop,
         onDone: () => Navigator.of(context).maybePop(),
         onInfo: () => showEvidence(context, 'meditation-feedback'),
+        onSettings: _openSettings,
+        onAlphaTheta: _openAlphaTheta,
+        onRatings: c.submitRatings,
       ),
     );
   }

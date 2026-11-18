@@ -9,6 +9,10 @@ import '../meditation/controller.dart' show Stage;
 import '../meditation/tracker.dart';
 import '../recorder/contact.dart';
 import '../recorder/nights.dart' show nightLabel;
+import '../training/check.dart';
+import '../training/control.dart';
+import 'check_views.dart';
+import 'form_parts.dart';
 import 'parts.dart';
 import 'phase_track.dart';
 import 'theme.dart';
@@ -40,7 +44,20 @@ class MeditationViewModel {
     this.comparison = '',
     this.earlier = const [],
     this.nightRunning = false,
+    this.kind = SessionKind.meditation,
+    this.checkOn = false,
+    this.checkStatus,
+    this.lengths = sessionMinutes,
   });
+
+  final SessionKind kind;
+
+  /// The replay check is on: the reminder before the session, no live bells or settled word during it.
+  final bool checkOn;
+  final String? checkStatus;
+
+  /// Lengths on offer (minutes).
+  final List<int> lengths;
 
   final Stage stage;
   final int minutes;
@@ -86,8 +103,14 @@ MeditationViewModel meditationModel({
   String comparison = '',
   List<MeditationSummary> earlier = const [],
   bool nightRunning = false,
+  SessionKind kind = SessionKind.meditation,
+  bool checkOn = false,
+  String? checkStatus,
+  List<int> lengths = sessionMinutes,
+  bool asleepGuard = false,
 }) {
   final lengthS = minutes * 60.0;
+  final at = kind == SessionKind.alphaTheta;
   final notes = [?soundNote, ?saveNote];
   MeditationViewModel m(
     String title,
@@ -123,6 +146,10 @@ MeditationViewModel meditationModel({
     comparison: comparison,
     earlier: earlier,
     nightRunning: nightRunning,
+    kind: kind,
+    checkOn: checkOn,
+    checkStatus: checkStatus,
+    lengths: lengths,
   );
 
   switch (stage) {
@@ -176,7 +203,29 @@ MeditationViewModel meditationModel({
         timeLabel: 'eyes open, left',
       );
     case Stage.running:
+      // with the check on, alpha above or under the line is not shown: it would tell a replay from live
+      final quiet = checkOn || at;
       final (word, sentence, shape, color) = switch (chip) {
+        Moment.settled || Moment.settling when quiet => (
+          'In session',
+          at
+              ? 'Eyes closed. Let the stream and the waves carry you; there is nothing to do.'
+              : 'Eyes closed. Nothing to do: just notice the sound.',
+          MarkShape.ring,
+          Night.inkMuted,
+        ),
+        Moment.drifting when at && asleepGuard => (
+          'Probably asleep',
+          'The sound has faded. A soft rising tone brings you back: open your eyes slowly.',
+          MarkShape.ringedDot,
+          Night.caution,
+        ),
+        Moment.drifting when at => (
+          'Drifting',
+          'Near the edge of sleep, where alpha-theta works. If you fall asleep the sound fades and a tone wakes you.',
+          MarkShape.ring,
+          Night.inkMuted,
+        ),
         Moment.settled => ('Settled', 'Eyes closed. Nothing to do: just notice the sound.', MarkShape.filled, Night.live),
         Moment.restless => (
           'Restless',
@@ -214,9 +263,10 @@ MeditationViewModel meditationModel({
         session: runSeconds / lengthS,
         live: TrackPart.session,
         timeLeft: (lengthS - runSeconds).ceil().clamp(0, 1 << 20),
-        bellCount: bells,
+        bellCount: checkOn ? null : bells,
       );
     case Stage.ending:
+    case Stage.rating:
       return m(
         'Session over',
         message,
@@ -226,7 +276,7 @@ MeditationViewModel meditationModel({
         closed: 1,
         session: runSeconds / lengthS,
         timeLeft: (lengthS - runSeconds).ceil().clamp(0, 1 << 20),
-        bellCount: bells,
+        bellCount: checkOn ? null : bells,
       );
     case Stage.report:
       final r = report!;
@@ -238,9 +288,11 @@ MeditationViewModel meditationModel({
         open: 1,
         closed: 1,
         session: r.runS / lengthS,
-        timeLeft: r.settledS.round(),
-        timeLabel: 'settled: ${(r.settledShare * 100).round()} % of ${_minSecWords(r.runS)}',
-        bellCount: r.bells,
+        timeLeft: at ? r.runS.round() : r.settledS.round(),
+        timeLabel: at
+            ? 'with sound${r.complete ? '' : ' of $minutes min'}'
+            : 'settled: ${(r.settledShare * 100).round()} % of ${_minSecWords(r.runS)}',
+        bellCount: checkOn ? null : r.bells,
       );
     case Stage.failed:
       return m('Could not start', message, MarkShape.dash, Night.problem, sentenceColor: Night.problem);
@@ -267,6 +319,9 @@ class MeditationView extends StatelessWidget {
     required this.onStop,
     required this.onDone,
     required this.onInfo,
+    this.onSettings,
+    this.onAlphaTheta,
+    this.onRatings,
   });
 
   final MeditationViewModel model;
@@ -276,14 +331,35 @@ class MeditationView extends StatelessWidget {
   final VoidCallback onDone;
   final VoidCallback onInfo;
 
+  /// Training settings (the replay check's toggle); shown in the app bar while nothing runs.
+  final VoidCallback? onSettings;
+
+  /// Opens alpha-theta training (offered under the meditation's setup).
+  final VoidCallback? onAlphaTheta;
+
+  /// Meditation's rating stage: the replay check's answers.
+  final ValueChanged<CheckRatings>? onRatings;
+
   @override
   Widget build(BuildContext context) {
     final m = model;
     final text = Theme.of(context).textTheme;
+    if (m.stage == Stage.rating && onRatings != null) return CheckRatingsView(onDone: onRatings!);
+    final idle = m.stage == Stage.setup || m.stage == Stage.failed || m.stage == Stage.report;
     return Scaffold(
       appBar: AppBar(
-        title: Text('Meditation', style: text.titleMedium?.copyWith(color: Night.inkMuted)),
+        title: Text(
+          m.kind == SessionKind.alphaTheta ? 'Alpha-theta' : 'Meditation',
+          style: text.titleMedium?.copyWith(color: Night.inkMuted),
+        ),
         actions: [
+          if (onSettings != null && idle)
+            IconButton(
+              onPressed: onSettings,
+              icon: const Icon(Icons.tune),
+              tooltip: 'Training settings',
+              color: Night.inkMuted,
+            ),
           IconButton(
             onPressed: onInfo,
             icon: const Icon(Icons.info_outline),
@@ -309,7 +385,13 @@ class MeditationView extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           _Legend(m),
-          if (m.timeLeft != null || m.bells != null) ...[const SizedBox(height: 28), _Readouts(m)],
+          if (m.timeLeft != null || m.bells != null) ...[
+            const SizedBox(height: 28),
+            if (m.checkOn && m.bells == null && m.timeLeft != null)
+              Readout(parts: _minSec(m.timeLeft!), label: m.timeLabel)
+            else
+              _Readouts(m),
+          ],
           for (final n in m.notes)
             Padding(
               padding: const EdgeInsets.only(top: 20),
@@ -328,6 +410,8 @@ class MeditationView extends StatelessWidget {
   List<Widget> _body(BuildContext context) {
     final m = model;
     switch (m.stage) {
+      case Stage.failed when m.kind == SessionKind.alphaTheta:
+        return const []; // alpha-theta's own setup page holds the length and the notes
       case Stage.setup:
       case Stage.failed:
         return [
@@ -335,7 +419,7 @@ class MeditationView extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: SegmentedButton<int>(
-              segments: [for (final v in sessionMinutes) ButtonSegment(value: v, label: Text('$v min'))],
+              segments: [for (final v in m.lengths) ButtonSegment(value: v, label: Text('$v min'))],
               selected: {m.minutes},
               onSelectionChanged: (s) => onMinutes(s.first),
               style: SegmentedButton.styleFrom(
@@ -347,6 +431,11 @@ class MeditationView extends StatelessWidget {
               ),
             ),
           ),
+          if (m.checkOn) ...[
+            const SectionHeading('Replay check'),
+            const _Note(Icons.shuffle, checkReminder),
+            if (m.checkStatus != null) Para(m.checkStatus!, color: Night.inkMuted, top: 0),
+          ],
           const SectionHeading('Before you start'),
           const _Note(
             Icons.headphones_outlined,
@@ -363,9 +452,20 @@ class MeditationView extends StatelessWidget {
             'button says what the research shows.',
             onTap: onInfo,
           ),
+          if (onAlphaTheta != null) ...[
+            const SectionHeading('Other practice'),
+            _Note(
+              Icons.waves_outlined,
+              'Alpha-theta training: eyes closed, drifting toward the edge of sleep with a stream and ocean '
+              'waves. Its own screen, with questions before the first session.',
+              onTap: onAlphaTheta,
+              chevron: true,
+            ),
+          ],
         ];
       case Stage.connecting:
       case Stage.contact:
+      case Stage.rating:
         return const [];
       case Stage.calibrating:
       case Stage.running:
@@ -382,9 +482,19 @@ class MeditationView extends StatelessWidget {
   List<Widget> _report(BuildContext context, MeditationSummary r) {
     final text = Theme.of(context).textTheme;
     String two(int v) => v.toString().padLeft(2, '0');
+    final at = r.kind == SessionKind.alphaTheta ? r.at : null;
+    String secs(Object? v) => _minSecWords(v is num ? v.toDouble() : 0);
+    final hideBells = model.checkOn;
     return [
       const SectionHeading('This session'),
-      _Row('Longest settled stretch', _minSecWords(r.longestSettledS)),
+      if (at != null) ...[
+        _Row('Alpha above its line', secs(at['alphaS']), detail: 'awake and clean time'),
+        _Row('Theta above its line', secs(at['thetaS'])),
+        _Row('Theta above alpha (crossover)', secs(at['crossoverS']), detail: 'awake only; a fact, not a goal'),
+        _Row('Probably asleep', secs(at['asleepS']), detail: 'left out of every measure'),
+        if (!hideBells) _Row('Chimes · gongs', '${at['chimes']} · ${at['gongs']}'),
+      ] else
+        _Row('Longest settled stretch', _minSecWords(r.longestSettledS)),
       _Row(
         'Restless moments',
         '${r.restlessTotal}',
@@ -392,11 +502,12 @@ class MeditationView extends StatelessWidget {
             'jaw ${r.restless[Restless.jaw]} · blinks ${r.restless[Restless.blinks]} · '
             'movement ${r.restless[Restless.movement]}',
       ),
-      _Row(
-        'Drifting toward sleep',
-        '${r.drifting}',
-        detail: r.drowsyS > 0 ? '${_minSecWords(r.drowsyS)} in all' : null,
-      ),
+      if (at == null)
+        _Row(
+          'Drifting toward sleep',
+          '${r.drifting}',
+          detail: r.drowsyS > 0 ? '${_minSecWords(r.drowsyS)} in all' : null,
+        ),
       _Row('Alpha peak', r.iafHz == null ? 'not clear' : '${(r.iafHz! * 4).round() / 4} Hz', rule: false),
       const SectionHeading('Earlier sessions'),
       if (model.earlier.isEmpty)
@@ -405,15 +516,21 @@ class MeditationView extends StatelessWidget {
         for (final (i, e) in model.earlier.take(5).indexed)
           _Row(
             '${nightLabel(e.start)}, ${two(e.start.hour)}:${two(e.start.minute)}',
-            '${(e.settledShare * 100).round()} % settled',
-            detail: '${_minSecWords(e.runS)} · ${e.bells} ${e.bells == 1 ? 'bell' : 'bells'}',
+            at != null ? _minSecWords(e.runS) : '${(e.settledShare * 100).round()} % settled',
+            detail: at != null
+                ? 'theta above its line ${secs(e.at?['thetaS'])}'
+                : hideBells
+                ? _minSecWords(e.runS)
+                : '${_minSecWords(e.runS)} · ${e.bells} ${e.bells == 1 ? 'bell' : 'bells'}',
             rule: i < math.min(5, model.earlier.length) - 1,
           ),
       Padding(
         padding: const EdgeInsets.only(top: 28),
         child: Text(
-          'Practice, not treatment. These numbers say what the headband measured, not how deep the meditation '
-          'was: no such signal exists at these electrodes.',
+          at != null
+              ? 'Practice, not treatment. Crossover often means you are falling asleep; it is shown, never aimed for.'
+              : 'Practice, not treatment. These numbers say what the headband measured, not how deep the meditation '
+                    'was: no such signal exists at these electrodes.',
           style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.4),
         ),
       ),
@@ -427,7 +544,7 @@ class MeditationView extends StatelessWidget {
         return FilledButton.icon(
           onPressed: m.nightRunning ? null : onStart,
           icon: const Icon(Icons.self_improvement),
-          label: const Text('Start meditation'),
+          label: Text(m.kind == SessionKind.alphaTheta ? 'Start session' : 'Start meditation'),
         );
       case Stage.failed:
         return FilledButton.icon(onPressed: onStart, icon: const Icon(Icons.refresh), label: const Text('Try again'));
@@ -438,6 +555,7 @@ class MeditationView extends StatelessWidget {
       case Stage.running:
         return OutlinedButton.icon(onPressed: onStop, icon: const Icon(Icons.stop_rounded), label: const Text('Stop'));
       case Stage.ending:
+      case Stage.rating:
         return OutlinedButton.icon(onPressed: null, icon: const Icon(Icons.stop_rounded), label: const Text('Saving…'));
       case Stage.report:
         return OutlinedButton.icon(onPressed: onDone, icon: const Icon(Icons.check), label: const Text('Done'));
@@ -546,7 +664,10 @@ class _Legend extends StatelessWidget {
       runSpacing: 6,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        Text('Line: how calm the sound was', style: style),
+        Text(
+          m.kind == SessionKind.alphaTheta ? 'Line: stream (low) to ocean (high)' : 'Line: how calm the sound was',
+          style: style,
+        ),
         Row(mainAxisSize: MainAxisSize.min, children: [tick(Night.caution), const SizedBox(width: 6), Text('restless', style: style)]),
         Row(mainAxisSize: MainAxisSize.min, children: [tick(Night.problem), const SizedBox(width: 6), Text('drifting', style: style)]),
       ],
@@ -570,7 +691,11 @@ class _Readouts extends StatelessWidget {
         Expanded(
           child: Readout(
             parts: [(m.bells == null ? '–' : '${m.bells}', true)],
-            label: m.bells == null ? 'bells, once the sound starts' : (m.bells == 1 ? 'bell' : 'bells'),
+            label: m.kind == SessionKind.alphaTheta
+                ? 'chimes and gongs'
+                : m.bells == null
+                ? 'bells, once the sound starts'
+                : (m.bells == 1 ? 'bell' : 'bells'),
           ),
         ),
       ],
@@ -579,10 +704,11 @@ class _Readouts extends StatelessWidget {
 }
 
 class _Note extends StatelessWidget {
-  const _Note(this.icon, this.text, {this.onTap});
+  const _Note(this.icon, this.text, {this.onTap, this.chevron = false});
   final IconData icon;
   final String text;
   final VoidCallback? onTap;
+  final bool chevron;
 
   @override
   Widget build(BuildContext context) {
@@ -595,6 +721,10 @@ class _Note extends StatelessWidget {
           Padding(padding: const EdgeInsets.only(top: 1), child: Icon(icon, size: 22, color: Night.inkMuted)),
           const SizedBox(width: 16),
           Expanded(child: Text(text, style: style)),
+          if (chevron) ...[
+            const SizedBox(width: 12),
+            const Padding(padding: EdgeInsets.only(top: 1), child: Icon(Icons.chevron_right, color: Night.inkMuted)),
+          ],
         ],
       ),
     );

@@ -21,6 +21,7 @@ dependencies:
   # ONNX Runtime 1.28 for the sleep model (AnySleep, assets/models; DECISIONS row 95). MIT. Pinned: the export
   # script checks the models with the same ONNX Runtime version (analysis/pyproject.toml, group "onnx").
   flutter_onnxruntime: 1.9.0
+  crypto: ^3.0.6
 
 dev_dependencies:
   flutter_test:

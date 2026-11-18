@@ -2,9 +2,9 @@
 
 ## What it does
 
-Planned. Eyes-closed training at the back of the head: a stream sound for alpha (the relaxed 8-12 Hz wave)
-crossfades to ocean waves for theta (the slower 4-8 Hz drowsy, dream-like wave), with a soft high chime and a
-low gong. Ten sessions, the first three only 15 minutes, then decide.
+In the phone app (not yet run on a phone). Eyes-closed training at the back of the head: a stream sound for alpha
+(the relaxed 8-12 Hz wave) crossfades to ocean waves for theta (the slower 4-8 Hz drowsy, dream-like wave), with a
+soft high chime and a low gong. Ten sessions, the first three only 15 minutes, then decide.
 
 ## Evidence for this headband: weak
 
@@ -33,19 +33,31 @@ studies wrapped in therapy, and it has the most reported side effects of the com
 
 ## How the app uses this
 
-- Built only after the replay check runs.
-- Before first use: screening questions, and plain consent: it can bring up strong memories, leave you drowsy or
-  spacey, and cause fatigue, headache, anxiety or poor sleep; at least 1 in 5 get no benefit. A personal stop plan.
-- Calibration: 1 min eyes open, 2 min eyes closed. Alpha is your peak ± 2 Hz; theta is 6 to 2 Hz below your peak.
-- Sessions: 15 min in the first three, then 20-25 min; at most one reward per band every 2-3 s, theta winning ties;
-  muscle, movement or a blink earns nothing.
-- A side-effect checklist at every session, and a sleep guard: "probably asleep" minutes are shown and left out
-  of every measure.
-- Before you leave: a sleepiness rating and a 1-minute reaction test against your own usual. If slower: "do not
-  drive or cycle yet", and a retest in 10 minutes.
-- An always-visible stop (the sound fades over about 10 s). The mode pauses and suggests talking to a
-  professional after distress of 7/10 or more, two sessions in a row with distressing memories, anything like
-  dissociation, a side effect lasting into the next day, or any seizure-like event.
+- Its own screen, opened from the meditation screen. Before first use: nine screening questions (any "yes" and the
+  mode is not offered; nothing you tick is saved), plain consent (it can bring up strong memories, leave you drowsy
+  or spacey, and cause tiredness, headache, anxiety or poor sleep; at least 1 in 5 get no benefit; practice, not
+  treatment), and your stop plan: someone to call and what grounds you.
+- Before each session a check-in: sleepiness, distress 0-10, and a side-effect checklist for the time since the last
+  session. In the first three check-ins a 1-minute reaction test sets your usual speed.
+- Calibration as in meditation: 30 s eyes open, 60 s eyes closed in silence (the research suggests 1 + 2 min; the
+  shorter one is a planning choice). Alpha is your peak ± 2 Hz; theta is 6 to 2 Hz below your peak.
+- Sessions: 15 min in the first three, then 20 or 25 min; after ten the app asks you to decide before going on.
+  Each band's line starts at your silent minute's middle value and moves every 3 minutes, aiming at alpha above it
+  50-65 % of the time and theta 30-40 %. A chime after 1 s of alpha above its line, a gong after 1 s of theta above
+  its line, at most one per band every 2.5 s, theta winning ties; a jaw clench, movement or blink earns nothing and
+  ducks the sound a little.
+- Sleep guard: when the drift-off detector says "probably asleep", the sound fades and a soft rising tone wakes you,
+  again every minute while it lasts. Those minutes are shown and left out of every measure. Crossover (theta above
+  alpha) is shown for awake time only, as a fact, never as a goal.
+- Stop is always on the screen and never asks: the sound fades over about 10 s. Then a minute of eyes-open
+  grounding, then the questions: distress, strong memories (none, pleasant, distressing), feeling unreal or
+  detached, anything like a seizure, the checklist again, how in control you felt, and notes.
+- Before you leave: a sleepiness rating and a 1-minute reaction test against your usual. If slower by over 10 % or
+  sleepy: "do not drive or cycle yet", and a retest after 10 minutes.
+- The mode pauses and suggests talking to a professional after distress of 7/10 or more, two sessions in a row with
+  distressing memories, anything like dissociation, a side effect lasting into the next day, or any seizure-like
+  event (then a doctor first). It resumes only when you confirm you have talked to someone.
+- With the replay check on, alpha-theta has its own check (the same rules as meditation's).
 
 ## Sources
 

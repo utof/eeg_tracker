@@ -115,8 +115,12 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
 - **Sleep periods:** ruled log entries: a numbered cell, the clock span, then label-left / minutes-right
   lines (Asleep, Deep, Dream, Light), wake-ups and missing minutes as plain sentences.
 - **Phone checks:** icon, one plain sentence, right-aligned text buttons that open the exact setting.
-- **Buttons:** one filled button per screen: Start night on the night screen, Start on the meditation screen; Stop is
-  outlined and asks once before stopping.
+- **Buttons:** one filled button per screen: Start night on the night screen, Start on the meditation screen, and on
+  each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before
+  stopping, except in alpha-theta, where stopping must be instant.
+- **Questions** (training pages): the question in body text, then a Material segmented row (a 1-5 scale with both
+  ends worded under it, or a few words like Live / Replay / Not sure), a slider that reads "not set" until moved, or a
+  checklist with the box first. Nothing is preselected; the forward button says "Answer each question" until done.
 
 ## Do's and Don'ts
 
