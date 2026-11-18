@@ -6,6 +6,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:eeg_tracker/detectors/detectors.dart';
+import 'package:eeg_tracker/sleep/drift.dart';
 import 'package:eeg_tracker/sleep/extras.dart';
 import 'package:eeg_tracker/sleep/model.dart';
 import 'package:eeg_tracker/sleep/report.dart';
@@ -31,7 +32,7 @@ List<String> _stages() => [
 
 /// Made-up detector output for [stages]: missing where the data is, a loose electrode for a few minutes while
 /// awake, noisy stretches here and there; jaw bursts more often awake, movements on turning.
-NightSeen _seen(List<String> stages, {int jawEveryS = 200}) {
+NightSeen _seen(List<String> stages, {int jawEveryS = 200, DriftSeen? drift}) {
   final q = [
     for (var e = 0; e < stages.length; e++)
       stages[e] == 'gap' || (stages[e] == 'W' && e % 140 < 6)
@@ -48,10 +49,12 @@ NightSeen _seen(List<String> stages, {int jawEveryS = 200}) {
       for (var k = 75; k < n; k += 410) Burst(k, k + 1, BurstKind.oneSided, 5),
     ]..sort((a, b) => a.start.compareTo(b.start)),
     moves: [for (var k = 130; k < n; k += stages[k ~/ 30] == 'W' ? 150 : 520) (k, k + 1)],
+    drift: drift,
   );
 }
 
-SleepReport _report(String nightOf, DateTime start, List<String> stages, {int jawEveryS = 200}) => SleepReport(
+SleepReport _report(String nightOf, DateTime start, List<String> stages, {int jawEveryS = 200, DriftSeen? drift}) =>
+    SleepReport(
   jsonDecode(
         jsonEncode(
           buildReport(
@@ -64,7 +67,7 @@ SleepReport _report(String nightOf, DateTime start, List<String> stages, {int ja
             model: phoneModelId,
             stages: stages,
             confidence: List.filled(stages.length, 0.74),
-            seen: _seen(stages, jawEveryS: jawEveryS),
+            seen: _seen(stages, jawEveryS: jawEveryS, drift: drift),
           ),
         ),
       )
@@ -72,12 +75,18 @@ SleepReport _report(String nightOf, DateTime start, List<String> stages, {int ja
 );
 
 final _start = DateTime(2026, 11, 17, 23, 40);
-final _main = _report('2026-11-17', _start, _stages());
+// Lights off tapped at 23:45; the detector says asleep at 23:57:30, the sleep model at 23:58 (18 min of wake).
+final _main = _report(
+  '2026-11-17',
+  _start,
+  _stages(),
+  drift: const DriftSeen(lightsOffS: 300, from: LightsOffFrom.button, tapped: 1795466700.4, onsetS: 1050),
+);
 final _others = [
   _report('2026-11-16', DateTime(2026, 11, 16, 23, 55), [..._run('W', 20), ..._run('N2', 200), ..._run('R', 60), ..._run('W', 10)],
-      jawEveryS: 260),
+      jawEveryS: 260, drift: const DriftSeen(lightsOffS: 0, from: LightsOffFrom.button, onsetS: 1260)),
   _report('2026-11-15', DateTime(2026, 11, 16, 0, 30), [..._run('W', 30), ..._run('N2', 150), ..._run('N3', 40), ..._run('W', 15)],
-      jawEveryS: 150),
+      jawEveryS: 150, drift: const DriftSeen(lightsOffS: 0, from: LightsOffFrom.nightStart)),
   SleepReport(
     jsonDecode(
           jsonEncode(
@@ -97,10 +106,18 @@ final _others = [
 ];
 
 final Map<String, Widget> _reportStates = {
-  'report': SleepReportView(nightOf: '2026-11-17', report: _main, others: _others, onInfo: () {}, onLicences: () {}),
+  'report': SleepReportView(
+    nightOf: '2026-11-17',
+    report: _main,
+    others: _others,
+    onInfo: () {},
+    onLicences: () {},
+    onDriftInfo: () {},
+  ),
   'report_scoring': const SleepReportView(nightOf: '2026-11-17', scoringStep: 'Sleep model, run 2 of 3, part 4 of 9'),
   'report_blocked': const SleepReportView(nightOf: '2026-11-17', blocked: ''),
   'report_short': SleepReportView(nightOf: '2026-11-14', report: _others.last),
+  'report_night_start': SleepReportView(nightOf: '2026-11-15', report: _others[1], others: [_main, _others[0]], onDriftInfo: () {}),
   'report_no_period': SleepReportView(
     nightOf: '2026-11-17',
     report: _report('2026-11-17', _start, [..._run('W', 40), ..._run('N1', 6), ..._run('W', 30)]),
@@ -187,7 +204,7 @@ void main() {
 
   for (final scale in [1.0, 1.3]) {
     testWidgets('the whole report on one tall page at ${(scale * 100).round()} % text, for a look', (tester) async {
-      tester.view.physicalSize = Size(1210, scale == 1.0 ? 6600 : 8800); // 440 dp wide
+      tester.view.physicalSize = Size(1210, scale == 1.0 ? 7600 : 10200); // 440 dp wide
       tester.view.devicePixelRatio = 2.75;
       addTearDown(tester.view.reset);
       final key = GlobalKey();

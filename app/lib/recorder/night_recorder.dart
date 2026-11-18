@@ -493,7 +493,7 @@ class NightRecorder {
     if (_stopping) return;
     final at = _now();
     _night = _night.copyWith(lightsOffMs: at.millisecondsSinceEpoch);
-    unawaited(_save());
+    unawaited(_save().catchError((Object _) {})); // the next 10 s check saves it again
     _marker(lightsOffMarker, at);
     if (_drift == null && !_driftUsed) _startDrift();
     _guarded((d) => d.lightsOff(at));

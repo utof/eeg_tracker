@@ -21,6 +21,7 @@ import '../sleep/scorer.dart';
 import 'dream_screen.dart';
 import 'dream_view.dart' show clock;
 import 'export_screen.dart';
+import 'lights_off_view.dart';
 import 'meditation_screen.dart';
 import 'morning_screen.dart';
 import 'morning_section.dart';
@@ -150,6 +151,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   int _ticks = 0;
   Completer<void>? _stopped;
   SleepScoring? _scoring;
+  int? _lightsOffSentMs;
   String? _dreamLine;
   String? _checkedInAt;
   Pending? _pending;
@@ -346,6 +348,16 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Lights off: a marker in the night and the drift-off detector from here. The first tap of a night is instant; a
+  /// later one asks, since it moves the night's comparison (DECISIONS 180).
+  Future<void> _lightsOff() async {
+    final first = _status?.lightsOffMs ?? _lightsOffSentMs;
+    if (first != null && !await confirmLightsOffAgain(context, DateTime.fromMillisecondsSinceEpoch(first))) return;
+    if (!mounted || !_running) return;
+    setState(() => _lightsOffSentMs = DateTime.now().millisecondsSinceEpoch);
+    FlutterForegroundTask.sendDataToTask(lightsOffCommand);
+  }
+
   Future<void> _stop() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -368,6 +380,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       await FlutterForegroundTask.stopService();
     } finally {
       _stopped = null;
+      _lightsOffSentMs = null;
       if (mounted) setState(() => _busy = false);
       unawaited(_refresh());
     }
@@ -510,6 +523,15 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
             ),
       sleep: _running ? null : _sleepSummary(),
       dreamLine: _dreamLine,
+      lightsOffLine: s == null
+          ? null
+          : lightsOffLine(
+              lightsOffMs: s.lightsOffMs ?? _lightsOffSentMs,
+              drift: s.drift,
+              onsetMs: s.driftOnsetMs,
+              recording: s.phase == Phase.recording,
+            ),
+      lightsOffTapped: (s?.lightsOffMs ?? _lightsOffSentMs) != null,
     );
   }
 
@@ -530,6 +552,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onSleepReport: sleep == null ? null : () => _openSleep(sleep.nightOf),
       onRetrySleep: sleep == null ? null : () => _scoring?.retry(sleep.nightOf),
       morning: MorningSection(doneAt: _checkedInAt, onCheckIn: _checkIn, onTrends: _trends),
+      onLightsOff: _lightsOff,
     );
   }
 }

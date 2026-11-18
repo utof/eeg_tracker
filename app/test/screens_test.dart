@@ -3,9 +3,11 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:eeg_tracker/detectors/drift_off.dart' show DriftState;
 import 'package:eeg_tracker/phone.dart';
 import 'package:eeg_tracker/recorder/status.dart';
 import 'package:eeg_tracker/ui/night_strip.dart';
+import 'package:eeg_tracker/ui/lights_off_view.dart';
 import 'package:eeg_tracker/ui/night_view.dart';
 import 'package:eeg_tracker/ui/phone_checks.dart';
 import 'package:eeg_tracker/ui/theme.dart';
@@ -69,6 +71,26 @@ final Map<String, NightViewModel> states = {
       nearbyAllowed: true,
       xiaomiDone: true,
     ),
+    lightsOffLine: lightsOffLine(lightsOffMs: null, drift: DriftState.awake, onsetMs: null),
+  ),
+  'recording_lights_off': NightViewModel(
+    title: 'Recording',
+    sentence: 'All is well. You can put the phone down.',
+    tone: Tone.live,
+    running: true,
+    minutes: 206.4,
+    dataAgeSeconds: 1,
+    rows: _rows(end: _now, live: true),
+    battery: 78,
+    rssi: -64,
+    contactOhms: const {'O1': 4.2e5, 'O2': 6.1e5, 'T3': 1.8e6, 'T4': 3.4e6},
+    checks: const [],
+    lightsOffLine: lightsOffLine(
+      lightsOffMs: DateTime(2026, 11, 18, 23, 42).millisecondsSinceEpoch,
+      drift: DriftState.asleep,
+      onsetMs: DateTime(2026, 11, 18, 23, 51, 30).millisecondsSinceEpoch,
+    ),
+    lightsOffTapped: true,
   ),
   'no_data': NightViewModel(
     title: 'No data',
@@ -82,6 +104,12 @@ final Map<String, NightViewModel> states = {
     rssi: -88,
     contactOhms: const {'O1': 4.2e5, 'O2': 6.1e5, 'T3': 1.8e6, 'T4': 3.4e6},
     checks: const [_xiaomi],
+    lightsOffLine: lightsOffLine(
+      lightsOffMs: DateTime(2026, 11, 18, 23, 42).millisecondsSinceEpoch,
+      drift: DriftState.baseline,
+      onsetMs: null,
+    ),
+    lightsOffTapped: true,
   ),
   'first_run': NightViewModel(
     title: 'Ready',
@@ -127,6 +155,40 @@ final Map<String, NightViewModel> states = {
 void main() {
   setUpAll(loadFonts);
 
+  // The owner's Xiaomi 11T is narrower (393 dp): the bar with Lights off and Stop side by side must still fit.
+  for (final name in ['recording', 'recording_lights_off']) {
+    testWidgets('$name at 393 dp and 130 % text', (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1080 / 393;
+      addTearDown(tester.view.reset);
+      final key = GlobalKey();
+      await tester.pumpWidget(
+        MediaQuery(
+          data: MediaQueryData.fromView(tester.view).copyWith(textScaler: const TextScaler.linear(1.3), disableAnimations: true),
+          child: MaterialApp(
+            debugShowCheckedModeBanner: false,
+            theme: nightTheme(),
+            home: RepaintBoundary(
+              key: key,
+              child: NightView(model: states[name]!, onStart: () {}, onStop: () {}, onFix: (_) {}, onLightsOff: () {}),
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(tester.takeException(), isNull);
+      expect(find.text(name == 'recording' ? 'Lights off' : 'Lights off again'), findsOneWidget);
+      final boundary = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      await tester.runAsync(() async {
+        final image = await boundary.toImage(pixelRatio: 1080 / 393);
+        final png = await image.toByteData(format: ui.ImageByteFormat.png);
+        File('build/screens/${name}_393dp_text130.png')
+          ..createSync(recursive: true)
+          ..writeAsBytesSync(png!.buffer.asUint8List());
+      });
+    });
+  }
+
   for (final scale in [1.0, 1.3]) {
     for (final e in states.entries) {
       testWidgets('${e.key} at ${(scale * 100).round()} % text', (tester) async {
@@ -143,7 +205,15 @@ void main() {
               theme: nightTheme(),
               home: RepaintBoundary(
                 key: key,
-                child: NightView(model: e.value, onStart: () {}, onStop: () {}, onFix: (_) {}, onExport: () {}, onExportData: () {}),
+                child: NightView(
+                  model: e.value,
+                  onStart: () {},
+                  onStop: () {},
+                  onFix: (_) {},
+                  onExport: () {},
+                  onExportData: () {},
+                  onLightsOff: () {},
+                ),
               ),
             ),
           ),
