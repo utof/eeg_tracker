@@ -326,7 +326,6 @@ class MorningController extends ChangeNotifier {
   Future<void> _recorded() async {
     _ended = true;
     _ticker?.cancel();
-    _set(MorningStage.questions, '');
     final w = morningWindows(_markers)!;
     final job = (
       channels: {for (final c in backChannels) c: Float64List.fromList(_uv[c]!)},
@@ -334,9 +333,10 @@ class MorningController extends ChangeNotifier {
     );
     _analysis = Isolate.run(() => _analyse(job));
     unawaited(_analysis!.then((_) {}, onError: (Object _) {})); // a failure is reported at Save
-    await _release();
+    await _release(); // before the stage changes: the screen lets the scanner go then
     _writer?.close();
-    await _sound?.stop();
+    _set(MorningStage.questions, '');
+    unawaited(_sound?.stop()); // lets the end tone ring out
   }
 
   /// Saves the check-in with the answers and shows the numbers.

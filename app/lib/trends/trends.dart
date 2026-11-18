@@ -27,6 +27,8 @@ class MeasureSpec {
     this.up = 'higher than usual',
     this.down = 'lower than usual',
     this.note,
+    this.min = 0,
+    this.max,
   });
 
   final String id;
@@ -40,17 +42,22 @@ class MeasureSpec {
 
   /// One plain line under the label, when the measure needs it.
   final String? note;
+
+  /// The ends of the measure's own scale: a normal range shown is kept inside them.
+  final double min;
+  final double? max;
 }
 
+/// `7 h 05 min`, `42 min`, with no-break spaces so a duration never splits across lines.
 String _hm(double minutes) {
   final t = minutes.round();
-  return t < 60 ? '$t min' : '${t ~/ 60} h ${(t % 60).toString().padLeft(2, '0')} min';
+  return t < 60 ? '$t\u00a0min' : '${t ~/ 60}\u00a0h\u00a0${(t % 60).toString().padLeft(2, '0')}\u00a0min';
 }
 
-String _of(double v, int top) => '${v.round()} of $top';
+String _of(double v, int top) => '${v.round()}\u00a0of\u00a0$top';
 String _count(double v, String one, String many) {
   final n = v.round();
-  return n >= 5 ? '5+ $many' : (n == 1 ? '1 $one' : '$n $many');
+  return n >= 5 ? '5+\u00a0$many' : (n == 1 ? '1\u00a0$one' : '$n\u00a0$many');
 }
 
 final List<MeasureSpec> measureSpecs = [
@@ -70,6 +77,8 @@ final List<MeasureSpec> measureSpecs = [
     group: TrendGroup.morning,
     scale: Scale.rating,
     format: (v) => _of(v, 9),
+    min: 1,
+    max: 9,
     up: 'sleepier than usual',
     down: 'more alert than usual',
   ),
@@ -78,17 +87,27 @@ final List<MeasureSpec> measureSpecs = [
     label: 'Reaction time',
     group: TrendGroup.morning,
     scale: Scale.reaction,
-    format: (v) => '${v.round()} ms',
+    format: (v) => '${v.round()}\u00a0ms',
     up: 'slower than usual',
     down: 'quicker than usual',
   ),
-  MeasureSpec(id: 'mood', label: 'Mood', group: TrendGroup.morning, scale: Scale.rating, format: (v) => _of(v, 5)),
+  MeasureSpec(
+    id: 'mood',
+    label: 'Mood',
+    group: TrendGroup.morning,
+    scale: Scale.rating,
+    format: (v) => _of(v, 5),
+    min: 1,
+    max: 5,
+  ),
   MeasureSpec(
     id: 'tension',
     label: 'Tension',
     group: TrendGroup.morning,
     scale: Scale.rating,
     format: (v) => _of(v, 5),
+    min: 1,
+    max: 5,
     up: 'more tense than usual',
     down: 'less tense than usual',
   ),
@@ -97,7 +116,7 @@ final List<MeasureSpec> measureSpecs = [
     label: 'Alpha speed',
     group: TrendGroup.morning,
     scale: Scale.plain,
-    format: (v) => '${v.toStringAsFixed(2)} Hz',
+    format: (v) => '${v.toStringAsFixed(2)}\u00a0Hz',
     up: 'faster than usual',
     down: 'slower than usual',
     note: 'Eyes closed. It does not tell tiredness.',
@@ -107,7 +126,7 @@ final List<MeasureSpec> measureSpecs = [
     label: 'Alpha strength',
     group: TrendGroup.morning,
     scale: Scale.log,
-    format: (v) => '${v.toStringAsFixed(1)} µV²',
+    format: (v) => '${v.toStringAsFixed(1)}\u00a0µV²',
     up: 'stronger than usual',
     down: 'weaker than usual',
     note: 'Eyes closed.',
@@ -127,7 +146,8 @@ final List<MeasureSpec> measureSpecs = [
     label: 'Settled in meditation',
     group: TrendGroup.practice,
     scale: Scale.plain,
-    format: (v) => '${v.round()} %',
+    format: (v) => '${v.round()}\u00a0%',
+    max: 100,
     up: 'more settled than usual',
     down: 'less settled than usual',
   ),

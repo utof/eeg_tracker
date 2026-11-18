@@ -11,6 +11,7 @@ import 'package:eeg_tracker/trends/forecast.dart';
 import 'package:eeg_tracker/trends/pressure.dart';
 import 'package:eeg_tracker/trends/trends.dart';
 import 'package:eeg_tracker/trends/usual.dart';
+import 'package:eeg_tracker/ui/trends_view.dart' show arrowWords, rangeText;
 import 'package:flutter_test/flutter_test.dart';
 
 /// A series of [n] days ending the day before [today], from [value] (k = 0 is the oldest).
@@ -266,7 +267,7 @@ void main() {
       expect(row('asleep').line, hasLength(14));
       expect(row('kss').value, 8);
       expect(row('reaction').value, 300);
-      expect(row('caffeine').spec.format(row('caffeine').value!), '2 cups');
+      expect(row('caffeine').spec.format(row('caffeine').value!), '2\u00a0cups');
       expect(row('practice').value, 30);
       expect(row('settled').value, closeTo(600 / 900 * 100, 1e-9));
       expect((m.nights, m.mornings, m.sessions, m.daysWithData), (1, 1, 3, 1));
@@ -289,5 +290,22 @@ void main() {
       final reaction = m.rows.singleWhere((r) => r.spec.id == 'reaction');
       expect(reaction.hasData, isFalse);
     });
+  });
+
+  test('a normal range says its unit once and stays inside the scale', () {
+    MeasureSpec spec(String id) => measureSpecs.singleWhere((m) => m.id == id);
+    expect(rangeText(spec('kss'), -1, 7), '1 to 7\u00a0of\u00a09');
+    expect(rangeText(spec('mood'), 2, 6), '2 to 5\u00a0of\u00a05');
+    expect(rangeText(spec('reaction'), 270, 330), '270 to 330\u00a0ms');
+    expect(rangeText(spec('asleep'), 369, 489), '6\u00a0h\u00a009\u00a0min to 8\u00a0h\u00a009\u00a0min');
+  });
+
+  test('a rating at the edge of its normal range gets the arrow the words agree with', () {
+    final s = days('2026-11-18', 20, (k) => 4.0 + (k % 3 == 0 ? 1 : (k % 3 == 1 ? -1 : 0)));
+    final spec = measureSpecs.singleWhere((m) => m.id == 'kss');
+    final u = usualOf(s, '2026-11-18', spec.scale);
+    final row = TrendRow(spec: spec, usual: u, line: const [], day: '2026-11-18', value: 7, arrow: u.arrow(7));
+    expect(row.arrow, Arrow.up);
+    expect(arrowWords(row), 'Sleepier than usual (normal range 2 to 6\u00a0of\u00a09).');
   });
 }
