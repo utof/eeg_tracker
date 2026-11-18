@@ -53,6 +53,13 @@ warms as eyes-closed alpha rises above your own line; a tight jaw, a blink or dr
 It reads the live stream, answers in about 0.3 s in training mode, and also has a demo signal. See
 [docs/brain-sound.md](docs/brain-sound.md). JS tests: `node --test tests/web/*.test.mjs`.
 
+**Why we believe each feature (evidence notes).** Every feature has a short note in
+[docs/evidence/](docs/evidence/README.md): what the research says, where the data supports it and where it does
+not, how the app uses it, the sources, and the libraries and models with their licences. Each carries one grade
+for this headband: strong, some, weak or none. The pages open them from a round "i" button, and the phone app will
+bundle the same files. After editing a note, run `python3 scripts/evidence_to_js.py` (it writes
+`scripts/web/evidence.js`; tests: `node --test tests/web/evidence.test.mjs`).
+
 BrainBit's NeuroSDK2 core is a closed binary from BrainBit; it is not part of this repository.
 
 MIT licence.
