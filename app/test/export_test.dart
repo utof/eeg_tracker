@@ -72,6 +72,9 @@ Directory fakeFiles(Directory tmp) {
   text('nights/2026-11-19.report.tmp', '{');
   text('nights/2026-11-19.scoring', '');
   text('sound-states/2026-11-19-230000.sound.json.tmp', '{');
+  // and what Android and the plugins keep there for themselves (seen on the emulator): not the owner's data
+  put('profileInstalled', [0, 0, 0, 1, 0, 0, 0, 0]);
+  text('flutter_callback_cache.json', '[{"handle":-1,"representation":{"name":"recorderEntryPoint"}}]');
   return files;
 }
 
@@ -122,7 +125,7 @@ void main() {
   );
 
   group('what is exported', () {
-    test('every place the app writes, in its own layout; models, temporary files and markers stay', () {
+    test('every place the app writes, in its own layout; models, temporary files, markers and Android\'s own files stay', () {
       final paths = [for (final f in storedFiles(files)) f.path];
       expect(paths, [
         'alpha-theta/2026-11-19-090000.alphatheta.json',

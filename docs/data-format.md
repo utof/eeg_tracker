@@ -190,7 +190,8 @@ folder). It never changes or deletes anything in the app's folder, and never run
   `mornings/`, `meditations/`, `alpha-theta/` (sessions and `journal.json`), `replay-check/<kind>/` and
   `settings.json`, `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers, `prompts/`), `sound-states/`, and any folder
   a later feature adds. Left on the phone: `models/` (copies of the app's model assets), `export/` (the export's own
-  index), half-written `*.tmp` files and the scorer's `*.scoring` markers.
+  index), half-written `*.tmp` files, the scorer's `*.scoring` markers, and the two files Android and a plugin keep
+  there for themselves (`profileInstalled`, `flutter_callback_cache.json`; DECISIONS row 160).
 - **Export new** copies files that are new or changed (size or modified time) since the last export to this folder;
   **Export everything** copies every file again. A file is replaced whole; files the app rewrites (a session file
   once you answer its question, a dream note, the alpha-theta journal, a rebuilt sleep report) are copied again.

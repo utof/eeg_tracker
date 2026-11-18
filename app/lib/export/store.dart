@@ -7,6 +7,9 @@
 //   export/      this file's state: the index of what was exported and the export log
 //   *.tmp        half-written files (every store writes a temporary file, then renames it)
 //   *.scoring    the sleep scorer's "working on it" marker
+//   profileInstalled, flutter_callback_cache.json
+//                what Android and the plugins keep at the top of `files/` for themselves (androidx's profile
+//                installer, flutter_foreground_task's callback handle; seen on the emulator, DECISIONS row 160)
 // The index (`files/export/state.json`) holds each exported file's size, modified time and SHA-256, so an export of
 // "what is new" needs to read only new or changed files, and the manifest can list every file without reading it
 // again. Plain Dart: tested on a plain folder.
@@ -24,6 +27,7 @@ const int manifestVersion = 1;
 const int exportReminderDays = 3;
 
 const Set<String> _staysTop = {'models', 'export'};
+const Set<String> _platformFiles = {'profileInstalled', 'flutter_callback_cache.json'};
 
 /// A relative path inside the export folder: `/`-separated, no empty, `.` or `..` parts.
 bool safeExportPath(String p) =>
@@ -33,6 +37,7 @@ bool safeExportPath(String p) =>
 bool isExported(String path) {
   final parts = path.split('/');
   if (parts.length > 1 && _staysTop.contains(parts.first)) return false;
+  if (parts.length == 1 && _platformFiles.contains(path)) return false;
   return safeExportPath(path) && !path.endsWith('.tmp') && !path.endsWith('.scoring');
 }
 
