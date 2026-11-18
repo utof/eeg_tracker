@@ -120,6 +120,8 @@ findings are on `_local/research/2026-11-18-findings.html`.
 - Clear the GitHub billing lock, so GitHub builds the app on every change (the laptop can build it too).
 - Morning check-in eyes-closed phase: keep 2 minutes or make it 3 (research D).
 - Order a spare magnetic charging cable for the headband (order by about 28 November; see the parts report).
+- Backups: an encrypted restic backup of the recordings to the `архив` drive needs a password you keep (a password
+  manager or paper); say where it should live and the assistant sets it up. Today the recordings exist in one copy.
 
 ## Ideas for later (after the wishes above are built)
 
