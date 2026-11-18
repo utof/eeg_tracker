@@ -84,3 +84,5 @@ Follow-ups (cloud session, merged 2026-11-18) in `docs/research/`: `anysleep.md`
 - `scripts/brainbit_probe.py`: scan, connect, contact, 5 s of signal.
 - `scripts/score_sleep.py`: AnySleep (3 runs averaged, 4 channels, 0.3 Hz high-pass added by us) and YASA (O1-T3) per 30 s epoch;
   epochs missing over 5 s are not scored; writes JSON and a hypnogram PNG. Environment: `analysis/` (uv, CPU torch).
+- `scripts/export_events.py`: `eeg_sleep_night` events in utof_tracker's envelope (docs/data-format.md); a separate
+  type from utof_tracker's own `sleep_night`, so neither overwrites the other. utof_tracker does not read them yet.
