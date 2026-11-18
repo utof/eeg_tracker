@@ -64,6 +64,7 @@ Update the status column whenever something lands.
 | 16 | Eyes open/closed test (high beep open, low beep closed) | working | `scripts/web/eyes.html` |
 | 17 | Sound for states: binaural, isochronic, pulsed noise; presets per state; markers for checking | first page working (review fixes in); next: calm beds as the default, beats as optional extras | `scripts/web/beats.html` |
 | 18 | Sound for states: measure "did I get there", stop when asleep, learn what works for you | after research + 6 | - |
+| 24 | Research round 2 (18 lanes: neurofeedback and sound feedback; more from four electrodes; EEG machine learning 2025-26; app tech and data) | in progress | `_local/research/2026-11-18-07-*` |
 | 19 | Research: sound for states; states and their markers; more features | done 2026-11-18 | `_local/research/2026-11-18-06-brain-states-sound-and-features.md` |
 | 21 | Meditation feedback: live (sound + settled / restless / drowsy) and a report after each session, progress across sessions | **high priority (owner)**, next after the 3 running lanes | builds on `feat/brain-sound` (live sound) and the morning check-in's alpha measures |
 | 22 | Alpha-theta training (eyes closed, back of the head; 20-30 sessions of about 25 min; stop button; "practice, not treatment"; a note that strong memories can come up) | planned, after meditation feedback | uses the meditation feedback engine; research lane on neurofeedback first |
@@ -99,3 +100,9 @@ Anyone, including the assistant, adds ideas here. When one is started, move it i
 | Reaction-time check | a 1-minute daily tap test next to the EEG, an objective alertness number | |
 | Self-experiments | the app picks random days (e.g. no coffee after 14:00) for a few weeks and reports the effect with a range | the only route to "this causes that" |
 | Helmet-only | frontal brain asymmetry, a brain-typing speller (P300), flicker games (SSVEP) | need electrodes the headband lacks |
+
+## Research for later (proposed, not run yet)
+
+| Lane | What it would answer |
+|---|---|
+| Rules for a public release | when an app counts as a medical device (EU MDR, US FDA "general wellness"), which claims are allowed, privacy law (GDPR) for brain data |
