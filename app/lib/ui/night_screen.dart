@@ -27,6 +27,7 @@ import 'night_view.dart';
 import 'phone_checks.dart';
 import 'sleep_report_screen.dart';
 import 'sleep_scoring.dart';
+import 'states_screen.dart';
 import 'theme.dart';
 import 'trends_screen.dart';
 
@@ -253,7 +254,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     }
     // Last night is scored on the phone once it has ended (DECISIONS row 97); never while a night records, nor
     // while a dream catcher session writes its recording.
-    if (!running && !dreamSessionRunning) unawaited(_scoring?.run());
+    if (!running && !dreamSessionRunning && !soundSessionRunning) unawaited(_scoring?.run());
     final dreamLine = dir == null ? null : _lastDream(dir);
     if (!mounted) return;
     setState(() {
@@ -408,6 +409,12 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   Future<void> _trends() =>
       Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TrendsScreen(recordingsDir: _dir)));
 
+  /// Sound for states: with the headband between nights, by its timer alone during one (DECISIONS row 130).
+  Future<void> _sound() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const StatesScreen()));
+    unawaited(_refresh());
+  }
+
   Future<void> _fix(FixAction a) async {
     switch (a) {
       case FixAction.requestNearby:
@@ -487,6 +494,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onExport: _export,
       onMeditate: _meditate,
       onDream: _dream,
+      onSound: _sound,
       onSleepReport: sleep == null ? null : () => _openSleep(sleep.nightOf),
       onRetrySleep: sleep == null ? null : () => _scoring?.retry(sleep.nightOf),
       morning: MorningSection(doneAt: _checkedInAt, onCheckIn: _checkIn, onTrends: _trends),

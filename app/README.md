@@ -6,7 +6,8 @@ contact per channel, and phone settings that could stop the recording. Between n
 opens the **morning check-in** and the **trends** page (below), and **Meditate** opens a guided eyes-closed
 session whose sound follows your alpha rhythm (below); from there, **Alpha-theta** training and the **replay
 check** (both below). Also between nights, the **Dream catcher** asks what is on your mind as you drift off and
-records your answers (below).
+records your answers (below). **Sound** (at the bottom, also during a night) plays calm sound
+for a state, with an optional beat, and with the headband shows what your brain does (below).
 
 - Files: `<stamp>.f32/.idx/.log` in the app's private folder (other apps cannot read it), the same format as
   `scripts/record_night.py` (`docs/data-format.md`); join a night with `scripts/to_bdf.py`. Only "Export a
@@ -27,6 +28,9 @@ records your answers (below).
 - Morning check-in and trends: `lib/morning/` (the laptop's `morning_check.py` in Dart, the session, the files),
   `lib/trends/` (days, your usual, sleep pressure, the forecast gate), `lib/ui/morning_*.dart`,
   `lib/ui/trends_*.dart`; DECISIONS rows 120-129.
+- Sound for states: `lib/states/` (presets, stop rule, readout, files, session), `lib/sound/state_synth.dart` (the
+  sound, made in the app) and `lib/sound/soloud_state_sound.dart`, `lib/ui/states_*.dart` and `lib/ui/sound_score.dart`;
+  DECISIONS rows 130-139.
 
 ## Build and test
 
@@ -39,12 +43,15 @@ flutter build apk --release --target-platform android-arm64
 ```
 
 `flutter test` also renders the night screen in four states, the meditation screen in eleven, the sleep report in
-eight, the replay check's and alpha-theta's pages in nineteen, the dream catcher in thirteen and the
-check-in, trends and Morning section in eighteen to `build/screens/*.png` (normal and 130 % text).
+eight, the replay check's and alpha-theta's pages in nineteen, the dream catcher in thirteen, the check-in, trends
+and Morning section in eighteen and sound for states in fourteen to `build/screens/*.png` (normal and 130 % text).
 `test/dream_test.dart` runs whole dream catcher sessions on a fake
 headband whose alpha fades and comes back, with a fake microphone. `test/morning_cross_check_test.dart` checks the
 check-in's numbers against a fixture made by the laptop's Python (`test/fixtures/make_morning_fixture.py`); with
 `MORNING_F32=<check-in .f32> MORNING_JSON=<its .morning.json>` it also runs a whole recorded check-in.
+`test/states_controller_test.dart` runs
+sound-for-states sessions the same way, and `test/state_synth_test.dart` checks the made sound (loudness, pulse
+edges, the beat in the sound or only between the ears) without an audio device.
 `test/sleep_prep_test.dart` checks the sleep model's input against a fixture made by the laptop's Python
 (`test/fixtures/make_sleep_fixture.py`). The meditation tests stream a synthetic headband through whole
 sessions; `test/feedback_cross_check_test.dart` checks the Dart core against a session made by the JavaScript
@@ -254,6 +261,54 @@ asking at the right moment.
    - Could you tap Drifting / Awake half-asleep?
 4. With **Record the night** on a later evening, check in the morning that the night recorded and that **Sleep
    report** covers the time from Lights off.
+
+## Sound for states
+
+Calm sound to help you fall asleep, relax, focus, take a break or wake up. A beat is an optional extra. With the
+headband on, the app first measures a quiet minute, then shows what your brain does during the sound. The **i**
+button says what the research shows (`docs/evidence/sound-for-states.md`): calm sound has the better evidence, and
+no beat is proven to put your brain into a state.
+
+1. On the main screen scroll to **Sound** and tap it. It works between nights and during one (then without the
+   headband, by its timer).
+2. Pick a state. The line at the top (the score) shows the session: a quiet minute, the sound fading in and out over
+   its minutes, and the beat's rate as a line if you add one.
+3. Pick a sound: Rain, Pink noise, Brown noise or Ocean. Under **Beat** leave **No beat**, or add Pulsed noise,
+   Isochronic tones or Binaural beats (headphones in both ears). On some days use No beat on purpose: it is just as
+   loud, so you can compare.
+4. Tap **Listen** and set the phone's volume low with its buttons. Pick the length.
+5. **Headband**: **Measure** (headband on and switched on) or **Sound only**. For **Fall asleep** with the headband,
+   choose what happens when the sound has stopped: **Record the night** (the night recording starts by itself) or
+   **Let the headband go**.
+6. Tap **Start**. With the headband: lie or sit as you will during the sound, eyes closed for fall asleep, relax and
+   break; the first minute is silent. The sound then starts by itself (or tap **Start the sound now**). The screen
+   stays on and black; for eyes-closed states also dim. Keep the app open: locking the phone can stop the sound.
+7. Fall asleep: the sound fades out over 2.5 minutes once you are probably asleep, and is silent 45 minutes after
+   lights off at the latest. The screen then stays dim and turns off by itself. Other states end at their timer.
+   **Stop** fades out over 3 seconds.
+8. Afterwards: what was measured in plain words, and one question, "did it help you get there?" (1-5). After a
+   night, open **Sound** in the morning to answer it.
+
+Files, app-private: `files/sound-states/<time>.sound.json` (the sound, timings, readout, your answer;
+`docs/data-format.md`). Only **Fall asleep** with the headband keeps its EEG, as a normal recording in
+`files/recordings/` with the sound's events as markers, so it is part of that night's sleep report and export.
+
+### Owner step: the first sound sessions (15 minutes, then one bedtime)
+
+Nothing of this has been heard on a phone yet: not the levels, the beds, the beats, or the stop when asleep.
+
+1. Between nights, open **Sound**. For each bed tap **Listen**: is any of them harsh or too loud at a low phone
+   volume? Then add each beat (Pulsed noise, Isochronic tones; Binaural with headphones) and Listen again: is the
+   beat soft enough, and does **No beat** sound as loud as with a beat?
+2. **Relax**, Ocean, **Measure**, 5 minutes, headband on, eyes closed. Afterwards read the result lines.
+3. At bedtime: **Fall asleep**, Pink noise (a beat if you like), **Measure**, **Record the night**. Sleep.
+4. Tell the assistant:
+   - Which beds and beats you liked or disliked, and whether any level was off.
+   - In the morning: did the sound stop by itself, did the night record from then (the sleep report starts at
+     lights off), and what did the result say ("probably asleep N min after lights off")? Did that match how you
+     felt?
+   - Did the dim black screen bother you, and did you want to lock the phone instead?
+   - The session file's `stalls` (0 is right; the assistant can read it from an exported night or over USB).
 
 ## If the headband drops out
 
