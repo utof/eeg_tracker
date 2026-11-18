@@ -115,10 +115,22 @@ prepare and 26 s for the model; a phone is likely 3-10 times slower.
 2. Note the clock time. The Sleep section says "Scoring the night of ...: Preparing the recording", then "Sleep
    model, run 1 of 3, part 1 of 8" and so on.
 3. When the time asleep appears, note the clock time again; open **Sleep report**: the line at the bottom says
-   "Scored on this phone in ..." (that is the measured time).
+   "Scored on this phone in ..." (that is the measured time). If "Counting jaw, movement and signal" showed after
+   the model's last part, note for how long: that is the detectors' pass running behind the model.
 4. Tell the assistant: hours recorded, the time it took, and whether the phone got warm or the app closed. If it
    says scoring stopped, tap **Try again** once and report what happens. With USB debugging on, also send
    `adb shell dumpsys meminfo io.github.utof.eeg_tracker | head -40` taken during "Sleep model, run 2 of 3".
+
+### Owner step: the night extras (the next morning, 2 minutes)
+
+1. Open **Sleep report** after the night is scored. Read the note under the totals: how much of your sleep was read
+   through noise. Under the chart, the **Signal** line: do the amber stretches fall where you remember turning over,
+   touching the headband or lying on it?
+2. Scroll to **Jaw and movement**: jaw-muscle bursts and movements an hour asleep. On the laptop's copy of your first
+   night they were about 23 and 19. Is a night you slept badly higher?
+3. Tell the assistant the two numbers, the noise share, and anything that looks wrong in **Hour by hour** (for
+   example an hour you were awake and talking with no jaw bursts). The setup test's 5 clenches will check the jaw
+   limits.
 
 ## Replay check (off unless you switch it on)
 
