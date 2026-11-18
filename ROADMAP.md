@@ -25,6 +25,13 @@ Update the status column whenever something lands.
    session's feedback instead of the live one, and later shows whether live sessions did better. In the app this is
    behind a toggle (off by default), and before each meditation a reminder says it is on.
 13. **Mission**: affordable EEG for everyone: build-at-home guides for the helmet plus this open app, with contributors.
+14. **An "i" button next to every exercise and feature** (added 2026-11-18): what the research says, where the data
+   supports it and where it does not; for ML features (noise cleaning, sleep scoring, forecasts) the research behind
+   them; links to the sources and the libraries used. For the owner and for anyone else who uses the app.
+15. **Repairable headband** (added 2026-11-18): the BrainBit's battery and electrodes by name, so they can be ordered
+   and swapped.
+16. **The phone app first** (owner, 2026-11-18): the web pages are only a stopgap until the app exists; keep them
+   simple, put the effort into the app.
 
 ## What each wish becomes (honest version)
 
@@ -73,12 +80,17 @@ Update the status column whenever something lands.
 
 ## What comes next, in order (2026-11-18)
 
-1. Merge the three running lanes (sound reacting to alpha, morning check-in, break hints) after testing them with you.
-2. Meditation feedback, live and after the session (row 21; owner: high priority).
+Changed 2026-11-18 09:10: the phone app moves to the front (wish 16).
+
+1. Phone app: the fixes from research D (recordings in app-private storage with an export button, no cloud backup of
+   recordings, reconnect without a fresh scan), then build, install, 1-hour screen-off test.
+2. Meditation feedback, live and after the session (row 21; owner: high priority): the feedback logic is written and
+   tested first as small JavaScript modules on the laptop page (branch `feat/feedback-core`), then ported to the app.
 3. One shared detector for drifting off to sleep (feeds the dream catcher, nap coach, sleep-sound auto-stop, drowsiness tile).
-4. Dream catcher (row 20), then the nap preset.
-5. State and trends page (row 10).
-6. Phone app: build, install, 1-hour screen-off test, then port the pages.
+4. The "i" evidence notes (wish 14): one file per feature written from the research reports, shown by the pages now
+   and by the app later.
+5. Dream catcher (row 20), then the nap preset.
+6. State and trends page (row 10).
 
 ## Next tests that need the owner (each about 5 minutes)
 
