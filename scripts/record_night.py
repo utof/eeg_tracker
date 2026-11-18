@@ -111,7 +111,7 @@ def main() -> None:
             log(f"start failed ({attempt + 1}/10): {e}"); time.sleep(3)
     log("recording started, 250 Hz, Ctrl+C to stop")
 
-    t0 = time.time(); last_report = t0; last_total = 0; stalled = 0
+    t0 = time.time(); last_report = t0; last_total = 0; stalled = 0; lost = [False]
     try:
         while not a.seconds or time.time() - t0 < a.seconds:
             time.sleep(1)
@@ -142,7 +142,10 @@ def main() -> None:
                 log(f"samples {total} (+{got}) battery {s.batt_power}%")
                 last_report = time.time(); last_total = total
                 stalled = stalled + 1 if got == 0 else 0
-                if stalled or s.state != SensorState.StateInRange:
+                if s.state != SensorState.StateInRange:  # SDK calls on a lost sensor segfault (seen 3x on 2026-11-18)
+                    log(f"headband {s.state.name}; saving and exiting so record_night.sh starts a fresh recorder")
+                    lost[0] = True; raise SystemExit(3)
+                if stalled:
                     if stalled >= 4:  # 40 s without data: a fresh process is the path known to work
                         log("still no data; exiting so record_night.sh starts a fresh recorder")
                         raise SystemExit(3)
@@ -160,17 +163,19 @@ def main() -> None:
                         log(f"stream restart failed: {e}")
     except KeyboardInterrupt:
         pass
-    finally:
-        try:
-            s.exec_command(SensorCommand.StopSignal); log(f"stopped, battery {s.batt_power}%")
-        except Exception as e:
-            log(f"stop failed: {e}")
+    finally:  # save first: the SDK calls below can crash the process
         with lock:
-            data.write(b"".join(buf)); idxf.write(b"".join(idx))
-        idxf.close(); data.flush(); os.fsync(data.fileno()); data.close()
-        log(f"total samples {total}, {total / 250 / 60:.1f} min"); logf.close()
-        try: s.disconnect()
-        except Exception: pass
+            chunk = b"".join(buf); data.write(chunk); idxf.write(b"".join(idx)); total += len(chunk) // REC.size
+        idxf.flush(); os.fsync(idxf.fileno()); idxf.close(); data.flush(); os.fsync(data.fileno()); data.close()
+        log(f"total samples {total}, {total / 250 / 60:.1f} min")
+        if not lost[0]:
+            try:
+                s.exec_command(SensorCommand.StopSignal); log(f"stopped, battery {s.batt_power}%")
+            except Exception as e:
+                log(f"stop failed: {e}")
+            try: s.disconnect()
+            except Exception: pass
+        logf.close()
 
 
 if __name__ == "__main__":
