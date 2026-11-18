@@ -684,7 +684,7 @@ def timers(drift: Drift, earlier_latencies_min: list[float], u: float) -> Timers
     lo_min, hi_min = DREAM_WINDOW_MIN
     if len(earlier_latencies_min) >= 3:
         lo_min, hi_min = percentile(earlier_latencies_min, 0.25), percentile(earlier_latencies_min, 0.75)
-    fallback = round((lo_min + (hi_min - lo_min) * u) * 60)
+    fallback = math.floor((lo_min + (hi_min - lo_min) * u) * 60 + 0.5)  # halves up, as in the Dart port
     fade = SOUND_CAP_S - SOUND_FADE_S
     if drift.asleep_at is not None:
         fade = min(fade, drift.asleep_at - drift.lights_off + 1)

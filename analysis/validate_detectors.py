@@ -75,6 +75,7 @@ def onset(bdf: Path, sleep: Path, offs: list[str]) -> dict[str, Any]:
     if s_start != start:
         raise ValueError("BDF and sleep.json start differ")
     sec = det.seconds(x, miss)
+    found = det.blinks(x, miss)
     del x
     out: list[dict[str, Any]] = []
     for hhmmss in offs:
@@ -83,7 +84,7 @@ def onset(bdf: Path, sleep: Path, offs: list[str]) -> dict[str, Any]:
             t += timedelta(days=1)
         e0 = int(np.ceil((t - start).total_seconds() / det.EPOCH_S))  # lights off on AnySleep's epoch grid
         lo = e0 * det.EPOCH_S
-        d = det.drift_off(sec, lo)
+        d = det.drift_off(sec, lo, found)
         ref = persistent_onset(stages, e0)
         row: dict[str, Any] = {
             "lights_off": clock(start, lo),
