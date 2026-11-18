@@ -29,6 +29,7 @@ class SoloudStateSound implements StateSound {
   int _added = 0;
   int _stalls = 0;
   int _deviceFailures = 0;
+  int _feedErrors = 0;
   bool _running = false;
   bool _stopping = false;
   StreamSubscription<AudioDeviceStartFailure>? _failures;
@@ -58,6 +59,7 @@ class SoloudStateSound implements StateSound {
     });
     _s.setGlobalVolume(1);
     _stalls = 0;
+    _feedErrors = 0;
     _added = 0;
     _stopping = false;
     final src = _src = _s.setBufferStream(
@@ -78,7 +80,13 @@ class SoloudStateSound implements StateSound {
       ..reset()
       ..start();
     _running = true;
-    _feeder = Timer.periodic(const Duration(milliseconds: 250), (_) => _guard(_top));
+    _feeder = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      try {
+        _top();
+      } catch (_) {
+        _feedErrors++; // the stream then runs dry and goes quiet; counted in the session file
+      }
+    });
   }
 
   /// Seconds played: the engine's count (exact for a released stream), else the clock.
@@ -155,6 +163,7 @@ class SoloudStateSound implements StateSound {
       'leadS': leadS,
       'stalls': _stalls,
       'deviceStartFailures': _deviceFailures,
+      'feedErrors': _feedErrors,
     };
     if (_s.isInitialized) {
       _guard(() {
