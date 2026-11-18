@@ -28,15 +28,15 @@ well.
 - The studies cannot prove that the light sleep caused the insight.
 - Live detection of the lightest sleep stage is weak in every system found (for example 34% in one live
   scorer).
-- The app's simple alpha rule is untested on this headband, and so is whether the headband keeps contact while
-  you lie down.
+- The app's alpha rule matched the sleep model within half a minute on the only two recorded sleep onsets, both
+  abrupt; the sleep model reads the same alpha, and 3 more nights are needed before the rule is trusted.
 - It is a creativity exercise, not a sleep aid or therapy.
 
 ## How the app uses this
 
-- It uses the shared drift-off detector: a "lights off" button starts a 60-second eyes-closed baseline; the
-  prompt comes 15-60 s after alpha flattens (under half its starting level, slower theta waves present, no
-  muscle burst).
+- It uses the shared drift-off detector (docs/detectors.md): a "lights off" button starts a 60-second
+  eyes-closed baseline; the prompt comes once alpha has stayed under half its starting level for a minute (30-60
+  s after it flattened), with no movement and no blinks.
 - A timer is always the fallback: a random moment inside your usual time to fall asleep.
 - One round: the theme cue and the question; recording until 3 s of silence or 30 s; a one-tap "were you
   drifting?"; then "you can drift off again". The next round waits for alpha to come back and fade again, at
@@ -44,7 +44,7 @@ well.
 - 3-4 rounds, a 45-minute cap, prompts in your own recorded voice from the speaker at low volume, and a gentle
   wake sound at the end.
 - The detector ships only when its sleep onset falls within 5 minutes of the sleep model's on 4 of 5 recorded
-  nights.
+  nights (2 so far, both within half a minute).
 - Optional: a home "insight test" that rotates prompted rest, unprompted rest and awake rest on different days.
 
 ## Sources
