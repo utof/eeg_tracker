@@ -23,6 +23,8 @@ for a state, with an optional beat, and with the headband shows what your brain 
   `lib/meditation/` (session and report), `lib/ui/meditation_*.dart`; DECISIONS rows 72-77.
 - Sleep report: `lib/sleep/` and `lib/ui/sleep_*.dart`, scored on the phone after Stop (below); DECISIONS rows 95-99,
   night extras (jaw, movement, signal quality) rows 140-146.
+- Lights off and falling asleep: `lib/recorder/live_drift.dart`, `lib/sleep/drift.dart`, `lib/ui/lights_off_view.dart`
+  (below); DECISIONS rows 180-186.
 - Replay check: `lib/training/` (schedule, frozen plan, replay, results), `lib/ui/training_settings_screen.dart`,
   `lib/ui/check_views.dart`, `lib/ui/replay_results_screen.dart`; DECISIONS rows 100-103.
 - Alpha-theta: `lib/alphatheta/` (rules, engine, notebook), `lib/sound/alpha_theta_sound.dart`,
@@ -46,8 +48,8 @@ flutter test --concurrency=1               # writer, recorder rules (fake headba
 flutter build apk --release --target-platform android-arm64
 ```
 
-`flutter test` also renders the night screen in four states, the meditation screen in eleven, the sleep report in
-eight, the replay check's and alpha-theta's pages in nineteen, the dream catcher in thirteen, the check-in, trends
+`flutter test` also renders the night screen in six states (two also at the owner's 393 dp width), the meditation
+screen in eleven, the sleep report in nine, the replay check's and alpha-theta's pages in nineteen, the dream catcher in thirteen, the check-in, trends
 and Morning section in eighteen, sound for states in fourteen and Export data in nine to `build/screens/*.png`
 (normal and 130 % text). `test/export_test.dart` exports a fake app folder (every place the app writes) and remakes,
 with `EXPORT_FIXTURE=write`, the export the laptop importer's test reads (`test/fixtures/phone_export/`).
@@ -210,6 +212,47 @@ prepare and 26 s for the model; a phone is likely 3-10 times slower.
 3. Tell the assistant the two numbers, the noise share, and anything that looks wrong in **Hour by hour** (for
    example an hour you were awake and talking with no jaw bursts). The setup test's 5 clenches will check the jaw
    limits.
+
+## Lights off and falling asleep
+
+While a night records, the bar at the bottom of the main screen has **Lights off** beside **Stop** (DECISIONS
+180-186). Tap it as you close your eyes to sleep. It marks that moment in the night's recording and starts the
+drift-off detector (the back-of-head alpha rhythm fading for 3 minutes, `docs/detectors.md`) from there. The line above
+the buttons says what the detector thinks: "Learning your eyes-closed alpha (a minute)", then awake, drowsy, or
+"Asleep since 23:51, by the detector". If you get up and come back, tap **Lights off again** (it asks first, so a
+3 a.m. brush does not move the moment). Without a tap the night counts from its start.
+
+The detector runs inside the recorder, on the samples it already saves; if it ever fails or takes too much time it
+switches itself off and the recording goes on (the night's `.log` says so in one line). The last lines of the `.log`
+give its cost: `drift-off detector: <s> s of work for <h> h of signal (<s> s an hour)`.
+
+In the morning the sleep report has **Falling asleep** after the sleep periods: the minutes from lights off to sleep
+by the detector and by the sleep model, whether they agree (within 5 minutes), and the check: the detector is
+trusted once 4 of 5 nights with Lights off agree. Its **i** shows the drift-off note (`docs/evidence/dream-catcher.md`).
+Both are guesses, so the check shows that they agree, not that either is right. Nights recorded before this change get
+the same comparison (counted from their start, or from a dream catcher's lights off): after installing this version
+the app scores each night it already has once more, between nights, which takes the same few minutes a night as
+before. The laptop's sleep report writes the same.
+
+Checked on the emulator (x64 release build, 2026-11-19): Start night without a headband, Lights off (the line
+became "Lights off 02:20." and the button "Lights off again"), the question on a second tap, Stop; and a 2-hour piece
+of the owner's recorded night with a `lights off` marker at 03:12, scored on the phone side in 54 s: detector 4½ min,
+sleep model 3 min after lights off, agreeing. The headband, the phone's speed and a whole night still need the phone.
+
+- Code: `lib/recorder/live_drift.dart` (live), `lib/sleep/drift.dart` (the morning's comparison and the check),
+  `lib/ui/lights_off_view.dart`; Python `analysis/night_drift.py`. `tool/live_drift.dart` replays a recorded night
+  through the live detector on the laptop (cost per hour, live against the morning; `docs/detectors.md`).
+
+### Owner step: tonight and the next four nights (a few seconds a night)
+
+1. Start the night as usual. Lie down; when you close your eyes to sleep, tap **Lights off** (bottom left). The line
+   above it should say "Lights off 23:42. Learning your eyes-closed alpha". Keep your eyes closed.
+2. If you glance at the phone later, the line says what the detector thinks (awake, drowsy, or asleep since when).
+   Got up? Tap **Lights off again** when you lie back down.
+3. In the morning press **Stop**, wait for the report, open **Sleep report** and scroll to **Falling asleep**: do the
+   two numbers feel right? Tell the assistant both, and the last `drift-off detector:` line of the night's `.log` (in
+   the export, or ask the assistant to pull it).
+4. After five such nights the check line says whether the detector can be trusted (4 of 5 within 5 minutes).
 
 ## Morning check-in
 

@@ -20,6 +20,9 @@ const String _dirKey = 'recordingsDir';
 const String stopCommand = 'stop';
 const String statusCommand = 'status';
 
+/// The night screen's Lights off (live_drift.dart): a marker in the recording, the drift-off detector from here.
+const String lightsOffCommand = 'lightsOff';
+
 /// Sent by the recorder once its files are closed after [stopCommand].
 const Map<String, Object> stoppedMessage = {'kind': 'stopped'};
 
@@ -97,6 +100,12 @@ class RecorderTaskHandler extends TaskHandler {
     } else if (data == statusCommand) {
       final r = _recorder;
       if (r != null) _send(r.status);
+    } else if (data == lightsOffCommand) {
+      final r = _recorder;
+      if (r != null) {
+        r.lightsOff();
+        _send(r.status);
+      }
     }
   }
 

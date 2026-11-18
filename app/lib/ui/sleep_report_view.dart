@@ -6,7 +6,9 @@ import 'package:flutter/material.dart';
 
 import '../detectors/detectors.dart' show EpochQuality;
 import '../recorder/nights.dart' show nightLabel;
+import '../sleep/drift.dart' show driftCheck;
 import '../sleep/report.dart';
+import 'lights_off_view.dart';
 import 'parts.dart';
 import 'sleep_chart.dart';
 import 'sleep_extras_view.dart';
@@ -37,6 +39,7 @@ class SleepReportView extends StatelessWidget {
     this.blocked,
     this.onInfo,
     this.onExtrasInfo,
+    this.onDriftInfo,
     this.onOpenNight,
     this.onRetry,
     this.onLicences,
@@ -59,6 +62,9 @@ class SleepReportView extends StatelessWidget {
 
   /// The "i" of the jaw and movement section.
   final VoidCallback? onExtrasInfo;
+
+  /// The "i" of the falling asleep section (the drift-off detector's note).
+  final VoidCallback? onDriftInfo;
   final void Function(SleepReport night)? onOpenNight;
   final VoidCallback? onRetry;
   final VoidCallback? onLicences;
@@ -110,6 +116,7 @@ class SleepReportView extends StatelessWidget {
     final x = r.extras;
     final quality = x?.quality;
     final noisyMin = x?.night.degradedMin ?? 0, unusableMin = x?.night.missingMin ?? 0;
+    final drift = r.driftOff;
     return [
       IntrinsicHeight(
         child: Row(
@@ -168,6 +175,8 @@ class SleepReportView extends StatelessWidget {
           style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
         ),
       ],
+      if (drift != null)
+        FallingAsleepSection(drift: drift, check: driftCheck([r, ...others]), onInfo: onDriftInfo),
       if (x != null) ExtrasSection(extras: x, earlier: earlierJaw(r.nightOf, others), onInfo: onExtrasInfo),
     ];
   }

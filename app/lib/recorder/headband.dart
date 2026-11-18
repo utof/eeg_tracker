@@ -124,6 +124,7 @@ class NightState {
     this.directOff = false,
     this.phoneBattery = const BatteryTrack(),
     this.packets = const PacketCounts(),
+    this.lightsOffMs,
   });
 
   final bool active;
@@ -152,6 +153,9 @@ class NightState {
   /// Missing and repeated packet numbers tonight, over all runs.
   final PacketCounts packets;
 
+  /// When Lights off was last tapped tonight (unix ms); null until then (DECISIONS 180).
+  final int? lightsOffMs;
+
   NightState copyWith({
     bool? active,
     int? startMs,
@@ -165,6 +169,7 @@ class NightState {
     bool? directOff,
     BatteryTrack? phoneBattery,
     PacketCounts? packets,
+    int? lightsOffMs,
   }) => NightState(
     active: active ?? this.active,
     startMs: startMs ?? this.startMs,
@@ -178,6 +183,7 @@ class NightState {
     directOff: directOff ?? this.directOff,
     phoneBattery: phoneBattery ?? this.phoneBattery,
     packets: packets ?? this.packets,
+    lightsOffMs: lightsOffMs ?? this.lightsOffMs,
   );
 
   Map<String, Object?> toJson() => {
@@ -197,6 +203,7 @@ class NightState {
     'directOff': directOff,
     'phoneBattery': phoneBattery.toJson(),
     'packets': packets.toJson(),
+    'lightsOffMs': lightsOffMs,
   };
 
   static NightState fromJson(Object? j) {
@@ -221,6 +228,7 @@ class NightState {
       directOff: j['directOff'] == true,
       phoneBattery: BatteryTrack.fromJson(j['phoneBattery']),
       packets: PacketCounts.fromJson(j['packets']),
+      lightsOffMs: (j['lightsOffMs'] as num?)?.toInt(),
     );
   }
 }

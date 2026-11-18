@@ -49,3 +49,9 @@ SIGNATURE: the hypnogram on the deck-log clock, periods numbered on it and in th
 
 FORM: night index opening night pages (dealt lead, position 4 of 7), fused with the strip's clock grid
 (5) and per-period log entries (3); seed:aa1970634eb59197.
+
+FALLING ASLEEP (2026-11-19, DECISIONS 185; same brief standing in): after the periods, before Jaw and movement, a
+section with an "i" to the drift-off note: the lights-off moment as a muted lead line, the detector's and the sleep
+model's minutes as two period-style log lines, then sentences: agreement, where lights off came from, the running
+check toward 4 of 5 nights, and "Both are guesses: this checks that they agree, not that either is right." Refused:
+a five-night progress ring, an onset mark on the chart, a trust score.

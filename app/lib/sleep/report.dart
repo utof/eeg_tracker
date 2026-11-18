@@ -6,11 +6,13 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'drift.dart';
 import 'extras.dart';
 import 'periods.dart';
 
 /// Of the report file; a report of another version is rebuilt (the laptop's rule). 2: adds `extras` (jaw,
-/// movement and signal quality from the shared detectors), so older nights are scored again once.
+/// movement and signal quality from the shared detectors), so older nights are scored again once. Since
+/// 2026-11-19 also `drift_off` (drift.dart), added without a new version: a version-2 report without it is rebuilt.
 const int reportVersion = 2;
 const String reportNote = 'first guess; the scorer is not yet validated on this headband';
 
@@ -101,6 +103,10 @@ class SleepReport {
   /// when the detectors' pass failed (`extras_error` says why).
   NightExtras? get extras => NightExtras.read(json['extras'], dataStart);
 
+  /// When you fell asleep after lights off, by the drift-off detector and the sleep model (drift.dart); null in
+  /// older reports, unscored nights or when the detector failed (`drift_off_error` says why).
+  DriftResult? get driftOff => DriftResult.read(json['drift_off']);
+
   /// The `.f32` files and sizes the report was made from.
   Map<String, int> get inputs => {
     for (final i in (json['inputs'] as List? ?? const []).whereType<Map<String, dynamic>>())
@@ -128,7 +134,7 @@ class SleepReport {
 
 /// Builds the report from the stages of a scored night. [start] is the first epoch's start; [lengthSeconds] the
 /// joined night (gaps and padding included); [inputs] the `.f32` names and sizes read. [seen]: what the detectors
-/// saw over the same samples, for `extras`; [extrasError]: why that pass failed.
+/// saw over the same samples, for `extras` and `drift_off`; [extrasError]: why that pass failed.
 Map<String, dynamic> buildReport({
   required String nightOf,
   required DateTime built,
@@ -180,6 +186,8 @@ Map<String, dynamic> buildReport({
         'stages': '',
         'extras': null,
         'extras_error': extrasError,
+        'drift_off': null,
+        'drift_off_error': null,
       });
   }
   // the laptop takes the confidence from probabilities rounded to 3 decimals (sleep.json)
@@ -223,6 +231,16 @@ Map<String, dynamic> buildReport({
       whyNot = '$e';
     }
   }
+  Map<String, Object?>? drift;
+  var driftWhyNot = extrasError ?? seen?.driftError;
+  final ds = seen?.drift;
+  if (ds != null && driftWhyNot == null) {
+    try {
+      drift = driftReport(ds, stages, start);
+    } on Object catch (e) {
+      driftWhyNot = '$e';
+    }
+  }
   final gaps = stages.where((s) => s == gapStage).length;
   return rep
     ..addAll({
@@ -246,6 +264,8 @@ Map<String, dynamic> buildReport({
       'stages': stages.map((s) => _stageChar[s] ?? '-').join(),
       'extras': extras,
       'extras_error': whyNot,
+      'drift_off': drift,
+      'drift_off_error': driftWhyNot,
     });
 }
 
@@ -282,9 +302,10 @@ class NightReportStore {
   }
 }
 
-/// night_files.py `is_stale`: no report, another version, a file gone or shrunk, or 10+ minutes of new samples.
+/// night_files.py `is_stale`: no report, another version, written before `drift_off` existed, a file gone or shrunk,
+/// or 10+ minutes of new samples.
 bool isStale(Map<String, int> files, SleepReport? report, {int newDataMinutes = 10}) {
-  if (report == null || report.json['version'] != reportVersion) return true;
+  if (report == null || report.json['version'] != reportVersion || !report.json.containsKey('drift_off')) return true;
   final done = report.inputs;
   if (done.keys.any((f) => !files.containsKey(f)) || done.entries.any((e) => files[e.key]! < e.value)) return true;
   final newBytes = files.entries.fold(0, (s, e) => s + e.value - (done[e.key] ?? 0));

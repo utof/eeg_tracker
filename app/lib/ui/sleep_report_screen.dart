@@ -26,6 +26,7 @@ class SleepReportScreen extends StatelessWidget {
         blocked: scoring.blocked[nightOf],
         onInfo: () => showEvidence(context, 'sleep-scoring'),
         onExtrasInfo: () => showEvidence(context, 'jaw-and-blinks'),
+        onDriftInfo: () => showEvidence(context, 'dream-catcher'),
         onOpenNight: (SleepReport r) => Navigator.of(context).push(
           MaterialPageRoute<void>(builder: (_) => SleepReportScreen(scoring: scoring, nightOf: r.nightOf)),
         ),

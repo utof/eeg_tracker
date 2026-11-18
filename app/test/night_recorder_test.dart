@@ -214,6 +214,9 @@ void main() {
   });
   tearDown(() => dir.deleteSync(recursive: true));
 
+  // The drift-off detector is off here: these are the recording's own rules on a wall-clock budget of a few hundred
+  // milliseconds, which the detector's first-call JIT warm-up in `flutter test` (about 90 ms) can eat; the phone runs
+  // AOT code. live_drift_test.dart runs whole nights through the recorder with it on (every sample still saved).
   NightRecorder recorder(HeadbandFinder finder, {PhoneProbe? probe, DateTime Function()? clock}) => NightRecorder(
     finder: finder,
     probe: probe,
@@ -223,6 +226,7 @@ void main() {
     onStatus: statuses.add,
     onStuck: (r) async => stuck.add(r),
     timing: fast,
+    watch: null,
   );
 
   List<File> files(String ext) =>

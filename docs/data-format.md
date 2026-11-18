@@ -29,7 +29,16 @@ Three layers, from raw to summary. Each is written once and never edited in plac
   the previous run's stem and the time of its last data.
 - `.markers.jsonl`: one JSON object per line from pages that `POST /marker`: `t` (unix time the marker
   arrived), `i` (index of the next sample in this file's `.f32`, so markers line up with samples even across
-  gaps) and `text`. `scripts/to_bdf.py` turns them into BDF+ annotations at their clock time.
+  gaps) and `text`. `scripts/to_bdf.py` turns them into BDF+ annotations at their clock time. The phone's night
+  recorder writes `lights off` when the night screen's Lights off is tapped (between file sets: beside the last one,
+  with that file's sample count as `i`; before the first: into the first) and the live drift-off detector's moments
+  (DECISIONS 180-184): `drift-off: eyes-closed baseline done`, `drift-off: drowsy`, `drift-off: probably asleep,
+  onset HH:MM:SS`, `drift-off: awake` (alpha back before sleep) and `drift-off: awake again`; each also as a line in
+  the `.log`. Lights off for the sleep report (`drift_off` below) is the latest marker of the night whose text is
+  `lights off`, starts with `dream catcher: lights off`, or is `sound: quiet minute (eyes closed)`.
+- On the phone the night's `.log` also says `drift-off detector on; lights off counts from the first sample until
+  Lights off` at the start, `drift-off detector stopped: <why>; the recording goes on` if it was switched off, and at
+  the end `drift-off detector: <s> s of work for <h> h of signal (<s> s an hour)`.
 - The device's Bluetooth address and serial number are in the `.log`. They stay on the owner's machine
   (`_local/` is never committed).
 
@@ -72,6 +81,8 @@ new samples exist; files of the same name made by hand are first renamed `<date>
 | `rules` | `split_min` 60, `min_period_sleep_min` 10, `wake_up_over_min` 5 (below) |
 | `extras` | what the shared detectors saw over the same samples (below); `null` when unscored or when that pass failed |
 | `extras_error` | why the detectors' pass failed, else `null` |
+| `drift_off` | when you fell asleep after lights off, by the drift-off detector and by the sleep model (below); `null` when unscored or when the detector did not run. Added 2026-11-19 without a new `version`: a version-2 report without this key was written before it and is rebuilt once |
+| `drift_off_error` | why the drift-off detector did not run (the detectors' pass failed, or the detector itself), else `null` |
 
 A sleep period is a stretch of asleep epochs (N1 N2 N3 R by AnySleep) that no 60+ minutes of wake or missing data
 interrupt; a stretch with under 10 minutes asleep is scorer noise and only counts in `stray_sleep_min`. Each period
@@ -98,6 +109,28 @@ and numbers. Readers should check `extras` is an object before using it (older r
 
 A burst or a movement counts in the epoch where it starts; one starting after the last whole epoch is left out.
 
+### `drift_off` (falling asleep, DECISIONS 180-184)
+
+Written by `analysis/night_drift.py` on the laptop and `app/lib/sleep/drift.dart` on the phone with the same rules.
+Lights off is the night's latest lights-off marker (above), else its first sample (`night start`); it is moved to the
+start of the next 30 s epoch from `data_start` (the stages' epochs), and the drift-off detector (DECISIONS 88) runs
+over the night from there. The sleep model's onset is the first epoch at or after lights off of 10 in a row not
+scored awake (`gap` epochs skipped). Seconds are counted from `data_start`.
+
+| Field | Meaning |
+|---|---|
+| `version` | 1 (of this object) |
+| `rules`, `validated` | the rules in words, `false` |
+| `lights_off`, `lights_off_s` | the moment both count from (ISO with offset; seconds, a multiple of 30) |
+| `source` | `button` (the night screen), `dream catcher`, `sound` (a fall-asleep session's quiet minute) or `night start` (no marker) |
+| `tapped` | the marker's own time (ISO), `null` for `night start` |
+| `baseline_s`, `drowsy_s`, `onset_s`, `known_s` | the detector: its 60 clean eyes-closed seconds complete, drowsy first known, the first "probably asleep" run's start (the onset) and when it was known; `null` = never |
+| `model_onset_s`, `onset`, `model_onset` | the sleep model's onset in seconds; both onsets as ISO times |
+| `onset_min`, `model_onset_min`, `diff_min` | minutes from lights off to each onset (half minutes), the detector's minus the model's |
+| `agree` | `true` when both found sleep at most 5 minutes apart, `false` when farther apart or only one found sleep, `null` when neither did |
+| `counted` | the night counts toward the check (4 of the newest 5 counted nights agree: the detector ships, DECISIONS 62): `source` is not `night start` and `agree` is not `null` |
+| `epochs` | the detector's state after each 30 s from lights off: `b` learning the baseline, `a` awake, `d` drowsy, `s` probably asleep, `-` skipped |
+
 ## The phone's `files/nights/<date>.report.json`
 
 The phone app scores a finished night itself (`app/lib/sleep/`, DECISIONS rows 95-98) and writes one report per
@@ -108,7 +141,7 @@ pieces-1h+15min`); there is no picture, BDF or second model, so `hypnogram`, `sl
 and each period's `agreement` are `null`; `epoch_s` is 30 and `stages` holds one character per 30 s from
 `data_start` (`W 1 2 3 R`, `-` where over 5 s of the epoch was missing), like the `hypnogram` of
 `eeg_sleep_night`. `extras` and `extras_error` are as above (the phone runs the detectors beside the sleep model;
-a pass that fails leaves `extras` `null` and the night still scored). While a night is being scored a `<date>.scoring`
+a pass that fails leaves `extras` `null` and the night still scored), and so are `drift_off` and `drift_off_error`. While a night is being scored a `<date>.scoring`
 file sits beside it; if it is still there when
 no scoring runs, the last attempt stopped (its text is the error, empty if the app was killed) and the app waits
 for "Try again". Export data copies the reports out (below).

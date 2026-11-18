@@ -53,3 +53,11 @@ show as hollow cells.
 FORM: ship's bridge on the night watch and its deck log, position 7 of 7; seed:a24d111eb0ab99e7.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+
+LIGHTS OFF (2026-11-19, DECISIONS 180-186; no question channel, the brief stood in for the owner): while a night
+records, the pinned bar gains Lights off beside Stop (3 : 2), the night's one filled button until tapped, then an
+outlined "Lights off again" in the same place that asks first; one muted line above the buttons says what the
+drift-off detector thinks, in words only; a hairline sets the bar apart from the page under it. Placed in the bar
+because it is used lying down at the moment the eyes close, where the thumb already is. Refused: a section in the
+scrolling page, a notification action, a coloured state chip. Checked as test renders at 440 dp (100 and 130 %
+text) and at the owner's 393 dp with 130 % text, which also found the watch strip 6 dp too wide (fixed).

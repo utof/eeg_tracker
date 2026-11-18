@@ -101,7 +101,8 @@ class NightStrip extends StatelessWidget {
                   Expanded(
                     child: LayoutBuilder(
                       builder: (context, c) {
-                        final cell = math.min(32.0, (c.maxWidth - 6 * (cellsPerRow - 1)) / cellsPerRow);
+                        // seven gaps: six of 6 dp and the two-hour one of 12 dp
+                        final cell = math.min(32.0, (c.maxWidth - 6 * (cellsPerRow - 1) - 6) / cellsPerRow);
                         final byColumn = {for (final x in r.cells) x.column: x};
                         return Row(
                           children: [

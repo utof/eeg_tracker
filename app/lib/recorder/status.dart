@@ -1,4 +1,5 @@
 // What the recorder isolate tells the screen, about once a second. Plain maps cross the isolate port.
+import '../detectors/drift_off.dart' show DriftState;
 import 'contact.dart';
 
 enum Phase { idle, searching, connecting, checkingContact, recording, reconnecting, stopping }
@@ -21,6 +22,9 @@ class RecorderStatus {
     this.note = '',
     this.slots = const {},
     this.sentMs = 0,
+    this.drift,
+    this.lightsOffMs,
+    this.driftOnsetMs,
   });
 
   final Phase phase;
@@ -54,6 +58,15 @@ class RecorderStatus {
 
   final int sentMs;
 
+  /// The live drift-off detector's state (live_drift.dart); null while it is off.
+  final DriftState? drift;
+
+  /// When Lights off was tapped tonight (unix ms); null while lights off counts from the night's first sample.
+  final int? lightsOffMs;
+
+  /// The detector's first "probably asleep" onset since lights off (unix ms).
+  final int? driftOnsetMs;
+
   double get minutesRecorded => nightSamples / sampleRateHz / 60;
 
   Contact contactOf(String channel) => classifyOhms(contactOhms[channel]);
@@ -83,6 +96,27 @@ class RecorderStatus {
     note: note ?? this.note,
     slots: slots ?? this.slots,
     sentMs: sentMs,
+    drift: drift,
+    lightsOffMs: lightsOffMs,
+    driftOnsetMs: driftOnsetMs,
+  );
+
+  /// The same status with the drift-off fields replaced (null clears them).
+  RecorderStatus withDrift({DriftState? drift, int? lightsOffMs, int? onsetMs}) => RecorderStatus(
+    phase: phase,
+    nightStartMs: nightStartMs,
+    nightSamples: nightSamples,
+    lastDataMs: lastDataMs,
+    rssi: rssi,
+    battery: battery,
+    contactOhms: contactOhms,
+    runs: runs,
+    note: note,
+    slots: slots,
+    sentMs: sentMs,
+    drift: drift,
+    lightsOffMs: lightsOffMs,
+    driftOnsetMs: onsetMs,
   );
 
   Map<String, Object?> toMap({required int nowMs}) => {
@@ -101,6 +135,9 @@ class RecorderStatus {
       for (final e in slots.entries) ...[e.key, e.value],
     ],
     'sentMs': nowMs,
+    'drift': drift?.name,
+    'lightsOffMs': lightsOffMs,
+    'driftOnsetMs': driftOnsetMs,
   };
 
   /// Parses a message from the recorder; returns null for anything else.
@@ -129,6 +166,9 @@ class RecorderStatus {
             }
           : const {},
       sentMs: _int(data['sentMs']) ?? 0,
+      drift: DriftState.values.where((d) => d.name == data['drift']).firstOrNull,
+      lightsOffMs: _int(data['lightsOffMs']),
+      driftOnsetMs: _int(data['driftOnsetMs']),
     );
   }
 }

@@ -1,7 +1,8 @@
 # What the electrodes see, and when you drift off
 
-One set of detectors, shared by every feature that needs them: meditation feedback, the dream catcher and the night
-extras of the sleep report now; the sleep-sound auto-stop later. ROADMAP next step 3; DECISIONS 85-89 and 140-146.
+One set of detectors, shared by every feature that needs them: meditation feedback, the dream catcher, sound for
+states, the night extras of the sleep report, and the drift-off detector during every night with its "Falling
+asleep" check in the morning report. ROADMAP next step 3; DECISIONS 85-89, 140-146 and 180-186.
 
 - **Python reference**: `analysis/eeg_detectors.py`, checked on the owner's recordings with
   `analysis/validate_detectors.py` (commands below). Tests: `analysis/tests/test_eeg_detectors.py`.
@@ -31,7 +32,8 @@ sleep waves also come in through the forehead and show upside down on O1/O2.
 
 ## The drift-off detector (DECISIONS 62, 88)
 
-1. **Lights off**: a button (later), or the meditation's close-eyes cue. Close your eyes.
+1. **Lights off**: the night screen's Lights off button, the dream catcher's, a fall-asleep sound session's quiet
+   minute, or the meditation's close-eyes cue. Close your eyes. A night without one counts from its first sample.
 2. **Baseline**: the median alpha (8-12 Hz at O1/O2) of the first 60 clean seconds without a blink.
 3. Every 30 s from lights off: the epoch is **faded** when over half of its clean seconds have alpha under half
    the baseline. It is not faded with 3 s of movement, or with 2 blinks before sleep (open eyes also lower
@@ -128,12 +130,46 @@ the Dart process running only the pass peaked at 109 MB, mostly the garbage coll
 needs about 2 GB and 20-35 s; in the laptop's sleep report it made the night's job 88 s instead of 64 s, and the
 peak memory stayed the scoring's 2.8 GB.
 
+## Lights off and falling asleep in the night (DECISIONS 180-186)
+
+- **Live**: the phone's night recorder runs the drift-off detector in its own background isolate on every batch,
+  right after the batch is buffered for the files (no extra wakeup; the screen is off). Lights off counts from the
+  night's first sample until the night screen's **Lights off**, which writes a `lights off` marker and starts it
+  again on the next 30 s epoch. Its moments become markers (`drift-off: drowsy`, `drift-off: probably asleep, onset
+  23:51:30`, ...) and the screen's line above the buttons shows its state. Every call is guarded: an exception, or
+  more than 2 % of the time after the first 10 minutes, switches it off with one log line and the recording goes on.
+  After Android restarts the service it waits for the next Lights off.
+- **Morning**: the sleep report runs the same detector again over the joined night from its latest lights-off marker
+  (the night pass that already counts jaw and movement) and compares its onset with the sleep model's (the first of
+  10 epochs in a row not scored awake): `drift_off` in the report ([data-format.md](data-format.md)), "Falling
+  asleep" on the screen, and the check: the detector ships when 4 of the newest 5 nights with Lights off agree within
+  5 minutes. The laptop's `scripts/sleep_report.py` writes the same from `analysis/night_drift.py`.
+- **Live equals morning**: the live detector places the batches on the clock as the night pass joins the files
+  (pauses over 0.5 s and new file sets held, the files' float32, the BDF's clip), so both find the same onset when
+  the night is the recorder's own files. On the owner's 12.9-hour night of 2026-11-17 (58 recordings, every drop)
+  replayed batch by batch with `tool/live_drift.dart`: the same baseline, onset and known second as the night pass.
+- **Cost**: in that replay (AOT, as the phone runs) the live detector took 42.8 s for 12.9 h of signal, **3.3 s an
+  hour** (0.09 % of the time) while the laptop was busy with other work (the night pass took 44 s instead of
+  its quiet 11.3 s, so about 1 s an hour on a quiet laptop); about 150 MB for the whole tool. The phone is untested
+  (likely 2-4 times slower: still well under its 2 % limit); its night `.log` ends with the measured number.
+
+The recorded night through the report's rules (the laptop's AnySleep stages; the night's own 30 s grid from 01:58:25,
+so the times differ from the table above by the grid):
+
+| Lights off at | Detector onset | Sleep model onset | Difference | Agree |
+|---|---|---|---|---|
+| 01:58:25 (night start: what the report says, not counted) | 03:12:55 | 03:16:55 | -4.0 min | yes |
+| 02:40:25 | 03:16:55 | 03:16:55 | 0 | yes |
+| 03:12:25 | 03:16:55 | 03:16:55 | 0 | yes |
+| 09:11:25 (headband back on) | 09:14:55 | 09:15:25 | -0.5 min | yes |
+| 11:35:25 (back to sleep after waking; extra) | 11:58:25 | 11:50:55 | +7.5 min | no |
+
 ## What still needs the owner
 
 - **The extended setup test** (`morning.html`, 2 min): 20 cued blinks set the blink depth, 10 glances give µV
   per degree and left vs right, 5 clenches confirm the jaw band and the 4x threshold.
-- **A "lights off" press** on each night or nap: three more onsets within 5 minutes and the detector ships
-  (DECISIONS 62).
+- **A Lights off tap** on each night or nap, as you close your eyes (app/README.md, "Lights off and falling asleep"):
+  the morning report's check counts the nights; 4 of 5 within 5 minutes and the detector ships (DECISIONS 62).
 - **A meditation on the phone** where you let yourself doze: does "drifting" come when you feel it?
 
 ## Commands
@@ -153,4 +189,12 @@ The night extras, phone code against the reference on a recorded night (same sta
 uv run --project analysis python analysis/night_extras.py RECORDINGS 2026-11-17 NIGHT.sleep.json --out py.json
 cd app && dart run tool/night_extras.dart RECORDINGS 2026-11-17 NIGHT.sleep.json dart.json
 uv run --project analysis python analysis/make_extras_fixture.py RECORDINGS 2026-11-17 NIGHT.sleep.json app/test/fixtures/night_extras.json
+```
+
+The live detector on a recorded night (cost per hour, live against the night pass, the report's comparison, and the
+same with lights off at given times); compile it first for the phone's speed:
+
+```
+cd app && dart compile exe tool/live_drift.dart -o /tmp/live_drift
+/tmp/live_drift RECORDINGS 2026-11-17 NIGHT.sleep.json 02:40:00 03:12:00 09:11:00
 ```

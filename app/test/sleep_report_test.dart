@@ -119,6 +119,7 @@ void main() {
       SleepReport report(Map<String, int> inputs, {int version = reportVersion}) => SleepReport({
         'version': version,
         'inputs': [for (final e in inputs.entries) {'file': e.key, 'bytes': e.value}],
+        'drift_off': null,
       });
       const min = 60 * 250 * 20; // bytes per minute
       final files = {'a.f32': 60 * min, 'b.f32': 30 * min};
@@ -129,6 +130,7 @@ void main() {
       expect(isStale(files, report({'a.f32': 60 * min, 'b.f32': 20 * min})), isTrue);
       expect(isStale(files, report({'a.f32': 60 * min})), isTrue); // b.f32 is new
       expect(isStale(files, report({...files, 'gone.f32': 20})), isTrue);
+      expect(isStale(files, SleepReport({...report(files).json}..remove('drift_off'))), isTrue); // before drift_off
     });
   });
 

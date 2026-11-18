@@ -11,6 +11,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import '../detectors/detectors.dart';
+import 'drift.dart';
 import 'night_signal.dart';
 import 'periods.dart' show asleepStages;
 
@@ -31,25 +32,35 @@ const Map<BurstKind, String> _kindKey = {
 };
 
 /// What the detectors saw over a night: quality per whole epoch from the first sample, muscle bursts and movement
-/// spans (first and last second).
+/// spans (first and last second), and the drift-off detector from lights off (drift.dart; null with [driftError]
+/// when it failed).
 class NightSeen {
-  const NightSeen({required this.quality, required this.bursts, required this.moves});
+  const NightSeen({required this.quality, required this.bursts, required this.moves, this.drift, this.driftError});
   final List<EpochQuality> quality;
   final List<Burst> bursts;
   final List<(int, int)> moves;
+  final DriftSeen? drift;
+  final String? driftError;
 }
 
 typedef SeeFn = Future<NightSeen?> Function(List<File> recordings);
 
 /// The night's recordings (oldest first) joined on the clock as the sleep model reads them and fed through the
-/// detectors; null when there are no samples.
+/// detectors, the drift-off detector running from the night's lights off (drift.dart); null when there are no samples.
 NightSeen? seeNight(List<File> f32Files) {
   final layout = joinLayout(f32Files);
   if (layout.samples == 0) return null;
-  final det = Detectors();
+  final drift = NightDrift(f32Files, layout.startUnix);
+  final det = Detectors(onSecond: drift.second);
   layout.forEachRow((row, missing) => det.push(row, missing: missing));
   det.finish();
-  return NightSeen(quality: [for (final e in det.epochs) e.quality], bursts: det.bursts, moves: det.movement);
+  return NightSeen(
+    quality: [for (final e in det.epochs) e.quality],
+    bursts: det.bursts,
+    moves: det.movement,
+    drift: drift.seen,
+    driftError: drift.error,
+  );
 }
 
 Future<NightSeen?> seeInBackground(List<File> recordings) =>

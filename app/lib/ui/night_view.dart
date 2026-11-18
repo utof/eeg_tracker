@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../recorder/contact.dart';
+import 'lights_off_view.dart';
 import 'night_strip.dart';
 import 'parts.dart';
 import 'phone_checks.dart';
@@ -54,6 +55,8 @@ class NightViewModel {
     this.exportLine,
     this.sleep,
     this.dreamLine,
+    this.lightsOffLine,
+    this.lightsOffTapped = false,
   });
 
   final String title;
@@ -91,6 +94,10 @@ class NightViewModel {
 
   /// The dream catcher's newest session in a line ("Last session: 3 answers, Tue 18 Nov 23:10"), if any.
   final String? dreamLine;
+
+  /// While a night records: the line above Lights off (lights_off_view.dart), and whether it was tapped tonight.
+  final String? lightsOffLine;
+  final bool lightsOffTapped;
 }
 
 class NightView extends StatelessWidget {
@@ -108,6 +115,7 @@ class NightView extends StatelessWidget {
     this.onSleepReport,
     this.onRetrySleep,
     this.morning,
+    this.onLightsOff,
   });
 
   final NightViewModel model;
@@ -124,6 +132,9 @@ class NightView extends StatelessWidget {
 
   /// The Morning section (check-in and trends; morning_section.dart), shown between nights after Sleep.
   final Widget? morning;
+
+  /// Lights off while a night records (DECISIONS 180).
+  final VoidCallback? onLightsOff;
 
   @override
   Widget build(BuildContext context) {
@@ -170,7 +181,7 @@ class NightView extends StatelessWidget {
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-          child: _Action(m, onStart: onStart, onStop: onStop),
+          child: _Action(m, onStart: onStart, onStop: onStop, onLightsOff: onLightsOff),
         ),
       ),
     );
@@ -580,13 +591,23 @@ class _Sound extends StatelessWidget {
 }
 
 class _Action extends StatelessWidget {
-  const _Action(this.m, {required this.onStart, required this.onStop});
+  const _Action(this.m, {required this.onStart, required this.onStop, this.onLightsOff});
   final NightViewModel m;
   final VoidCallback onStart;
   final VoidCallback onStop;
+  final VoidCallback? onLightsOff;
 
   @override
   Widget build(BuildContext context) {
+    if (m.running && onLightsOff != null) {
+      return NightActions(
+        line: m.lightsOffLine,
+        tapped: m.lightsOffTapped,
+        busy: m.busy,
+        onLightsOff: onLightsOff,
+        onStop: onStop,
+      );
+    }
     if (m.running) {
       return OutlinedButton.icon(
         onPressed: m.busy ? null : onStop,

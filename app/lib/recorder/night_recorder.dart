@@ -9,8 +9,11 @@
 //   (row 49). Each drop and try goes into the .log with its time;
 // - every SDK call has a deadline; one that blocks means the SDK is wedged, so the data is saved and the
 //   app process is restarted (the phone's version of "exit and let record_night.sh start a fresh one");
-// - the data is saved before every risky SDK call.
+// - the data is saved before every risky SDK call;
+// - the drift-off detector runs on the batches in this isolate (live_drift.dart, DECISIONS 180-184), always behind the
+//   files and inside a guard: an exception, or more than its share of time, switches it off with one log line.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -18,6 +21,7 @@ import 'battery.dart';
 import 'chunk_writer.dart';
 import 'contact.dart';
 import 'headband.dart';
+import 'live_drift.dart';
 import 'nights.dart';
 import 'packets.dart';
 import 'status.dart';
@@ -48,6 +52,8 @@ class RecorderTiming {
     this.rescanFor = const Duration(seconds: 15),
     this.phoneLogEvery = const Duration(minutes: 1),
     this.packetLogEvery = const Duration(minutes: 10),
+    this.driftBudget = 0.02,
+    this.driftBudgetAfter = const Duration(minutes: 10),
   });
 
   /// Buffered samples go to the files and a status goes to the screen this often.
@@ -89,6 +95,11 @@ class RecorderTiming {
 
   /// The packet accounting line goes into the `.log` this often (and at the end of every run and night).
   final Duration packetLogEvery;
+
+  /// The drift-off detector is switched off once it has taken more than this share of the time since it started,
+  /// checked from [driftBudgetAfter] on (on the laptop it takes about 0.03 %).
+  final double driftBudget;
+  final Duration driftBudgetAfter;
 }
 
 /// An SDK call passed its deadline. Never swallowed by the ordinary error handling.
@@ -112,6 +123,7 @@ class NightRecorder {
     required this.onStuck,
     this.probe,
     this.timing = const RecorderTiming(),
+    this.watch = LiveDrift.new,
     DateTime Function()? clock,
   }) : _now = clock ?? DateTime.now;
 
@@ -124,6 +136,9 @@ class NightRecorder {
   final Future<void> Function(String reason) onStuck;
   final PhoneProbe? probe;
   final RecorderTiming timing;
+
+  /// Makes the live drift-off detector; null: none.
+  final DriftWatch Function()? watch;
   final DateTime Function() _now;
 
   RecorderStatus _status = const RecorderStatus();
@@ -159,6 +174,16 @@ class NightRecorder {
 
   /// Headbands dropped while out of range. Kept, never touched again (no SDK call on a lost sensor).
   final List<Headband> abandoned = [];
+
+  /// The live drift-off detector; null while off. [_driftTime] is the time spent in it, [_driftWall] the time since
+  /// it started (for its budget), [_driftUsed] whether it ran tonight (for the night's cost line).
+  DriftWatch? _drift;
+  final Stopwatch _driftTime = Stopwatch(), _driftWall = Stopwatch();
+  int _driftSamples = 0;
+  bool _driftUsed = false;
+
+  /// Markers given before tonight's first file set opened, with their times.
+  List<(DateTime, String)> _pendingMarkers = const [];
 
   RecorderStatus get status => _status;
   bool get _stopping => _stopSignal.isCompleted;
@@ -204,6 +229,7 @@ class NightRecorder {
         _night = _night.copyWith(directPending: false, directOff: true);
         notes.add('the previous process ended during a direct connection; scans only for the rest of the night');
       }
+      if (watch != null) notes.add('drift-off detector off after the restart; it starts again at Lights off');
       final t = _now();
       _notes = [for (final n in notes) (t, n)];
       _lastLog = _newestLog(prior.startMs);
@@ -211,6 +237,8 @@ class NightRecorder {
       if (prior.band != null) _drop = (lastDataMs: null, stem: stem, why: 'app process restarted');
     } else {
       _night = NightState(active: true, startMs: _now().millisecondsSinceEpoch);
+      _startDrift();
+      if (_drift != null) _notes = [(_now(), 'drift-off detector on; lights off counts from the first sample until Lights off')];
     }
     _packets = PacketAccount(_night.packets);
     _packetsLoggedMs = _now().millisecondsSinceEpoch;
@@ -223,8 +251,8 @@ class NightRecorder {
         runs: _night.runs,
         contactOhms: _night.contactOhms,
         slots: Map.of(_slots),
-        note: _notes.isEmpty ? 'looking for the headband' : 'restarted by Android; reconnecting',
-      ),
+        note: restartedBySystem && prior.active ? 'restarted by Android; reconnecting' : 'looking for the headband',
+      ).withDrift(lightsOffMs: _night.lightsOffMs),
     );
   }
 
@@ -378,6 +406,10 @@ class NightRecorder {
         w.log(line, at: t);
       }
       _notes = const [];
+      for (final (t, text) in _pendingMarkers) {
+        _marker(text, t);
+      }
+      _pendingMarkers = const [];
       _logReconnected(w);
       await _save();
       final battery = await _battery(band);
@@ -438,12 +470,128 @@ class NightRecorder {
   void _onRows(ChunkWriter w, List<Sample> rows) {
     if (rows.isEmpty) return;
     final t = _now();
+    final firstOfFile = w.samplesReceived == 0;
     w.addBatch(t, rows);
     _packets.add(rows);
     final ms = t.millisecondsSinceEpoch;
     final slot = ms ~/ slotMs;
     _slots[slot] = (_slots[slot] ?? 0) + rows.length;
     _status = _status.copyWith(nightSamples: _status.nightSamples + rows.length, lastDataMs: ms, slots: _slots);
+    if (_drift != null) {
+      _guarded((d) {
+        d.add(t, rows, firstOfFile: firstOfFile);
+        for (final text in d.takeEvents()) {
+          _marker(text, t);
+        }
+      });
+    }
+  }
+
+  /// The night screen's Lights off: a marker in the recording, kept in the saved night, and the drift-off detector
+  /// starts again from the night's next 30 s epoch (after a process restart it starts here).
+  void lightsOff() {
+    if (_stopping) return;
+    final at = _now();
+    _night = _night.copyWith(lightsOffMs: at.millisecondsSinceEpoch);
+    unawaited(_save().catchError((Object _) {})); // the next 10 s check saves it again
+    _marker(lightsOffMarker, at);
+    if (_drift == null && !_driftUsed) _startDrift();
+    _guarded((d) => d.lightsOff(at));
+    _set(_withDrift(_status));
+  }
+
+  void _startDrift() {
+    final make = watch;
+    if (make == null) return;
+    try {
+      _drift = make();
+      _driftUsed = true;
+      _driftWall.start();
+    } catch (e) {
+      _note('drift-off detector could not start: ${_short(e)}');
+    }
+  }
+
+  /// Every call into the detector goes through here: any exception switches it off for the rest of the process with
+  /// one log line, and the recording never notices.
+  void _guarded(void Function(DriftWatch d) call) {
+    final d = _drift;
+    if (d == null) return;
+    _driftTime.start();
+    try {
+      call(d);
+      _driftSamples = d.samples;
+    } catch (e) {
+      _driftOff('${_short(e)}; the recording goes on');
+    } finally {
+      _driftTime.stop();
+    }
+  }
+
+  void _driftOff(String why) {
+    _drift = null;
+    _driftWall.stop();
+    final line = 'drift-off detector stopped: $why';
+    final w = _writer;
+    try {
+      if (w != null && !w.isClosed) {
+        w.log(line);
+      } else {
+        _note(line);
+      }
+    } catch (_) {}
+  }
+
+  /// Switched off when it has used more than its share of the time (a phone much slower than expected).
+  void _checkDriftBudget() {
+    if (_drift == null || _driftWall.elapsed < timing.driftBudgetAfter) return;
+    final share = _driftTime.elapsedMicroseconds / max(1, _driftWall.elapsedMicroseconds);
+    if (share > timing.driftBudget) {
+      _driftOff(
+        'it took ${(share * 100).toStringAsFixed(1)} % of the time (over ${(timing.driftBudget * 100).toStringAsFixed(1)} %); '
+        'the recording goes on',
+      );
+    }
+  }
+
+  RecorderStatus _withDrift(RecorderStatus s) {
+    final live = _drift?.live;
+    return s.withDrift(drift: live?.state, lightsOffMs: _night.lightsOffMs, onsetMs: live?.onsetMs);
+  }
+
+  /// A marker (`.markers.jsonl`, an annotation in the night's BDF) and a `.log` line: in the open file set, else beside
+  /// the last closed one, else kept for tonight's first. Never throws.
+  void _marker(String text, DateTime at) {
+    try {
+      final w = _writer;
+      final ({String stem, int i})? into = w != null && !w.isClosed
+          ? (stem: w.stem, i: w.samplesReceived)
+          : _lastLog == null
+          ? null
+          : (stem: _lastLog!.path.substring(_lastLog!.parent.path.length + 1, _lastLog!.path.length - 4), i: _closedSamples());
+      if (into == null) {
+        _pendingMarkers = [..._pendingMarkers, (at, text)];
+        return;
+      }
+      File('${dir.path}/${into.stem}.markers.jsonl').writeAsStringSync(
+        '${jsonEncode({'t': unixSeconds(at), 'i': into.i, 'text': text})}\n',
+        mode: FileMode.append,
+        flush: true,
+      );
+      if (w != null && !w.isClosed) {
+        w.log(text, at: at);
+      } else {
+        appendLogLine(_lastLog!, text, at);
+      }
+    } catch (_) {}
+  }
+
+  /// Samples in the last closed run's `.f32`.
+  int _closedSamples() {
+    final log = _lastLog;
+    if (log == null) return 0;
+    final f = File('${log.path.substring(0, log.path.length - 4)}.f32');
+    return f.existsSync() ? f.lengthSync() ~/ recordBytes : 0;
   }
 
   Future<void> _contactCheck(Headband band, ChunkWriter w) async {
@@ -498,7 +646,7 @@ class NightRecorder {
     while (true) {
       await _pause(timing.tick);
       w.append();
-      _set(_status);
+      _set(_withDrift(_status));
       if (_stopping) return _End.stopped;
       if (lost()) {
         w.log('headband out of range; saving');
@@ -506,6 +654,7 @@ class NightRecorder {
       }
       if (++ticks % timing.ticksPerCheck != 0) continue;
       w.sync();
+      _checkDriftBudget();
       await _save();
       final got = w.samplesReceived - lastTotal;
       lastTotal = w.samplesReceived;
@@ -726,6 +875,14 @@ class NightRecorder {
     }
     _note('end of night, ${_packets.counts.logLine()}');
     _note(_night.phoneBattery.summaryLine());
+    if (_driftUsed) {
+      final hours = _driftSamples / sampleRateHz / 3600;
+      final work = _driftTime.elapsedMicroseconds / 1e6;
+      _note(
+        'drift-off detector: ${work.toStringAsFixed(2)} s of work for ${hours.toStringAsFixed(2)} h of signal'
+        '${hours > 0 ? ' (${(work / hours).toStringAsFixed(2)} s an hour)' : ''}${_drift == null ? ', then stopped' : ''}',
+      );
+    }
     await _save();
   }
 
