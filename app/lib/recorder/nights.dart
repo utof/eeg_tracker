@@ -1,10 +1,18 @@
-// The nights kept on the phone, for Export. A night is every file set whose run started in the same
-// noon-to-noon day: the evening's date is the start minus 12 hours, as `night_of` in docs/data-format.md.
+// The nights kept on the phone, for Export and the sleep report. A night is a chain of recordings, the rule of
+// scripts/night_files.py (DECISIONS row 82): a recording joins the night before it when it starts less than
+// 3 hours after that night's last data or has the same evening date (its start minus 12 hours, as `night_of` in
+// docs/data-format.md), and a night never takes a recording that starts 24 hours or more after its first one.
+// The night is named after the evening date of its first recording, so a late-morning sleep lands in the same
+// night as the sleep before it. Files of a run without samples (a `.log` alone) join the night they fall in.
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'chunk_writer.dart';
 
 final RegExp _stem = RegExp(r'^(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})\.');
+
+const Duration chainGap = Duration(hours: 3);
+const Duration maxSpan = Duration(hours: 24);
 
 /// Start of the run that wrote [fileName] (`2026-11-18-231200.f32` and its `.idx`, `.log`), or null for any
 /// other file.
@@ -23,8 +31,11 @@ DateTime nightOf(DateTime t) {
   return DateTime(shifted.year, shifted.month, shifted.day);
 }
 
+/// `2026-11-18`.
+String dateName(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${_two(d.month)}-${_two(d.day)}';
+
 class NightFiles {
-  NightFiles(this.nightOf, this.files);
+  NightFiles(this.nightOf, this.files, {this.recordings = const [], this.lastData});
 
   /// The evening's date.
   final DateTime nightOf;
@@ -32,8 +43,20 @@ class NightFiles {
   /// Every file of the night, oldest run first.
   final List<File> files;
 
+  /// The `.f32` files with samples, oldest first: what the sleep report scores.
+  final List<File> recordings;
+
+  /// Arrival of the night's last data; null without recordings.
+  final DateTime? lastData;
+
+  /// `2026-11-18`, the name of its report.
+  String get name => dateName(nightOf);
+
   /// Start of the first run.
   DateTime get start => stemTime(files.first.uri.pathSegments.last)!;
+
+  /// Arrival of the last data (the start when there is none).
+  DateTime get end => lastData ?? start;
 
   /// File sets (one per recorder run: a new one after every drop or restart).
   int get runs => files.where((f) => f.path.endsWith('.f32')).length;
@@ -41,22 +64,104 @@ class NightFiles {
   int get bytes => files.fold(0, (sum, f) => sum + f.lengthSync());
 
   /// Name of the folder an export creates, e.g. `eeg-night-2026-11-18`.
-  String get folderName =>
-      'eeg-night-${nightOf.year.toString().padLeft(4, '0')}-${_two(nightOf.month)}-${_two(nightOf.day)}';
+  String get folderName => 'eeg-night-$name';
+}
+
+class _Rec {
+  _Rec(this.stem, this.start, this.end);
+  final String stem;
+  final DateTime start;
+  DateTime end;
+}
+
+class _Chain {
+  _Chain(this.nightOf, this.first);
+  final DateTime nightOf;
+  final DateTime first;
+  DateTime end = DateTime(0);
+  final List<String> stems = [];
+  final List<String> dataStems = [];
 }
 
 /// The nights in [dir], newest first.
 List<NightFiles> nightsIn(Directory dir) {
   if (!dir.existsSync()) return const [];
-  final byNight = <DateTime, List<File>>{};
+  final byStem = <String, List<File>>{};
   for (final f in dir.listSync().whereType<File>()) {
-    final t = stemTime(f.uri.pathSegments.last);
-    if (t != null) byNight.putIfAbsent(nightOf(t), () => []).add(f);
+    final name = f.uri.pathSegments.last;
+    if (stemTime(name) != null) byStem.putIfAbsent(name.substring(0, 17), () => []).add(f);
   }
+  final data = <_Rec>[];
+  final other = <String>[];
+  for (final stem in byStem.keys) {
+    final f32 = File('${dir.path}/$stem.f32');
+    final size = f32.existsSync() ? f32.lengthSync() : 0;
+    final start = stemTime('$stem.')!;
+    if (size >= recordBytes) {
+      data.add(_Rec(stem, start, _lastData(dir, stem, start, size)));
+    } else {
+      other.add(stem);
+    }
+  }
+  data.sort((a, b) {
+    final c = a.start.compareTo(b.start);
+    return c != 0 ? c : a.stem.compareTo(b.stem);
+  });
+  final chains = <_Chain>[];
+  for (final r in data) {
+    final n = chains.isEmpty ? null : chains.last;
+    final near = n != null && (r.start.difference(n.end) < chainGap || nightOf(r.start) == n.nightOf);
+    if (n == null || !near || r.start.difference(n.first) >= maxSpan) chains.add(_Chain(nightOf(r.start), r.start));
+    final c = chains.last;
+    c.stems.add(r.stem);
+    c.dataStems.add(r.stem);
+    if (r.end.isAfter(c.end)) c.end = r.end;
+  }
+  for (final stem in other) {
+    final t = stemTime('$stem.')!;
+    final home = chains.where((c) => nightOf(t) == c.nightOf || (!t.isBefore(c.first) && t.difference(c.end) < chainGap));
+    if (home.isNotEmpty) {
+      home.first.stems.add(stem);
+    } else {
+      final same = chains.where((c) => c.dataStems.isEmpty && c.nightOf == nightOf(t));
+      (same.isNotEmpty ? same.first : (chains..add(_Chain(nightOf(t), t))).last).stems.add(stem);
+    }
+  }
+  int byName(File a, File b) => a.uri.pathSegments.last.compareTo(b.uri.pathSegments.last);
   return [
-    for (final e in byNight.entries)
-      NightFiles(e.key, e.value..sort((a, b) => a.uri.pathSegments.last.compareTo(b.uri.pathSegments.last))),
-  ]..sort((a, b) => b.nightOf.compareTo(a.nightOf));
+    for (final c in chains)
+      NightFiles(
+        c.nightOf,
+        [for (final s in c.stems) ...byStem[s]!]..sort(byName),
+        recordings: [for (final s in c.dataStems) File('${dir.path}/$s.f32')]..sort(byName),
+        lastData: c.dataStems.isEmpty ? null : c.end,
+      ),
+  ]..sort((a, b) {
+    final c = b.nightOf.compareTo(a.nightOf);
+    return c != 0 ? c : b.start.compareTo(a.start);
+  });
+}
+
+/// Arrival time of the last batch (the last `.idx` row); start + samples / 250 without an index.
+DateTime _lastData(Directory dir, String stem, DateTime start, int size) {
+  final byLength = start.add(Duration(microseconds: (size ~/ recordBytes) * 4000));
+  final idx = File('${dir.path}/$stem.idx');
+  try {
+    final len = idx.existsSync() ? idx.lengthSync() : 0;
+    if (len < indexBytes) return byLength;
+    final f = idx.openSync();
+    try {
+      f.setPositionSync((len ~/ indexBytes - 1) * indexBytes);
+      final t = ByteData.sublistView(f.readSync(8)).getFloat64(0, Endian.little);
+      final at = DateTime.fromMicrosecondsSinceEpoch((t * 1e6).round());
+      final ok = !at.isBefore(start) && at.isBefore(start.add(const Duration(days: 7)));
+      return ok ? at : byLength;
+    } finally {
+      f.closeSync();
+    }
+  } on FileSystemException {
+    return byLength;
+  }
 }
 
 const List<String> _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
