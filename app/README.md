@@ -51,7 +51,7 @@ flutter build apk --release --target-platform android-arm64
 ```
 
 `flutter test` also renders the night screen in four states, the meditation screen in eleven, the sleep report in
-eight, the replay check's and alpha-theta's pages in nineteen, the dream catcher in thirteen, the check-in, trends
+eight, the replay check's and alpha-theta's pages in nineteen, the dream catcher in thirteen, the nap coach in sixteen, the check-in, trends
 and Morning section in eighteen, sound for states in fourteen and Export data in nine to `build/screens/*.png`
 (normal and 130 % text). `test/export_test.dart` exports a fake app folder (every place the app writes) and remakes,
 with `EXPORT_FIXTURE=write`, the export the laptop importer's test reads (`test/fixtures/phone_export/`).
@@ -59,6 +59,9 @@ with `EXPORT_FIXTURE=write`, the export the laptop importer's test reads (`test/
 headband whose alpha fades and comes back, with a fake microphone. `test/morning_cross_check_test.dart` checks the
 check-in's numbers against a fixture made by the laptop's Python (`test/fixtures/make_morning_fixture.py`); with
 `MORNING_F32=<check-in .f32> MORNING_JSON=<its .morning.json>` it also runs a whole recorded check-in.
+`test/nap_test.dart` runs whole naps the same way with a scripted sleep model (ONNX cannot run in
+`flutter test`); `test/live_prep_test.dart` checks the live scorer's input against `analysis/live_stager.py` (fixture
+made by `test/fixtures/make_live_fixture.py`), and `tool/live_night.dart` streams a whole recorded night through it.
 `test/states_controller_test.dart` runs
 sound-for-states sessions the same way, and `test/state_synth_test.dart` checks the made sound (loudness, pulse
 edges, the beat in the sound or only between the ears) without an audio device.
