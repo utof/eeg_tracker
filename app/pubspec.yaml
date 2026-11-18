@@ -14,6 +14,10 @@ dependencies:
   # Foreground service whose TaskHandler isolate owns the whole BrainBit session (DECISIONS row 2).
   flutter_foreground_task: ^11.0.3
   permission_handler: ^12.0.1
+  # Sound engine for the meditation feedback (DECISIONS rows 11 and 72): SoLoud + miniaudio, MIT/zlib. Its build
+  # hook compiles the C++ engine with the NDK; the Xiph decoders are left out (below), we only play WAV and
+  # waveforms made in memory.
+  flutter_soloud: ^5.3.0
 
 dev_dependencies:
   flutter_test:
@@ -22,3 +26,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+hooks:
+  user_defines:
+    flutter_soloud:
+      no_xiph_libs: true # no Opus/Ogg/Vorbis/FLAC: nothing to download, smaller APK
