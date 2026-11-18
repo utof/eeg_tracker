@@ -107,11 +107,13 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
 - **Readouts:** big numbers with small units and a muted label under them; data age turns amber at 5 s
   and red at 40 s.
 - **Phone checks:** icon, one plain sentence, right-aligned text buttons that open the exact setting.
-- **Buttons:** Start night is the only filled button; Stop is outlined and asks once before stopping.
+- **Buttons:** one filled button per screen: Start night on the night screen, Start on the meditation screen; Stop is
+  outlined and asks once before stopping.
 
 ## Do's and Don'ts
 
 - Do keep every value in the same place across states; the eye finds it at 3 a.m. without reading.
 - Do word every state ("Recording", "No data for 52 s") next to its colour.
-- Don't add bright fills, animation beyond the slow breathing live mark, or sounds.
+- Don't add bright fills, animation beyond the slow breathing live mark, or sounds. Exception: the meditation
+  mode, whose feedback is sound (rain, drone, bells; DECISIONS 72-77); the night screen stays silent.
 - Don't show a number that was not measured; label planning thresholds as such.
