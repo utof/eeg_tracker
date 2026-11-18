@@ -175,7 +175,7 @@ class StatesController extends ChangeNotifier {
       if (!await link.connect(onFound: (name) => _set(SoundStage.connecting, 'Found $name. Connecting.'))) {
         _link = null;
         if (_ended) return;
-        return _soundOnly(HeadbandUse.notFound, 'Headband not found, so the sound plays by its timer alone.');
+        return await _soundOnly(HeadbandUse.notFound, 'Headband not found, so the sound plays by its timer alone.');
       }
       if (_ended) return await link.close();
       _set(SoundStage.contact, 'Checking contact. Keep still for a few seconds.');

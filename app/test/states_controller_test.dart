@@ -162,7 +162,7 @@ void main() {
     // the EEG is a normal recording with the events as markers, so it joins that night
     expect(s.recording, isNotNull);
     expect(File('${recordings.path}/${s.recording}.f32').lengthSync(), greaterThan(0));
-    final markers = File('${recordings.path}/${s.recording}.markers.jsonl').readAsLinesSync().map((l) => jsonDecode(l)['text']);
+    final markers = File('${recordings.path}/${s.recording}.markers.jsonl').readAsLinesSync().map((l) => (jsonDecode(l) as Map)['text']);
     expect(markers, containsAll(['sound: sound on: Pink noise, pulsed noise 10 → 3 Hz', 'sound: probably asleep: fading out']));
     expect(nightsIn(recordings).single.files.any((f) => f.path.endsWith('.f32')), isTrue);
     c.dispose();
