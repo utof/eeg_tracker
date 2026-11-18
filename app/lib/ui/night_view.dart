@@ -2,9 +2,11 @@
 import 'package:flutter/material.dart';
 
 import '../recorder/contact.dart';
+import '../share/control.dart' show ShareLine;
 import 'night_strip.dart';
 import 'parts.dart';
 import 'phone_checks.dart';
+import 'share_sheet.dart';
 import 'sleep_report_view.dart' show durationParts, nightTitle;
 import 'theme.dart';
 
@@ -54,6 +56,7 @@ class NightViewModel {
     this.exportLine,
     this.sleep,
     this.dreamLine,
+    this.share,
   });
 
   final String title;
@@ -91,6 +94,9 @@ class NightViewModel {
 
   /// The dream catcher's newest session in a line ("Last session: 3 answers, Tue 18 Nov 23:10"), if any.
   final String? dreamLine;
+
+  /// Share on Wi-Fi's switch and sentence (lib/share/control.dart `line`); null until the setting is read.
+  final ShareLine? share;
 }
 
 class NightView extends StatelessWidget {
@@ -102,6 +108,8 @@ class NightView extends StatelessWidget {
     required this.onFix,
     this.onExport,
     this.onExportData,
+    this.onShare,
+    this.onShareDetails,
     this.onMeditate,
     this.onDream,
     this.onSound,
@@ -116,6 +124,8 @@ class NightView extends StatelessWidget {
   final void Function(FixAction action) onFix;
   final VoidCallback? onExport;
   final VoidCallback? onExportData;
+  final ValueChanged<bool>? onShare;
+  final VoidCallback? onShareDetails;
   final VoidCallback? onMeditate;
   final VoidCallback? onDream;
   final VoidCallback? onSound;
@@ -152,10 +162,20 @@ class NightView extends StatelessWidget {
           const SectionHeading('Phone'),
           PhoneChecksList(checks: m.checks, onFix: onFix),
           if (!m.running) ...headband,
-          // A night being recorded is not finished, so Export waits for Stop (DECISIONS rows 56, 150).
-          if (!m.running && (m.nightsOnPhone > 0 || m.exportLine != null)) ...[
+          // A night being recorded is not finished, so Export waits for Stop (DECISIONS rows 56, 150); Share on
+          // Wi-Fi is there during the night too (rows 220-229).
+          if (m.share != null || (!m.running && (m.nightsOnPhone > 0 || m.exportLine != null))) ...[
             const SectionHeading('Your data'),
-            _YourData(nights: m.nightsOnPhone, line: m.exportLine, onExportData: onExportData, onExport: onExport),
+            _YourData(
+              running: m.running,
+              nights: m.nightsOnPhone,
+              line: m.exportLine,
+              onExportData: onExportData,
+              onExport: onExport,
+              share: m.share,
+              onShare: onShare,
+              onShareDetails: onShareDetails,
+            ),
           ],
           // The headband connects to one thing at a time, so meditation waits for the night to end.
           if (!m.running) ...[const SectionHeading('Meditation'), _Meditation(onMeditate: onMeditate)],
@@ -382,7 +402,20 @@ class _Headband extends StatelessWidget {
 /// What the app keeps, when it last left the phone (amber, with a mark and words, once it gets old), Export data
 /// (everything new, its own page) and Export a night (one night into a folder of its own).
 class _YourData extends StatelessWidget {
-  const _YourData({required this.nights, required this.line, required this.onExportData, required this.onExport});
+  const _YourData({
+    required this.running,
+    required this.nights,
+    required this.line,
+    required this.onExportData,
+    required this.onExport,
+    this.share,
+    this.onShare,
+    this.onShareDetails,
+  });
+  final bool running;
+  final ShareLine? share;
+  final ValueChanged<bool>? onShare;
+  final VoidCallback? onShareDetails;
   final int nights;
   final ({String text, bool warn})? line;
   final VoidCallback? onExportData;
@@ -393,6 +426,9 @@ class _YourData extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final muted = text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4);
     final l = line;
+    final s = share;
+    final sharing = s == null ? null : ShareRow(line: s, onChanged: onShare, onDetails: onShareDetails);
+    if (running) return sharing ?? const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -437,6 +473,7 @@ class _YourData extends StatelessWidget {
             label: const Text('Export a night'),
           ),
         ],
+        if (sharing != null) ...[const SizedBox(height: 20), const Divider(), const SizedBox(height: 8), sharing],
       ],
     );
   }
