@@ -42,8 +42,9 @@ class RoundPlan {
   /// A round is under way (question, answer, the drifting tap).
   bool inRound = false;
 
-  /// When the last round ended (s after lights off).
+  /// When the last round ended (s after lights off), and the same moment on the signal's own clock (the epochs').
   double? lastEnd;
+  double? _lastEndSignal;
 
   /// When the next round's timer runs out (s after lights off).
   double timerS;
@@ -54,7 +55,7 @@ class RoundPlan {
 
   /// A finished drift-off epoch: its first second after lights off and the detector's state after it.
   void epoch(int start, DriftState state) {
-    final end = lastEnd;
+    final end = _lastEndSignal;
     if (end != null && start >= end && state == DriftState.awake) _awakeSince = true;
   }
 
@@ -72,10 +73,12 @@ class RoundPlan {
   void start() => inRound = true;
 
   /// The round under way ended at [t]: the next one waits for alpha to come back, and its timer is drawn.
-  void finish(double t) {
+  /// [signalS]: the same moment in seconds of signal, when the signal lags the clock (a drop of unknown length).
+  void finish(double t, {double? signalS}) {
     inRound = false;
     done++;
     lastEnd = t;
+    _lastEndSignal = signalS ?? t;
     _awakeSince = false;
     final w = DreamRule.againWindowMin, u = _random();
     if (!(u >= 0 && u <= 1)) throw StateError('random must give 0..1, gave $u');

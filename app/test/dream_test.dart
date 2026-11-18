@@ -227,6 +227,16 @@ void main() {
       expect(p.due(420, DriftState.asleep), DreamCause.drowsy);
     });
 
+    test('alpha coming back counts on the signal\'s clock when the signal lags the clock', () {
+      final p = plan()
+        ..start()
+        ..finish(400, signalS: 330);
+      p.epoch(330, DriftState.awake);
+      expect(p.awakeSince, isTrue);
+      expect(p.due(519, DriftState.drowsy), isNull, reason: 'the 2 minutes still count on the clock');
+      expect(p.due(520, DriftState.drowsy), DreamCause.drowsy);
+    });
+
     test('a later round\'s timer falls 4 to 7 minutes after the last round ended', () {
       final early = plan(u: 0)
         ..start()

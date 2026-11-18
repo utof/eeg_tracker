@@ -444,7 +444,7 @@ class DreamController extends ChangeNotifier {
       ),
     );
     roundNow = null;
-    plan.finish(end);
+    plan.finish(end, signalS: (_seen?.n ?? 0) / fs);
     if (_ended) {
       _busy = false;
       return; // the end saves the session with this round
