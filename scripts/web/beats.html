@@ -153,15 +153,18 @@ function marker(text) { fetch('marker', { method: 'POST', body: text }).catch(()
 
 // brain readout: alpha and slow waves at the back of the head, against the first 30 s of the session
 const FS = 250; let base = null;
-function bandPower(x, f0, f1) {
+// skip: the beat rate now playing. The hearing part of the brain answers AT the beat rate, so counting that band
+// would credit the sound with "more alpha" that is only an echo of it (research 2026-11-18).
+function bandPower(x, f0, f1, skip = null) {
   const N = x.length; let s = 0, n = 0;
   for (let f = f0; f <= f1; f++) {
+    if (skip !== null && Math.abs(f - skip) <= 1) continue;
     let re = 0, im = 0;
     for (let i = 0; i < N; i++) { const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1)), a = 2 * Math.PI * f * i / FS;
       re += w * x[i] * Math.cos(a); im -= w * x[i] * Math.sin(a); }
     s += re * re + im * im; n++;
   }
-  return s / n;
+  return n ? s / n : 0;
 }
 async function tick() {
   if (playing) {
@@ -175,13 +178,16 @@ async function tick() {
   if (s.age > 3) { $('brain').textContent = 'Recorder running, but no fresh data from the headband.'; return; }
   const x = [0, 1].map(c => s.data[c].slice(-500));
   if (x[0].length < 500) return;
-  const alpha = (bandPower(x[0], 8, 12) + bandPower(x[1], 8, 12)) / 2, slow = (bandPower(x[0], 4, 7) + bandPower(x[1], 4, 7)) / 2;
+  const fb = playing && playing.mode !== 'noise' ? Math.round(playing.f0 + (playing.f1 - playing.f0) * Math.min(1, (Date.now() - playing.t0) / 1000 / playing.T)) : null;
+  const bp = (c, a, b) => bandPower(x[c], a, b, fb);
+  const alpha = (bp(0, 8, 12) + bp(1, 8, 12)) / 2, slow = (bp(0, 4, 7) + bp(1, 4, 7)) / 2;
   if (playing) {
     base = base || { n: 0, a: 0, s: 0, until: Date.now() + 30000 };
     if (Date.now() < base.until) { base.a += alpha; base.s += slow; base.n++; $('brain').textContent = 'Measuring your starting point (30 s)…'; return; }
     const a = alpha / (base.a / base.n), sl = slow / (base.s / base.n);
     const pct = v => (v >= 1 ? '+' : '') + Math.round((v - 1) * 100) + '%';
-    $('brain').textContent = `Alpha ${pct(a)} · slow waves ${pct(sl)} since the start (back of the head, last 2 s). ` +
+    $('brain').textContent = `Alpha ${pct(a)} · slow waves ${pct(sl)} since the start (back of the head, last 2 s` +
+      (fb !== null ? `; ${fb} Hz ±1 left out, it echoes the beat). ` : '). ') +
       (playing.preset === 'asleep' ? 'Falling asleep: alpha fades and slow waves grow.' : playing.preset === 'relax' || playing.preset === 'brk' ? 'Relaxing with eyes closed: alpha goes up.' : '');
   } else { $('brain').textContent = 'Recorder connected. Start a sound to compare against your starting point.'; }
 }
