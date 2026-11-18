@@ -133,7 +133,7 @@ void main() {
       return f;
     }
 
-    test('every sample in clock order: held gaps marked missing, values clipped as the BDF holds them', () {
+    test('every sample in clock order: held gaps marked missing, values clipped as the BDF holds them', () async {
       final rng = math.Random(5);
       List<List<double>> noise(int seconds) =>
           [for (var i = 0; i < seconds * 250; i++) [for (var c = 0; c < 4; c++) 80000 + 8 * (rng.nextDouble() - 0.5)]];
@@ -158,6 +158,13 @@ void main() {
       final seen = seeNight(files)!;
       expect(seen.quality.length, 3); // 96 s: three whole epochs
       expect(seen.quality[1], EpochQuality.missing); // 6 gap seconds in 30-59 s
+
+      // the scorer's way: in a background isolate, the same result comes back
+      final back = (await seeInBackground(files))!;
+      expect(back.quality, seen.quality);
+      expect(back.quality[1] == EpochQuality.missing, isTrue);
+      expect([for (final b in back.bursts) (b.start, b.end, b.kind)], [for (final b in seen.bursts) (b.start, b.end, b.kind)]);
+      expect(back.moves, seen.moves);
     });
 
     test('no samples: nothing seen', () => expect(seeNight(const []), isNull));
