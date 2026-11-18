@@ -10,14 +10,14 @@ button{font:inherit;padding:10px 14px;border-radius:12px;border:1px solid #3a404
 button.on{background:#2c3e50;border-color:#7fb3f2}
 button.main{background:#e8e6e1;color:#101214;border-color:#e8e6e1;font-weight:600;padding:14px 22px}
 label{display:grid;grid-template-columns:150px 1fr 70px;gap:10px;align-items:center;margin:6px 0;font-size:14px}
-input[type=range]{width:100%}
+input[type=range],select{width:100%}select{font:inherit;background:#1d2125;color:inherit;border:1px solid #3a4046;border-radius:8px;padding:4px}
 #now{margin-top:20px;padding:14px;border-radius:12px;background:#181b1e;font-size:15px}
 #big{font-size:34px;font-weight:700;margin:4px 0}
 .why{font-size:13px;color:#9aa0a6;margin-top:6px}
 </style>
 <main>
 <h1>Sound for states</h1>
-<div class="dim">Pick a state and a kind of sound. If the recorder is running, the page also shows what your brain does.</div>
+<div class="dim">Pick a state and a kind of sound. If the recorder is running, the page first measures a quiet minute, then shows what your brain does with the sound.</div>
 
 <h2>State</h2>
 <div class="chips" id="presets"></div>
@@ -31,11 +31,12 @@ input[type=range]{width:100%}
 <label>Beat at start <input type="range" id="f0" min="1" max="40" step="0.5"><span id="f0v"></span></label>
 <label>Beat at end <input type="range" id="f1" min="1" max="40" step="0.5"><span id="f1v"></span></label>
 <label>Minutes <input type="range" id="min" min="1" max="60" step="1"><span id="minv"></span></label>
-<label>Tone pitch <input type="range" id="car" min="100" max="400" step="10"><span id="carv"></span></label>
+<label>Tone pitch <select id="car"><option>150</option><option>200</option><option>300</option><option>400</option></select><span id="carv"></span></label>
+<label>Pulse depth <input type="range" id="depth" min="0.2" max="1" step="0.05"><span id="depthv"></span></label>
 <label>Volume <input type="range" id="vol" min="0" max="1" step="0.05"><span id="volv"></span></label>
 <label>Rain-like bed <input type="range" id="bed" min="0" max="1" step="0.05"><span id="bedv"></span></label>
 
-<div style="margin-top:18px"><button class="main" id="go">Start</button></div>
+<div style="margin-top:18px"><button class="main" id="go">Start</button> <button id="skip" hidden>Skip the quiet minute</button></div>
 
 <div id="now">
   <div class="dim" id="status">Not playing.</div>
@@ -43,33 +44,37 @@ input[type=range]{width:100%}
   <div class="dim" id="brain">Brain readout appears when the recorder is running.</div>
 </div>
 <p class="dim">Keep the volume low. Not while driving. Binaural beats need headphones; the other kinds work on a speaker.
-The hearing part of the brain reliably follows pulses; whether that moves your whole state is less proven, which is what
-the brain readout is for.</p>
+The hearing part of the brain reliably follows pulses; whether that moves your whole state is not proven, and plain
+calm sound often does as well. Use the no-beat option on some days to see what works for you.</p>
 </main>
 <script>
+// Fixes from the 2026-11-18 build review: seamless noise loops, faded stops, rate-aware isochronic edges, a stored
+// pulse depth, a silent baseline minute, carriers that do not alias into the EEG band at 250 Hz sampling (no
+// 220-280 Hz), loudness-matched modes (RMS, not perceived loudness), longer fades for sleep.
 const PRESETS = {
-  asleep: { name: 'Fall asleep', f0: 10, f1: 3, min: 30, mode: 'binaural', bed: 0.35,
-            why: 'Starts near your awake alpha rhythm and slides slowly into the slow rhythms of sleep onset. Fades out at the end.' },
-  relax:  { name: 'Relax', f0: 10, f1: 10, min: 10, mode: 'pulsed', bed: 0.2,
+  asleep: { name: 'Fall asleep', f0: 10, f1: 3, min: 30, mode: 'binaural', bed: 0.5, sleep: true,
+            why: 'Starts near your awake alpha rhythm and slides slowly into the slow rhythms of sleep onset. Long, gentle fades.' },
+  relax:  { name: 'Relax', f0: 10, f1: 10, min: 10, mode: 'pulsed', bed: 0.3,
             why: 'Steady 10 Hz, the alpha rhythm of calm, eyes-closed rest.' },
-  focus:  { name: 'Focus', f0: 16, f1: 16, min: 25, mode: 'pulsed', bed: 0.15,
-            why: '16 Hz pulsed noise, the beta-range rate used by focus-music services.' },
-  brk:    { name: 'Break', f0: 10, f1: 8, min: 5, mode: 'binaural', bed: 0.3,
+  focus:  { name: 'Focus', f0: 16, f1: 16, min: 25, mode: 'pulsed', bed: 0.2,
+            why: '16 Hz pulsed noise, the rate used by focus-music services. Evidence is thin (one company-run study).' },
+  brk:    { name: 'Break', f0: 10, f1: 8, min: 5, mode: 'binaural', bed: 0.4,
             why: 'Five minutes of slow alpha to step out of work mode. Close your eyes.' },
   wake:   { name: 'Wake up', f0: 10, f1: 18, min: 5, mode: 'isochronic', bed: 0,
             why: 'Rises from alpha into beta over five minutes.' },
-  plain:  { name: 'No beat (compare)', f0: 10, f1: 10, min: 10, mode: 'noise', bed: 0.4,
-            why: 'Just the rain-like bed, no rhythm. Use it on some days to compare: is it the beat or just a calm sound?' },
+  plain:  { name: 'No beat (compare)', f0: 10, f1: 10, min: 10, mode: 'noise', bed: 0.5,
+            why: 'Only the rain-like bed at the same loudness, no rhythm. Use it on some days to compare.' },
 };
 const MODES = {
-  binaural:   { name: 'Binaural', why: 'Each ear gets a slightly different tone (say 195 and 205 Hz). The brain hears a slow wobble at the difference (10 Hz). Needs headphones. Its effect on brain waves is the least consistent in studies.' },
-  isochronic: { name: 'Isochronic', why: 'One tone switched on and off in sharp, even pulses (say 10 times a second). The hearing part of the brain follows pulses like these strongly. Works on a speaker; can feel harsh.' },
+  binaural:   { name: 'Binaural', why: 'Each ear gets a slightly different tone (say 195 and 205 Hz); the brain hears a slow wobble at the difference. Needs headphones (a speaker or a mono setting turns it into an ordinary beat). The least consistent effect on brain waves in studies.' },
+  isochronic: { name: 'Isochronic', why: 'One tone switched on and off in even pulses with soft edges. The hearing part of the brain follows pulses like these strongly. Works on a speaker.' },
   pulsed:     { name: 'Pulsed noise', why: 'Soft noise whose loudness swells and fades at the beat rate: a gentler version of isochronic, the idea behind Brain.fm-style music.' },
   noise:      { name: 'Plain noise', why: 'Only the rain-like bed, no rhythm at all.' },
 };
+const TARGET_RMS = 0.12;                           // every mode is scaled to this level before the volume slider
 const $ = id => document.getElementById(id);
-let cfg = { ...PRESETS.relax, car: 200, vol: 0.5 }, preset = 'relax';
-let ctx = null, nodes = [], playing = null;
+let cfg = { ...PRESETS.relax, car: 200, vol: 0.5, depth: 0.7 }, preset = 'relax';
+let ctx = null, nodes = [], master = null, playing = null, baseline = null, waiting = null, lastState = null;
 
 function chips(el, items, cur, pick) {
   el.innerHTML = '';
@@ -79,117 +84,153 @@ function chips(el, items, cur, pick) {
   }
 }
 function render() {
-  chips($('presets'), PRESETS, preset, k => { preset = k; cfg = { ...cfg, ...PRESETS[k] }; render(); });
+  chips($('presets'), PRESETS, preset, k => { preset = k; cfg = { ...cfg, sleep: false, ...PRESETS[k] }; render(); });
   chips($('modes'), MODES, cfg.mode, k => { cfg.mode = k; render(); });
   $('presetWhy').textContent = PRESETS[preset]?.why ?? ''; $('modeWhy').textContent = MODES[cfg.mode].why;
-  for (const k of ['f0', 'f1', 'min', 'car', 'vol', 'bed']) {
-    $(k).value = cfg[k]; $(k + 'v').textContent = k === 'vol' || k === 'bed' ? Math.round(cfg[k] * 100) + '%' : cfg[k] + (k === 'min' ? ' min' : ' Hz');
+  const unit = { f0: ' Hz', f1: ' Hz', min: ' min', car: ' Hz' };
+  for (const k of ['f0', 'f1', 'min', 'car', 'depth', 'vol', 'bed']) {
+    $(k).value = cfg[k];
+    $(k + 'v').textContent = unit[k] ? cfg[k] + unit[k] : Math.round(cfg[k] * 100) + '%';
     $(k).oninput = e => { cfg[k] = +e.target.value; preset = null; render(); };
   }
 }
 
-function noiseBuffer(kind) {                        // 8 s loop of pink or brown noise
-  const n = ctx.sampleRate * 8, buf = ctx.createBuffer(1, n, ctx.sampleRate), d = buf.getChannelData(0);
-  let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, br = 0;
-  for (let i = 0; i < n; i++) {
+// --- sound ---------------------------------------------------------------------------------------------------
+function noiseBuffer(kind) {                       // 12 s of pink or brown noise, ends crossfaded: a seamless loop
+  const sr = ctx.sampleRate, n = sr * 12, F = Math.round(sr * 0.5), a = new Float32Array(n + F);
+  let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, br = 0, x1 = 0, y1 = 0;
+  for (let i = 0; i < n + F; i++) {
     const w = Math.random() * 2 - 1;
-    if (kind === 'brown') { br = (br + 0.02 * w) / 1.02; d[i] = br * 3.5; continue; }
+    if (kind === 'brown') {                        // leaky integrator, then a DC blocker
+      br = (br + 0.02 * w) / 1.02; const y = br - x1 + 0.995 * y1; x1 = br; y1 = y; a[i] = y; continue;
+    }
     b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
     b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
-    d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11; b6 = w * 0.115926;
+    a[i] = b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362; b6 = w * 0.115926;
   }
+  for (let i = 0; i < F; i++) { const k = i / F; a[i] = a[i] * k + a[n + i] * (1 - k); }
+  let ss = 0; for (let i = 0; i < n; i++) ss += a[i] * a[i];
+  const scale = TARGET_RMS / Math.sqrt(ss / n), buf = ctx.createBuffer(1, n, sr), d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = a[i] * scale;
   return buf;
 }
 function loop(buf) { const s = ctx.createBufferSource(); s.buffer = buf; s.loop = true; nodes.push(s); return s; }
-function osc(freq, type = 'sine') { const o = ctx.createOscillator(); o.type = type; o.frequency.value = freq; nodes.push(o); return o; }
+function osc(freq) { const o = ctx.createOscillator(); o.frequency.value = freq; nodes.push(o); return o; }
 function gain(v) { const g = ctx.createGain(); g.gain.value = v; return g; }
-// a rhythm at f Hz that slides to f1 over T seconds; shaped: 'soft' (sine) or 'sharp' (near-square pulses)
-function rhythm(f0, f1, T, t0, shape) {
-  const lfo = osc(f0); lfo.frequency.setValueAtTime(f0, t0); lfo.frequency.linearRampToValueAtTime(f1, t0 + T);
-  if (shape === 'soft') return lfo;
+function ramp(param, a, b, t0, T) { param.setValueAtTime(a, t0); param.linearRampToValueAtTime(b, t0 + T); }
+// A rhythm between -1 and 1 at the beat rate. 'sharp' squares it with edges of about 12 ms at the fastest rate of
+// the session (tanh of a sine: edge time ~ 1/(k*pi*f)), so faster rates do not click.
+function rhythm(T, t0, sharp) {
+  const lfo = osc(cfg.f0); ramp(lfo.frequency, cfg.f0, cfg.f1, t0, T);
+  if (!sharp) return lfo;
+  const k = Math.min(8, Math.max(1, 1 / (0.012 * Math.PI * Math.max(cfg.f0, cfg.f1))));
   const ws = ctx.createWaveShaper(), c = new Float32Array(1025);
-  for (let i = 0; i < c.length; i++) { const x = i / 512 - 1; c[i] = Math.tanh(8 * x) / Math.tanh(8); }
+  for (let i = 0; i < c.length; i++) c[i] = Math.tanh(k * (i / 512 - 1)) / Math.tanh(k);
   ws.curve = c; lfo.connect(ws); return ws;
 }
-
+// gain swinging between (1 - depth) and 1 at the beat rate, and its RMS factor (for loudness matching)
+function pulsedGain(T, t0, sharp) {
+  const d = cfg.depth, g = gain(1 - d / 2), amt = gain(d / 2);
+  rhythm(T, t0, sharp).connect(amt).connect(g.gain);
+  return { g, rms: Math.sqrt((1 - d / 2) ** 2 + (sharp ? 1 : 0.5) * (d / 2) ** 2) };
+}
 function start() {
-  ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
-  stop(false);
-  const t0 = ctx.currentTime + 0.05, T = cfg.min * 60, master = gain(0);
-  master.connect(ctx.destination);
-  master.gain.setValueAtTime(0, t0); master.gain.linearRampToValueAtTime(cfg.vol, t0 + 6);
-  master.gain.setValueAtTime(cfg.vol, t0 + Math.max(7, T - 20)); master.gain.linearRampToValueAtTime(0, t0 + T);
+  hardStop();
+  const t0 = ctx.currentTime + 0.05, T = cfg.min * 60;
+  const fin = cfg.sleep ? 45 : 6, fout = cfg.sleep ? 90 : 20;
+  master = gain(0); master.connect(ctx.destination);
+  master.gain.setValueAtTime(0, t0); master.gain.linearRampToValueAtTime(cfg.vol, t0 + fin);
+  master.gain.setValueAtTime(cfg.vol, t0 + Math.max(fin + 1, T - fout)); master.gain.linearRampToValueAtTime(0, t0 + T);
+  const sine = TARGET_RMS * Math.SQRT2;            // a sine of this amplitude has TARGET_RMS
   if (cfg.mode === 'binaural') {
-    const merge = ctx.createChannelMerger(2), level = gain(0.22);
-    const L = osc(cfg.car - cfg.f0 / 2), R = osc(cfg.car + cfg.f0 / 2);
-    L.frequency.setValueAtTime(cfg.car - cfg.f0 / 2, t0); R.frequency.setValueAtTime(cfg.car + cfg.f0 / 2, t0);
-    L.frequency.linearRampToValueAtTime(cfg.car - cfg.f1 / 2, t0 + T); R.frequency.linearRampToValueAtTime(cfg.car + cfg.f1 / 2, t0 + T);
-    L.connect(merge, 0, 0); R.connect(merge, 0, 1); merge.connect(level).connect(master);
+    const merge = ctx.createChannelMerger(2), L = osc(cfg.car - cfg.f0 / 2), R = osc(cfg.car + cfg.f0 / 2);
+    ramp(L.frequency, cfg.car - cfg.f0 / 2, cfg.car - cfg.f1 / 2, t0, T); ramp(R.frequency, cfg.car + cfg.f0 / 2, cfg.car + cfg.f1 / 2, t0, T);
+    L.connect(merge, 0, 0); R.connect(merge, 0, 1); merge.connect(gain(sine)).connect(master);
   } else if (cfg.mode === 'isochronic') {
-    const tone = osc(cfg.car), g = gain(0.5), depth = gain(0.5), level = gain(0.22);
-    rhythm(cfg.f0, cfg.f1, T, t0, 'sharp').connect(depth).connect(g.gain);
-    tone.connect(g).connect(level).connect(master);
+    const p = pulsedGain(T, t0, true); osc(cfg.car).connect(p.g).connect(gain(sine / p.rms)).connect(master);
   } else if (cfg.mode === 'pulsed') {
-    const src = loop(noiseBuffer('pink')), g = gain(0.6), depth = gain(0.4), level = gain(0.7);
-    rhythm(cfg.f0, cfg.f1, T, t0, 'soft').connect(depth).connect(g.gain);
-    src.connect(g).connect(level).connect(master);
+    const p = pulsedGain(T, t0, false); loop(noiseBuffer('pink')).connect(p.g).connect(gain(1 / p.rms)).connect(master);
   }
-  if (cfg.bed > 0 || cfg.mode === 'noise') {
-    const src = loop(noiseBuffer('brown')), lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
-    src.connect(lp).connect(gain(cfg.mode === 'noise' ? Math.max(cfg.bed, 0.3) : cfg.bed)).connect(master);
+  const bed = cfg.mode === 'noise' ? 1 : cfg.bed;   // alone, the bed carries the full level: a fair no-beat control
+  if (bed > 0) {
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1200;
+    loop(noiseBuffer('brown')).connect(lp).connect(gain(bed)).connect(master);
   }
   for (const n of nodes) n.start(t0);
-  nodes.push(master);
   playing = { t0: Date.now(), T, ...cfg, preset };
-  base = null; $('go').textContent = 'Stop';
-  marker(`beats: start ${preset ?? 'custom'} ${cfg.mode} ${cfg.f0}->${cfg.f1} Hz ${cfg.min} min`);
+  $('go').textContent = 'Stop';
+  marker(`beats: start ${preset ?? 'custom'} ${cfg.mode} ${cfg.f0}->${cfg.f1} Hz ${cfg.min} min carrier ${cfg.car} depth ${cfg.depth} vol ${cfg.vol} bed ${bed}`);
 }
-function stop(mark = true) {
-  for (const n of nodes) { try { n.stop ? n.stop() : n.disconnect(); } catch {} }
-  nodes = []; if (playing && mark) marker('beats: stop'); playing = null; $('go').textContent = 'Start';
+function hardStop() { for (const n of nodes) { try { n.stop(); } catch {} } nodes = []; if (master) master.disconnect(); master = null; }
+function stop(reason = 'stop') {                   // fade out over 3 s, then stop: no click, no startle
+  if (master) {
+    const t = ctx.currentTime, m = master, old = nodes; nodes = []; master = null;
+    m.gain.cancelScheduledValues(t); m.gain.setValueAtTime(m.gain.value, t); m.gain.linearRampToValueAtTime(0, t + 3);
+    setTimeout(() => { for (const n of old) { try { n.stop(); } catch {} } m.disconnect(); }, 3200);
+  }
+  if (playing || waiting) marker(`beats: ${reason}`);
+  playing = null; waiting = null; $('go').textContent = 'Start'; $('skip').hidden = true;
 }
-$('go').onclick = () => playing ? stop() : start();
 function marker(text) { fetch('marker', { method: 'POST', body: text }).catch(() => {}); }
 
-// brain readout: alpha and slow waves at the back of the head, against the first 30 s of the session
-const FS = 250; let base = null;
-// skip: the beat rate now playing. The hearing part of the brain answers AT the beat rate, so counting that band
-// would credit the sound with "more alpha" that is only an echo of it (research 2026-11-18).
-function bandPower(x, f0, f1, skip = null) {
-  const N = x.length; let s = 0, n = 0;
-  for (let f = f0; f <= f1; f++) {
-    if (skip !== null && Math.abs(f - skip) <= 1) continue;
+// --- start: a quiet minute first (when the headband is streaming), so the baseline has no sound in it --------
+$('go').onclick = async () => {
+  if (playing || waiting) { stop(); return; }
+  ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); await ctx.resume();
+  baseline = null;
+  if (lastState && lastState.age < 3) {
+    waiting = { until: Date.now() + 60000, sum: new Float64Array(20), n: 0 };
+    $('go').textContent = 'Cancel'; $('skip').hidden = false; marker('beats: quiet baseline start');
+  } else start();
+};
+$('skip').onclick = () => { if (waiting) { waiting = null; $('skip').hidden = true; start(); } };
+
+// --- brain readout -------------------------------------------------------------------------------------------
+const FS = 250;
+function powers(x) {                               // power at 1..19 Hz (Hann window), index = frequency
+  const N = x.length, p = new Float64Array(20);
+  for (let f = 1; f < 20; f++) {
     let re = 0, im = 0;
     for (let i = 0; i < N; i++) { const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1)), a = 2 * Math.PI * f * i / FS;
       re += w * x[i] * Math.cos(a); im -= w * x[i] * Math.sin(a); }
-    s += re * re + im * im; n++;
+    p[f] = re * re + im * im;
   }
-  return n ? s / n : 0;
+  return p;
+}
+// band power over [a, b] Hz leaving out the beat rate +-1 Hz: the hearing part of the brain answers AT the beat
+// rate, and counting that echo would credit the sound with "more alpha".
+function band(p, a, b, skip) {
+  let s = 0, n = 0;
+  for (let f = a; f <= b; f++) { if (skip !== null && Math.abs(f - skip) <= 1) continue; s += p[f]; n++; }
+  return n ? s / n : NaN;
 }
 async function tick() {
   if (playing) {
-    const el = (Date.now() - playing.t0) / 1000, left = Math.max(0, playing.T - el), fr = Math.min(1, el / playing.T);
-    const f = playing.f0 + (playing.f1 - playing.f0) * fr;
+    const el = (Date.now() - playing.t0) / 1000, left = Math.max(0, playing.T - el), f = playing.f0 + (playing.f1 - playing.f0) * Math.min(1, el / playing.T);
     $('status').textContent = `${PRESETS[playing.preset]?.name ?? 'Custom'} · ${MODES[playing.mode].name} · ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')} left`;
     $('big').textContent = playing.mode === 'noise' ? 'no beat' : `${f.toFixed(1)} Hz`;
-    if (left <= 0) stop();
+    if (left <= 0) { playing = null; $('go').textContent = 'Start'; marker('beats: end'); }
+  } else if (waiting) {
+    const left = Math.max(0, (waiting.until - Date.now()) / 1000);
+    $('status').textContent = `Quiet minute: sit as you will during the sound (eyes closed for relax and sleep). ${Math.ceil(left)} s`;
+    $('big').textContent = '';
+    if (left <= 0) { baseline = waiting.n ? waiting.sum.map(v => v / waiting.n) : null; waiting = null; $('skip').hidden = true; start(); }
   } else { $('status').textContent = 'Not playing.'; $('big').textContent = ''; }
-  let s; try { s = await (await fetch('state')).json(); } catch { return; }
+
+  let s; try { s = lastState = await (await fetch('state')).json(); } catch { lastState = null; return; }
   if (s.age > 3) { $('brain').textContent = 'Recorder running, but no fresh data from the headband.'; return; }
   const x = [0, 1].map(c => s.data[c].slice(-500));
-  if (x[0].length < 500) return;
-  const fb = playing && playing.mode !== 'noise' ? Math.round(playing.f0 + (playing.f1 - playing.f0) * Math.min(1, (Date.now() - playing.t0) / 1000 / playing.T)) : null;
-  const bp = (c, a, b) => bandPower(x[c], a, b, fb);
-  const alpha = (bp(0, 8, 12) + bp(1, 8, 12)) / 2, slow = (bp(0, 4, 7) + bp(1, 4, 7)) / 2;
-  if (playing) {
-    base = base || { n: 0, a: 0, s: 0, until: Date.now() + 30000 };
-    if (Date.now() < base.until) { base.a += alpha; base.s += slow; base.n++; $('brain').textContent = 'Measuring your starting point (30 s)…'; return; }
-    const a = alpha / (base.a / base.n), sl = slow / (base.s / base.n);
-    const pct = v => (v >= 1 ? '+' : '') + Math.round((v - 1) * 100) + '%';
-    $('brain').textContent = `Alpha ${pct(a)} · slow waves ${pct(sl)} since the start (back of the head, last 2 s` +
-      (fb !== null ? `; ${fb} Hz ±1 left out, it echoes the beat). ` : '). ') +
-      (playing.preset === 'asleep' ? 'Falling asleep: alpha fades and slow waves grow.' : playing.preset === 'relax' || playing.preset === 'brk' ? 'Relaxing with eyes closed: alpha goes up.' : '');
-  } else { $('brain').textContent = 'Recorder connected. Start a sound to compare against your starting point.'; }
+  if (x[0].length < 500 || Math.max(...x[0].map(Math.abs), ...x[1].map(Math.abs)) > 400) { $('brain').textContent = 'Movement or a blink: waiting for a clean moment…'; return; }
+  const p = powers(x[0]), q = powers(x[1]), pq = p.map((v, i) => (v + q[i]) / 2);
+  if (waiting) { pq.forEach((v, i) => { waiting.sum[i] += v; }); waiting.n++; $('brain').textContent = 'Measuring your starting point in quiet…'; return; }
+  if (!playing) { $('brain').textContent = 'Headband connected. Press Start: the page measures a quiet minute first.'; return; }
+  if (!baseline) { $('brain').textContent = 'No quiet minute this time (skipped), so no comparison.'; return; }
+  const el = (Date.now() - playing.t0) / 1000, fb = playing.mode === 'noise' ? null : Math.round(playing.f0 + (playing.f1 - playing.f0) * Math.min(1, el / playing.T));
+  const a = band(pq, 8, 12, fb) / band(baseline, 8, 12, fb), sl = band(pq, 4, 7, fb) / band(baseline, 4, 7, fb);
+  const pct = v => isNaN(v) ? 'n/a' : (v >= 1 ? '+' : '') + Math.round((v - 1) * 100) + '%';
+  $('brain').textContent = `Alpha ${pct(a)} · slow waves ${pct(sl)} against your quiet minute (back of the head, last 2 s` +
+    (fb !== null ? `; ${fb} Hz ±1 left out, it echoes the beat). ` : '). ') +
+    (playing.preset === 'asleep' ? 'Falling asleep: alpha fades and slow waves grow.' : playing.preset === 'relax' || playing.preset === 'brk' ? 'Relaxing with eyes closed: alpha goes up.' : '');
 }
 setInterval(tick, 1000);
 render();
