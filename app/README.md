@@ -111,6 +111,10 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    `adb pull /sdcard/Download/EEG/eeg-export <dir>` and `python3 scripts/import_phone.py <dir> --dest <scratch>`
    (not the real `_local`).
 5. **Start night** without a headband: the service starts ("Searching ... The app keeps looking"); Stop ends it.
+6. **The phone's own arm64 APK** also runs on this x86_64 image through Android's ARM translation (slowly: about
+   a minute per model part), but only with `hw.cpu.ncore=2` in the AVD's `config.ini`: the translator's stand-in
+   `/proc/cpuinfo` lists 2 processors, and with 4 cores in sysfs ONNX Runtime's CPU detection (cpuinfo) crashes
+   while the library loads, at app start. That crash is the emulator's, not the phone's.
 
 The night of 2026-11-17 (58 recordings, 12.9 h) scored on the emulator in 99 s with a peak of 438 MB (PSS; 561 MB
 RSS) and the same stages as the laptop's ONNX check (96.6 % of epochs agree with the laptop's one-pass scoring; see
