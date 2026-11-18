@@ -54,6 +54,7 @@ class NightViewModel {
     this.exportLine,
     this.sleep,
     this.dreamLine,
+    this.napLine,
   });
 
   final String title;
@@ -91,6 +92,9 @@ class NightViewModel {
 
   /// The dream catcher's newest session in a line ("Last session: 3 answers, Tue 18 Nov 23:10"), if any.
   final String? dreamLine;
+
+  /// The nap coach's newest nap in a line ("Last nap: 30 min, woke you before deep sleep"), if any.
+  final String? napLine;
 }
 
 class NightView extends StatelessWidget {
@@ -104,6 +108,7 @@ class NightView extends StatelessWidget {
     this.onExportData,
     this.onMeditate,
     this.onDream,
+    this.onNap,
     this.onSound,
     this.onSleepReport,
     this.onRetrySleep,
@@ -118,6 +123,7 @@ class NightView extends StatelessWidget {
   final VoidCallback? onExportData;
   final VoidCallback? onMeditate;
   final VoidCallback? onDream;
+  final VoidCallback? onNap;
   final VoidCallback? onSound;
   final VoidCallback? onSleepReport;
   final VoidCallback? onRetrySleep;
@@ -161,6 +167,8 @@ class NightView extends StatelessWidget {
           if (!m.running) ...[const SectionHeading('Meditation'), _Meditation(onMeditate: onMeditate)],
           // The dream catcher holds the headband too, so it also waits for the night to end (DECISIONS row 110).
           if (!m.running) ...[const SectionHeading('Dream catcher'), _Dream(line: m.dreamLine, onDream: onDream)],
+          // The nap coach holds the headband too (DECISIONS row 173).
+          if (!m.running) ...[const SectionHeading('Nap coach'), _Nap(line: m.napLine, onNap: onNap)],
           // Sound for states also plays during a night, by its timer alone (DECISIONS row 130).
           const SectionHeading('Sound'),
           _Sound(running: m.running, onSound: onSound),
@@ -549,6 +557,27 @@ class _Dream extends StatelessWidget {
           icon: const Icon(Icons.nights_stay_outlined),
           label: const Text('Dream catcher'),
         ),
+      ],
+    );
+  }
+}
+
+class _Nap extends StatelessWidget {
+  const _Nap({required this.line, required this.onNap});
+  final String? line;
+  final VoidCallback? onNap;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final muted = text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('A nap that ends before deep sleep starts, or at the length you pick, with a soft rising sound.', style: muted),
+        if (line != null) ...[const SizedBox(height: 8), Text(line!, style: text.bodyLarge?.copyWith(height: 1.4))],
+        const SizedBox(height: 16),
+        OutlinedButton.icon(onPressed: onNap, icon: const Icon(Icons.airline_seat_flat_angled_outlined), label: const Text('Nap coach')),
       ],
     );
   }

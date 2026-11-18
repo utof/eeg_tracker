@@ -6,6 +6,9 @@ import 'package:flutter/foundation.dart';
 import '../sleep/report.dart';
 import '../sleep/scorer.dart';
 
+/// Last night's scoring runs now (its models take memory): the nap coach's live checks wait meanwhile.
+bool nightScoringBusy = false;
+
 class SleepScoring extends ChangeNotifier {
   SleepScoring(this.scorer);
   final SleepScorer scorer;
@@ -28,9 +31,13 @@ class SleepScoring extends ChangeNotifier {
   List<SleepReport> get reports => _reports ??= store.all();
 
   /// Scores every night that is due, unless a run is already going. Never throws.
-  Future<void> run() => _running ??= _all().whenComplete(() => _running = null);
+  Future<void> run() => _running ??= _all().whenComplete(() {
+    _running = null;
+    nightScoringBusy = false;
+  });
 
   Future<void> _all() async {
+    nightScoringBusy = true;
     try {
       _reports = null;
       blocked = scorer.blocked();
