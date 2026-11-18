@@ -88,6 +88,8 @@ class StepResult {
     required this.rung,
     required this.lastMinute,
     required this.channels,
+    this.alphaLog,
+    this.thetaLog,
   });
 
   /// Samples received so far, and the same in seconds of signal.
@@ -130,6 +132,25 @@ class StepResult {
 
   /// 'ok', 'off' or 'noisy' per channel name.
   final Map<String, String> channels;
+
+  /// log10 of the mean alpha and theta power (µV²) of the usable back channels at this step; null when none is
+  /// usable. Not logged (the log stays the JS format); for the outcome measures and the alpha-theta rules.
+  final double? alphaLog;
+  final double? thetaLog;
+}
+
+/// The calibration's eyes-closed minute in numbers (log10 µV², personal bands): median and robust SD of the
+/// clean steps' alpha and theta, and the median of log10(theta / alpha). Not logged; the outcome measures of
+/// the replay check and the alpha-theta lines start from it.
+class CalBaseline {
+  const CalBaseline({
+    required this.alpha,
+    required this.alphaSd,
+    required this.theta,
+    required this.thetaSd,
+    required this.ratio,
+  });
+  final double alpha, alphaSd, theta, thetaSd, ratio;
 }
 
 class _Muscle {
@@ -188,6 +209,9 @@ class Session {
 
   /// The personal alpha peak found by calibration (Hz), or null (none found, or not calibrated yet).
   double? iaf;
+
+  /// The eyes-closed baseline, once calibration (or the learning minute) is done.
+  CalBaseline? baseline;
   String phase = 'cal-open';
   int _phaseN = 0;
   final Map<String, _CalPhase> _cal = {};
@@ -377,6 +401,8 @@ class Session {
       rung: rung,
       lastMinute: _bells?.lastMinute ?? 0,
       channels: {for (var c = 0; c < 4; c++) channelNames[c]: q[c]},
+      alphaLog: alphaLog,
+      thetaLog: thetaPow == null ? null : _log10f(thetaPow),
     );
   }
 
@@ -494,6 +520,7 @@ class Session {
         if (c.clean[i]) _log10f(c.alpha[i]),
     ];
     final first = firstLine(logs);
+    baseline = _baselineOf(c);
     final gb = guardBaseline(c.alpha, c.theta, c.clean, iaf, stepS);
     double? rise;
     if (open != null) {
@@ -616,11 +643,32 @@ String _fmt(double v) => jsNum(jsRound(v * 4) / 4);
 /// as fast as possible, with its gaps and contact changes at the same samples. Returns the new core; its
 /// log lines equal the saved lines (exactly when the log came from this engine).
 Session replaySession(Map<String, Object?> saved, [int chunk = 37]) {
-  final header = saved['header'], lines = saved['lines'];
-  if (header is! Map || lines is! List) throw const FormatException('not a session file');
+  final header = savedHeader(saved);
+  final s = Session(mode: header.mode, calibrate: header.calibrate);
+  feedSaved(saved, push: s.push, gap: s.gap, contact: s.contact, chunk: chunk);
+  return s;
+}
+
+/// The core's settings from a saved session's header. Throws [FormatException] on anything else.
+({String mode, bool calibrate}) savedHeader(Map<String, Object?> saved) {
+  final header = saved['header'];
+  if (header is! Map) throw const FormatException('not a session file');
   final mode = header['mode'], calibrate = header['calibrate'];
   if (mode is! String || calibrate is! bool) throw const FormatException('session file: bad header');
-  final s = Session(mode: mode, calibrate: calibrate);
+  return (mode: mode, calibrate: calibrate);
+}
+
+/// Replays a saved session's input into [push], with its gaps and contact changes at the same samples (the
+/// part of [replaySession] that does not depend on which engine listens).
+void feedSaved(
+  Map<String, Object?> saved, {
+  required void Function(List<List<double>> rows) push,
+  required void Function() gap,
+  required void Function(Map<String, double?>? c) contact,
+  int chunk = 37,
+}) {
+  final lines = saved['lines'];
+  if (lines is! List) throw const FormatException('not a session file');
   final input = decodeInput(saved['input']), total = input[0].length;
   var pos = 0;
   void feedTo(int end) {
@@ -629,7 +677,7 @@ Session replaySession(Map<String, Object?> saved, [int chunk = 37]) {
       for (; pos < stop; pos++) {
         rows.add([for (final ch in input) ch[pos]]);
       }
-      s.push(rows);
+      push(rows);
     }
   }
 
@@ -639,13 +687,12 @@ Session replaySession(Map<String, Object?> saved, [int chunk = 37]) {
     if (at is! int) throw const FormatException('session file: event without a sample number');
     feedTo(at);
     if (e['type'] == 'gap') {
-      s.gap();
+      gap();
     } else {
-      s.contact(_contactMap(e['contact']));
+      contact(_contactMap(e['contact']));
     }
   }
   feedTo(total);
-  return s;
 }
 
 Map<String, double?>? _contactMap(Object? c) {
@@ -660,3 +707,21 @@ Map<String, double?>? _contactMap(Object? c) {
 List<List<double>> inputRows(List<Float32List> input, int from, int to) => [
   for (var i = from; i < to; i++) [for (final ch in input) ch[i]],
 ];
+
+/// Medians and robust SDs (at least 0.1 log units, as the target line) of the clean eyes-closed steps.
+CalBaseline _baselineOf(({List<double> alpha, List<double> theta, List<bool> clean}) c) {
+  final a = <double>[], t = <double>[], r = <double>[];
+  for (var i = 0; i < c.alpha.length; i++) {
+    if (!c.clean[i]) continue;
+    final la = _log10f(c.alpha[i]), lt = _log10f(c.theta[i]);
+    a.add(la);
+    t.add(lt);
+    r.add(lt - la);
+  }
+  double sd(List<double> v) {
+    final m = median(v), s = 1.4826 * median([for (final x in v) (x - m).abs()]);
+    return s > LineRule.sdFloor ? s : LineRule.sdFloor;
+  }
+
+  return CalBaseline(alpha: median(a), alphaSd: sd(a), theta: median(t), thetaSd: sd(t), ratio: median(r));
+}
