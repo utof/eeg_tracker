@@ -12,6 +12,11 @@ from pathlib import Path
 from neurosdk.cmn_types import SensorCommand, SensorFamily, SensorState
 from neurosdk.scanner import Scanner
 
+try:
+    import battery as batt  # scripts/battery.py: drops the gauge's stuck values, time left from the trend
+except Exception:
+    batt = None
+
 REC = struct.Struct("<I4f")
 IDX = struct.Struct("<dQ")
 FAMILIES = [SensorFamily.LEBrainBit, SensorFamily.LEBrainBitBlack]
@@ -53,6 +58,14 @@ def main() -> None:
     for attr in ("features", "commands", "parameters"):  # what this headband offers (e.g. pulse or motion sensors)
         try: log(f"{attr} {getattr(s, attr)}")
         except Exception as e: log(f"{attr} unavailable: {e}")
+    batt_pts: list = []  # (unix time, %) of the last 3 hours, earlier runs' logs included
+    if batt:
+        try:
+            batt_pts = batt.from_logs(out, time.time()); live_note = batt.estimate(batt_pts, time.time())["text"]
+        except Exception:
+            batt_pts, live_note = [], None
+    else:
+        live_note = None
 
     last = {}
     resist_n = [0]
@@ -67,7 +80,7 @@ def main() -> None:
         log(f"contact check failed: {e}")
 
     ring: collections.deque = collections.deque(maxlen=FS * 5)
-    want_contact = threading.Event(); live = dict(status="recording", t=time.time())
+    want_contact = threading.Event(); live = dict(status="recording", t=time.time(), battery_note=live_note)
     subs: list[queue.Queue] = []; subs_lock = threading.Lock()  # live stream: one queue per connected consumer
 
     def publish(event: dict) -> None:
@@ -130,7 +143,7 @@ def main() -> None:
                     col = [r[c] for r in rows]; m = sum(col) / len(col) if col else 0.0
                     data.append([round((v - m) * 1e6, 1) for v in col])
                 contact = {n: (None if last.get(n, float("inf")) == float("inf") else round(last[n])) for n in NAMES}
-                body = dict(status=live["status"], battery=live.get("battery", "?"), minutes=round(total / FS / 60, 1),
+                body = dict(status=live["status"], battery=live.get("battery", "?"), battery_note=live.get("battery_note"), minutes=round(total / FS / 60, 1),
                             age=round(time.time() - live["t"], 1), names=NAMES, fs=FS, contact=contact, data=data)
                 self._send(json.dumps(body).encode(), "application/json")
             else:  # pages in scripts/web/ by file name; anything else gets the live check page
@@ -200,7 +213,12 @@ def main() -> None:
                 got = total - last_total
                 try: live["battery"] = s.batt_power
                 except Exception: pass
-                log(f"samples {total} (+{got}) battery {s.batt_power}%")
+                log(f"samples {total} (+{got}) battery {live.get('battery', '?')}%")
+                if batt and isinstance(live.get("battery"), int):
+                    try:
+                        batt_pts.append((time.time(), live["battery"])); del batt_pts[:-1100]
+                        live["battery_note"] = batt.estimate(batt_pts, time.time())["text"]
+                    except Exception: pass
                 last_report = time.time(); last_total = total
                 stalled = stalled + 1 if got == 0 else 0
                 if s.state != SensorState.StateInRange:  # SDK calls on a lost sensor segfault (seen 3x on 2026-11-18)
