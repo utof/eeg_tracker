@@ -12,6 +12,7 @@ import 'package:eeg_tracker/sleep/extras.dart';
 import 'package:eeg_tracker/sleep/model.dart';
 import 'package:eeg_tracker/sleep/night_signal.dart';
 import 'package:eeg_tracker/sleep/report.dart';
+import 'package:eeg_tracker/ui/sleep_extras_view.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const w = 'W', n2 = 'N2', n3 = 'N3', r = 'R';
@@ -233,5 +234,32 @@ void main() {
       expect(SleepReport(build(seen: seen)..['extras'] = {'quality': 3}).extras, isNull);
       expect(SleepReport.read(File('test/fixtures/does-not-exist')), isNull);
     });
+  });
+
+  test('the honest note\'s sentence on noise', () {
+    NightExtras x(double good, double noisy, double none, {bool asleep = true}) {
+      Map<String, Object?> t(double g, double d, double m) => {
+        'min': g + d + m, 'good_min': g, 'degraded_min': d, 'missing_min': m,
+        'jaw_bursts': 0, 'one_sided_bursts': 0, 'movement_bursts': 0, 'moves': 0,
+      };
+      return NightExtras.read({
+        'quality': 'g',
+        'night': t(good + 10, noisy, none),
+        'asleep': {...asleep ? t(good, noisy, none) : t(0, 0, 0), 'jaw_per_hour': null, 'moves_per_hour': null},
+        'hours': <Object>[],
+      }, DateTime(2026))!;
+    }
+
+    expect(noiseSentence(x(300, 0, 0)), 'The signal was clean for all of your sleep.');
+    expect(noiseSentence(x(260, 30, 10)),
+        'It read 10\u00a0% of your sleep through noise (movement, muscle or a loose electrode) and 3\u00a0% with no '
+        'usable electrode.');
+    expect(noiseSentence(x(290, 0, 10)), 'It read 3\u00a0% of your sleep with no usable electrode.');
+    expect(noiseSentence(x(999, 1, 0)), 'It read under 1\u00a0% of your sleep through noise (movement, muscle or a '
+        'loose electrode).');
+    expect(noiseSentence(x(50, 50, 0, asleep: false)), startsWith('It read 45\u00a0% of the recording through noise'));
+    expect(rateText(22.8), '23\u00a0an\u00a0hour');
+    expect(rateText(6.94), '6.9\u00a0an\u00a0hour');
+    expect(rateText(null), '–');
   });
 }

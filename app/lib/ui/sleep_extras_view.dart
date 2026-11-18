@@ -34,7 +34,7 @@ String noiseSentence(NightExtras x) {
   if (noisy == 0 && unusable == 0) return 'The signal was clean for all of $what.';
   final parts = [
     if (noisy > 0) '${shareText(noisy)} of $what through noise (movement, muscle or a loose electrode)',
-    if (unusable > 0) '${shareText(unusable)} with no usable electrode',
+    if (unusable > 0) '${shareText(unusable)}${noisy > 0 ? '' : ' of $what'} with no usable electrode',
   ];
   return 'It read ${parts.join(' and ')}.';
 }
