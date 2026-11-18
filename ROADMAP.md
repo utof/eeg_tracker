@@ -19,7 +19,8 @@ Update the status column whenever something lands.
    music or noise, nature), measures whether you actually got there, and learns over days what works for you.
 10. **A state and trends page**: a few numbers (drowsiness, sleep, alertness, tension) to see at a glance where you
    are and where it is going.
-11. **Mission**: affordable EEG for everyone: build-at-home guides for the helmet plus this open app, with contributors.
+11. **Meditation feedback, live and after the session** (added 2026-11-18, high priority): to improve faster.
+12. **Mission**: affordable EEG for everyone: build-at-home guides for the helmet plus this open app, with contributors.
 
 ## What each wish becomes (honest version)
 
@@ -32,6 +33,7 @@ Update the status column whenever something lands.
 | Breaks | stage 0 from ActivityWatch (no headband), then ratings, typing rhythm, then the EEG trend | no validated EEG break detector exists |
 | Music | procedural ambient sound that calms as eyes-closed alpha rises; jaw clench blocks rewards | measurement fine; benefit evidence weak (say so) |
 | Sound for states | binaural / isochronic / pulsed / nature sound per state; checks if you got there (sleep onset: alpha fades, slow eye rolls; relax: alpha up; break: drowsiness falls; focus: weak, rating + drowsiness); stops by itself once you are asleep | the brain's hearing area follows pulses reliably; whether that moves the whole state is less proven, which is why we measure it on you |
+| Meditation feedback | live: sound and a simple display of settled / restless / drifting toward sleep; after: a timeline of the session, share of settled time, longest settled stretch, movement and jaw events, your own rating, and the trend across sessions | stillness, eyes-closed alpha and drowsiness are measurable; there is no reliable "meditation depth" signal, and a 2025 review found Muse-style feedback mainly helps through the practice itself, so it shows what is measurable and tracks your own progress |
 | State and trends page | big numbers with arrows against your own usual and a "how sure" dot: sleep, morning alertness, drowsiness now, tension | as sure as each number's row above |
 | Statistics | per-day export to utof_tracker's careful nightly analysis first; later "seen together" vs "tested" (random self-experiments) | needs about a month of days |
 | Other apps' features | contact display per electrode, live artefact flags, meditation/alpha sessions, night jaw-clench count, open export, no account | standard |
@@ -59,7 +61,17 @@ Update the status column whenever something lands.
 | 17 | Sound for states: binaural, isochronic, pulsed noise; presets per state; markers for checking | first page working (review fixes in); next: calm beds as the default, beats as optional extras | `scripts/web/beats.html` |
 | 18 | Sound for states: measure "did I get there", stop when asleep, learn what works for you | after research + 6 | - |
 | 19 | Research: sound for states; states and their markers; more features | done 2026-11-18 | `_local/research/2026-11-18-06-brain-states-sound-and-features.md` |
+| 21 | Meditation feedback: live (sound + settled / restless / drowsy) and a report after each session, progress across sessions | **high priority (owner)**, next after the 3 running lanes | builds on `feat/brain-sound` (live sound) and the morning check-in's alpha measures |
 | 20 | Dream catcher (owner: "definitely build"): at sleep onset, ask what you're thinking, record the answer, let you drift again, 3-4 rounds | planned, right after the current features | see Ideas |
+
+## What comes next, in order (2026-11-18)
+
+1. Merge the three running lanes (sound reacting to alpha, morning check-in, break hints) after testing them with you.
+2. Meditation feedback, live and after the session (row 21; owner: high priority).
+3. One shared detector for drifting off to sleep (feeds the dream catcher, nap coach, sleep-sound auto-stop, drowsiness tile).
+4. Dream catcher (row 20), then the nap preset.
+5. State and trends page (row 10).
+6. Phone app: build, install, 1-hour screen-off test, then port the pages.
 
 ## Next tests that need the owner (each about 5 minutes)
 
@@ -78,7 +90,6 @@ Anyone, including the assistant, adds ideas here. When one is started, move it i
 | Dream catcher (now row 20 above) | as you drift off, the app notices the half-dream stage (back-of-head alpha fading), quietly asks "what are you thinking about?", records your spoken answer, lets you drift again; 3-4 rounds. For creative ideas | MIT's Dormio; a 2021 study found 15 s in that stage tripled insight on a puzzle; needs only O1/O2 |
 | Lucid dream cues | soft sound cues during dream sleep (REM) to become aware you are dreaming | evidence weak; fun |
 | Hands-free controls | a double jaw clench or a look left-right as a switch: pause sound, mark a moment | jaw and eye movements are what these electrodes see best |
-| Meditation sessions | guided sessions with feedback on how settled you were | alpha and movement |
 | Reaction-time check | a 1-minute daily tap test next to the EEG, an objective alertness number | |
 | Self-experiments | the app picks random days (e.g. no coffee after 14:00) for a few weeks and reports the effect with a range | the only route to "this causes that" |
 | Helmet-only | frontal brain asymmetry, a brain-typing speller (P300), flicker games (SSVEP) | need electrodes the headband lacks |
