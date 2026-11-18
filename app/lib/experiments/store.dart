@@ -36,7 +36,10 @@ class ExperimentStore {
 
   void _write(String id, String name, Object? json) {
     Directory('${dir.path}/$id').createSync(recursive: true);
-    _f(id, name).writeAsStringSync(const JsonEncoder.withIndent(' ').convert(json), flush: true);
+    // a temporary file, then a rename: an export never copies a half-written file (it skips *.tmp)
+    final tmp = File('${_f(id, name).path}.tmp');
+    tmp.writeAsStringSync(const JsonEncoder.withIndent(' ').convert(json), flush: true);
+    tmp.renameSync(_f(id, name).path);
   }
 
   void _event(String id, DateTime at, String what, [Map<String, Object?> more = const {}]) {

@@ -1,7 +1,7 @@
 // Export data (DECISIONS rows 150-154): what leaves the phone, and the phone's own record of what already did.
 //
 // Everything the app keeps in its private `files/` folder is exported in the same layout (recordings/, nights/,
-// mornings/, meditations/, alpha-theta/, replay-check/, settings.json, dream-catcher/, sound-states/ and whatever a
+// mornings/, meditations/, alpha-theta/, replay-check/, settings.json, dream-catcher/, sound-states/, experiments/ and whatever a
 // later feature adds), except:
 //   models/      copies of the app's own sleep-model assets (made again from the APK)
 //   export/      this file's state: the index of what was exported and the export log

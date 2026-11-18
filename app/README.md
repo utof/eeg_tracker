@@ -23,6 +23,8 @@ for a state, with an optional beat, and with the headband shows what your brain 
   `lib/meditation/` (session and report), `lib/ui/meditation_*.dart`; DECISIONS rows 72-77.
 - Sleep report: `lib/sleep/` and `lib/ui/sleep_*.dart`, scored on the phone after Stop (below); DECISIONS rows 95-99,
   night extras (jaw, movement, signal quality) rows 140-146.
+- Self-experiments: `lib/experiments/` (plan, hidden order, randomisation test, store), `lib/ui/experiments_*.dart`,
+  `lib/ui/experiment_setup.dart`.
 - Replay check: `lib/training/` (schedule, frozen plan, replay, results), `lib/ui/training_settings_screen.dart`,
   `lib/ui/check_views.dart`, `lib/ui/replay_results_screen.dart`; DECISIONS rows 100-103.
 - Alpha-theta: `lib/alphatheta/` (rules, engine, notebook), `lib/sound/alpha_theta_sound.dart`,
@@ -242,6 +244,46 @@ Nothing of this has run on the phone yet; the numbers were checked against the l
 4. Open **Trends**: last night's sleep, the check-in's numbers and the sleep pressure should be there, with "usual
    after N more days".
 5. Tell the assistant what felt wrong or slow. If the app closed or stalled, note at which step.
+
+## Self-experiments (does this habit change that number, for you?)
+
+Everything on the Trends page is only "seen together". A self-experiment is the one way to test a habit: the app
+draws random days, you do the thing on those and not on the others, and at the end it says what the habit did to
+one number, with a range (DECISIONS rows 200-209; the **i** button shows `docs/evidence/self-experiments.md`).
+
+1. **Trends**, then **Experiments**, then **New experiment**. Pick a question (for example "No screens in the last
+   hour before bed"; or write your own "do" and "don't" lines), ONE number (time asleep, sleepiness, reaction
+   time...), and 4, 6 or 8 weeks. **Start tomorrow**. Nothing can be changed afterwards.
+2. Every day the Experiment page shows that day's task (also one line on the main screen's Morning section and
+   after a check-in). The days ahead are hidden, and the app cannot be asked for them.
+3. The next day, tap **Kept** or **Not kept**. A day you could not keep still counts: say so and carry on.
+4. Record the night and do the morning check-in as usual: a task is judged by the next day's number, and a day
+   without it is left out.
+5. The answer opens by itself the day after the last number: one sentence such as "On 'No screens...' days your
+   time asleep was 18 min longer than on 'Screens as usual' days (range −5 to +41 min): not clear yet." It ends
+   in one of: **likely real for you**, **little or no effect for you**, **not clear yet**, **too few days to say**.
+   Under it: the days counted, how often you kept to the day, and other numbers as "seen together, not tested".
+
+**Look early anyway** shows the answer so far, but the look is marked on the final answer for good; a half-time
+result is often wrong. **Stop this experiment** ends it and keeps the days that are over. Four weeks can only show
+a large effect, and you know which kind of day it is, so ratings can follow what you expect: trust measured
+numbers more, and run an experiment a second time before relying on it. The files are in `files/experiments/`
+(exported with everything else; `sealed.json` holds the days ahead: please do not open it, or ask the assistant
+to, before the app shows the answer).
+
+### Owner step: start a first experiment (2 minutes, then one tap a day)
+
+Nothing of this has run on the phone yet. A good first one is caffeine: research found late caffeine costs about 45
+minutes of sleep on average.
+
+1. Open **Trends**, scroll to **Self-experiments**, tap **Experiments**, then **New experiment**.
+2. Choose "No caffeine in the last 8 hours before bed", leave **Asleep** as the number and 4 weeks, tap
+   **Start tomorrow**.
+3. From tomorrow: look at the task once a day, wear the headband at night, do the morning check-in, tap Kept or
+   Not kept for the day before.
+4. Notice and tell the assistant: was the task easy to find; did the day change at a sensible hour for you (a day
+   runs 04:00 to 04:00); was anything unclear in the words.
+5. The answer opens after 4 weeks and 2 days. Export data as usual in between: the experiment travels with it.
 
 ## Replay check (off unless you switch it on)
 
