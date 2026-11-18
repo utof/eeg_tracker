@@ -15,8 +15,11 @@ import 'dart:math' as math;
 
 import '../detectors/detectors.dart' show Second;
 import '../detectors/drift_off.dart';
+import '../recorder/live_drift.dart' show lightsOffMarker;
 import 'periods.dart' show gapStage;
 import 'report.dart' show SleepReport, isoLocal;
+
+export '../recorder/live_drift.dart' show lightsOffMarker;
 
 /// Of the report's `drift_off` object.
 const int driftVersion = 1;
@@ -33,8 +36,6 @@ const int checkNights = 5, checkNeeded = 4;
 
 const int _epochS = 30;
 
-/// The marker the night screen's Lights off writes into the night's recording.
-const String lightsOffMarker = 'lights off';
 
 enum LightsOffFrom { button, dreamCatcher, sound, nightStart }
 
