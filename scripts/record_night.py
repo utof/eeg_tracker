@@ -12,6 +12,8 @@ from pathlib import Path
 from neurosdk.cmn_types import SensorCommand, SensorFamily, SensorState
 from neurosdk.scanner import Scanner
 
+SDK_LIB = sorted({ln.split()[-1] for ln in open("/proc/self/maps") if "libneurosdk2.so" in ln})  # which copy is loaded
+
 try:
     import battery as batt  # scripts/battery.py: drops the gauge's stuck values, time left from the trend
 except Exception:
@@ -55,6 +57,7 @@ def main() -> None:
     idxf = open(out / f"{stamp}.idx", "ab")
     markf = open(out / f"{stamp}.markers.jsonl", "a")  # page markers: {"t": unix time, "i": sample index, "text"}
     log(f"connected {info.Name} {info.Address} serial {info.SerialNumber} battery {s.batt_power}% signal {info.RSSI} dBm")
+    log(f"sdk library {'patched (keeps other Bluetooth devices)' if SDK_LIB and all('patched' in x for x in SDK_LIB) else SDK_LIB}")
     for attr in ("features", "commands", "parameters"):  # what this headband offers (e.g. pulse or motion sensors)
         try: log(f"{attr} {getattr(s, attr)}")
         except Exception as e: log(f"{attr} unavailable: {e}")
