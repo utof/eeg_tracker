@@ -117,7 +117,12 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
 - **Phone checks:** icon, one plain sentence, right-aligned text buttons that open the exact setting.
 - **Buttons:** one filled button per screen: Start night on the night screen, Start on the meditation screen, and on
   each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before
-  stopping, except in alpha-theta, where stopping must be instant.
+  stopping, except in alpha-theta, where stopping must be instant. Session faces (dream catcher, sound for states)
+  are true black with words only.
+- **Sound score** (sound for states): the session drawn before Start, its real minutes left to right: the quiet
+  minute an empty `rule` cell, the sound's loudness a `track` band that fades in and out, the beat's rate an ink
+  line (log scale, its two ends worded in Hz), minute ticks; a thin green rule where a session is, and afterwards the
+  played part in `saved` with an ink rule where it ended.
 - **Questions** (training pages): the question in body text, then a Material segmented row (a 1-5 scale with both
   ends worded under it, or a few words like Live / Replay / Not sure), a slider that reads "not set" until moved, or a
   checklist with the box first. Nothing is preselected; the forward button says "Answer each question" until done.
@@ -126,6 +131,7 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
 
 - Do keep every value in the same place across states; the eye finds it at 3 a.m. without reading.
 - Do word every state ("Recording", "No data for 52 s") next to its colour.
-- Don't add bright fills, animation beyond the slow breathing live mark, or sounds. Exception: the meditation
-  mode, whose feedback is sound (rain, drone, bells; DECISIONS 72-77); the night screen stays silent.
+- Don't add bright fills, animation beyond the slow breathing live mark, or sounds. Exceptions: the meditation
+  mode, whose feedback is sound (rain, drone, bells; DECISIONS 72-77), and the practices built the same way
+  (alpha-theta, the dream catcher, sound for states, whose product is sound); the night screen stays silent.
 - Don't show a number that was not measured; label planning thresholds as such.

@@ -2,9 +2,11 @@
 
 ## What it does
 
-Pick a state (fall asleep, relax, focus, break, wake up) and a kind of sound. If the headband is recording, the
-page first measures a quiet minute, then shows what your brain does during the sound. A "no beat" option at the
-same loudness lets you compare.
+In the phone app (not yet heard on a phone) and on a laptop page. Pick a state (fall asleep, relax, focus, break,
+wake up) and a calm sound: rain, pink or brown noise, ocean. A beat is an optional extra: pulsed noise, isochronic
+tones or binaural beats. "No beat" plays the same sound at the same loudness, so you can compare. With the headband
+on, a quiet minute comes first, then the app shows what your brain does during the sound. "Fall asleep" stops by
+itself once you are probably asleep. Without the headband the sound plays by its timer.
 
 ## Evidence for this headband: weak
 
@@ -42,20 +44,30 @@ your whole brain into a chosen state.
 
 ## How the app uses this
 
-- Presets: Fall asleep (a beat sliding from 10 to 3 Hz over 30 min, long fades), Relax (10 Hz), Focus (16 Hz
-  pulsed noise), Break (10 to 8 Hz, 5 min, eyes closed), Wake up (10 to 18 Hz), and No beat (compare).
-- Every kind of sound is scaled to the same loudness, so "beat or no beat" is not "louder or quieter".
-- Tone pitch is limited to 150, 200, 300 or 400 Hz: no tone between 220 and 280 Hz, which would fold into the
+- Calm sound first: each state starts with a bed and no beat (fall asleep: pink noise; relax: ocean; focus, break
+  and wake up: rain). A beat is an extra you choose.
+- Beats per state: fall asleep slides from 10 to 3 Hz over 30 min, relax 10 Hz, focus 16 Hz, break 10 to 8 Hz
+  over 5 min, wake up 10 to 18 Hz over 5 min. The slide is smooth (the same ratio each minute).
+- Every sound is set to the same loudness (-23 LUFS, the broadcast loudness measure), so "beat or no beat" is
+  never "louder or quieter". A beat plays 6 dB above the bed under it, so the bed does not fill its gaps.
+- Tone pitch 200 Hz (allowed: 150, 200, 300, 400 Hz): nothing between 220 and 280 Hz, which would fold into the
   brain-wave bands at 250 samples a second.
-- Soft pulse edges (about 12 ms), slow fades in and out (45 s in and 90 s out for sleep), no hard stops.
-- A quiet minute first, when the headband is recording. The readout compares alpha and slow waves with that
-  minute and leaves out the beat rate ± 1 Hz, because the brain's echo of the beat would otherwise count as
-  "more alpha".
-- Each session's settings go into the recording as markers, for later comparison.
-- Planned: calm sound beds (nature, pink or brown noise, music you like) as the default with beats as optional
-  extras; the sleep preset stopping itself once you fall asleep; a rating after each session; a personal
-  comparison over weeks.
-- Keep the volume low, never while driving, and prefer a speaker to earbuds overnight.
+- Isochronic pulses have soft edges (12 ms, or a fifth of the pulse when faster) and swing down to -20 dB; pulsed
+  noise swings to -10.5 dB. Fades: 45 s in for sleep, 6 s for the others; out over 2.5 min for sleep, 20 s for
+  the others, 3 s when you press Stop.
+- With the headband: a silent quiet minute first (60 clean seconds, 2 min at most). Then alpha (8-12 Hz) and slow
+  waves (4-7 Hz) at the back of the head against that minute, every second the electrodes are clean. The beat's
+  rate and twice it (each ± 1 Hz) are left out, because the brain's echo of the beat would count as "more alpha".
+- The echo itself is shown as an echo: expected, not a sign that your brain "tuned in", and possibly sound leaking
+  into the headband from earbuds.
+- Fall asleep: the drift-off detector watches. Once you are probably asleep the sound fades out over 2.5 min; it
+  is silent 45 min after lights off whatever happens. Its EEG is kept with the night, and the night recording can
+  start by itself when the sound has stopped.
+- Without the headband (or while the night records) the sound simply plays for its minutes.
+- After each session: one question, "did it help you get there?" (1-5). Each session is saved with its sound,
+  timings, readout and answer, so a later comparison over weeks can say what works for you.
+- Keep the volume low, never while driving, and prefer the phone's speaker to earbuds overnight.
+- On the laptop page: the same presets with beats on by default; its markers go into the recording.
 
 ## Sources
 
@@ -78,7 +90,8 @@ your whole brain into a chosen state.
 ## Libraries and models
 
 - No outside library in the page: the browser's built-in Web Audio makes every sound.
-- [flutter_soloud](https://github.com/alnitak/flutter_soloud) (MIT): the sound engine for the phone app.
+- [flutter_soloud](https://github.com/alnitak/flutter_soloud) (MIT): plays the phone app's sound, which the app
+  makes itself, sample by sample; nothing is downloaded.
 - [Ambio](https://github.com/jaimebg/Ambio) (CC0 sound recordings): a source of nature sounds that may be shipped.
 - [SBaGenX](https://github.com/lm7137/SBaGenX) and the other open beat generators are GPL: ideas only, no code
   copied.

@@ -50,3 +50,13 @@ the bottom, filled, 64 dp.
 FORM: the sound score, structure 5 of 7; seed:c412c8d042c9b3b7.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+
+## Finish review (2026-11-18) and open points
+
+In-thread review (a subagent run; no separate reviewer spawned) of the test renders at 100 and 130 % text
+(`build/screens/states_*.png`) against the contract. Verdict: ship, with these applied: the rate's arrow became
+"10 to 3 Hz" (the arrow had no glyph in the test font); a "Next session" heading separates the last session's score
+from the next one's; the score's right label says minutes of sound ("sound: 30 min at most"). Seen and kept: the
+quiet minute's cell is narrow on a 45-minute score (its label says it); the face is words only. DESIGN.md gained the
+sound score component and the session-face line. Open for the owner: levels and beds not yet heard; whether a
+locked phone should keep playing (DECISIONS row 135).

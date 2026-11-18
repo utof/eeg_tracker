@@ -88,6 +88,33 @@ and each period's `agreement` are `null`; `epoch_s` is 30 and `stages` holds one
 no scoring runs, the last attempt stopped (its text is the error, empty if the app was killed) and the app waits
 for "Try again". The report is not exported yet.
 
+## The phone's `files/sound-states/<stamp>.sound.json`
+
+One file per sound-for-states session (`app/lib/states/store.dart`, DECISIONS row 136), in the app's private folder
+next to `files/recordings/`; `<stamp>` is lights off (`2026-11-18-231205`). Written when the sound starts (`end`
+`running`) and again at the end and when you answer the question. Every `...S` is whole seconds after lights off:
+the start of the quiet minute with the headband, the start of the sound without it.
+
+| Field | Meaning |
+| --- | --- |
+| `version` | 1 |
+| `start` | lights off, local ISO time |
+| `plan` | `state` (`asleep relax focus pause wake`; `pause` is Break), `bed` (`rain pink brown ocean none`), `beat` (`none pulsed isochronic binaural`), `minutes` of sound, the beat's `fromHz` `toHz` and `rampS` (exponential slide, then held), `carrierHz`, pulse `depth` (gain swings between 1 - depth and 1), `fadeInS` `fadeOutS`, `beatShare` (of the loudness power; the bed has the rest), `targetLufs` |
+| `headband` | `headband` (measured), `sound only`, `night recording` (the night held it), `not found`, `lost` (no signal came) |
+| `contact` | ohms per channel at the start, `null` = none |
+| `recording` | stem of the session's EEG in `files/recordings/` (fall asleep with the headband only), else `null` |
+| `soundStartS` `fadeFromS` `offAtS` `endS` | the sound started, began to fade, was silent; the session ended (`null`: never reached) |
+| `end` | `time`, `cap` (45 min after lights off), `asleep`, `stopped`, `failed`, `running` |
+| `baselineS` | clean seconds in the quiet minute (a comparison needs 20) |
+| `epochs` | per 30 s of sound with a clean second: `i` (epoch from the sound's start), `cleanS`, and medians of `alpha` (8-12 Hz), `slow` (4-7 Hz) and `echo` (power at the beat's rate) as ratios to the quiet minute, O1/O2, the beat's rate and twice it (± 1 Hz) left out of alpha and slow; `null` when not computable |
+| `summary` | the same over the whole sound, `null` without a comparison |
+| `drift` | fall asleep with the headband: the drift-off detector's `baselineAlpha`, `baselineS`, `drowsyS`, `onsetS`, `asleepAtS` and `epochs` (one letter per 30 s from lights off: `b` baseline, `a` awake, `d` drowsy, `s` probably asleep, `-` skipped) |
+| `events` | `{s, text}` in plain words: quiet minute, sound on (with the plan's line), fading and why, headband drops, the end |
+| `stalls` | times the sound ran dry because the app fell behind (0 is right) |
+| `engine` | the audio engine's report (sample rate, buffer, lead, output delay) |
+| `night` | fall asleep with "Record the night": `started`, or why it did not start |
+| `rating` | your answer to "did it help you get there?", 1 (not at all) to 5 (clearly), `null` = not answered |
+
 ## Morning check-in markers and `<start>.morning.json`
 
 `scripts/web/morning.html` writes these marker texts, in order: `morning:start`, `morning:eyes_closed:start`,
