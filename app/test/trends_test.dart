@@ -292,6 +292,87 @@ void main() {
     });
   });
 
+  group('jaw muscle bursts from the sleep report', () {
+    // the same helpers as above, for nights with the detectors' extras (report version 2)
+    Map<String, Object?> report(DateTime start, DateTime end, double asleep, {Object? extras = 'none'}) => {
+      'night_of': dayKey(start.subtract(const Duration(hours: 8))),
+      'scored': true,
+      'data_start': isoLocal(start),
+      'data_end': isoLocal(end),
+      'total': {'asleep_min': asleep, 'recorded_min': asleep, 'missing_min': 0, 'stray_sleep_min': 0},
+      'periods': [
+        {
+          'start': isoLocal(start),
+          'end': isoLocal(end),
+          'asleep_min': asleep,
+          'light_min': asleep,
+          'deep_min': 0,
+          'dream_min': 0,
+          'awake_min': 0,
+          'wake_ups': 0,
+          'missing_min': 0,
+        },
+      ],
+      if (extras != 'none') 'extras': extras,
+    };
+    Map<String, Object?> tally(double min, int jaw) => {
+      'min': min,
+      'good_min': min,
+      'degraded_min': 0,
+      'missing_min': 0,
+      'jaw_bursts': jaw,
+      'one_sided_bursts': 0,
+      'movement_bursts': 0,
+      'moves': 0,
+    };
+    Map<String, Object?> extras(double min, int jaw, double? perHour) => {
+      'version': 1,
+      'quality': '',
+      'night': tally(min, jaw),
+      'asleep': {...tally(min, jaw), 'jaw_per_hour': perHour, 'moves_per_hour': 0.0},
+      'hours': const [],
+    };
+    final now = DateTime(2026, 11, 18, 15);
+    TrendRow jaw(List<Map<String, Object?>> nights) => buildTrends(
+      (nights: [for (final n in nights) SleepReport(n)], mornings: const [], sessions: const []),
+      now,
+    ).rows.singleWhere((r) => r.spec.id == 'jaw');
+
+    test("the night's number is the report's jaw bursts an hour asleep; older reports have none", () {
+      final r = jaw([
+        report(DateTime(2026, 11, 17, 23), DateTime(2026, 11, 18, 5, 27), 387, extras: extras(387, 147, 22.8)),
+        report(DateTime(2026, 11, 16, 23), DateTime(2026, 11, 17, 7), 480), // version 1: no extras
+      ]);
+      expect(r.value, 22.8);
+      expect(r.day, '2026-11-18');
+      expect(r.yesterday, isNull);
+      expect(r.spec.format(22.8), '22.8\u00a0an\u00a0hour');
+      expect(r.spec.group, TrendGroup.sleep);
+      expect(jaw([report(DateTime(2026, 11, 17, 23), DateTime(2026, 11, 18, 7), 0, extras: extras(0, 0, null))]).hasData,
+          isFalse);
+      expect(jaw([report(DateTime(2026, 11, 17, 23), DateTime(2026, 11, 18, 7), 480, extras: null)]).hasData, isFalse);
+    });
+
+    test('two sleeps that end the same day: bursts over the hours asleep of both', () {
+      final r = jaw([
+        report(DateTime(2026, 11, 18, 3), DateTime(2026, 11, 18, 5), 120, extras: extras(120, 20, 10.0)),
+        report(DateTime(2026, 11, 18, 7), DateTime(2026, 11, 18, 14), 360, extras: extras(360, 140, 23.3)),
+      ]);
+      expect(r.value, 20.0); // 160 bursts in 8 hours, not the mean of 10.0 and 23.3
+    });
+
+    test('an arrow only beyond the normal spread and at least a quarter away from your usual', () {
+      final spec = measureSpecs.singleWhere((m) => m.id == 'jaw');
+      final s = days('2026-11-18', 20, (k) => 20.0 + (k % 2 == 0 ? 0.2 : -0.2));
+      final u = usualOf(s, '2026-11-18', spec.scale);
+      expect(u.arrow(23), Arrow.none); // 15 % more: beyond 2 spreads of 0.3, but under a quarter
+      expect(u.arrow(26), Arrow.up);
+      expect(u.arrow(14), Arrow.down);
+      final row = TrendRow(spec: spec, usual: u, line: const [], day: '2026-11-18', value: 26, arrow: u.arrow(26));
+      expect(arrowWords(row), 'More than usual (normal range 15.0 to 25.0\u00a0an\u00a0hour).');
+    });
+  });
+
   test('a normal range says its unit once and stays inside the scale', () {
     MeasureSpec spec(String id) => measureSpecs.singleWhere((m) => m.id == id);
     expect(rangeText(spec('kss'), -1, 7), '1 to 7\u00a0of\u00a09');

@@ -27,10 +27,29 @@ import 'screens_test.dart' show loadFonts;
 
 final _now = DateTime(2026, 11, 18, 15, 10);
 
-SleepReport _night(DateTime start, double hours) {
+/// [jaw]: the night extras' jaw muscle bursts an hour asleep (report version 2); null: an older report without them.
+SleepReport _night(DateTime start, double hours, {double? jaw}) {
   final end = start.add(Duration(minutes: (hours * 60).round()));
   final asleep = hours * 60 - 20;
+  Map<String, Object?> tally(int bursts) => {
+    'min': asleep,
+    'good_min': asleep,
+    'degraded_min': 0,
+    'missing_min': 0,
+    'jaw_bursts': bursts,
+    'one_sided_bursts': 0,
+    'movement_bursts': 0,
+    'moves': 0,
+  };
   return SleepReport({
+    if (jaw != null)
+      'extras': {
+        'version': 1,
+        'quality': '',
+        'night': tally((jaw * asleep / 60).round()),
+        'asleep': {...tally((jaw * asleep / 60).round()), 'jaw_per_hour': jaw, 'moves_per_hour': 12.0},
+        'hours': const [],
+      },
     'night_of': '${start.year}-${start.month}-${start.day}',
     'scored': true,
     'data_start': isoLocal(start),
@@ -81,18 +100,23 @@ MeditationSummary _session(DateTime start, double runS, double settledS) => Medi
 
 /// The owner's state today: the night of 06:51-14:36, one check-in, one meditation.
 final TrendInputs _first = (
-  nights: [_night(DateTime(2026, 11, 18, 6, 51), 7.75)],
+  nights: [_night(DateTime(2026, 11, 18, 6, 51), 7.75, jaw: 22.8)],
   mornings: [_morning(DateTime(2026, 11, 18, 14, 48), kss: 8, iaf: 9.62, alpha: 31.3)],
   sessions: [_session(DateTime(2026, 11, 18, 15, 0), 600, 270)],
 );
 
 /// Days of made-up data ending today: regular-ish nights, mornings, some meditations; today a short night.
 TrendInputs _days(int n) {
-  final r = math.Random(5);
+  final r = math.Random(5), j = math.Random(7);
   return (
     nights: [
       for (var d = n; d >= 0; d--)
-        _night(DateTime(2026, 11, 18 - d, 0, 20 + r.nextInt(50)), d == 0 ? 4.6 : 6.8 + r.nextDouble() * 1.2),
+        _night(
+          DateTime(2026, 11, 18 - d, 0, 20 + r.nextInt(50)),
+          d == 0 ? 4.6 : 6.8 + r.nextDouble() * 1.2,
+          // the jaw count from the night extras on (older reports have none); today a tense night
+          jaw: d > 40 ? null : (d == 0 ? 34.6 : ((18 + j.nextDouble() * 8) * 10).round() / 10),
+        ),
     ],
     mornings: [
       for (var d = n; d >= 0; d--)

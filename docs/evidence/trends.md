@@ -2,8 +2,8 @@
 
 ## What it does
 
-A page in the phone app with a few numbers per day (sleep, morning sleepiness and reaction time, mood, tension,
-the alpha numbers, practice, coffee and alcohol), each shown next to yesterday's and your usual, plus a
+A page in the phone app with a few numbers per day (sleep, jaw muscle bursts in the night, morning sleepiness and
+reaction time, mood, tension, the alpha numbers, practice, coffee and alcohol), each shown next to yesterday's and your usual, plus a
 sleep-pressure curve built from your sleep log. Forecasts stay hidden until they prove useful for you.
 
 ## Evidence for this headband: some
@@ -40,8 +40,11 @@ an EEG sleep-pressure number and next-day forecasts are weak, and no study shows
 - "Your usual": the middle value of your last 28 days with a value, shown from 7 days. A day runs from 04:00 to
   04:00; a night counts for the day you woke from it. No single brain score, no red or green health colours.
 - Arrows from 14 days, and only when a day is beyond your normal day-to-day spread (twice a robust spread) and
-  beyond the smallest change that matters: 1 hour of sleep, 2 points on a rating, 10 % in reaction time. Each
-  arrow says in words what it means, with your normal range.
+  beyond the smallest change that matters: 1 hour of sleep, 2 points on a rating, 10 % in reaction time, a quarter
+  of your usual in jaw muscle bursts (a planning value). Each arrow says in words what it means, with your normal
+  range.
+- Jaw muscle bursts are the sleep report's count an hour asleep: a trend to compare your nights, not a test for
+  teeth grinding (the jaw note says why).
 - "Same as yesterday": every number shows yesterday's beside it.
 - Sleep pressure comes from your sleep log (sleep periods of the phone's sleep reports; builds with an 18-hour
   time scale while awake, drains with a 4-hour one asleep), labelled as an estimate. Your body clock and coffee

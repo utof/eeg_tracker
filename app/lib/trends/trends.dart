@@ -1,10 +1,12 @@
-// The trends page's content from the phone's own files (DECISIONS rows 120-129): one number per day per measure,
-// from the sleep reports (files/nights), the morning check-ins (files/mornings) and the meditation and alpha-theta
-// reports; each with yesterday's value ("same as yesterday"), your usual and an arrow when the day is beyond your
-// normal spread (usual.dart); the last 14 days as a line; sleep pressure from the sleep log (pressure.dart); and the
-// hidden forecast (forecast.dart). Plain Dart: the screen only lays it out.
+// The trends page's content from the phone's own files (DECISIONS rows 120-129, 155): one number per day per
+// measure, from the sleep reports (files/nights; jaw muscle bursts from their extras), the morning check-ins
+// (files/mornings) and the meditation and alpha-theta reports; each with yesterday's value ("same as yesterday"), your
+// usual and an arrow when the day is beyond your normal spread (usual.dart); the last 14 days as a line; sleep
+// pressure from the sleep log (pressure.dart); and the hidden forecast (forecast.dart). Plain Dart: the screen only
+// lays it out.
 import '../meditation/tracker.dart' show MeditationSummary;
 import '../morning/store.dart' show MorningRecord;
+import '../sleep/extras.dart' show ExtrasAsleep;
 import '../sleep/report.dart' show SleepReport;
 import '../training/control.dart' show SessionKind;
 import 'days.dart';
@@ -70,6 +72,16 @@ final List<MeasureSpec> measureSpecs = [
     up: 'longer than usual',
     down: 'shorter than usual',
     note: 'The sleep model is a first guess on this headband.',
+  ),
+  MeasureSpec(
+    id: 'jaw',
+    label: 'Jaw muscle bursts',
+    group: TrendGroup.sleep,
+    scale: Scale.rate,
+    format: (v) => '${v.toStringAsFixed(1)}\u00a0an\u00a0hour',
+    up: 'more than usual',
+    down: 'fewer than usual',
+    note: 'An hour asleep. A trend to compare your nights, not a test for teeth grinding.',
   ),
   MeasureSpec(
     id: 'kss',
@@ -186,10 +198,20 @@ DateTime finalWake(SleepReport r) {
 /// Day -> value per measure id.
 Map<String, Map<String, double>> dailySeries(TrendInputs inputs) {
   final out = {for (final m in measureSpecs) m.id: <String, double>{}};
+  // jaw muscle bursts an hour asleep (the report's extras, version 2): the night's own number, or over the hours
+  // asleep of all the day's nights together
+  final jaw = <String, List<ExtrasAsleep>>{};
   for (final r in inputs.nights) {
     if (!r.scored) continue;
     final d = wakeDay(finalWake(r));
     out['asleep']![d] = (out['asleep']![d] ?? 0) + r.asleepMin;
+    final a = r.extras?.asleep;
+    if (a != null && a.jawPerHour != null && a.min > 0) jaw.putIfAbsent(d, () => []).add(a);
+  }
+  for (final MapEntry(key: d, value: a) in jaw.entries) {
+    out['jaw']![d] = a.length == 1
+        ? a.single.jawPerHour!
+        : (a.fold(0, (n, x) => n + x.jawBursts) / (a.fold(0.0, (m, x) => m + x.min) / 60) * 10).round() / 10;
   }
   // a check-in's values: the first of the day that has each one (a later one is not a morning)
   final mornings = [...inputs.mornings]..sort((a, b) => a.start.compareTo(b.start));
