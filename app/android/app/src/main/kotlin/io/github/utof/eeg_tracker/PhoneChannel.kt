@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
@@ -38,6 +39,31 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
             MethodChannel(messenger, NAME).setMethodCallHandler(PhoneChannel(context.applicationContext))
         }
 
+        /**
+         * Share on Wi-Fi during a night (lib/share/isolate.dart): one Wi-Fi lock for the whole process, so
+         * Wi-Fi keeps answering the laptop while the screen is off. Not counted: "on" twice is held once, "off"
+         * always lets go. Android drops it by itself when the process ends.
+         */
+        private var wifiLock: WifiManager.WifiLock? = null
+
+        @Synchronized
+        fun holdWifi(context: Context, on: Boolean) {
+            if (on) {
+                if (wifiLock?.isHeld == true) return
+                val wm = context.applicationContext.getSystemService(WifiManager::class.java) ?: return
+                // HIGH_PERF is the one mode that also counts with the screen off; Android 14 marks it deprecated
+                // and some builds treat it as LOW_LATENCY (screen on only). Harmless either way.
+                @Suppress("DEPRECATION")
+                val lock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "eeg_tracker:share")
+                lock.setReferenceCounted(false)
+                lock.acquire()
+                wifiLock = lock
+            } else {
+                wifiLock?.let { if (it.isHeld) it.release() }
+                wifiLock = null
+            }
+        }
+
         /** Where the recorder writes; only an explicit Export copies anything out (NightExport.kt). */
         fun recordingsFolder(context: Context): File = File(context.filesDir, "recordings")
     }
@@ -50,6 +76,10 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
                 "battery" -> result.success(battery())
                 "openSettings" -> result.success(openSettings(call.argument<String>("page") ?: "appDetails"))
                 "exitReasons" -> result.success(exitReasons(call.argument<Number>("sinceMs")?.toLong() ?: 0L))
+                "wifiLock" -> {
+                    holdWifi(context, call.argument<Boolean>("on") == true)
+                    result.success(null)
+                }
                 "restartProcess" -> {
                     restartProcess(call.argument<Number>("delayMs")?.toInt() ?: 5000)
                     result.success(null)

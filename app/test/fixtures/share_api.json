@@ -1,0 +1,11 @@
+{
+  "about": "The live routes' JSON, checked against both the laptop recorder (analysis/tests/test_share_api.py) and the phone's Share on Wi-Fi server (app/test/share_server_test.dart).",
+  "state_keys": ["status", "battery", "battery_note", "minutes", "age", "names", "fs", "contact", "contact_t", "data"],
+  "names": ["O1", "O2", "T3", "T4"],
+  "fs": 250,
+  "hello_keys": ["hello", "names", "fs", "unit", "status", "next_i"],
+  "batch_keys": ["i", "t", "uv"],
+  "marker_keys": ["marker", "i", "t"],
+  "state_seconds": 4,
+  "marker_file_keys": ["t", "i", "text"]
+}

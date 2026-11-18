@@ -11,6 +11,7 @@
 //   app process is restarted (the phone's version of "exit and let record_night.sh start a fresh one");
 // - the data is saved before every risky SDK call.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -166,6 +167,26 @@ class NightRecorder {
 
   /// [run] has returned: no session is using a headband any more.
   bool get finished => _done.isCompleted;
+
+  /// A text marker from a laptop page (Share on Wi-Fi's POST /marker), as the laptop recorder writes it: one
+  /// line `{"t", "i", "text"}` in the run's `.markers.jsonl`, `i` the index of the next sample. Null while no run
+  /// is open or when the line could not be written; never throws.
+  ({double t, int i})? addMarker(String text) {
+    final w = _writer;
+    if (w == null || w.isClosed) return null;
+    try {
+      final t = (unixSeconds(_now()) * 1000).roundToDouble() / 1000;
+      final i = w.samplesReceived;
+      File('${dir.path}/${w.stem}.markers.jsonl').writeAsStringSync(
+        '${jsonEncode({'t': t, 'i': i, 'text': text})}\n',
+        mode: FileMode.append,
+        flush: true,
+      );
+      return (t: t, i: i);
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Records until [stop]. [restartedBySystem]: Android restarted the service after the process died,
   /// so an active night is continued (new file set) instead of a new night begun.
@@ -616,6 +637,19 @@ class NightRecorder {
       'drop ($why); last data ${last == null ? 'none' : logTime(DateTime.fromMillisecondsSinceEpoch(last))}; reconnecting',
     );
     _drop = (lastDataMs: last, stem: w.stem, why: why);
+  }
+
+  /// A line for the night's log from outside the loop (Share on Wi-Fi going on or off): into the open run's
+  /// `.log`, else as [_note]. Never throws.
+  void note(String message) {
+    try {
+      final w = _writer;
+      if (w != null && !w.isClosed) {
+        w.log(message);
+      } else {
+        _note(message);
+      }
+    } catch (_) {}
   }
 
   /// A line for the night's log between runs, with its own time: into the last closed run's `.log`, or,

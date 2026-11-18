@@ -59,6 +59,11 @@ class ChunkWriter {
   int _written = 0; // samples appended to the .f32 file
   bool _closed = false;
 
+  /// Share on Wi-Fi's tap (lib/share/isolate.dart): every batch any recording buffers, with its run and the index
+  /// of its first sample. It only sends the batch to another isolate. One per isolate; a tap that throws is
+  /// dropped, so it can never cost a sample.
+  static void Function(String stem, int first, DateTime arrival, List<Sample> samples)? onBatch;
+
   int get samplesReceived => _received;
   int get samplesWritten => _written;
   bool get isClosed => _closed;
@@ -83,6 +88,14 @@ class ChunkWriter {
     }
     _dataBuf.add(rec.buffer.asUint8List());
     _received += samples.length;
+    final tap = onBatch;
+    if (tap != null) {
+      try {
+        tap(stem, _received - samples.length, arrival, samples);
+      } catch (_) {
+        onBatch = null;
+      }
+    }
   }
 
   /// One line in the `.log`, written at once (`ISO-local-time message`).
