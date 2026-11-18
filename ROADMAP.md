@@ -59,6 +59,7 @@ Update the status column whenever something lands.
 | 17 | Sound for states: binaural, isochronic, pulsed noise; presets per state; markers for checking | first page being built | `scripts/web/beats.html` |
 | 18 | Sound for states: measure "did I get there", stop when asleep, learn what works for you | after research + 6 | - |
 | 19 | Research: sound for states; states and their markers; more features | in progress | `_local/research/` |
+| 20 | Dream catcher (owner: "definitely build"): at sleep onset, ask what you're thinking, record the answer, let you drift again, 3-4 rounds | planned, right after the current features | see Ideas |
 
 ## Next tests that need the owner (each about 5 minutes)
 
@@ -74,7 +75,7 @@ Anyone, including the assistant, adds ideas here. When one is started, move it i
 |---|---|---|
 | Smart alarm | wakes you within a chosen window at a moment of light sleep, not deep sleep | needs live sleep staging on the phone |
 | Nap coach | a nap that ends before deep sleep starts (so no groggy wake-up) | same live staging |
-| Dream catcher | as you drift off, the app notices the half-dream stage (back-of-head alpha fading), quietly asks "what are you thinking about?", records your spoken answer, lets you drift again; 3-4 rounds. For creative ideas | MIT's Dormio; a 2021 study found 15 s in that stage tripled insight on a puzzle; needs only O1/O2 |
+| Dream catcher (now row 20 above) | as you drift off, the app notices the half-dream stage (back-of-head alpha fading), quietly asks "what are you thinking about?", records your spoken answer, lets you drift again; 3-4 rounds. For creative ideas | MIT's Dormio; a 2021 study found 15 s in that stage tripled insight on a puzzle; needs only O1/O2 |
 | Lucid dream cues | soft sound cues during dream sleep (REM) to become aware you are dreaming | evidence weak; fun |
 | Hands-free controls | a double jaw clench or a look left-right as a switch: pause sound, mark a moment | jaw and eye movements are what these electrodes see best |
 | Meditation sessions | guided sessions with feedback on how settled you were | alpha and movement |
