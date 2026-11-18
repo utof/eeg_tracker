@@ -86,7 +86,9 @@ headings titleMedium 500; everything else bodyLarge. No monospace, no display fa
 
 One scrolling column, 24 dp page margins, sections separated by a hairline and 32 dp above the heading.
 Order: status, readouts, watch strip, then Headband and Phone (Phone first before a night, Headband first
-during one). The primary action is pinned at the bottom, full width, 64 dp.
+during one). Between nights the Sleep section (last night's asleep total and a Sleep report button) comes
+right after the strip. The primary action is pinned at the bottom, full width, 64 dp. The sleep report is
+its own page: totals, the honest note, the chart, the periods, past nights.
 
 ## Elevation & Depth
 
@@ -106,6 +108,12 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   outlines so columns never move.
 - **Readouts:** big numbers with small units and a muted label under them; data age turns amber at 5 s
   and red at 40 s.
+- **Sleep chart (sleep report):** the night's stages on the clock: an ink step line through four worded
+  levels (Awake, Dream, Light, Deep) on the `track` ground, hour rules, missing data hatched in `caution`
+  amber like the strip's gaps, each sleep period a faint `rule` band numbered above the chart and in the
+  period log below it. No stage colours: the levels are words.
+- **Sleep periods:** ruled log entries: a numbered cell, the clock span, then label-left / minutes-right
+  lines (Asleep, Deep, Dream, Light), wake-ups and missing minutes as plain sentences.
 - **Phone checks:** icon, one plain sentence, right-aligned text buttons that open the exact setting.
 - **Buttons:** one filled button per screen: Start night on the night screen, Start on the meditation screen; Stop is
   outlined and asks once before stopping.

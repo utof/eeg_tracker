@@ -5,9 +5,34 @@ import '../recorder/contact.dart';
 import 'night_strip.dart';
 import 'parts.dart';
 import 'phone_checks.dart';
+import 'sleep_report_view.dart' show durationParts, nightTitle;
 import 'theme.dart';
 
 enum Tone { calm, live, caution, problem }
+
+/// The Sleep section: the newest night's report, or what the scorer is doing.
+class SleepSummary {
+  const SleepSummary({
+    required this.nightOf,
+    this.scored = false,
+    this.asleepMin,
+    this.periods = 0,
+    this.scoringStep,
+    this.blocked,
+  });
+
+  /// `2026-11-17`.
+  final String nightOf;
+  final bool scored;
+  final double? asleepMin;
+  final int periods;
+
+  /// Set while this night is being scored.
+  final String? scoringStep;
+
+  /// Why its scoring stopped ('' when the app stopped while scoring), or null.
+  final String? blocked;
+}
 
 class NightViewModel {
   const NightViewModel({
@@ -26,6 +51,7 @@ class NightViewModel {
     this.contactOhms = const {},
     this.checks = const [],
     this.nightsOnPhone = 0,
+    this.sleep,
   });
 
   final String title;
@@ -53,6 +79,9 @@ class NightViewModel {
 
   /// Finished nights kept in the app's private folder (Export copies one out).
   final int nightsOnPhone;
+
+  /// The Sleep section, shown between nights.
+  final SleepSummary? sleep;
 }
 
 class NightView extends StatelessWidget {
@@ -64,6 +93,8 @@ class NightView extends StatelessWidget {
     required this.onFix,
     this.onExport,
     this.onMeditate,
+    this.onSleepReport,
+    this.onRetrySleep,
   });
 
   final NightViewModel model;
@@ -72,10 +103,13 @@ class NightView extends StatelessWidget {
   final void Function(FixAction action) onFix;
   final VoidCallback? onExport;
   final VoidCallback? onMeditate;
+  final VoidCallback? onSleepReport;
+  final VoidCallback? onRetrySleep;
 
   @override
   Widget build(BuildContext context) {
     final m = model;
+    final sleep = m.sleep;
     final text = Theme.of(context).textTheme;
     final headband = [const SectionHeading('Headband'), _Headband(m)];
     return Scaffold(
@@ -88,6 +122,11 @@ class NightView extends StatelessWidget {
           _Status(m),
           if (m.minutes != null) ...[const SizedBox(height: 28), _Readouts(m)],
           if (m.rows.isNotEmpty) ...[SectionHeading(m.stripTitle), NightStrip(rows: m.rows)],
+          // In the morning the night's sleep comes right after its strip.
+          if (!m.running && sleep != null) ...[
+            const SectionHeading('Sleep'),
+            _Sleep(sleep, onOpen: onSleepReport, onRetry: onRetrySleep),
+          ],
           // Before the night the phone settings matter most; during it, the headband.
           if (m.running) ...headband,
           const SectionHeading('Phone'),
@@ -337,6 +376,63 @@ class _Recordings extends StatelessWidget {
           icon: const Icon(Icons.drive_folder_upload_outlined),
           label: const Text('Export a night'),
         ),
+      ],
+    );
+  }
+}
+
+class _Sleep extends StatelessWidget {
+  const _Sleep(this.s, {required this.onOpen, required this.onRetry});
+  final SleepSummary s;
+  final VoidCallback? onOpen;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final night = nightTitle(s.nightOf);
+    final body = text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4);
+    final open = OutlinedButton.icon(
+      onPressed: onOpen,
+      icon: const Icon(Icons.bar_chart_rounded),
+      label: const Text('Sleep report'),
+    );
+    if (s.scoringStep != null) {
+      return Text('Scoring the night of $night on the phone: ${s.scoringStep}.', style: body);
+    }
+    if (s.blocked != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            s.blocked!.isEmpty
+                ? 'Scoring the night of $night stopped before it finished.'
+                : 'Scoring the night of $night failed: ${s.blocked}',
+            style: body?.copyWith(color: Night.caution),
+          ),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh), label: const Text('Try again')),
+        ],
+      );
+    }
+    final n = s.periods;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (s.scored)
+          Readout(parts: durationParts(s.asleepMin ?? 0), label: 'asleep, night of $night')
+        else
+          Text('The night of $night was too short to score.', style: body),
+        if (s.scored) ...[
+          const SizedBox(height: 12),
+          Text(
+            '${n == 0 ? 'No sleep period' : n == 1 ? '1 sleep period' : '$n sleep periods'}. A first guess: the sleep '
+            'model is not yet validated on this headband.',
+            style: body,
+          ),
+        ],
+        const SizedBox(height: 16),
+        open,
       ],
     );
   }

@@ -11,11 +11,16 @@ import '../recorder/headband.dart';
 import '../recorder/nights.dart';
 import '../recorder/recorder_service.dart';
 import '../recorder/status.dart';
+import '../sleep/onnx_runs.dart';
+import '../sleep/report.dart';
+import '../sleep/scorer.dart';
 import 'night_strip.dart';
 import 'meditation_screen.dart';
 import 'nearby.dart';
 import 'night_view.dart';
 import 'phone_checks.dart';
+import 'sleep_report_screen.dart';
+import 'sleep_scoring.dart';
 import 'theme.dart';
 
 const String _xiaomiDoneKey = 'xiaomiChecked';
@@ -133,6 +138,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   Timer? _clock;
   int _ticks = 0;
   Completer<void>? _stopped;
+  SleepScoring? _scoring;
 
   @override
   void initState() {
@@ -149,6 +155,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _scoring?.removeListener(_onScoring);
     _clock?.cancel();
     FlutterForegroundTask.removeTaskDataCallback(_onData);
     WidgetsBinding.instance.removeObserver(this);
@@ -176,6 +183,38 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     });
   }
 
+  void _onScoring() {
+    if (mounted) setState(() {});
+  }
+
+  /// The newest night's report, or what the scorer is doing; a stopped scoring of a newer night comes first.
+  SleepSummary? _sleepSummary() {
+    final sc = _scoring;
+    if (sc == null) return null;
+    if (sc.night != null) return SleepSummary(nightOf: sc.night!, scoringStep: sc.step ?? 'Starting');
+    final reports = sc.reports;
+    final newest = reports.isEmpty ? null : reports.first;
+    final stuck = sc.blocked.keys.toList()..sort();
+    if (stuck.isNotEmpty && (newest == null || stuck.last.compareTo(newest.nightOf) >= 0)) {
+      return SleepSummary(nightOf: stuck.last, blocked: sc.blocked[stuck.last]);
+    }
+    if (newest == null) return null;
+    return SleepSummary(
+      nightOf: newest.nightOf,
+      scored: newest.scored,
+      asleepMin: newest.asleepMin,
+      periods: newest.periods.length,
+    );
+  }
+
+  Future<void> _openSleep(String nightOf) async {
+    final sc = _scoring;
+    if (sc == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => SleepReportScreen(scoring: sc, nightOf: nightOf)),
+    );
+  }
+
   Future<void> _refreshRunning() async {
     final running = await FlutterForegroundTask.isRunningService;
     if (mounted && running != _running) setState(() => _running = running);
@@ -190,6 +229,18 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     final dir = _dir ?? await _safe<String?>(Phone.recordingsDir, null);
     final nights = dir == null || running ? const <NightFiles>[] : _listNights(dir);
     if (running) FlutterForegroundTask.sendDataToTask(statusCommand);
+    if (dir != null && _scoring == null) {
+      _scoring = SleepScoring(
+        SleepScorer(
+          recordingsDir: Directory(dir),
+          store: NightReportStore(nightsDirFor(dir)),
+          openRun: OnnxStageRun.open,
+          closeRun: (run) => (run as OnnxStageRun).close(),
+        ),
+      )..addListener(_onScoring);
+    }
+    // Last night is scored on the phone once it has ended (DECISIONS row 97); never while a night records.
+    if (!running) unawaited(_scoring?.run());
     if (!mounted) return;
     setState(() {
       _nights = nights;
@@ -364,19 +415,25 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       contactOhms: s?.contactOhms ?? (showLast ? last.contactOhms : const {}),
       checks: phoneChecks(phone: _phone, nearbyAllowed: _nearby, xiaomiDone: _xiaomiDone),
       nightsOnPhone: _nights.length,
+      sleep: _running ? null : _sleepSummary(),
     );
   }
 
   @override
-  Widget build(BuildContext context) =>
-      NightView(
-        model: _model(),
-        onStart: _start,
-        onStop: _stop,
-        onFix: _fix,
-        onExport: _export,
-        onMeditate: _meditate,
-      );
+  Widget build(BuildContext context) {
+    final model = _model();
+    final sleep = model.sleep;
+    return NightView(
+      model: model,
+      onStart: _start,
+      onStop: _stop,
+      onFix: _fix,
+      onExport: _export,
+      onMeditate: _meditate,
+      onSleepReport: sleep == null ? null : () => _openSleep(sleep.nightOf),
+      onRetrySleep: sleep == null ? null : () => _scoring?.retry(sleep.nightOf),
+    );
+  }
 }
 
 String _mb(int bytes) => '${(bytes / 1e6).toStringAsFixed(bytes < 1e7 ? 1 : 0)} MB';
