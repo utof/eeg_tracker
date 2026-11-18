@@ -1,6 +1,7 @@
 _local/
 __pycache__/
 *.f32
+!app/test/fixtures/sleep_night/*.f32
 logs/
 *.bdf
 .venv/
