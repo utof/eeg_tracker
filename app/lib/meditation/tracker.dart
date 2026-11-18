@@ -12,14 +12,16 @@ import 'dart:math' as math;
 import '../detectors/drift_off.dart' show DriftState;
 import '../feedback/mapping.dart' show jawBlock;
 import '../feedback/session.dart';
+import '../training/control.dart' show SessionKind;
 
 enum Moment { calibrating, settled, settling, restless, drifting, noSignal }
 
 enum Restless { jaw, blinks, movement }
 
 /// One moment per analysis step of the run phase. Null outside it. [drift]: the drift-off detector's state
-/// (null before its baseline); drowsy or asleep makes an otherwise calm step a drifting one.
-({Moment moment, Restless? why})? momentOf(StepResult r, {DriftState? drift}) {
+/// (null before its baseline); drowsy or asleep makes an otherwise calm step a drifting one. [coreDrowsy]:
+/// false in alpha-theta, where theta rising is the aim, so only the drift-off detector says drifting.
+({Moment moment, Restless? why})? momentOf(StepResult r, {DriftState? drift, bool coreDrowsy = true}) {
   if (r.phase != 'run') return null;
   if (r.quality == 'poor') {
     return r.channels['O1'] == 'noisy' || r.channels['O2'] == 'noisy'
@@ -32,7 +34,7 @@ enum Restless { jaw, blinks, movement }
       return (moment: Moment.restless, why: (r.jaw ?? 0) > jawBlock ? Restless.jaw : Restless.movement);
     case 'blink':
       return (moment: Moment.restless, why: Restless.blinks);
-    case 'drowsy':
+    case 'drowsy' when coreDrowsy:
       return (moment: Moment.drifting, why: null);
   }
   if (drift == DriftState.drowsy || drift == DriftState.asleep) return (moment: Moment.drifting, why: null);
@@ -90,12 +92,14 @@ class MeditationTracker {
   /// Mean calm (the sound: 0 = brightest rain, 1 = calmest) per 30 s, the last bin as far as it got.
   List<double> get calm => [..._calm, if (_binN > 0) _binSum / _binN];
 
-  void add(StepResult r, {DriftState? drift}) {
-    final m = momentOf(r, drift: drift);
+  /// [level]: the bed setting played (default the core's calm; a replay or alpha-theta passes its own);
+  /// [reward]: whether a reward sounded (default the core's bell).
+  void add(StepResult r, {DriftState? drift, double? level, bool? reward, bool coreDrowsy = true}) {
+    final m = momentOf(r, drift: drift, coreDrowsy: coreDrowsy);
     if (m == null) return;
     _steps++;
     if (drift == DriftState.asleep) asleepS ??= runSeconds;
-    if (r.ring) bells++;
+    if (reward ?? r.ring) bells++;
     _recent.add(m.moment);
     if (_recent.length > 20) _recent.removeAt(0);
 
@@ -127,7 +131,7 @@ class MeditationTracker {
       _sinceDrowsy++;
     }
 
-    _binSum += r.targets.calm;
+    _binSum += level ?? r.targets.calm;
     _binN++;
     if (_binN * stepS >= calmBinS - 1e-9) {
       _calm.add(_binSum / _binN);
@@ -154,7 +158,17 @@ class MeditationTracker {
     required double? iafHz,
     required String note,
     required String logFile,
+    SessionKind kind = SessionKind.meditation,
+    Map<String, Object?>? check,
+    double? outcome,
+    double? excludedShare,
+    Map<String, Object?>? at,
   }) => MeditationSummary(
+    kind: kind,
+    check: check,
+    outcome: outcome,
+    excludedShare: excludedShare,
+    at: at,
     start: start,
     lengthMin: length.inSeconds / 60,
     runS: _round1(runSeconds),
@@ -176,9 +190,15 @@ class MeditationTracker {
 
 double _round1(double v) => (v * 10).round() / 10;
 
-/// One finished session, as kept next to the recordings (`<stamp>.meditation.json`).
+/// One finished session, as kept next to the recordings (`<stamp>.meditation.json`; an alpha-theta session the
+/// same in its own folder as `<stamp>.alphatheta.json`).
 class MeditationSummary {
   const MeditationSummary({
+    this.kind = SessionKind.meditation,
+    this.check,
+    this.outcome,
+    this.excludedShare,
+    this.at,
     required this.start,
     required this.lengthMin,
     required this.runS,
@@ -198,6 +218,17 @@ class MeditationSummary {
   });
 
   static const int version = 1;
+  final SessionKind kind;
+
+  /// While the replay check was on: {'phase': 'donor' | 'randomised' | 'finished', 'index': n}. Never the arm.
+  final Map<String, Object?>? check;
+
+  /// The replay check's primary measure (training/outcome.dart) and the share of the run it could not count.
+  final double? outcome;
+  final double? excludedShare;
+
+  /// Alpha-theta: seconds of alpha and theta above their lines, crossover, asleep, counted; chimes, gongs.
+  final Map<String, Object?>? at;
   final DateTime start;
 
   /// The length chosen, in minutes.
@@ -234,7 +265,11 @@ class MeditationSummary {
 
   Map<String, Object?> toJson() => {
     'version': version,
-    'kind': 'meditation',
+    'kind': kind.name,
+    if (check != null) 'check': check,
+    if (outcome != null) 'outcome': outcome,
+    if (excludedShare != null) 'excludedShare': excludedShare,
+    if (at != null) 'at': at,
     'start': start.toIso8601String(),
     'lengthMin': lengthMin,
     'runS': runS,
@@ -256,7 +291,9 @@ class MeditationSummary {
 
   /// Null when [j] is not a summary this version can read (a damaged or foreign file is skipped, not trusted).
   static MeditationSummary? fromJson(Object? j) {
-    if (j is! Map || j['kind'] != 'meditation' || j['version'] != version) return null;
+    if (j is! Map || j['version'] != version) return null;
+    final kind = SessionKind.byName(j['kind']);
+    if (kind == null) return null;
     final start = DateTime.tryParse('${j['start']}');
     final r = j['restless'], calm = j['calm'];
     double? num_(Object? v) => v is num && v.isFinite && v >= 0 ? v.toDouble() : null;
@@ -288,8 +325,13 @@ class MeditationSummary {
         }
       }
     }
-    final iaf = j['iafHz'], asleep = num_(j['asleepS']);
+    final iaf = j['iafHz'], asleep = num_(j['asleepS']), outcome = j['outcome'], check = j['check'], at = j['at'];
     return MeditationSummary(
+      kind: kind,
+      check: check is Map<String, Object?> ? check : null,
+      outcome: outcome is num && outcome.isFinite ? outcome.toDouble() : null,
+      excludedShare: num_(j['excludedShare']),
+      at: at is Map<String, Object?> ? at : null,
       start: start,
       lengthMin: lengthMin,
       runS: runS,

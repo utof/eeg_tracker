@@ -14,24 +14,51 @@
 // close-eyes cue (its 60 s eyes-closed baseline is the calibration minute). Its drowsy / probably-asleep state
 // joins the core's drowsy gate in the "drifting" chip; both are exposed for later features (dream catcher,
 // sleep-sound auto-stop).
+//
+// Two kinds of session run here (training/control.dart): meditation, and alpha-theta (ROADMAP row 22), whose
+// rules (alphatheta/engine.dart) sit on the same core and whose sleep guard is the drift-off detector: when it
+// says "probably asleep" the bed fades and a soft rising cue wakes you, again every minute while it lasts.
+// With the replay check on (ROADMAP row 23), a session can be a replay: the sound then plays the control stream of
+// your own earlier live sessions (training/replay.dart) while the live gates still act. Which one it is stays in
+// here: the screen gets the same fields either way, without live bells or the settled / settling word.
 import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import '../alphatheta/engine.dart';
 import '../detectors/detectors.dart';
 import '../detectors/drift_off.dart';
 import '../feedback/features.dart' show channelNames, fs;
 import '../feedback/mapping.dart';
 import '../feedback/session.dart';
-import '../recorder/chunk_writer.dart' show Sample;
+import '../recorder/chunk_writer.dart' show Sample, fileStem;
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
 import '../sound/feedback_sound.dart';
+import '../sound/session_sound.dart';
+import '../training/check.dart';
+import '../training/check_store.dart';
+import '../training/control.dart';
+import '../training/outcome.dart';
+import '../training/replay.dart';
 import 'store.dart';
 import 'tracker.dart';
 
-enum Stage { setup, connecting, contact, calibrating, running, ending, report, failed }
+/// [rating]: the session is over and saved; the after-session questions come before the report (the replay
+/// check's guess, and for alpha-theta its checklist and alertness check).
+enum Stage { setup, connecting, contact, calibrating, running, ending, rating, report, failed }
+
+/// While the drift-off detector says probably asleep in alpha-theta, the wake cue repeats this often.
+const double wakeEveryS = 60;
+
+/// The live control of a meditation step: the core's calm, roughness and bell.
+Control meditationControl(StepResult r) => (
+  level: r.targets.calm,
+  rough: r.targets.rough,
+  reward: r.ring ? 'bell' : null,
+  gated: r.veto != null || r.quality != 'good',
+);
 
 /// A skip of this many packet numbers or more (0.1 s) is a hole in the signal: the core restarts its filters.
 /// Smaller skips (a lost packet or two) pass through. Planning value until the phone test counts real gaps.
@@ -89,16 +116,37 @@ class MeditationController extends ChangeNotifier {
   MeditationController({
     required this.finder,
     required FeedbackSound Function() sound,
+    SessionSound Function()? alphaThetaSound,
     this.store,
+    this.checkStore,
     this.timing = const MeditationTiming(),
     DateTime Function()? clock,
   }) : _makeSound = sound,
+       _makeAtSound = alphaThetaSound ?? SilentSessionSound.new,
        _now = clock ?? DateTime.now;
 
   final HeadbandFinder finder;
   final FeedbackSound Function() _makeSound;
-  /// Where sessions are kept; set by the screen once the app's folder is known (null: not saved).
+  final SessionSound Function() _makeAtSound;
+
+  /// Where sessions of this controller's kind are kept; set by the screen once the app's folder is known
+  /// (null: not saved).
   MeditationStore? store;
+
+  /// The replay check of this kind while the toggle is on; null when it is off.
+  CheckStore? checkStore;
+
+  /// The kind of the session running now (or the last one).
+  SessionKind kind = SessionKind.meditation;
+
+  /// The replay check's words for this session (never live or replay); null with the check off.
+  String? checkStatus;
+
+  /// The check is on for the session running now: the screen hides live bells and the settled word.
+  bool get checkOn => _slot != null;
+
+  /// The after-session questions include the replay check's guess.
+  bool get asksGuess => _slot?.phase == SlotPhase.randomised;
   final MeditationTiming timing;
   final DateTime Function() _now;
 
@@ -129,6 +177,12 @@ class MeditationController extends ChangeNotifier {
   /// A headband was left out of range (the finder must not dispose its scanner then).
   bool get leftLost => _lostBands.isNotEmpty;
 
+  /// Alpha-theta: the drift-off detector says probably asleep now, so the bed has faded.
+  bool asleepGuard = false;
+
+  /// Alpha-theta: what the session adds to the report.
+  AtTally? get tally => _tally;
+
   /// Seconds of signal since calibration ended.
   double get runSeconds => _tracker?.runSeconds ?? 0;
   int get secondsLeft => math.max(0, (length.inMilliseconds / 1000 - runSeconds).ceil());
@@ -151,8 +205,15 @@ class MeditationController extends ChangeNotifier {
 
   Headband? _band;
   final List<Headband> _lostBands = [];
-  FeedbackSound? _sound;
+  SessionSound? _sound;
   Session? _session;
+  AlphaThetaEngine? _engine;
+  Slot? _slot;
+  Replayer? _replayer;
+  OutcomeMeter? _outcome;
+  AtTally? _tally;
+  double _wokeAt = -1e9;
+  bool _replayFailed = false;
   MeditationTracker? _tracker;
   Detectors? _seen;
   DriftOff? _drift;
@@ -173,12 +234,15 @@ class MeditationController extends ChangeNotifier {
   bool _quiet = false;
   bool _disposed = false;
 
-  /// Connects, checks contact, starts the sound and the calibration. Errors end in [Stage.failed].
-  Future<void> start(Duration sessionLength) async {
+  /// Connects, checks contact, starts the sound and the calibration. Errors end in [Stage.failed]. With
+  /// [checkStore] set, the replay check decides first whether this session is live or a replay.
+  Future<void> start(Duration sessionLength, {SessionKind kind = SessionKind.meditation}) async {
     if (active) return;
     _reset(sessionLength);
+    this.kind = kind;
     _set(Stage.connecting, 'Looking for the headband.');
     try {
+      await _prepareCheck(sessionLength);
       final band = await finder
           .find(timing.scanFor, onFound: (name, _) => _set(Stage.connecting, 'Found $name. Connecting.'))
           .timeout(timing.scanFor + timing.connectTimeout);
@@ -192,12 +256,12 @@ class MeditationController extends ChangeNotifier {
       contact = await _checkContact(band);
       if (_ended) return await _release();
 
-      var sound = _makeSound();
+      SessionSound sound = kind == SessionKind.meditation ? MeditationSound(_makeSound()) : _makeAtSound();
       try {
         await sound.start();
       } catch (e) {
         soundNote = 'The sound did not start ($e). This session runs without sound.';
-        sound = SilentSound();
+        sound = SilentSessionSound();
       }
       _sound = sound;
       if (_ended) {
@@ -205,9 +269,19 @@ class MeditationController extends ChangeNotifier {
         return await _release();
       }
 
-      final s = Session()..contact(contact);
-      s.log.note({'app': 'eeg_tracker meditation', 'lengthS': sessionLength.inSeconds, 'headband': band.name});
+      final engine = kind == SessionKind.alphaTheta ? AlphaThetaEngine() : null;
+      final s = engine?.core ?? Session();
+      engine != null ? engine.contact(contact) : s.contact(contact);
+      s.log.note({
+        'app': 'eeg_tracker ${kind.name}',
+        'lengthS': sessionLength.inSeconds,
+        'headband': band.name,
+        if (_slot != null) 'check': _checkInfo(),
+      });
       _session = s;
+      _engine = engine;
+      _outcome = OutcomeMeter(kind);
+      _tally = engine == null ? null : AtTally();
       _tracker = MeditationTracker(sessionLength);
       _seen = Detectors(onSecond: _onSecond);
       _startedAt = _now();
@@ -230,14 +304,44 @@ class MeditationController extends ChangeNotifier {
 
   /// Back to the length choice after a report or a failure.
   void again() {
+    if (stage == Stage.rating) return;
     if (active) return;
     _set(Stage.setup, '');
   }
+
+  /// With the check on: the next slot (the plan is frozen before the first randomised session) and, for a
+  /// replay, the donors' control streams. A donor that cannot be read makes this session live instead; the
+  /// record says so and the reveal counts it as a deviation.
+  Future<void> _prepareCheck(Duration sessionLength) async {
+    final cs = checkStore, st = store;
+    if (cs == null) return;
+    final sessions = st?.list() ?? const <MeditationSummary>[];
+    final slot = prepareSlot(cs, st == null ? const [] : donorCandidates(st, sessions), sessionLength.inSeconds.toDouble(), _now());
+    _slot = slot;
+    checkStatus = slot.status;
+    if (slot.arm != Arm.replay || st == null) return;
+    try {
+      _replayer = Replayer(await loadStreams(st.dir, slot.donors, kind), cleanSteps: cleanStepsFor(kind));
+    } catch (_) {
+      _replayFailed = true;
+    }
+  }
+
+  Map<String, Object?> _checkInfo() => {'phase': _slot!.phase.name, if (_slot!.index != null) 'index': _slot!.index};
 
   void _reset(Duration sessionLength) {
     length = sessionLength;
     _band = null;
     _session = null;
+    _engine = null;
+    _slot = null;
+    _replayer = null;
+    _replayFailed = false;
+    _outcome = null;
+    _tally = null;
+    _wokeAt = -1e9;
+    asleepGuard = false;
+    checkStatus = null;
     _tracker = null;
     _seen = null;
     _drift = null;
@@ -296,7 +400,7 @@ class MeditationController extends ChangeNotifier {
     }
     _lastData = now;
     var rows = <List<double>>[];
-    final steps = <StepResult>[];
+    final steps = <AtStep>[];
     for (final x in batch) {
       final prev = _lastPack;
       if (prev != null) {
@@ -308,9 +412,9 @@ class MeditationController extends ChangeNotifier {
       }
       _lastPack = x.pack;
       if (_gapPending) {
-        if (rows.isNotEmpty) steps.addAll(s.push(rows));
+        if (rows.isNotEmpty) steps.addAll(_push(rows));
         rows = [];
-        s.gap();
+        _engine != null ? _engine!.gap() : s.gap();
         // the detectors hold the last value over the hole (as the BDF does); unknown length: one second
         _seen?.hold(_lostSamples > 0 ? math.min(_lostSamples, maxGapSamples) : fs);
         _gapPending = false;
@@ -320,16 +424,23 @@ class MeditationController extends ChangeNotifier {
       rows.add(row);
       if (row.every((v) => v.isFinite)) _seen?.push(row);
     }
-    steps.addAll(s.push(rows));
-    for (final r in steps) {
+    steps.addAll(_push(rows));
+    for (final st in steps) {
       if (_ended) break;
-      _onStep(r);
+      _onStep(st.r, st.control);
     }
     if (_quiet) _quiet = false;
     if (now.difference(_notifiedAt) >= timing.tick) _notify();
   }
 
-  void _onStep(StepResult r) {
+  /// The core's steps with the control each run step would play live.
+  List<AtStep> _push(List<List<double>> rows) {
+    final e = _engine;
+    if (e != null) return e.push(rows);
+    return [for (final r in _session!.push(rows)) (r: r, control: r.phase == 'run' ? meditationControl(r) : null)];
+  }
+
+  void _onStep(StepResult r, Control? live) {
     final sound = _sound!, tracker = _tracker!;
     if (r.cue == 'close-eyes') {
       sound.cue();
@@ -349,12 +460,41 @@ class MeditationController extends ChangeNotifier {
       final left = (Cal.closedS - (r.n - _closedFromN) / fs).ceil();
       calNeedsClean = left <= 0;
       calSecondsLeft = left > 0 ? left : _session!.calibrationCleanLeft.ceil();
-    } else if (r.phase == 'run') {
-      sound.glide(r.targets);
-      if (r.ring) sound.bell();
-      tracker.add(r, drift: driftState);
+    } else if (r.phase == 'run' && live != null) {
+      final drift = driftState, asleep = drift == DriftState.asleep, at = kind == SessionKind.alphaTheta;
+      // the same gates act whether the sound is live or replayed; in alpha-theta sleep is one of them
+      final gated = live.gated || (at && asleep);
+      final played = _replayer?.next(live, gated: gated) ??
+          (gated && !live.gated ? (level: live.level, rough: live.rough, reward: null, gated: true) : live);
+      sound.play(played);
+      if (at) _sleepGuard(asleep, r.n / fs);
+      tracker.add(r, drift: drift, level: played.level, reward: played.reward != null, coreDrowsy: !at);
+      _outcome?.add(r, _session?.baseline, drift: drift);
+      _tally?.add(r, played, asleep: asleep, alpha: _engine?.alpha, theta: _engine?.theta);
       chip = tracker.chip;
       if (tracker.done) unawaited(_finish(complete: true));
+    }
+  }
+
+  /// Alpha-theta's sleep guard: "probably asleep" fades the bed (over 10 s) and plays the rising wake cue, again
+  /// every minute while it lasts; awake again, the bed comes back.
+  void _sleepGuard(bool asleep, double t) {
+    final sound = _sound!;
+    if (asleep) {
+      if (!asleepGuard) {
+        asleepGuard = true;
+        sound.bed(on: false);
+        _session?.log.note({'event': 'asleep: bed faded', 'n': _session?.n});
+      }
+      if (t - _wokeAt >= wakeEveryS) {
+        _wokeAt = t;
+        sound.wake();
+      }
+    } else if (asleepGuard) {
+      asleepGuard = false;
+      _wokeAt = -1e9;
+      sound.bed(on: true);
+      _session?.log.note({'event': 'awake again: bed back', 'n': _session?.n});
     }
   }
 
@@ -373,7 +513,8 @@ class MeditationController extends ChangeNotifier {
     if (quiet > timing.noDataAfter) {
       if (!_quiet) {
         _quiet = true;
-        _sound?.glide(mapState(z: null, jaw: null, quality: 'none', veto: null));
+        final t = mapState(z: null, jaw: null, quality: 'none', veto: null);
+        _sound?.play((level: kind == SessionKind.meditation ? t.calm : AtRule.startMix, rough: 0, reward: null, gated: true));
       }
       if (last == null && !_restartedStream && !_lost && quiet > timing.restartStreamAfter) {
         _restartedStream = true;
@@ -451,7 +592,14 @@ class MeditationController extends ChangeNotifier {
     _ended = true;
     _ticker?.cancel();
     final s = _session, t = _tracker, sound = _sound, start = _startedAt;
-    _set(Stage.ending, complete ? 'Session over. Open your eyes when you like.' : 'Stopping.');
+    _set(
+      Stage.ending,
+      complete
+          ? 'Session over. Open your eyes when you like.'
+          : kind == SessionKind.alphaTheta
+          ? 'Stopping: the sound fades over about 10 seconds.'
+          : 'Stopping.',
+    );
     if (complete) sound?.cue();
     sound?.bed(on: false);
     await _release();
@@ -461,13 +609,19 @@ class MeditationController extends ChangeNotifier {
       _set(Stage.setup, s == null ? '' : 'Stopped before the session began, so nothing was saved.');
       return;
     }
-    final st = store;
+    final st = store, stem = st?.stemFor(start) ?? fileStem(start);
+    final outcome = _outcome;
     final summary = t.summary(
       start: start,
       complete: complete,
       iafHz: s.iaf,
       note: s.note,
-      logFile: '${st?.stemFor(start) ?? 'session'}.session.json',
+      logFile: '$stem.session.json',
+      kind: kind,
+      check: _slot == null ? null : _checkInfo(),
+      outcome: outcome?.value,
+      excludedShare: outcome == null ? null : (outcome.excludedShare * 1000).round() / 1000,
+      at: _tally?.toJson(),
     );
     _seen?.finish();
     s.log.note({'sound': sound?.info(), 'end': complete ? 'length reached' : 'stopped', 'runS': t.runSeconds});
@@ -496,6 +650,45 @@ class MeditationController extends ChangeNotifier {
     }
     comparison = compareWithEarlier(summary, earlier).line;
     report = summary;
+    _keepCheckRecord(summary, stem);
+    _set(kind == SessionKind.alphaTheta || asksGuess ? Stage.rating : Stage.report, '');
+  }
+
+  /// A randomised session goes into the check's records right away (before the answers), so every session is
+  /// counted, with what actually played.
+  void _keepCheckRecord(MeditationSummary summary, String stem) {
+    final slot = _slot, cs = checkStore;
+    if (slot == null || cs == null || slot.phase != SlotPhase.randomised) return;
+    final played = _replayer != null ? Arm.replay : Arm.live;
+    try {
+      cs.add(CheckRecord(
+        index: slot.index!,
+        stem: stem,
+        start: summary.start,
+        arm: played,
+        donors: played == Arm.replay ? slot.donors : const [],
+        runS: summary.runS,
+        outcome: summary.outcome,
+        excludedShare: summary.excludedShare ?? 1,
+        asleepS: (_tally?.asleepS ?? summary.drowsyS),
+      ));
+      if (_replayFailed) cs.event(_now(), 'a donor could not be read: the session played live', {'index': slot.index});
+    } catch (e) {
+      saveNote = 'The replay check could not keep this session: $e';
+    }
+  }
+
+  /// The answers after the session (the check's part, when it asked), then the report.
+  void submitRatings(CheckRatings? ratings) {
+    if (stage != Stage.rating) return;
+    final slot = _slot, cs = checkStore;
+    if (ratings != null && slot?.phase == SlotPhase.randomised && cs != null) {
+      try {
+        cs.rate(slot!.index!, ratings);
+      } catch (e) {
+        saveNote = 'Your answers could not be saved: $e';
+      }
+    }
     _set(Stage.report, '');
   }
 
