@@ -6,10 +6,12 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'extras.dart';
 import 'periods.dart';
 
-/// Of the report file; a report of another version is rebuilt (the laptop's rule).
-const int reportVersion = 1;
+/// Of the report file; a report of another version is rebuilt (the laptop's rule). 2: adds `extras` (jaw,
+/// movement and signal quality from the shared detectors), so older nights are scored again once.
+const int reportVersion = 2;
 const String reportNote = 'first guess; the scorer is not yet validated on this headband';
 
 /// The nights folder for the app's recordings folder.
@@ -95,6 +97,10 @@ class SleepReport {
       ),
   ];
 
+  /// Jaw, movement and signal quality from the shared detectors (DECISIONS 140-145); null in older reports or
+  /// when the detectors' pass failed (`extras_error` says why).
+  NightExtras? get extras => NightExtras.read(json['extras'], dataStart);
+
   /// The `.f32` files and sizes the report was made from.
   Map<String, int> get inputs => {
     for (final i in (json['inputs'] as List? ?? const []).whereType<Map<String, dynamic>>())
@@ -121,7 +127,8 @@ class SleepReport {
 }
 
 /// Builds the report from the stages of a scored night. [start] is the first epoch's start; [lengthSeconds] the
-/// joined night (gaps and padding included); [inputs] the `.f32` names and sizes read.
+/// joined night (gaps and padding included); [inputs] the `.f32` names and sizes read. [seen]: what the detectors
+/// saw over the same samples, for `extras`; [extrasError]: why that pass failed.
 Map<String, dynamic> buildReport({
   required String nightOf,
   required DateTime built,
@@ -132,6 +139,8 @@ Map<String, dynamic> buildReport({
   required String model,
   List<String>? stages,
   List<double>? confidence,
+  NightSeen? seen,
+  String? extrasError,
 }) {
   final rep = <String, dynamic>{
     'version': reportVersion,
@@ -169,6 +178,8 @@ Map<String, dynamic> buildReport({
         'model': null,
         'cross_check': null,
         'stages': '',
+        'extras': null,
+        'extras_error': extrasError,
       });
   }
   // the laptop takes the confidence from probabilities rounded to 3 decimals (sleep.json)
@@ -193,6 +204,25 @@ Map<String, dynamic> buildReport({
       },
   ];
   double sum(String k) => periods.fold(0.0, (s, p) => s + (p[k] as num).toDouble());
+  Map<String, Object?>? extras;
+  var whyNot = extrasError;
+  if (seen != null && whyNot == null) {
+    try {
+      extras = nightExtras(
+        quality: seen.quality,
+        bursts: seen.bursts,
+        moves: seen.moves,
+        stages: stages,
+        periods: [for (final p in found.periods) (p.first, p.last)],
+        firstEdge: firstEdgeS(start),
+      );
+      for (final h in (extras['hours']! as List).cast<Map<String, Object?>>()) {
+        h['start'] = isoLocal(start.add(Duration(seconds: h['from_s']! as int)));
+      }
+    } on Object catch (e) {
+      whyNot = '$e';
+    }
+  }
   final gaps = stages.where((s) => s == gapStage).length;
   return rep
     ..addAll({
@@ -214,6 +244,8 @@ Map<String, dynamic> buildReport({
       'model': model,
       'cross_check': null,
       'stages': stages.map((s) => _stageChar[s] ?? '-').join(),
+      'extras': extras,
+      'extras_error': whyNot,
     });
 }
 

@@ -96,6 +96,74 @@ class NightLayout {
     return out;
   }
 
+  /// Every sample of the night in time order, all four channels at once, the values [channel] gives (held over
+  /// gaps, clipped to ±400 000 µV), with whether it was filled in (a gap or the end padding). [row] is reused
+  /// between calls. For the detectors' pass over a whole night: memory stays a few kilobytes.
+  void forEachRow(void Function(Float64List row, bool missing) emit) {
+    final row = Float64List(4);
+    var started = false;
+    var pending = 0; // a gap before the first run holds that run's first value
+    RandomAccessFile? open;
+    File? openFile;
+    try {
+      for (final p in parts) {
+        final run = p.run;
+        if (run == null) {
+          if (started) {
+            for (var i = 0; i < p.count; i++) {
+              emit(row, true);
+            }
+          } else {
+            pending += p.count;
+          }
+          continue;
+        }
+        if (openFile?.path != run.file.path) {
+          open?.closeSync();
+          open = run.file.openSync();
+          openFile = run.file;
+        }
+        const chunk = 16384; // records per read
+        open!.setPositionSync(run.first * recordBytes);
+        var done = 0;
+        while (done < run.count) {
+          final n = math.min(chunk, run.count - done);
+          final bytes = open.readSync(n * recordBytes);
+          final view = ByteData.sublistView(bytes);
+          final got = bytes.length ~/ recordBytes;
+          for (var k = 0; k < got; k++) {
+            for (var c = 0; c < 4; c++) {
+              row[c] = (view.getFloat32(k * recordBytes + 4 + 4 * c, Endian.little) * 1e6)
+                  .clamp(-limitMicrovolts, limitMicrovolts);
+            }
+            if (!started) {
+              started = true;
+              for (var i = 0; i < pending; i++) {
+                emit(row, true);
+              }
+            }
+            emit(row, false);
+          }
+          done += got;
+          if (got < n) break; // the file shrank under us: [channel] keeps zeros there, so do we
+        }
+        if (done < run.count) {
+          row.fillRange(0, 4, 0);
+          started = true;
+          for (var i = done; i < run.count; i++) {
+            emit(row, false);
+          }
+        }
+      }
+    } finally {
+      open?.closeSync();
+    }
+    final end = parts.fold(0, (e, p) => math.max(e, p.at + p.length));
+    for (var i = end; i < samples; i++) {
+      emit(row, true);
+    }
+  }
+
   static void _readChannel(RandomAccessFile f, Run run, int c, Float64List out, int at) {
     const chunk = 16384; // records per read
     f.setPositionSync(run.first * recordBytes);
