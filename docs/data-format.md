@@ -7,7 +7,7 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 | Raw recording | `<stamp>.f32`, `<stamp>.idx`, `<stamp>.log`, `<stamp>.markers.jsonl` (one set per recorder run) | `scripts/record_night.py` (laptop); the phone app will write the same kind of add-only chunks |
 | One night | `<night>.bdf` (BDF+, 24-bit, µV), `<night>.sleep.json`, `<night>.hypnogram.png` | `scripts/to_bdf.py`, `scripts/score_sleep.py` |
 | Morning check-in | `<start>.morning.json` (or `<start>.setup.json` for a setup test alone) | `scripts/morning_check.py` |
-| Events for other apps | `<root>/events/<dev>/eeg-YYYY-MM.jsonl` | `scripts/export_events.py` |
+| Events for other apps | `<root>/events/<dev>/eeg-YYYY-MM.jsonl`, `<root>/events/<dev>/breaks-YYYY-MM.jsonl` | `scripts/export_events.py`, `scripts/break_hints.py` |
 
 ## Raw recording (BrainBit)
 
@@ -88,7 +88,6 @@ de-duplicate by `id`; an update is a new event whose `data.replaces` is the old 
 `sleep_night` in utof_tracker is the phone's own estimate; `eeg_sleep_night` is a separate type so neither
 overwrites the other. utof_tracker does not read these files yet: that needs a change there, made with the owner.
 
-
 ### `eeg_morning_check`
 
 One event per morning check-in. `ts` is the moment the eyes-closed phase started; `id` is `eeg:` + sha1 of
@@ -112,3 +111,18 @@ meant to be compared with their own earlier mornings, not with norms.
 | `validated` | `false`: the measures follow the literature but are not yet checked for day-to-day repeatability on this headband |
 | `device` | headband model and channels |
 | `replaces` | the `id` of an earlier result for the same check-in, when re-analysed |
+
+### `break_hint`
+
+Written by `scripts/break_hints.py` ([break-hints.md](break-hints.md)) to `breaks-YYYY-MM.jsonl` in the same
+device folder, one event per thing that happened. `ts` is when it happened (local time with offset); `id` is
+`eeg:` + sha1 of device, type, `ts`, kind and hint; `seq` continues from the highest `seq` in the folder.
+
+| Field | Meaning |
+|---|---|
+| `kind` | `shown` (a hint appeared), `snoozed` (Snooze 20 min pressed), `dismissed` (OK pressed), `taken` (an AFK stretch of 5+ min began within 30 min of the hint) |
+| `active_min` | active minutes counted when the hint was shown (0 for `taken`) |
+| `threshold_min` | the threshold in force then, back-off included |
+| `hint` | for `snoozed`, `dismissed`, `taken`: the `id` of the `shown` event it answers |
+
+A hint closed or expired without a button press adds no event; "ignored" means `shown` with no `taken` after it.

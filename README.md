@@ -11,6 +11,7 @@ a build-it-yourself ADS1299 helmet ([hardware and guides](https://github.com/uto
 - [docs/data-format.md](docs/data-format.md): raw recordings, night files and the events other apps can read.
 - `scripts/record_night.sh`: records a BrainBit on Linux until Ctrl+C (needs BrainBit's `libneurosdk2.so`
   and libc++ in `~/.local/lib/neurosdk2`). Live check page on port 8765.
+- `scripts/break_hints.py`: soft "take a break" hints from ActivityWatch, no headband needed ([docs/break-hints.md](docs/break-hints.md)).
 
 Next morning, join the night's files and score sleep (AnySleep + YASA; neither is validated on BrainBit yet):
 

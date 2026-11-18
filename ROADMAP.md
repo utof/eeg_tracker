@@ -53,7 +53,7 @@ Update the status column whenever something lands.
 | 5 | Android recorder app (one tap, screen off all night) | code + tests done; APK not built yet; phone test pending | branch `feat/android-recorder` |
 | 6 | Morning check-in (eyes closed / open, ratings) + setup test | page, analysis, export and tests done on the fake headband; first real morning pending | `scripts/web/morning.html`, `scripts/morning_check.py` |
 | 7 | Brain-reactive sound (alpha → calmer sound, jaw blocks) | browser prototype working on the fake headband; real-head test pending; phone port next | `scripts/web/sound.html`, [docs/brain-sound.md](docs/brain-sound.md) |
-| 8 | Break hints stage 0 (ActivityWatch) | in progress | branch `feat/break-hints` |
+| 8 | Break hints stage 0 (ActivityWatch) | code + tests done; not yet run on the owner's laptop | `scripts/break_hints.py`, docs/break-hints.md |
 | 9 | Night extras: jaw clench count, movement, signal quality per hour | next | - |
 | 10 | State and trends page (numbers + arrows vs your usual, 14-day lines; laptop first, then phone) | after 6 and 3 | - |
 | 11 | utof_tracker importer for `eeg_*` events | waits for the owner's OK | - |
