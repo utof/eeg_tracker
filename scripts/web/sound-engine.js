@@ -53,7 +53,13 @@ function lfo(ctx, periodS, depth, target) {
   return o;
 }
 
+// light: for phones. No convolution reverb (the heaviest part) and no compressor: a small feedback-delay
+// room instead, and no pitch-drift LFOs. Same layers, same reactions, about a third of the audio work.
+export const isPhone = () => typeof navigator !== 'undefined' && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+
 export class AmbientEngine {
+  constructor({ light = false } = {}) { this.light = light; }
+
   // ctx: an OfflineAudioContext for tests and speed checks; by default a live one with large buffers
   // ('playback': ~0.1 s more delay, far fewer dropouts on a busy machine; nothing here needs speed).
   async start(ctx = new AudioContext({ latencyHint: 'playback' })) {
@@ -61,20 +67,33 @@ export class AmbientEngine {
     if (typeof AudioContext !== 'undefined' && ctx instanceof AudioContext && ctx.state !== 'running') await ctx.resume();
     const now = ctx.currentTime;
 
-    const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -18; comp.ratio.value = 3;
     this.master = ctx.createGain(); this.master.gain.value = 0;
-    this.master.connect(comp).connect(ctx.destination);
-    this.master.gain.setTargetAtTime(0.8, now, 0.8);   // fade in
+    if (this.light) {
+      this.master.connect(ctx.destination);
+    } else {
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -18; comp.ratio.value = 3;
+      this.master.connect(comp).connect(ctx.destination);
+    }
+    this.master.gain.setTargetAtTime(this.light ? 0.85 : 0.8, now, 0.8);   // fade in (levels match: same loudness both ways)
 
-    // reverb fed in mono (2 convolutions instead of 4 for a stereo input), 2.5 s tail
-    const verb = ctx.createConvolver(); verb.buffer = impulse(ctx, 2.5);
-    const wet = ctx.createGain(); wet.gain.value = 0.3; verb.connect(wet).connect(this.master);
+    // room: everything sent to this.verb (mono)
     this.verb = ctx.createGain(); this.verb.channelCount = 1; this.verb.channelCountMode = 'explicit';
-    this.verb.connect(verb);
+    if (this.light) {  // two short delays feeding back through a low-pass: a soft room, nearly free
+      const wet = ctx.createGain(); wet.gain.value = 0.25; wet.connect(this.master);
+      for (const [d, fb] of [[0.043, 0.55], [0.067, 0.5]]) {
+        const dl = ctx.createDelay(0.2), lp = ctx.createBiquadFilter(), g = ctx.createGain();
+        dl.delayTime.value = d; lp.type = 'lowpass'; lp.frequency.value = 2200; g.gain.value = fb;
+        this.verb.connect(dl); dl.connect(lp).connect(g).connect(dl); lp.connect(wet);
+      }
+    } else {  // convolution reverb fed in mono (2 convolutions instead of 4 for a stereo input), 2.5 s tail
+      const verb = ctx.createConvolver(); verb.buffer = impulse(ctx, 2.5);
+      const wet = ctx.createGain(); wet.gain.value = 0.3; verb.connect(wet).connect(this.master);
+      this.verb.connect(verb);
+    }
 
     // roughness: tremolo at 33 Hz (heard as rough, not as a beat) on the drone and rain
-    this.trem = ctx.createGain(); this.trem.gain.value = 1; this.trem.connect(this.master); this.trem.connect(verb);
+    this.trem = ctx.createGain(); this.trem.gain.value = 1; this.trem.connect(this.master); this.trem.connect(this.verb);
     this.tremDepth = ctx.createGain(); this.tremDepth.gain.value = 0;
     const to = ctx.createOscillator(); to.frequency.value = 33; to.connect(this.tremDepth).connect(this.trem.gain); to.start();
 
@@ -87,7 +106,7 @@ export class AmbientEngine {
       const o = ctx.createOscillator(); o.type = i === 1 ? 'triangle' : 'sine'; o.frequency.value = f;
       const g = ctx.createGain(); g.gain.value = level * 0.7;
       lfo(ctx, period, level * 0.3, g.gain);           // slow swell, unequal periods
-      lfo(ctx, period * 1.7, 3, o.detune);              // slow drift of a few cents
+      if (!this.light) lfo(ctx, period * 1.7, 3, o.detune);  // slow drift of a few cents
       const w = ctx.createGain(); w.gain.value = warm ? 0 : 1;
       o.connect(g).connect(w).connect(this.droneFilter); o.start();
       this.oscs.push(o); if (warm) this.warmGains.push(w);

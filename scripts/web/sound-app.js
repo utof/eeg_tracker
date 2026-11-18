@@ -4,7 +4,7 @@ import { Session } from './sound-session.js';
 import { mapState } from './sound-mapping.js';
 import { createMixer } from './sound-mixer.js';
 import { DemoSignal } from './sound-demo.js';
-import { AmbientEngine } from './sound-engine.js';
+import { AmbientEngine, isPhone } from './sound-engine.js';
 
 const $ = (id) => document.getElementById(id);
 const RATE_MS = 250;   // analysis 4 times a second on the last 1 s
@@ -83,32 +83,63 @@ async function analyse() {
 async function start(calibrate) {
   if (run) return;
   const demo = $('src').value === 'demo';
-  const engine = new AmbientEngine();
+  const engine = new AmbientEngine({ light: $('light').checked });
   await engine.start();
   log.audio = engine.ctx.state;
   const neutral = mapState({ alpha: null, jaw: null, quality: 'none' });
   run = { demo: demo ? new DemoSignal(Date.now() & 0xffff) : null, engine, session: new Session(),
     mixer: createMixer(neutral), targets: neutral, t0: performance.now(), last: performance.now() };
   run.session.begin(0, calibrate); log.t0wall = Date.now();
+  watchAudio(engine);
   mark(calibrate ? 'start, calibration eyes open' : 'start without calibration');
   engine.glide(neutral, run.mixer.values);
   run.mix = setInterval(() => {
     const now = performance.now();
     run.mixer.step(run.targets, (now - run.last) / 1000); run.last = now;
   }, MIX_MS);
-  $('go').disabled = $('go2').disabled = $('src').disabled = true; $('stop').disabled = false;
+  $('go').disabled = $('go2').disabled = $('src').disabled = $('light').disabled = true; $('stop').disabled = false;
   analyse();
 }
 
 async function stop() {
   if (!run) return;
-  const r = run; mark('stop'); run = null;
-  clearTimeout(r.timer); clearInterval(r.mix);
+  const r = run, a = r.audio;
+  mark(`stop; audio fell behind ${a.behind} times (${Math.round(a.behindMs)} ms), paused by the browser ${a.pauses} times, light ${r.engine.light}`);
+  run = null;
+  clearTimeout(r.timer); clearInterval(r.mix); clearInterval(a.timer);
   $('say').textContent = 'Stopped.'; $('why').textContent = '';
   $('stop').disabled = true;
   await r.engine.stop();
-  $('go').disabled = $('go2').disabled = $('src').disabled = false;
+  $('go').disabled = $('go2').disabled = $('src').disabled = $('light').disabled = false;
 }
+
+// Dropouts: the phone's audio system pairs its own clock with the wall clock (getOutputTimestamp).
+// When the sound misses its deadline, the audio clock falls behind the wall clock; each jump of
+// over 20 ms counts as one dropout. A browser that pauses the audio (screen off, battery saver)
+// is resumed at once and counted.
+function watchAudio(engine) {
+  const ctx = engine.ctx, a = (run.audio = { behind: 0, behindMs: 0, pauses: 0, lag: null });
+  ctx.onstatechange = () => {
+    if (!run || run.engine !== engine || ctx.state === 'running' || ctx.state === 'closed') return;
+    a.pauses++; mark(`audio ${ctx.state} by the browser; resuming`); ctx.resume().catch(() => {});
+  };
+  a.timer = setInterval(() => {
+    if (!run || run.engine !== engine || ctx.state !== 'running') { a.lag = null; return; }
+    const ts = ctx.getOutputTimestamp ? ctx.getOutputTimestamp() : null;
+    if (ts && ts.performanceTime > 0) {
+      const lag = ts.performanceTime / 1000 - ts.contextTime;
+      if (a.lag !== null && lag - a.lag > 0.02) { a.behind++; a.behindMs += (lag - a.lag) * 1000; }
+      a.lag = lag;
+    }
+    $('snd').textContent = (engine.light ? 'light · ' : '') + (a.behind ? `${a.behind} dropouts (${Math.round(a.behindMs)} ms)` : 'no dropouts')
+      + (a.pauses ? ` · paused ${a.pauses}×` : '');
+  }, 1000);
+}
+document.addEventListener('visibilitychange', () => {
+  const ctx = run?.engine?.ctx;
+  if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') ctx.resume().catch(() => {});
+});
+$('light').checked = isPhone();
 
 $('go').onclick = () => start(true);
 $('go2').onclick = () => start(false);
