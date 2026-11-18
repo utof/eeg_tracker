@@ -1,0 +1,140 @@
+{
+ "format": "eeg-tracker-phone-export",
+ "version": 1,
+ "exported": "2026-11-19T07:42:10+03:00",
+ "mode": "new",
+ "complete": true,
+ "files": [
+  {
+   "path": "alpha-theta/2026-11-19-090000.alphatheta.json",
+   "bytes": 12,
+   "sha256": "cee0ac360f92b7f3f1b2d2f037432ea7db57ffa545ad1d1514e38893f1a00810",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "alpha-theta/journal.json",
+   "bytes": 18,
+   "sha256": "8cb52e1a8b7217c1ced87d194a4d9d07fb4758107fbafbd47f4147a1b699e9f2",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "dream-catcher/2026-11-18-230000-r1.wav",
+   "bytes": 12,
+   "sha256": "61607e279f58ecf64ac48b25b94c2cec1c45e9344bdd03127fdd0ce0485f2c95",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "dream-catcher/2026-11-18-230000.dream.json",
+   "bytes": 13,
+   "sha256": "56460150420622c6713c7eb77ca201afc23d89bc3fa6753502ecfd0affcdf1b2",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "dream-catcher/prompts/theme.wav",
+   "bytes": 12,
+   "sha256": "61607e279f58ecf64ac48b25b94c2cec1c45e9344bdd03127fdd0ce0485f2c95",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "meditations/2026-11-19-080000.meditation.json",
+   "bytes": 12,
+   "sha256": "59fa20c9db47483e1cff26cf787c3669591c36210d43a201fc2e1682bf6ab287",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "meditations/2026-11-19-080000.session.json",
+   "bytes": 12,
+   "sha256": "2ffd967f41ac1c7ee43c558109ecb4e86721fff4025f22c2a70aff5fcd0a3e32",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "mornings/2026-11-19-071400.f32",
+   "bytes": 20,
+   "sha256": "d4fc1db665446507dc51b0c9392dd9649291581bfe1b48e241b2b08032b3b647",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "mornings/2026-11-19-071500.morning.json",
+   "bytes": 24,
+   "sha256": "d7fc531afdea5c5576d5b14bf61f631d51430bfee70134cebf9fb6773faef786",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "nights/2026-11-18.report.json",
+   "bytes": 37,
+   "sha256": "0a7a00953232d9826257a04fc2f35a8d681d6753031c5b972d59c6e8424d9fcf",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "recordings/2026-11-18-231200.f32",
+   "bytes": 40,
+   "sha256": "4e13dee6afee9bf84fc06807fff483e130fa2abd5413e15b240917a73579f0d4",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "recordings/2026-11-18-231200.idx",
+   "bytes": 16,
+   "sha256": "33a06fc5271be7836e68336a70804ed85227c2cb25b48a26c4e473465b473119",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "recordings/2026-11-18-231200.log",
+   "bytes": 39,
+   "sha256": "add4cfc4855f7434da998b09851379147fcba7f5facca045f62a1096a4a16983",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "recordings/2026-11-18-231200.markers.jsonl",
+   "bytes": 45,
+   "sha256": "d5cdd2d45df1a18d61038e83635913d3861d2812d1540913d0cefa40d773d73c",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "replay-check/meditation/events.jsonl",
+   "bytes": 15,
+   "sha256": "03307a94658d20108966045ee9448edb9b154b496985933afb5774a744e19342",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "replay-check/meditation/plan.json",
+   "bytes": 17,
+   "sha256": "e330018b524590fe0df551e01db4c27772bf72b2be218183e9102b2996cb8d40",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "settings.json",
+   "bytes": 21,
+   "sha256": "6a1be699a57adb7cd249196e3264e4608e3f31fd7fc8846cc00d7f72f083ca4d",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  },
+  {
+   "path": "sound-states/2026-11-18-231000.sound.json",
+   "bytes": 13,
+   "sha256": "2430f1a2ad2982d0067885488a4c89e21ad1d7c83b115ba8f1b20acc88dfaea8",
+   "modified_ms": 1795060800000,
+   "written": "2026-11-19T07:42:10+03:00"
+  }
+ ],
+ "not_exported": [],
+ "totals": {
+  "files": 18,
+  "bytes": 378
+ }
+}

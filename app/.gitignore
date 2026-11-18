@@ -46,3 +46,6 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# the export fixture holds a synthetic night log (test/export_test.dart)
+!test/fixtures/phone_export/eeg-export/recordings/*.log

@@ -1,7 +1,10 @@
 // The app's own small Android channel (PhoneChannel.kt). Registered in both Flutter engines: the
 // screen's and the recorder service's, so the recorder can find its folder and log the power state.
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 
+import 'export/exporter.dart';
 import 'recorder/battery.dart';
 import 'recorder/headband.dart';
 
@@ -16,6 +19,9 @@ const MethodChannel _window = MethodChannel('eeg_tracker/window');
 
 /// What an export copied.
 typedef ExportResult = ({int files, int bytes, String folder});
+
+/// The folder Export data writes into: the system picker's grant and how to show it (`Download/EEG`).
+typedef ExportFolder = ({String uri, String label});
 
 /// Phone settings that decide whether a night survives, read in one go.
 class PhoneSnapshot {
@@ -52,6 +58,18 @@ class Phone {
       folder: r['folder'] is String ? r['folder'] as String : folder,
     );
   }
+
+  /// The system folder picker for Export data; the app keeps the grant until another folder is picked. Null when
+  /// the picker was closed without a choice.
+  static Future<ExportFolder?> pickExportFolder() async {
+    final r = await _export.invokeMapMethod<String, Object?>('pickFolder');
+    final uri = r?['uri'], label = r?['label'];
+    return uri is String && label is String ? (uri: uri, label: label) : null;
+  }
+
+  /// Whether the app may still write to the picked folder (the grant can be taken back in the phone's settings).
+  static Future<bool> exportFolderUsable(String uri) async =>
+      await _export.invokeMethod<bool>('folderUsable', {'uri': uri}) ?? false;
 
   /// Keeps the screen on (or lets it sleep again) while the app is in front.
   static Future<void> keepScreenOn({required bool on}) => _window.invokeMethod<void>('keepScreenOn', {'on': on});
@@ -97,4 +115,37 @@ class ChannelPhoneProbe implements PhoneProbe {
 
   @override
   Future<List<String>> exitReasons(int sinceMs) => Phone.exitReasons(sinceMs);
+}
+
+/// [ExportTarget] through the folder grant of the system picker (DataExport.kt); only in the screen's engine.
+class ChannelExportTarget implements ExportTarget {
+  ChannelExportTarget(this.uri);
+  final String uri;
+
+  static Future<T> _call<T>(String method, [Map<String, Object?>? args]) async {
+    try {
+      return await _export.invokeMethod<T>(method, args) as T;
+    } on PlatformException catch (e) {
+      throw ExportFailure(e.message ?? e.code);
+    }
+  }
+
+  static Copied _copied(Object? r) {
+    if (r is! Map || r['bytes'] is! num || r['sha256'] is! String) throw const ExportFailure('the folder gave no answer');
+    return (bytes: (r['bytes'] as num).toInt(), sha256: r['sha256'] as String);
+  }
+
+  @override
+  Future<void> open() => _call<void>('open', {'uri': uri});
+
+  @override
+  Future<Copied> copy(File source, String path) async =>
+      _copied(await _call<Object?>('copy', {'source': source.path, 'path': path}));
+
+  @override
+  Future<Copied> write(String path, List<int> bytes) async =>
+      _copied(await _call<Object?>('write', {'path': path, 'bytes': Uint8List.fromList(bytes)}));
+
+  @override
+  Future<void> close() => _call<void>('close');
 }

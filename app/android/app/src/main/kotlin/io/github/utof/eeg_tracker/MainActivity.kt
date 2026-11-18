@@ -11,14 +11,27 @@ class MainActivity : FlutterActivity() {
     /** The export waiting for the folder picker; at most one at a time. */
     private var pendingExport: NightExport? = null
 
+    /** Export data (DataExport.kt): the copier, and the call waiting for the folder picker. */
+    private var dataExport: DataExport? = null
+    private var pendingPick: MethodChannel.Result? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
         PhoneChannel.register(messenger, applicationContext)
         // Export needs this Activity for the system folder picker, so it lives here, not in PhoneChannel.
+        val data = DataExport(applicationContext).also { dataExport = it }
         MethodChannel(messenger, NightExport.CHANNEL).setMethodCallHandler { call, result ->
-            if (call.method == "exportNight") startExport(call.argument<List<String>>("paths"), call.argument<String>("folder"), result)
-            else result.notImplemented()
+            when (call.method) {
+                "exportNight" -> startExport(call.argument<List<String>>("paths"), call.argument<String>("folder"), result)
+                "pickFolder" -> pickFolder(result)
+                "folderUsable" -> result.success(data.usable(call.argument<String>("uri") ?: ""))
+                "open" -> data.run(result) { data.open(call.argument<String>("uri") ?: ""); null }
+                "copy" -> data.run(result) { data.copy(call.argument<String>("source") ?: "", call.argument<String>("path") ?: "") }
+                "write" -> data.run(result) { data.write(call.argument<String>("path") ?: "", call.argument<ByteArray>("bytes") ?: ByteArray(0)) }
+                "close" -> data.run(result) { data.close(); null }
+                else -> result.notImplemented()
+            }
         }
         // Meditation and the dream catcher keep the screen on while they run: they live in this Activity, and a
         // locked phone could freeze them (DECISIONS rows 75 and 110). The dream catcher also dims this window to
@@ -57,8 +70,38 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /** The system folder picker for Export data; the answer keeps the grant (DataExport.keep). */
+    private fun pickFolder(result: MethodChannel.Result) {
+        if (pendingPick != null) {
+            result.error("busy", "the folder picker is already open", null)
+            return
+        }
+        try {
+            pendingPick = result
+            startActivityForResult(DataExport.pickIntent(), DataExport.REQUEST)
+        } catch (e: Exception) {
+            pendingPick = null
+            result.error("export", e.message ?: e.javaClass.simpleName, null)
+        }
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == DataExport.REQUEST) {
+            val result = pendingPick ?: return
+            pendingPick = null
+            val tree = data?.data
+            if (resultCode != Activity.RESULT_OK || tree == null) {
+                result.success(null) // the owner closed the picker
+                return
+            }
+            try {
+                result.success(dataExport?.keep(tree))
+            } catch (e: Exception) {
+                result.error("folder", e.message ?: e.javaClass.simpleName, null)
+            }
+            return
+        }
         if (requestCode != NightExport.REQUEST) return
         val export = pendingExport ?: return
         pendingExport = null

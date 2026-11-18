@@ -5,3 +5,5 @@ __pycache__/
 logs/
 *.bdf
 .venv/
+!app/test/fixtures/phone_export/eeg-export/recordings/*.f32
+!app/test/fixtures/phone_export/eeg-export/mornings/*.f32
