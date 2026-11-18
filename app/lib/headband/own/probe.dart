@@ -704,7 +704,12 @@ class BandProbe {
     add('rate_250', 'The signal arrives at 250 samples a second.', 'The signal does not arrive at 250 samples a second.');
     add('packet_108_bytes', 'Packets have the expected size (108 bytes).', 'Packets have another size than expected.');
     add('counter_counts_samples', 'The headband numbers its samples as expected.', 'The packet counter does not step by 8.');
-    add('no_lost_samples', 'No sample was lost.', 'Some samples were lost on the way (not a failure; they are counted).');
+    if (v.containsKey('no_lost_samples')) {
+      // Losing a packet now and then is Bluetooth, not a failed check: said, never marked as a failure.
+      lines.add(v['no_lost_samples'] == true
+          ? (true, 'No sample was lost.')
+          : (null, 'Some samples were lost on the way (not a failure; they are counted).'));
+    }
     add('command2_stops_signal', 'Stop works.', 'The signal did not stop when asked.');
     add('command4_gives_resistance', 'The contact check works.', 'The contact check gave nothing.');
     add('signal_restarts_after_resistance', 'The signal starts again after a contact check, without a new connection.',

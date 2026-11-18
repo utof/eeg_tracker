@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../recorder/contact.dart';
 import 'night_strip.dart';
+import 'own_ble_screen.dart' show OwnBleEntry;
 import 'parts.dart';
 import 'phone_checks.dart';
 import 'sleep_report_view.dart' show durationParts, nightTitle;
@@ -151,7 +152,8 @@ class NightView extends StatelessWidget {
           if (m.running) ...headband,
           const SectionHeading('Phone'),
           PhoneChecksList(checks: m.checks, onFix: onFix),
-          if (!m.running) ...headband,
+          // Between nights the Headband section also leads to the connection page (the probe and the switch).
+          if (!m.running) ...[...headband, const OwnBleEntry()],
           // A night being recorded is not finished, so Export waits for Stop (DECISIONS rows 56, 150).
           if (!m.running && (m.nightsOnPhone > 0 || m.exportLine != null)) ...[
             const SectionHeading('Your data'),
