@@ -98,6 +98,7 @@ class NightView extends StatelessWidget {
     this.onExport,
     this.onMeditate,
     this.onDream,
+    this.onSound,
     this.onSleepReport,
     this.onRetrySleep,
   });
@@ -109,6 +110,7 @@ class NightView extends StatelessWidget {
   final VoidCallback? onExport;
   final VoidCallback? onMeditate;
   final VoidCallback? onDream;
+  final VoidCallback? onSound;
   final VoidCallback? onSleepReport;
   final VoidCallback? onRetrySleep;
 
@@ -147,6 +149,9 @@ class NightView extends StatelessWidget {
           if (!m.running) ...[const SectionHeading('Meditation'), _Meditation(onMeditate: onMeditate)],
           // The dream catcher holds the headband too, so it also waits for the night to end (DECISIONS row 110).
           if (!m.running) ...[const SectionHeading('Dream catcher'), _Dream(line: m.dreamLine, onDream: onDream)],
+          // Sound for states also plays during a night, by its timer alone (DECISIONS row 130).
+          const SectionHeading('Sound'),
+          _Sound(running: m.running, onSound: onSound),
         ],
       ),
       bottomNavigationBar: SafeArea(
@@ -496,6 +501,31 @@ class _Dream extends StatelessWidget {
           icon: const Icon(Icons.nights_stay_outlined),
           label: const Text('Dream catcher'),
         ),
+      ],
+    );
+  }
+}
+
+class _Sound extends StatelessWidget {
+  const _Sound({required this.running, required this.onSound});
+  final bool running;
+  final VoidCallback? onSound;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          running
+              ? 'Calm sound to fall asleep to, stopping by its timer (the headband is busy with the night).'
+              : 'Calm sound for falling asleep, relaxing, focus, a break or waking up; a beat if you like. With the '
+                    'headband, see what your brain does.',
+          style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(onPressed: onSound, icon: const Icon(Icons.graphic_eq), label: const Text('Sound')),
       ],
     );
   }

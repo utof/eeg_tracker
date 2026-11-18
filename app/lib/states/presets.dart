@@ -260,9 +260,9 @@ class SoundPlan {
 
   String _hz(double v) => v == v.roundToDouble() ? v.round().toString() : v.toStringAsFixed(1);
 
-  /// "Pink noise, pulsed noise 10 → 3 Hz".
+  /// "Pink noise, pulsed noise 10 to 3 Hz".
   String get line {
-    final rate = fromHz == toHz ? '${_hz(fromHz)} Hz' : '${_hz(fromHz)} → ${_hz(toHz)} Hz';
+    final rate = fromHz == toHz ? '${_hz(fromHz)} Hz' : '${_hz(fromHz)} to ${_hz(toHz)} Hz';
     final beatPart = beat == Beat.none ? 'no beat' : '${beatNames[beat]!.toLowerCase()} $rate';
     if (bed == Bed.none) return '${beatNames[beat]} $rate';
     return '${bedNames[bed]}, $beatPart';

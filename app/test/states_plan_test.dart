@@ -116,7 +116,7 @@ void main() {
 
     test('a plain line for the screen and the log', () {
       expect(SoundPlan.of(SoundState.asleep).line, 'Pink noise, no beat');
-      expect(SoundPlan.of(SoundState.asleep, beat: Beat.pulsed).line, 'Pink noise, pulsed noise 10 → 3 Hz');
+      expect(SoundPlan.of(SoundState.asleep, beat: Beat.pulsed).line, 'Pink noise, pulsed noise 10 to 3 Hz');
       expect(SoundPlan.of(SoundState.relax, beat: Beat.isochronic, bed: Bed.none).line, 'Isochronic tones 10 Hz');
     });
   });
