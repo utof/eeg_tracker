@@ -444,7 +444,7 @@ class MeditationView extends StatelessWidget {
           ),
           const _Note(
             Icons.smartphone_outlined,
-            'The screen stays on while you meditate. Keep the app open: locking the phone can stop the session.',
+            'The screen stays on while you meditate. You can lock the phone: the session goes on.',
           ),
           _Note(
             Icons.info_outline,

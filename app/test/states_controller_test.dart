@@ -7,7 +7,9 @@ import 'dart:io';
 
 import 'package:eeg_tracker/detectors/drift_off.dart';
 import 'package:eeg_tracker/dream/band_link.dart';
+import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/nights.dart';
+import 'package:eeg_tracker/session_keeper.dart';
 import 'package:eeg_tracker/sound/state_sound.dart';
 import 'package:eeg_tracker/states/controller.dart';
 import 'package:eeg_tracker/states/presets.dart';
@@ -134,18 +136,23 @@ void main() {
     final band = DriftBand((t) => t < 240 ? 1 : 0.25); // alpha fades for good 4 minutes after lights off
     final sound = SilentStateSound();
     var nightStarted = 0;
+    final keeper = FakeSessionKeeper();
     final c = StatesController(
       finder: OneFinder(band),
       sound: () => sound,
       store: store,
       recordingsDir: recordings,
       timing: fast,
+      keeper: keeper,
       startNight: () async {
         nightStarted++;
+        keeper.log.add('night');
         return null;
       },
     );
     await c.start(SoundPlan.of(SoundState.asleep, beat: Beat.pulsed, minutes: 45), thenNight: true);
+    expect(c.canLock, isTrue);
+    expect((keeper.spec!.title, keeper.spec!.headband, keeper.spec!.microphone), ('Fall asleep', true, false));
     await until(c, () => c.stage == SoundStage.fading);
     expect(c.stopWhy, StopWhy.asleep);
     expect(c.driftState, DriftState.asleep);
@@ -159,6 +166,7 @@ void main() {
     expect((s.drift['epochs']! as String).contains('s'), isTrue);
     expect(s.night, 'started');
     expect(nightStarted, 1);
+    expect(keeper.log, ['hold', 'night', 'release'], reason: 'the night recording is up before the session lets go');
     // the EEG is a normal recording with the events as markers, so it joins that night
     expect(s.recording, isNotNull);
     expect(File('${recordings.path}/${s.recording}.f32').lengthSync(), greaterThan(0));
@@ -166,6 +174,59 @@ void main() {
     expect(markers, containsAll(['sound: sound on: Pink noise, pulsed noise 10 to 3 Hz', 'sound: probably asleep: fading out']));
     expect(nightsIn(recordings).single.files.any((f) => f.path.endsWith('.f32')), isTrue);
     c.dispose();
+  });
+
+  test('locked phone: held from Start to the end; Stop on the notification ends the session', () async {
+    final sound = SilentStateSound();
+    final keeper = FakeSessionKeeper();
+    final c = StatesController(finder: OneFinder(null), sound: () => sound, store: store, timing: fast, keeper: keeper);
+    await c.start(SoundPlan.of(SoundState.relax), useHeadband: false);
+    expect(c.stage, SoundStage.playing);
+    expect((c.canLock, keeper.held), (true, true));
+    expect((keeper.spec!.title, keeper.spec!.headband), ('Relax', false));
+    keeper.onStop!(); // the notification's Stop
+    await until(c, () => c.stage == SoundStage.done);
+    expect(sound.stopped, isTrue);
+    expect(store.list().single.end, SoundEnd.stopped);
+    expect(keeper.log, ['hold', 'release']);
+    c.dispose();
+  });
+
+  test('a phone that refuses the service: the session runs as before and says the phone cannot be locked', () async {
+    final sound = SilentStateSound();
+    final keeper = FakeSessionKeeper(grant: false);
+    final c = StatesController(finder: OneFinder(null), sound: () => sound, store: store, timing: fast, keeper: keeper);
+    await c.start(SoundPlan.of(SoundState.focus), useHeadband: false);
+    expect((c.stage, c.canLock), (SoundStage.playing, false));
+    await c.stop();
+    expect(keeper.held, isFalse);
+    c.dispose();
+  });
+
+  test('every way out lets the service go: Stop while connecting, a sound that fails, leaving the screen', () async {
+    // Stop while the headband is still being looked for
+    var keeper = FakeSessionKeeper();
+    var c = StatesController(finder: SlowFinder(), sound: SilentStateSound.new, store: store, timing: fast, keeper: keeper);
+    final starting = c.start(SoundPlan.of(SoundState.relax));
+    await until(c, () => keeper.held);
+    await c.stop();
+    await starting;
+    expect((c.stage, keeper.held), (SoundStage.setup, false));
+    c.dispose();
+    // the sound cannot start
+    keeper = FakeSessionKeeper();
+    c = StatesController(finder: OneFinder(null), sound: () => SilentStateSound()..fail = true, store: store, timing: fast, keeper: keeper);
+    await c.start(SoundPlan.of(SoundState.relax), useHeadband: false);
+    expect((c.stage, keeper.held), (SoundStage.failed, false));
+    expect(keeper.log, ['hold', 'release']);
+    c.dispose();
+    // the screen is closed mid-session
+    keeper = FakeSessionKeeper();
+    c = StatesController(finder: OneFinder(null), sound: SilentStateSound.new, store: store, timing: fast, keeper: keeper);
+    await c.start(SoundPlan.of(SoundState.relax), useHeadband: false);
+    c.dispose();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(keeper.held, isFalse);
   });
 
   test('Stop in the quiet minute: no sound ever started, the session is kept as stopped', () async {
@@ -206,4 +267,16 @@ void main() {
     expect(band.calls, contains('disconnect'));
     c.dispose();
   });
+}
+
+/// A finder that takes a while and finds nothing.
+class SlowFinder implements HeadbandFinder {
+  @override
+  Future<Headband?> find(Duration scanFor, {void Function(String name, int rssi)? onFound}) async {
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    return null;
+  }
+
+  @override
+  Future<Headband> connectDirect(BandId id) async => throw StateError('out of range');
 }

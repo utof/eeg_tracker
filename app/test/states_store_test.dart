@@ -69,6 +69,18 @@ void main() {
     expect(dir.listSync().where((f) => f.path.endsWith('.tmp')), isEmpty);
   });
 
+  test('"Screen: Stays on" is remembered next to the sessions and is not taken for one', () {
+    final dir = Directory.systemTemp.createTempSync('sound');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final store = SoundStore(Directory('${dir.path}/sound-states'));
+    expect(store.screenStaysOn, isFalse, reason: 'by default the phone can be locked');
+    store.screenStaysOn = true;
+    expect(SoundStore(store.dir).screenStaysOn, isTrue);
+    expect(store.list(), isEmpty);
+    File('${store.dir.path}/settings.json').writeAsStringSync('{broken');
+    expect(store.screenStaysOn, isFalse);
+  });
+
   test('a rating given later is saved into the same file', () {
     final st = SoundStore(dir);
     final s = session(DateTime(2026, 11, 18, 23));

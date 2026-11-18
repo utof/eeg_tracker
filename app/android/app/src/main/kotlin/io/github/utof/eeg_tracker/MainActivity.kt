@@ -33,6 +33,28 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        // Sound sessions with the phone locked (SessionService.kt): "hold" answers with what is kept
+        // ("headband", "microphone"), "release" ends it; Stop on the notification comes back as "stopTapped".
+        val session = MethodChannel(messenger, "eeg_tracker/session")
+        session.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "hold" -> SessionService.hold(
+                    applicationContext,
+                    call.argument<String>("title") ?: "Sound session",
+                    call.argument<String>("text") ?: "",
+                    call.argument<Boolean>("headband") == true,
+                    call.argument<Boolean>("microphone") == true,
+                ) { kept, error ->
+                    runOnUiThread { if (kept != null) result.success(kept) else result.error("session", error, null) }
+                }
+                "release" -> {
+                    SessionService.release(applicationContext)
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+        SessionService.onStopTapped = { runOnUiThread { session.invokeMethod("stopTapped", null) } }
         // Meditation and the dream catcher keep the screen on while they run: they live in this Activity, and a
         // locked phone could freeze them (DECISIONS rows 75 and 110). The dream catcher also dims this window to
         // the lowest brightness while you lie in bed; "off" hands the brightness back to the phone's setting.
@@ -53,6 +75,13 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    /** The sessions live in this Activity's Flutter engine: without it nothing is left to keep alive. */
+    override fun onDestroy() {
+        SessionService.onStopTapped = null
+        SessionService.release(applicationContext)
+        super.onDestroy()
     }
 
     private fun startExport(paths: List<String>?, folder: String?, result: MethodChannel.Result) {

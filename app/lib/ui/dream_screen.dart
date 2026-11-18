@@ -1,6 +1,7 @@
 // The dream catcher (ROADMAP row 20, DECISIONS rows 110-115): record your two prompts, choose 3 or 4 rounds and how
 // it ends, tap Lights off; afterwards play the answers back and type notes. Holds the headband from this screen, only
-// between nights; during a session the screen stays on, black, at the lowest brightness, without the system bars.
+// between nights; during a session the screen stays on, black, at the lowest brightness, without the system bars
+// (you may lock the phone yourself: a foreground service keeps the session going, DECISIONS row 195).
 // With the sleep ending the night recording starts by itself and the app returns to the night screen.
 // Layout in dream_view.dart.
 import 'dart:async';
@@ -16,6 +17,7 @@ import '../dream/store.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
 import '../recorder/recorder_service.dart';
+import '../session_keeper.dart';
 import '../sound/dream_sound.dart';
 import 'dream_view.dart';
 import 'evidence_sheet.dart';
@@ -50,6 +52,7 @@ class _DreamScreenState extends State<DreamScreen> {
   DreamEnding _ending = DreamEnding.wake;
   bool _nightRunning = false;
   bool _face = false;
+  final SessionKeeper _keeper = PhoneSessionKeeper();
   DreamStage _lastStage = DreamStage.setup;
   List<DreamSession> _sessions = const [];
   final Map<PromptKind, double?> _promptS = {};
@@ -125,6 +128,15 @@ class _DreamScreenState extends State<DreamScreen> {
     _face = on;
     unawaited(Phone.keepScreenOn(on: on).catchError((Object _) {}));
     unawaited(Phone.dimScreen(on: on).catchError((Object _) {}));
+    // If you lock the phone yourself, a foreground service keeps the sound, the headband and the microphone going
+    // (session_keeper.dart, DECISIONS row 195). It starts here, with the app on screen and the microphone allowed:
+    // Android gives a locked app the microphone only then.
+    _keeper.onStop = () => unawaited(_c.stop());
+    unawaited(
+      on
+          ? _keeper.hold(const KeepSpec(title: 'Dream catcher', text: 'Session running', headband: true, microphone: true))
+          : _keeper.release(),
+    );
     unawaited(
       on
           ? SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky)
@@ -170,8 +182,8 @@ class _DreamScreenState extends State<DreamScreen> {
       return;
     }
     if (!await _micAllowed()) return;
-    if (_ending == DreamEnding.sleep && phone.sdkInt >= 33) {
-      // the night recorder shows a notification; ask now, not half-asleep
+    if (phone.sdkInt >= 33) {
+      // the session's notification (Stop for a locked phone) and the night recorder's; ask now, not half-asleep
       await FlutterForegroundTask.requestNotificationPermission();
     }
     _justEnded = false;
