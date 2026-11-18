@@ -45,6 +45,10 @@ headband has never been checked against a lab recording, and the five-stage deta
   stretches compared with the laptop's single pass. The phone has no second opinion.
 - A 30-second stretch missing more than 5 seconds of data is not scored: missing data never becomes "awake" or
   "deep".
+- Noise is shown, not hidden: the report says how much of your sleep the model read through a noisy signal
+  (movement, jaw muscle or a loose electrode) or with no usable electrode, and a Signal line under the chart marks
+  where. Nobody has tested how well the model copes with that noise on this headband, so treat those stretches with
+  care. On the first recorded night 13 % of the sleep was noisy and 3 % had no usable electrode.
 - An upgrade (AnySleep fine-tuned on public nights reshaped to this headband's channels) is adopted only if it
   adds at least 0.03 kappa on nights it has not seen.
 - Big foundation models only in a later side-by-side test; none is used now.

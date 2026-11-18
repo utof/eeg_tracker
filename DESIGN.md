@@ -88,7 +88,8 @@ One scrolling column, 24 dp page margins, sections separated by a hairline and 3
 Order: status, readouts, watch strip, then Headband and Phone (Phone first before a night, Headband first
 during one). Between nights the Sleep section (last night's asleep total and a Sleep report button) comes
 right after the strip. The primary action is pinned at the bottom, full width, 64 dp. The sleep report is
-its own page: totals, the honest note, the chart, the periods, past nights.
+its own page: totals, the honest note, the chart, the periods, jaw and movement with the night hour by hour,
+past nights.
 
 ## Elevation & Depth
 
@@ -111,9 +112,18 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
 - **Sleep chart (sleep report):** the night's stages on the clock: an ink step line through four worded
   levels (Awake, Dream, Light, Deep) on the `track` ground, hour rules, missing data hatched in `caution`
   amber like the strip's gaps, each sleep period a faint `rule` band numbered above the chart and in the
-  period log below it. No stage colours: the levels are words.
+  period log below it. No stage colours: the levels are words. When the report has the detectors' extras, a
+  Signal lane runs under the levels on the same clock, worded "Signal" like them: the empty `track` where the
+  signal was clean, `caution` amber dots where the model read through noise, solid amber where no electrode was
+  usable; both in the legend.
 - **Sleep periods:** ruled log entries: a numbered cell, the clock span, then label-left / minutes-right
   lines (Asleep, Deep, Dream, Light), wake-ups and missing minutes as plain sentences.
+- **Night extras (sleep report):** the honest note adds one sentence on how much of the sleep was read through
+  noise. "Jaw and movement" (a heading with an "i") uses the period lines' label-left / value-right form for the
+  two rates an hour asleep, then plain sentences: the counts, the earlier nights' jaw rates, and "a trend to
+  compare your nights, not a test for teeth grinding". "Hour by hour" is a table of log rows: the hour in
+  tabular figures, the Signal lane's marks as a bar whose full width is 60 recorded minutes, then Jaw and Moves
+  right-aligned; the swatches and one muted sentence under it. Past nights add "jaw N an hour".
 - **Phone checks:** icon, one plain sentence, right-aligned text buttons that open the exact setting.
 - **Buttons:** one filled button per screen: Start night on the night screen, Start on the meditation screen, and on
   each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before

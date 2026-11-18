@@ -1,7 +1,7 @@
 # What the electrodes see, and when you drift off
 
-One set of detectors, shared by every feature that needs them: meditation feedback now; the night extras, the
-sleep-sound auto-stop and the dream catcher later. ROADMAP next step 3; DECISIONS 85-89.
+One set of detectors, shared by every feature that needs them: meditation feedback, the dream catcher and the night
+extras of the sleep report now; the sleep-sound auto-stop later. ROADMAP next step 3; DECISIONS 85-89 and 140-146.
 
 - **Python reference**: `analysis/eeg_detectors.py`, checked on the owner's recordings with
   `analysis/validate_detectors.py` (commands below). Tests: `analysis/tests/test_eeg_detectors.py`.
@@ -91,6 +91,42 @@ contact (23 N2 epochs missing).
 same blinks, eye movements, bursts, movement, epoch flags and drift-off steps in Dart and Python; per-second
 numbers agree within 1e-9.
 
+## Night extras in the sleep report (DECISIONS 140-146)
+
+After a night is scored, the report says what the detectors saw over the same samples (`extras` in
+`<date>.report.json`, [data-format.md](data-format.md)):
+
+- **Signal quality** per 30 s epoch (good / noisy / no usable electrode), drawn as a Signal lane under the stage
+  chart, and how much of the sleep the model read through noise in the honest note.
+- **Jaw muscle bursts** (both sides at once) and **movements** (3+ channels jumping) per hour asleep: a trend to
+  compare nights, not a bruxism count (row 65). Asleep = the asleep epochs inside the sleep periods.
+- **Hour by hour** on the clock: minutes good / noisy / unusable, jaw, one-sided and movement bursts, movements.
+
+Each burst or movement counts in the 30 s epoch it starts in. The same rules exist twice: `analysis/night_extras.py`
+(the reference, also used by the laptop's `scripts/sleep_report.py`) and `app/lib/sleep/extras.dart` (the phone,
+which runs the detectors in a background isolate beside the sleep model).
+
+**The owner's night of 2026-11-17** (58 recordings joined, 12.9 h, 1549 epochs, the laptop's AnySleep stages for
+both): the phone's code and the Python reference find the same 924 bursts and 508 movements, the same quality for
+every epoch and the same number in every hour.
+
+| | Whole recording | Asleep (6 h 27 min) |
+|---|---|---|
+| Good / noisy / no usable electrode | 466.5 / 151 / 157 min | 322.5 / 52 / 12.5 min (83 / 13 / 3 %) |
+| Jaw bursts (both sides) | 312 | 147: 22.8 an hour |
+| One-sided / movement bursts | 341 / 270 | 163 / 79 |
+| Movements | 507 | 122: 18.9 an hour |
+
+The whole recording counts 157 minutes with no usable electrode: the 109.5 minutes of gaps plus stretches with every
+channel flat, railed or over 500 µV (mostly awake, the headband off or loose). These rates are higher than the
+validation's per-stage numbers above because the long morning sleep was restless: in the morning
+recording alone N2 had 21.8 jaw bursts and 30.5 movements an hour.
+
+**Time and memory** on the laptop (AOT-compiled Dart, the same night): the detectors' pass 11.3 s, the sleep model's
+preparation 12.5 s, both side by side 11.8 s; the pass streams the files, so it needs a few kilobytes beyond the
+code. The Python reference needs about 2 GB and 20-35 s; in the laptop's sleep report it made the night's job 88 s
+instead of 64 s, and the peak memory stayed the scoring's 2.8 GB.
+
 ## What still needs the owner
 
 - **The extended setup test** (`morning.html`, 2 min): 20 cued blinks set the blink depth, 10 glances give µV
@@ -109,3 +145,11 @@ uv run --project analysis python analysis/make_detector_fixture.py NIGHT.bdf RUN
 ```
 
 A night of 5.4 hours takes about 10 s on the laptop.
+
+The night extras, phone code against the reference on a recorded night (same stages for both):
+
+```
+uv run --project analysis python analysis/night_extras.py RECORDINGS 2026-11-17 NIGHT.sleep.json --out py.json
+cd app && dart run tool/night_extras.dart RECORDINGS 2026-11-17 NIGHT.sleep.json dart.json
+uv run --project analysis python analysis/make_extras_fixture.py RECORDINGS 2026-11-17 NIGHT.sleep.json app/test/fixtures/night_extras.json
+```

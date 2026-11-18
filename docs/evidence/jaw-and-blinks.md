@@ -56,8 +56,12 @@ measures; eye direction, heart rate and breathing are not.
   caught, 7-8 % of the quietest); movement is three or more channels jumping past 200 µV at once.
 - Meditation and drifting off: two blinks in half a minute mean open eyes, so the drift-off detector does not
   call you asleep then.
-- Planned: the night count shown as "jaw-muscle bursts per hour, 7-day trend", never as bruxism; hands-free
-  gestures (a double clench marks a moment, a long clench pauses the sound).
+- The sleep report counts jaw-muscle bursts (both sides at once) and movements per hour asleep, shows the earlier
+  nights' numbers beside them, and lists the night hour by hour. It is a trend to compare your own nights, never a
+  bruxism (teeth grinding) result: swallowing, turning over or a pillow pressing on one side also light up the muscle
+  band, and the limits are guesses until your setup test. On the first recorded night: about 23 bursts and 19
+  movements an hour asleep.
+- Planned: hands-free gestures (a double clench marks a moment, a long clench pauses the sound).
 
 ## Sources
 
