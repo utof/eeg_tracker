@@ -222,6 +222,11 @@ the same comparison (counted from their start, or from a dream catcher's lights 
 the app scores each night it already has once more, between nights, which takes the same few minutes a night as
 before. The laptop's sleep report writes the same.
 
+Checked on the emulator (x64 release build, 2026-11-19): Start night without a headband, Lights off (the line
+became "Lights off 02:20." and the button "Lights off again"), the question on a second tap, Stop; and a 2-hour piece
+of the owner's recorded night with a `lights off` marker at 03:12, scored on the phone side in 54 s: detector 4½ min,
+sleep model 3 min after lights off, agreeing. The headband, the phone's speed and a whole night still need the phone.
+
 - Code: `lib/recorder/live_drift.dart` (live), `lib/sleep/drift.dart` (the morning's comparison and the check),
   `lib/ui/lights_off_view.dart`; Python `analysis/night_drift.py`. `tool/live_drift.dart` replays a recorded night
   through the live detector on the laptop (cost per hour, live against the morning; `docs/detectors.md`).
