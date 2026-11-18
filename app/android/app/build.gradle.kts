@@ -25,6 +25,31 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Plugin libraries (ONNX Runtime, neurosdk2) come for every ABI; Flutter itself only for the one asked for.
+        // When a build names its platform (`--target-platform android-arm64`, as for the owner's phone and CI),
+        // package only that ABI: ONNX Runtime alone is 29 MB per ABI.
+        val abis = mapOf(
+            "android-arm" to "armeabi-v7a",
+            "android-arm64" to "arm64-v8a",
+            "android-x64" to "x86_64",
+            "android-x86" to "x86",
+        )
+        (project.findProperty("target-platform") as String?)?.split(",")?.mapNotNull { abis[it.trim()] }
+            ?.takeIf { it.isNotEmpty() }
+            ?.let {
+                ndk {
+                    abiFilters.clear() // the Flutter plugin has already put all three of its ABIs here
+                    abiFilters += it
+                }
+            }
+    }
+
+    // Compress native libraries in the APK (Android unpacks them at install): the APK is about half the size
+    // to copy to the phone, at the cost of about 50 MB more on the phone after install.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 
     buildTypes {
