@@ -35,6 +35,10 @@ def make_handler(rec_host: str, rec_port: int):
             name = path.rstrip("/").rsplit("/", 1)[-1]
             if path in ("", "/"):
                 f = HERE / "live_page.html"
+            elif name == "findings.html":  # the private research findings page (never committed), LAN only
+                f = HERE.parent / "_local" / "research" / "2026-11-18-findings.html"
+                if not f.is_file():
+                    return False
             else:
                 f = HERE / "web" / name
                 if Path(name).suffix not in KINDS or not f.is_file():
