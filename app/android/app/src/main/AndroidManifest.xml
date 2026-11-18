@@ -26,7 +26,7 @@
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
-    <!-- No backup of any kind: recordings and night state are EEG (DECISIONS row 26). -->
+    <!-- No backup of any kind: recordings and night state are EEG (DECISIONS row 57). -->
     <application
         android:label="EEG Tracker"
         android:name=".EegApp"

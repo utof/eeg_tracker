@@ -12,11 +12,20 @@ h1{font-size:18px;font-weight:600;margin:0 0 4px}#top{color:#9aa0a6;font-size:14
 #alpha{margin:14px 0;padding:12px;border-radius:10px;background:#181b1e}
 button{font:inherit;padding:10px 16px;border-radius:10px;border:1px solid #3a4046;background:#1d2125;color:inherit}
 #hint{color:#9aa0a6;font-size:14px;margin-top:12px}
+nav{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin:4px 0 14px}
+nav a{display:block;padding:10px 12px;border-radius:10px;border:1px solid #3a4046;background:#1d2125;color:inherit;text-decoration:none}
+nav a:hover,nav a:focus-visible{border-color:#8ab4f8;outline:none}nav b{display:block;font-weight:600}nav span{color:#9aa0a6;font-size:13px}
 </style><main>
 <h1>Headband check</h1><div id="top">connecting…</div>
+<nav>
+<a href="morning.html"><b>Morning check-in</b><span>2-min eyes closed/open test + ratings</span></a>
+<a href="eyes.html"><b>Eyes open or closed</b><span>beeps high when open, low when closed</span></a>
+<a href="sound.html"><b>Brain sound</b><span>sound that follows your brain</span></a>
+<a href="beats.html"><b>Sound for states</b><span>beats and noise for sleep, focus, breaks</span></a>
+</nav>
 <div id="chs"></div>
 <div id="alpha"></div>
-<button onclick="fetch('contact',{method:'POST'});this.textContent='Checking contact (7 s)…';setTimeout(()=>this.textContent='Re-check contact',8000)">Re-check contact</button>
+<button onclick="fetch('contact',{method:'POST'});this.textContent='Restarting, back in about 30 s…';setTimeout(()=>this.textContent='Re-check contact (pauses ~30 s)',35000)">Re-check contact (pauses ~30 s)</button>
 <div id="hint">Green on all four = good. Red: part the hair under that electrode, press it to the skin, sit still.
 Alpha test: close your eyes for 20 s; the bar for the back pair should grow.</div></main>
 <script>
@@ -36,7 +45,7 @@ function smooth(x,fs){const h=Math.round(fs/2),o=[];let acc=0;const q=[];
  for(let i=0;i<x.length;i++){acc+=x[i];q.push(x[i]);if(q.length>h)acc-=q.shift();o.push(x[i]-acc/q.length)}
  const r=[];for(let i=4;i<o.length;i+=5)r.push((o[i]+o[i-1]+o[i-2]+o[i-3]+o[i-4])/5);return r}
 async function tick(){try{const s=await (await fetch('state')).json();
- document.getElementById('top').textContent=`${s.status} · battery ${s.battery}% · recorded ${s.minutes} min · last data ${s.age}s ago`;
+ document.getElementById('top').textContent=`${s.status} · battery ${s.battery_note || s.battery + "%"} · recorded ${s.minutes} min · last data ${s.age}s ago`;
  let best={r:0,pk:0};
  s.names.forEach((n,c)=>{const x=s.data[c];if(x.length<s.fs*2)return;const sp=spectrum(x,s.fs);
   let tot=0;for(let k=Math.ceil(1/sp.df);k*sp.df<=40;k++)tot+=sp.p[k];

@@ -4,13 +4,18 @@ Output in --out: <stamp>.f32 (records: uint32 PackNum + 4 float32 volts O1 O2 T3
 <stamp>.idx (one record per arriving batch: float64 unix time + uint64 index of its first sample;
 used to find gaps, since packet numbers can repeat), <stamp>.log (wall-clock lines: contact check, sample counts every 10 s, disconnects).
 """
-import argparse, collections, json, os, struct, threading, time
+import argparse, collections, json, os, queue, struct, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime
 from pathlib import Path
 
 from neurosdk.cmn_types import SensorCommand, SensorFamily, SensorState
 from neurosdk.scanner import Scanner
+
+try:
+    import battery as batt  # scripts/battery.py: drops the gauge's stuck values, time left from the trend
+except Exception:
+    batt = None
 
 REC = struct.Struct("<I4f")
 IDX = struct.Struct("<dQ")
@@ -48,7 +53,19 @@ def main() -> None:
     data = open(out / f"{stamp}.f32", "ab")
     logf = open(out / f"{stamp}.log", "a")
     idxf = open(out / f"{stamp}.idx", "ab")
+    markf = open(out / f"{stamp}.markers.jsonl", "a")  # page markers: {"t": unix time, "i": sample index, "text"}
     log(f"connected {info.Name} {info.Address} serial {info.SerialNumber} battery {s.batt_power}% signal {info.RSSI} dBm")
+    for attr in ("features", "commands", "parameters"):  # what this headband offers (e.g. pulse or motion sensors)
+        try: log(f"{attr} {getattr(s, attr)}")
+        except Exception as e: log(f"{attr} unavailable: {e}")
+    batt_pts: list = []  # (unix time, %) of the last 3 hours, earlier runs' logs included
+    if batt:
+        try:
+            batt_pts = batt.from_logs(out, time.time()); live_note = batt.estimate(batt_pts, time.time())["text"]
+        except Exception:
+            batt_pts, live_note = [], None
+    else:
+        live_note = None
 
     last = {}
     resist_n = [0]
@@ -63,7 +80,15 @@ def main() -> None:
         log(f"contact check failed: {e}")
 
     ring: collections.deque = collections.deque(maxlen=FS * 5)
-    want_contact = threading.Event(); live = dict(status="recording", t=time.time())
+    want_contact = threading.Event(); live = dict(status="recording", t=time.time(), battery_note=live_note)
+    subs: list[queue.Queue] = []; subs_lock = threading.Lock()  # live stream: one queue per connected consumer
+
+    def publish(event: dict) -> None:
+        line = json.dumps(event, separators=(",", ":"))
+        with subs_lock:
+            for q in subs:
+                try: q.put_nowait(line)
+                except queue.Full: pass  # a consumer that cannot keep up loses batches, the recording does not
 
     class Page(BaseHTTPRequestHandler):
         def log_message(self, *_a) -> None: pass
@@ -73,9 +98,43 @@ def main() -> None:
             self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body)
 
         def do_POST(self) -> None:
-            want_contact.set(); self._send(b"ok", "text/plain")
+            name = self.path.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+            if name == "contact":
+                want_contact.set(); self._send(b"ok", "text/plain")
+            elif name == "marker":  # body: plain text, e.g. "eyes closed start"
+                n = min(int(self.headers.get("Content-Length") or 0), 2000)
+                text = self.rfile.read(n).decode("utf-8", "replace").strip()[:200] or "marker"
+                with lock:
+                    m = dict(t=round(time.time(), 3), i=seen[0], text=text)
+                    markf.write(json.dumps(m) + "\n"); markf.flush()
+                publish(dict(marker=text, i=m["i"], t=m["t"]))
+                self._send(b"ok", "text/plain")
+            else:
+                self.send_error(404)
+
+        def stream(self) -> None:
+            """Server-sent events: a hello line, then every batch as {"i": first sample, "t": arrival, "uv": [[O1,O2,T3,T4]...]}
+            and every page marker as {"marker": text, "i", "t"}. Any number of consumers (pages, scripts/lsl_bridge.py)."""
+            self.send_response(200); self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store"); self.send_header("Access-Control-Allow-Origin", "*"); self.end_headers()
+            q: queue.Queue = queue.Queue(maxsize=200)
+            with subs_lock: subs.append(q)
+            try:
+                hello = dict(hello=True, names=NAMES, fs=FS, unit="uV", status=live["status"], next_i=seen[0])
+                self.wfile.write(f"data: {json.dumps(hello)}\n\n".encode()); self.wfile.flush()
+                while True:
+                    try: line = q.get(timeout=10)
+                    except queue.Empty: self.wfile.write(b": keepalive\n\n"); self.wfile.flush(); continue
+                    self.wfile.write(f"data: {line}\n\n".encode()); self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                with subs_lock:
+                    if q in subs: subs.remove(q)
 
         def do_GET(self) -> None:
+            if self.path.split("?")[0].rstrip("/").endswith("/stream"):
+                self.stream(); return
             if self.path.rstrip("/").endswith("state"):
                 with lock:
                     rows = list(ring)[-FS * 4:]
@@ -84,11 +143,17 @@ def main() -> None:
                     col = [r[c] for r in rows]; m = sum(col) / len(col) if col else 0.0
                     data.append([round((v - m) * 1e6, 1) for v in col])
                 contact = {n: (None if last.get(n, float("inf")) == float("inf") else round(last[n])) for n in NAMES}
-                body = dict(status=live["status"], battery=live.get("battery", "?"), minutes=round(total / FS / 60, 1),
+                body = dict(status=live["status"], battery=live.get("battery", "?"), battery_note=live.get("battery_note"), minutes=round(total / FS / 60, 1),
                             age=round(time.time() - live["t"], 1), names=NAMES, fs=FS, contact=contact, data=data)
                 self._send(json.dumps(body).encode(), "application/json")
-            else:
-                self._send((Path(__file__).parent / "live_page.html").read_bytes(), "text/html; charset=utf-8")
+            else:  # pages in scripts/web/ by file name; anything else gets the live check page
+                name = self.path.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+                kind = {".html": "text/html", ".js": "text/javascript", ".css": "text/css"}.get(Path(name).suffix)
+                f = Path(__file__).parent / "web" / name
+                if kind and f.is_file():
+                    self._send(f.read_bytes(), kind + "; charset=utf-8")
+                else:
+                    self._send((Path(__file__).parent / "live_page.html").read_bytes(), "text/html; charset=utf-8")
 
     if a.port:
         srv = ThreadingHTTPServer(("0.0.0.0", a.port), Page)
@@ -101,6 +166,10 @@ def main() -> None:
             idx.append(IDX.pack(now, seen[0])); seen[0] += len(samples)
             buf.extend(REC.pack(x.PackNum, x.O1, x.O2, x.T3, x.T4) for x in samples)
             ring.extend((x.O1, x.O2, x.T3, x.T4) for x in samples)
+            first = seen[0] - len(samples)
+        if subs:
+            publish(dict(i=first, t=round(now, 3), uv=[[round(x.O1 * 1e6, 2), round(x.O2 * 1e6, 2), round(x.T3 * 1e6, 2),
+                                                       round(x.T4 * 1e6, 2)] for x in samples]))
     s.signalDataReceived = on_signal
     for attempt in range(10):
         try:
@@ -130,20 +199,11 @@ def main() -> None:
         while not a.seconds or time.time() - t0 < a.seconds:
             time.sleep(1); beat[0] = time.time()
             if want_contact.is_set():
-                want_contact.clear(); live["status"] = "checking contact"
-                n0 = resist_n[0]
-                try:
-                    s.exec_command(SensorCommand.StopSignal); time.sleep(1)
-                    s.exec_command(SensorCommand.StartResist); time.sleep(6)
-                    s.exec_command(SensorCommand.StopResist); time.sleep(1)
-                    s.exec_command(SensorCommand.StartSignal)
-                    if resist_n[0] > n0:
-                        log("contact ohms " + " ".join(f"{k}={v:.0f}" for k, v in last.items()))
-                    else:
-                        log("contact re-check: no resistance data arrived")
-                except Exception as e:
-                    log(f"contact re-check failed: {e}")
-                live["status"] = "recording"
+                # Measuring contact mid-stream never worked with the Linux SDK (no resistance data, then the stream
+                # would not restart; 2026-11-18 02:42 and 05:51). A fresh connection measures it reliably, so restart.
+                live["status"] = "restarting to re-check contact"
+                log("contact re-check asked: saving and exiting; record_night.sh starts a fresh recorder, which measures contact")
+                raise SystemExit(3)
             with lock:
                 chunk, buf[:] = b"".join(buf), []
                 ichunk, idx[:] = b"".join(idx), []
@@ -153,7 +213,12 @@ def main() -> None:
                 got = total - last_total
                 try: live["battery"] = s.batt_power
                 except Exception: pass
-                log(f"samples {total} (+{got}) battery {s.batt_power}%")
+                log(f"samples {total} (+{got}) battery {live.get('battery', '?')}%")
+                if batt and isinstance(live.get("battery"), int):
+                    try:
+                        batt_pts.append((time.time(), live["battery"])); del batt_pts[:-1100]
+                        live["battery_note"] = batt.estimate(batt_pts, time.time())["text"]
+                    except Exception: pass
                 last_report = time.time(); last_total = total
                 stalled = stalled + 1 if got == 0 else 0
                 if s.state != SensorState.StateInRange:  # SDK calls on a lost sensor segfault (seen 3x on 2026-11-18)
@@ -189,7 +254,7 @@ def main() -> None:
                 log(f"stop failed: {e}")
             try: s.disconnect()
             except Exception: pass
-        logf.close()
+        markf.close(); logf.close()
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-// The night loop, ported from scripts/record_night.py with its lessons (DECISIONS rows 17-21):
+// The night loop, ported from scripts/record_night.py with its lessons (DECISIONS row 17 and rows 49-52):
 // - contact check at the start of the night;
 // - a stalled stream is restarted; 40 s without data ends the run;
 // - never an SDK call on a headband that is out of range (on the laptop that segfaulted the SDK); the
@@ -6,7 +6,7 @@
 // - after a drop: a new sensor object and a new file set (to_bdf.py joins a night's sets by time), like
 //   the laptop's fresh process. The phone reaches the same headband directly by its address, because
 //   Android stops unfiltered scans while the screen is off; growing waits, every third try a scan
-//   (row 18). Each drop and try goes into the .log with its time;
+//   (row 49). Each drop and try goes into the .log with its time;
 // - every SDK call has a deadline; one that blocks means the SDK is wedged, so the data is saved and the
 //   app process is restarted (the phone's version of "exit and let record_night.sh start a fresh one");
 // - the data is saved before every risky SDK call.

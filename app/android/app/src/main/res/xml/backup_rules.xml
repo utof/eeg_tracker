@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 11 and older (DECISIONS row 26). allowBackup="false" already stops backups there; these rules
+<!-- Android 11 and older (DECISIONS row 57). allowBackup="false" already stops backups there; these rules
      keep everything out even if backup is turned back on later for some settings file. -->
 <full-backup-content>
     <exclude domain="root" path="." />

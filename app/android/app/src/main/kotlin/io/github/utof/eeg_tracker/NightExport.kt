@@ -12,7 +12,7 @@ import java.io.IOException
 /**
  * Export of one night: the owner picks a folder with the system picker (Storage Access Framework,
  * ACTION_OPEN_DOCUMENT_TREE), and the night's files are copied from the app's private folder into a new
- * subfolder there. Nothing leaves the private folder without this step (DECISIONS, phone file location).
+ * subfolder there. Nothing leaves the private folder without this step (DECISIONS rows 53 and 56).
  */
 class NightExport(
     private val files: List<File>,

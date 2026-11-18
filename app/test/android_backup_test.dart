@@ -1,5 +1,5 @@
 // Recordings and the saved night state must never reach Google Drive backups or a device-to-device
-// transfer (DECISIONS row 26). The manifest cannot be built here, so its settings are read as text.
+// transfer (DECISIONS row 57). The manifest cannot be built here, so its settings are read as text.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';

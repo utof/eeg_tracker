@@ -6,10 +6,10 @@ contact per channel, and phone settings that could stop the recording.
 
 - Files: `<stamp>.f32/.idx/.log` in the app's private folder (other apps cannot read it), the same format as
   `scripts/record_night.py` (`docs/data-format.md`); join a night with `scripts/to_bdf.py`. Only "Export a
-  night" copies them out (below; DECISIONS rows 22 and 25). Android backups and phone-to-phone transfers
-  skip the app completely (row 26), so a new phone starts empty: export what you want to keep first.
+  night" copies them out (below; DECISIONS rows 53 and 56). Android backups and phone-to-phone transfers
+  skip the app completely (row 57), so a new phone starts empty: export what you want to keep first.
 - Recorder: a foreground service of type `connectedDevice` (`lib/recorder/recorder_service.dart`) whose
-  isolate owns the BrainBit session (`lib/recorder/night_recorder.dart`, rules in DECISIONS rows 17-23).
+  isolate owns the BrainBit session (`lib/recorder/night_recorder.dart`, rules in DECISIONS row 17 and rows 49-54).
 - Screen: `lib/ui/`, design in `../DESIGN.md`.
 
 ## Build and test
@@ -67,6 +67,6 @@ From `docs/research/android-overnight-ble-xiaomi.md` section 8. Nothing here has
 8. Drop test (T3(d)), 5 minutes: start a night, screen off, carry the headband to another room for 60 s,
    bring it back, wait 3 minutes. Stop, export, and look in the `.log` files for `reconnect try`. A line
    `(direct to ...): connected` means reconnecting without a scan works on this phone; if only `(scan)`
-   lines connect, or the app restarted itself, tell the assistant (DECISIONS row 18).
+   lines connect, or the app restarted itself, tell the assistant (DECISIONS row 49).
 
-If the headband is not found without location permission (test T0), see DECISIONS row 23.
+If the headband is not found without location permission (test T0), see DECISIONS row 54.

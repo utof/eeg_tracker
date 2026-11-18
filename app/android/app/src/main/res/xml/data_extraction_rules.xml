@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 12+ (DECISIONS row 26). Nothing of this app goes to Google Drive backups or to a new phone by
+<!-- Android 12+ (DECISIONS row 57). Nothing of this app goes to Google Drive backups or to a new phone by
      device-to-device transfer: the recordings (files/recordings) and the saved night state (shared
      preferences) are EEG, which identifies a person, and there is no setting worth restoring.
      Needed on top of allowBackup="false": on Android 12+ some makers still run device transfers then. -->
