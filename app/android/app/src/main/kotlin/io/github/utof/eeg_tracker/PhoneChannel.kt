@@ -35,6 +35,9 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
         fun register(messenger: BinaryMessenger, context: Context) {
             MethodChannel(messenger, NAME).setMethodCallHandler(PhoneChannel(context.applicationContext))
         }
+
+        /** Where the recorder writes; only an explicit Export copies anything out (NightExport.kt). */
+        fun recordingsFolder(context: Context): File = File(context.filesDir, "recordings")
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -55,11 +58,9 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
         }
     }
 
-    /** Android/media/<applicationId>/recordings: no storage permission needed, visible to adb and Syncthing. */
-    @Suppress("DEPRECATION")
+    /** The app's private folder (filesDir/recordings): other apps cannot read it, Android encrypts it. */
     private fun recordingsDir(): String? {
-        val media = context.externalMediaDirs.firstOrNull { it != null } ?: return null
-        val dir = File(media, "recordings")
+        val dir = recordingsFolder(context)
         dir.mkdirs()
         return if (dir.isDirectory) dir.absolutePath else null
     }

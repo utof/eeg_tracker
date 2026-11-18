@@ -6,6 +6,12 @@ import 'recorder/headband.dart';
 
 const MethodChannel _channel = MethodChannel('eeg_tracker/phone');
 
+/// Only in the screen's engine: the folder picker needs the Activity (MainActivity.kt, NightExport.kt).
+const MethodChannel _export = MethodChannel('eeg_tracker/export');
+
+/// What an export copied.
+typedef ExportResult = ({int files, int bytes, String folder});
+
 /// Phone settings that decide whether a night survives, read in one go.
 class PhoneSnapshot {
   const PhoneSnapshot(this._m);
@@ -26,8 +32,21 @@ class PhoneSnapshot {
 }
 
 class Phone {
-  /// `Android/media/<applicationId>/recordings`, created if missing (reachable by adb pull and Syncthing).
+  /// The app's private `files/recordings` folder, created if missing. Other apps cannot read it; only
+  /// [exportNight] copies anything out.
   static Future<String?> recordingsDir() => _channel.invokeMethod<String>('recordingsDir');
+
+  /// Lets the owner pick a folder with the system picker, then copies [paths] (files of the recordings
+  /// folder only) into a new subfolder [folder] there. Null when the picker was closed without a choice.
+  static Future<ExportResult?> exportNight(List<String> paths, String folder) async {
+    final r = await _export.invokeMapMethod<String, Object?>('exportNight', {'paths': paths, 'folder': folder});
+    if (r == null) return null;
+    return (
+      files: (r['files'] as num?)?.toInt() ?? 0,
+      bytes: (r['bytes'] as num?)?.toInt() ?? 0,
+      folder: r['folder'] is String ? r['folder'] as String : folder,
+    );
+  }
 
   static Future<PhoneSnapshot> snapshot() async =>
       PhoneSnapshot(await _channel.invokeMethod<Map<Object?, Object?>>('snapshot') ?? const {});

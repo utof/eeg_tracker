@@ -136,7 +136,7 @@ class RecorderTaskHandler extends TaskHandler {
       if (d != null) return d;
     } catch (_) {}
     final saved = await FlutterForegroundTask.getData<String>(key: _dirKey);
-    return saved ?? '/storage/emulated/0/Android/media/io.github.utof.eeg_tracker/recordings';
+    return saved ?? '/data/user/0/io.github.utof.eeg_tracker/files/recordings'; // Context.getFilesDir()
   }
 }
 

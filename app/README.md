@@ -4,8 +4,9 @@ Records a BrainBit headband all night on an Android phone. One screen: Start nig
 minutes recorded, seconds since the last data, a half-hour strip of what was saved, battery, signal,
 contact per channel, and phone settings that could stop the recording.
 
-- Files: `Android/media/io.github.utof.eeg_tracker/recordings/<stamp>.f32/.idx/.log`, the same format as
-  `scripts/record_night.py` (`docs/data-format.md`); join a night with `scripts/to_bdf.py`.
+- Files: `<stamp>.f32/.idx/.log` in the app's private folder (other apps cannot read it), the same format as
+  `scripts/record_night.py` (`docs/data-format.md`); join a night with `scripts/to_bdf.py`. Only "Export a
+  night" copies them out (below; DECISIONS rows 22 and 25).
 - Recorder: a foreground service of type `connectedDevice` (`lib/recorder/recorder_service.dart`) whose
   isolate owns the BrainBit session (`lib/recorder/night_recorder.dart`, rules in DECISIONS rows 17-23).
 - Screen: `lib/ui/`, design in `../DESIGN.md`.
@@ -22,6 +23,22 @@ flutter build apk --profile --target-platform android-arm64
 
 `flutter test` also renders the screen in four states to `build/screens/*.png` (normal and 130 % text).
 
+## Export a night
+
+The recordings stay inside the app. To get one night out:
+
+1. Stop the night (Export is hidden while recording).
+2. Scroll down to **Recordings** and tap **Export a night**.
+3. Tap the night you want.
+4. Android's folder picker opens. Pick a folder, or make a new one (for example `Download/EEG`; Android
+   does not allow `Download` itself), then tap **Use this folder** and **Allow**.
+5. The app copies the night into a new folder there, named like `eeg-night-2026-11-18`, and says how many
+   files it copied.
+
+From there: `adb pull /sdcard/Download/EEG/eeg-night-2026-11-18/`, a USB cable, or pick your Syncthing
+folder in step 4. The night also stays in the app. There is no Delete button yet; Settings > Apps >
+EEG Tracker > Storage > Clear data deletes every night (about 160 MB each).
+
 ## First phone test (1 hour, screen off)
 
 From `docs/research/android-overnight-ble-xiaomi.md` section 8. Nothing here has run on a phone yet.
@@ -35,8 +52,8 @@ From `docs/research/android-overnight-ble-xiaomi.md` section 8. Nothing here has
    shows the wake lock.
 4. Screen off, unplug USB (or `adb shell dumpsys battery unplug`), wait 60 minutes.
 5. Wake the phone: the strip should be full, data age about 1 s. Stop. Note the battery drop.
-6. `adb pull /sdcard/Android/media/io.github.utof.eeg_tracker/recordings/` and run `scripts/to_bdf.py` on
-   the `.f32` files: expect at least 99.9 % of the expected samples and no gap.
+6. Export the night to `Download/EEG` (above), then `adb pull /sdcard/Download/EEG/` and run
+   `scripts/to_bdf.py` on the `.f32` files: expect at least 99.9 % of the expected samples and no gap.
 7. Collect `adb shell am get-standby-bucket io.github.utof.eeg_tracker` and
    `adb logcat -b events -d | grep -i -E "am_kill|am_proc_died"`.
 

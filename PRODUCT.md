@@ -34,7 +34,8 @@ the data supports (no unvalidated stress or focus scores, sleep stages labelled 
 
 - Start: headband on, open the app, Start night, glance at contact quality, put the phone down.
 - During the night: the screen is normally off; a foreground notification shows the recorder is alive.
-- Morning: Stop, then files go to the PC by Syncthing or `adb pull` from `Android/media/<app id>/recordings/`.
+- Morning: Stop, then "Export a night" copies the night out of the app's private folder into a folder the
+  user picks (e.g. Download/EEG or a Syncthing folder); from there `adb pull`, USB or Syncthing take it to the PC.
 - Xiaomi phones kill background work by default; the user must fix several phone settings once.
 
 ## Capabilities and Constraints

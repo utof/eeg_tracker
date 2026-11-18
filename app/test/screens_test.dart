@@ -69,7 +69,6 @@ final Map<String, NightViewModel> states = {
       nearbyAllowed: true,
       xiaomiDone: true,
     ),
-    filesPath: 'Android/media/io.github.utof.eeg_tracker/recordings',
   ),
   'no_data': NightViewModel(
     title: 'No data',
@@ -111,7 +110,7 @@ final Map<String, NightViewModel> states = {
     rows: _rows(end: DateTime(2026, 11, 19, 6, 23), live: false),
     contactOhms: const {'O1': 4.2e5, 'O2': 6.1e5, 'T3': 1.8e6, 'T4': 3.4e6},
     checks: const [],
-    filesPath: 'Android/media/io.github.utof.eeg_tracker/recordings',
+    nightsOnPhone: 3,
   ),
 };
 
@@ -134,7 +133,7 @@ void main() {
               theme: nightTheme(),
               home: RepaintBoundary(
                 key: key,
-                child: NightView(model: e.value, onStart: () {}, onStop: () {}, onFix: (_) {}),
+                child: NightView(model: e.value, onStart: () {}, onStop: () {}, onFix: (_) {}, onExport: () {}),
               ),
             ),
           ),

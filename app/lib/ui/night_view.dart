@@ -24,7 +24,7 @@ class NightViewModel {
     this.rssi,
     this.contactOhms = const {},
     this.checks = const [],
-    this.filesPath,
+    this.nightsOnPhone = 0,
   });
 
   final String title;
@@ -49,16 +49,26 @@ class NightViewModel {
   /// Empty: no contact check yet.
   final Map<String, double?> contactOhms;
   final List<PhoneCheck> checks;
-  final String? filesPath;
+
+  /// Finished nights kept in the app's private folder (Export copies one out).
+  final int nightsOnPhone;
 }
 
 class NightView extends StatelessWidget {
-  const NightView({super.key, required this.model, required this.onStart, required this.onStop, required this.onFix});
+  const NightView({
+    super.key,
+    required this.model,
+    required this.onStart,
+    required this.onStop,
+    required this.onFix,
+    this.onExport,
+  });
 
   final NightViewModel model;
   final VoidCallback onStart;
   final VoidCallback onStop;
   final void Function(FixAction action) onFix;
+  final VoidCallback? onExport;
 
   @override
   Widget build(BuildContext context) {
@@ -80,9 +90,10 @@ class NightView extends StatelessWidget {
           const _Heading('Phone'),
           PhoneChecksList(checks: m.checks, onFix: onFix),
           if (!m.running) ...headband,
-          if (m.filesPath != null) ...[
-            const SizedBox(height: 32),
-            Text('Files: ${m.filesPath}', style: text.bodySmall?.copyWith(color: Night.inkMuted)),
+          // A night being recorded is not finished, so Export waits for Stop.
+          if (!m.running && m.nightsOnPhone > 0) ...[
+            const _Heading('Recordings'),
+            _Recordings(nights: m.nightsOnPhone, onExport: onExport),
           ],
         ],
       ),
@@ -381,6 +392,33 @@ class _ContactCell extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _Recordings extends StatelessWidget {
+  const _Recordings({required this.nights, required this.onExport});
+  final int nights;
+  final VoidCallback? onExport;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '${nights == 1 ? '1 night' : '$nights nights'} on this phone, kept inside the app where other apps '
+          'cannot read them.',
+          style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: onExport,
+          icon: const Icon(Icons.drive_folder_upload_outlined),
+          label: const Text('Export a night'),
+        ),
+      ],
     );
   }
 }

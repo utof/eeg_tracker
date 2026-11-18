@@ -1,17 +1,21 @@
 // The app's one screen: start and stop the night, see that it is being recorded, fix phone settings.
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../phone.dart';
 import '../recorder/headband.dart';
+import '../recorder/nights.dart';
 import '../recorder/recorder_service.dart';
 import '../recorder/status.dart';
 import 'night_strip.dart';
 import 'night_view.dart';
 import 'phone_checks.dart';
+import 'theme.dart';
 
 const String _xiaomiDoneKey = 'xiaomiChecked';
 
@@ -124,6 +128,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   bool _xiaomiDone = false;
   NightState? _last;
   String? _dir;
+  List<NightFiles> _nights = const [];
   Timer? _clock;
   int _ticks = 0;
   Completer<void>? _stopped;
@@ -182,9 +187,11 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     final last = await loadNight();
     final xiaomiDone = await FlutterForegroundTask.getData<bool>(key: _xiaomiDoneKey) ?? false;
     final dir = _dir ?? await _safe<String?>(Phone.recordingsDir, null);
+    final nights = dir == null || running ? const <NightFiles>[] : _listNights(dir);
     if (running) FlutterForegroundTask.sendDataToTask(statusCommand);
     if (!mounted) return;
     setState(() {
+      _nights = nights;
       _phone = phone;
       _nearby = nearby;
       _running = running;
@@ -273,6 +280,34 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     }
   }
 
+  static List<NightFiles> _listNights(String dir) {
+    try {
+      return nightsIn(Directory(dir));
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Export: the owner picks a night, then a folder (system picker); the night's files are copied there.
+  Future<void> _export() async {
+    final nights = _nights;
+    if (nights.isEmpty) return;
+    final night = await showModalBottomSheet<NightFiles>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: Night.surfaceHigh,
+      builder: (c) => _NightPicker(nights: nights),
+    );
+    if (night == null || !mounted) return;
+    try {
+      final r = await Phone.exportNight([for (final f in night.files) f.path], night.folderName);
+      if (r == null) return; // picker closed
+      _say('Copied ${r.files} files (${_mb(r.bytes)}) into the new folder "${r.folder}".');
+    } on PlatformException catch (e) {
+      _say('Export failed: ${e.message ?? e.code}');
+    }
+  }
+
   Future<void> _fix(FixAction a) async {
     switch (a) {
       case FixAction.requestNearby:
@@ -334,15 +369,51 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       rssi: s?.rssi,
       contactOhms: s?.contactOhms ?? (showLast ? last.contactOhms : const {}),
       checks: phoneChecks(phone: _phone, nearbyAllowed: _nearby, xiaomiDone: _xiaomiDone),
-      filesPath: _dir == null ? null : _shortPath(_dir!),
+      nightsOnPhone: _nights.length,
     );
   }
 
-  static String _shortPath(String p) {
-    final i = p.indexOf('Android/media/');
-    return i < 0 ? p : p.substring(i);
-  }
+  @override
+  Widget build(BuildContext context) =>
+      NightView(model: _model(), onStart: _start, onStop: _stop, onFix: _fix, onExport: _export);
+}
+
+String _mb(int bytes) => '${(bytes / 1e6).toStringAsFixed(bytes < 1e7 ? 1 : 0)} MB';
+
+/// The nights on the phone, newest first; tapping one returns it.
+class _NightPicker extends StatelessWidget {
+  const _NightPicker({required this.nights});
+  final List<NightFiles> nights;
 
   @override
-  Widget build(BuildContext context) => NightView(model: _model(), onStart: _start, onStop: _stop, onFix: _fix);
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    String two(int v) => v.toString().padLeft(2, '0');
+    return SafeArea(
+      child: ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.only(bottom: 16),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+            child: Text(
+              'Export which night? Next, pick or create a folder, for example Download/EEG.',
+              style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
+            ),
+          ),
+          for (final n in nights)
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              title: Text('Night of ${nightLabel(n.nightOf)}', style: text.titleMedium),
+              subtitle: Text(
+                'from ${two(n.start.hour)}:${two(n.start.minute)} · '
+                '${n.runs == 1 ? '1 file set' : '${n.runs} file sets'} · ${_mb(n.bytes)}',
+                style: text.bodyMedium?.copyWith(color: Night.inkMuted),
+              ),
+              onTap: () => Navigator.pop(context, n),
+            ),
+        ],
+      ),
+    );
+  }
 }
