@@ -1,5 +1,6 @@
 // Guided morning check-in. Served by scripts/record_night.py; markers go to POST /marker.
 import { KSS, MOOD, TENSION, phaseSeconds, morningPlan, marker, validRatings, setupPlan, clock, gradeChannel } from './morning-core.js';
+import { morningHtml } from './morning-result.js';
 
 const $ = (id) => document.getElementById(id);
 const show = (id) => { for (const s of document.querySelectorAll('main > section')) s.classList.toggle('hidden', s.id !== id); };
@@ -95,6 +96,36 @@ async function save() {
   await mark(marker.ratings(ratings)); await mark(marker.end());
   if (wake) wake.release().catch(() => {});
   show('done');
+  results();
+}
+
+// ---- results without asking: the laptop analyses the check-in (POST /morning-report runs scripts/morning_check.py)
+async function results() {
+  const ask = async (init) => {
+    const r = await (await fetch('morning-report', init)).json();
+    if (r.error) throw new Error(r.error);
+    return r;
+  };
+  $('dsay').textContent = 'Working it out, about 30 s…';
+  try {
+    const go = await ask({ method: 'POST' });
+    const since = go.now - 2; // the laptop's clock: a result file written after this is today's
+    for (let i = 0; i < 90; i++) {
+      await sleep(2000);
+      const s = await ask({ cache: 'no-store' });
+      if (s.running) continue;
+      if (s.failed) throw new Error(s.failed);
+      if (!s.report || !(s.updated >= since)) throw new Error('no new result was written');
+      $('dsay').textContent = 'Thank you. Your numbers this morning:';
+      $('result').innerHTML = morningHtml(s.report, { title: false });
+      return;
+    }
+    throw new Error('it is taking over 3 minutes');
+  } catch (e) {
+    $('dsay').textContent = e instanceof TypeError ? 'Saved, but the laptop did not answer to work it out. On the laptop:'
+      : `Saved, but working it out failed (${e.message}). On the laptop:`;
+    $('dcmd').classList.remove('hidden');
+  }
 }
 
 // ---- setup test
@@ -111,6 +142,7 @@ async function runSetup() {
   if (wake) wake.release().catch(() => {});
   $('dtitle').textContent = 'Setup test saved';
   $('dsay').textContent = 'To see which events the electrodes picked up, run on the laptop:';
+  $('dcmd').classList.remove('hidden');
   show('done');
 }
 
