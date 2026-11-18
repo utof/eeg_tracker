@@ -19,6 +19,7 @@ import 'chunk_writer.dart';
 import 'contact.dart';
 import 'headband.dart';
 import 'nights.dart';
+import 'packets.dart';
 import 'status.dart';
 
 class RecorderTiming {
@@ -46,6 +47,7 @@ class RecorderTiming {
     this.scanEvery = 3,
     this.rescanFor = const Duration(seconds: 15),
     this.phoneLogEvery = const Duration(minutes: 1),
+    this.packetLogEvery = const Duration(minutes: 10),
   });
 
   /// Buffered samples go to the files and a status goes to the screen this often.
@@ -84,6 +86,9 @@ class RecorderTiming {
 
   /// The phone battery line goes into the `.log` this often (the check that finds it due runs every 10 s).
   final Duration phoneLogEvery;
+
+  /// The packet accounting line goes into the `.log` this often (and at the end of every run and night).
+  final Duration packetLogEvery;
 }
 
 /// An SDK call passed its deadline. Never swallowed by the ordinary error handling.
@@ -141,6 +146,10 @@ class NightRecorder {
 
   /// When the phone battery line was last written (unix ms).
   int _batteryLoggedMs = 0;
+
+  /// Packet numbers of tonight; [_packetsLoggedMs] is when its line was last written (unix ms).
+  PacketAccount _packets = PacketAccount();
+  int _packetsLoggedMs = 0;
 
   /// Reconnect tries since the last run that recorded anything.
   int _tries = 0;
@@ -203,6 +212,8 @@ class NightRecorder {
     } else {
       _night = NightState(active: true, startMs: _now().millisecondsSinceEpoch);
     }
+    _packets = PacketAccount(_night.packets);
+    _packetsLoggedMs = _now().millisecondsSinceEpoch;
     await store.save(_night);
     _set(
       RecorderStatus(
@@ -356,6 +367,7 @@ class NightRecorder {
   Future<_End> _session(Headband band, ChunkWriter w) async {
     _writer = w;
     _night = _night.copyWith(runs: _night.runs + 1, band: band.id);
+    _packets.startRun();
     var lost = false;
     bool isLost() => lost;
     final rangeSub = band.rangeChanges.listen((inRange) => lost = lost || !inRange);
@@ -427,6 +439,7 @@ class NightRecorder {
     if (rows.isEmpty) return;
     final t = _now();
     w.addBatch(t, rows);
+    _packets.add(rows);
     final ms = t.millisecondsSinceEpoch;
     final slot = ms ~/ slotMs;
     _slots[slot] = (_slots[slot] ?? 0) + rows.length;
@@ -507,6 +520,9 @@ class NightRecorder {
       if (_now().millisecondsSinceEpoch - _batteryLoggedMs >= timing.phoneLogEvery.inMilliseconds) {
         await _logBattery(w);
       }
+      if (_now().millisecondsSinceEpoch - _packetsLoggedMs >= timing.packetLogEvery.inMilliseconds) {
+        _logPackets(w);
+      }
       stalled = got == 0 ? stalled + 1 : 0;
       if (stalled == 0) {
         if (_status.note != 'recording') _set(_status.copyWith(note: 'recording'));
@@ -545,6 +561,7 @@ class NightRecorder {
     w.sync();
     _night = _night.copyWith(samples: _night.samples + w.samplesWritten);
     _status = _status.copyWith(nightSamples: _night.samples);
+    _logPackets(w);
     w.log('total samples ${w.samplesWritten}, ${(w.samplesWritten / sampleRateHz / 60).toStringAsFixed(1)} min');
     if (end != _End.stopped) _logDrop(w, end);
     if (w.samplesWritten > 0) _tries = 0; // a run that recorded something restarts the waits from the shortest
@@ -676,6 +693,12 @@ class NightRecorder {
     } catch (_) {}
   }
 
+  /// The packet accounting line, from the whole night so far.
+  void _logPackets(ChunkWriter w) {
+    _packetsLoggedMs = _now().millisecondsSinceEpoch;
+    w.log(_packets.counts.logLine());
+  }
+
   /// One phone battery line in the run's `.log`, and the reading kept for the end-of-night drain. A phone
   /// that gives no numbers, or a slow channel call, only costs the line.
   Future<void> _logBattery(ChunkWriter w) async {
@@ -701,6 +724,7 @@ class NightRecorder {
       _night = _night.copyWith(phoneBattery: _night.phoneBattery.add(b, _now().millisecondsSinceEpoch));
       _note('phone ${b.logLine()}');
     }
+    _note('end of night, ${_packets.counts.logLine()}');
     _note(_night.phoneBattery.summaryLine());
     await _save();
   }
@@ -716,7 +740,12 @@ class NightRecorder {
     final w = _writer;
     final live = w == null || w.isClosed ? 0 : w.samplesWritten;
     await store.save(
-      _night.copyWith(active: !(_stopping && _endNight), samples: _night.samples + live, slots: Map.of(_slots)),
+      _night.copyWith(
+        active: !(_stopping && _endNight),
+        samples: _night.samples + live,
+        slots: Map.of(_slots),
+        packets: _packets.counts,
+      ),
     );
   }
 

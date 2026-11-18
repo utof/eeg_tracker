@@ -2,6 +2,7 @@
 // tests use a fake, so the recorder's rules can be checked without a phone.
 import 'battery.dart';
 import 'chunk_writer.dart';
+import 'packets.dart';
 
 /// What it takes to reach the same headband again without a scan: the SDK's sensor info minus the signal
 /// strength. Plain data, kept with the night, so a restarted app process can try it too.
@@ -122,6 +123,7 @@ class NightState {
     this.directPending = false,
     this.directOff = false,
     this.phoneBattery = const BatteryTrack(),
+    this.packets = const PacketCounts(),
   });
 
   final bool active;
@@ -147,6 +149,9 @@ class NightState {
   /// The phone battery's first and last reading tonight (the end-of-night drain line).
   final BatteryTrack phoneBattery;
 
+  /// Missing and repeated packet numbers tonight, over all runs.
+  final PacketCounts packets;
+
   NightState copyWith({
     bool? active,
     int? startMs,
@@ -159,6 +164,7 @@ class NightState {
     bool? directPending,
     bool? directOff,
     BatteryTrack? phoneBattery,
+    PacketCounts? packets,
   }) => NightState(
     active: active ?? this.active,
     startMs: startMs ?? this.startMs,
@@ -171,6 +177,7 @@ class NightState {
     directPending: directPending ?? this.directPending,
     directOff: directOff ?? this.directOff,
     phoneBattery: phoneBattery ?? this.phoneBattery,
+    packets: packets ?? this.packets,
   );
 
   Map<String, Object?> toJson() => {
@@ -189,6 +196,7 @@ class NightState {
     'directPending': directPending,
     'directOff': directOff,
     'phoneBattery': phoneBattery.toJson(),
+    'packets': packets.toJson(),
   };
 
   static NightState fromJson(Object? j) {
@@ -212,6 +220,7 @@ class NightState {
       directPending: j['directPending'] == true,
       directOff: j['directOff'] == true,
       phoneBattery: BatteryTrack.fromJson(j['phoneBattery']),
+      packets: PacketCounts.fromJson(j['packets']),
     );
   }
 }

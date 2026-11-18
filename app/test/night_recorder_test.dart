@@ -5,14 +5,18 @@ import 'package:eeg_tracker/recorder/battery.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/night_recorder.dart';
+import 'package:eeg_tracker/recorder/packets.dart';
 import 'package:eeg_tracker/recorder/status.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// A headband that sends a 5-sample batch every 10 ms while its signal runs.
 class FakeBand implements Headband {
-  FakeBand(this.label, {this.hangOn, this.rssi = -60, bool outOfRange = false}) : lost = outOfRange;
+  FakeBand(this.label, {this.hangOn, this.rssi = -60, bool outOfRange = false, this.packOf}) : lost = outOfRange;
 
   final String label;
+
+  /// Packet number of the i-th sample sent; default counts up and wraps at 2048 like the headband.
+  final int Function(int i)? packOf;
 
   /// An SDK call that never returns, to imitate the wedged SDK.
   final String? hangOn;
@@ -65,7 +69,12 @@ class FakeBand implements Headband {
       // Only batches someone receives count: one sent after the recorder unsubscribed is lost on a real
       // headband too, and counting it made the sample-count checks fail on a busy machine.
       if (!sending || !_signal.hasListener) return;
-      _signal.add([for (var i = 0; i < 5; i++) (pack: _pack++ % 2048, o1: 1e-6, o2: 2e-6, t3: 3e-6, t4: 4e-6)]);
+      int next() {
+        final i = _pack++;
+        return packOf == null ? i % 2048 : packOf!(i);
+      }
+
+      _signal.add([for (var i = 0; i < 5; i++) (pack: next(), o1: 1e-6, o2: 2e-6, t3: 3e-6, t4: 4e-6)]);
       emitted += 5;
     });
   }
@@ -543,5 +552,48 @@ void main() {
     final log = files('log').single.readAsStringSync();
     expect(log, contains('phone battery summary: no readings'));
     expect(log, contains('total samples ${broken.emitted}')); // recording went on
+  });
+
+  test('packet accounting: counted over the night, logged every 10 minutes, at run end and night end', () async {
+    // 20 samples in order, a gap of 3 numbers, 20 more, a repeated number, then in order.
+    int pack(int i) => i < 20 ? i : (i < 40 ? i + 3 : i + 2);
+    final t0 = DateTime(2026, 11, 18, 23);
+    final sw = Stopwatch()..start();
+    final r = recorder(
+      FakeFinder([FakeBand('a', packOf: pack)]),
+      clock: () => t0.add(Duration(milliseconds: sw.elapsedMilliseconds * 3600)), // 0.4 s is 24 minutes
+    );
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await r.stop();
+    await running;
+
+    final log = files('log').single.readAsStringSync();
+    expect(RegExp('packets: ').allMatches(log).length, greaterThanOrEqualTo(3), reason: log);
+    expect(log, contains('missing 3 in 1 gaps, repeated 1, longest gap 3 samples'));
+    expect(log, contains('end of night, packets: '));
+    expect(store.state.packets.missing, 3);
+    expect(store.state.packets.repeated, 1);
+    expect(store.state.packets.longestGap, 3);
+  });
+
+  test('packet accounting: a restarted process continues the night\'s counts; a new run is not compared', () async {
+    store.state = const NightState(
+      active: true,
+      startMs: 1000,
+      runs: 1,
+      contactTried: true,
+      band: BandId(name: 'BrainBit a', address: 'AA:BB', serial: '123', family: 'leBrainBitBlack', model: 1),
+      packets: PacketCounts(samples: 1000, missing: 5, gaps: 2, repeated: 1, longestGap: 4),
+    );
+    // The headband restarts its counter at 1500 on the new connection: no gap against the earlier run.
+    final r = recorder(FakeFinder([], direct: [FakeBand('a', packOf: (i) => 1500 + i)]));
+    final running = r.run(restartedBySystem: true);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await r.stop();
+    await running;
+    expect(store.state.packets.missing, 5);
+    expect(store.state.packets.longestGap, 4);
+    expect(store.state.packets.samples, greaterThan(1000));
   });
 }
