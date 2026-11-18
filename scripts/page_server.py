@@ -7,18 +7,26 @@ re-check, and its page server goes with it for 20-40 s. This small server never 
 itself (scripts/live_page.html at "/", anything in scripts/web/ by file name) and passes every other request
 (state, stream, marker, contact, ...) to the recorder. While the recorder is away, /state answers
 {"status": "reconnecting"} and other requests get 503, so the pages show "reconnecting" and carry on by themselves.
-Standard library only.
+The results (GET/POST /sleep-report and /morning-report, GET /hypnogram.png) it answers itself through
+night_files.py, like the recorder does, so the Sleep page works while the headband is off or charging, which is
+when the recorder has no page server at all. Standard library only.
 """
 import argparse, http.client, json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
+
+try:
+    import night_files as nf  # scripts/night_files.py: the results jobs (standard library only)
+except Exception:
+    nf = None
 
 HERE = Path(__file__).parent
+REPORTS = ("sleep-report", "morning-report", "hypnogram.png")
 KINDS = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".png": "image/png"}
 
 
-def make_handler(rec_host: str, rec_port: int):
+def make_handler(rec_host: str, rec_port: int, rec_dir: Path = HERE.parent / "_local" / "recordings"):
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -40,6 +48,33 @@ def make_handler(rec_host: str, rec_port: int):
                 if Path(name).suffix not in KINDS or not f.is_file():
                     return False
             self._send(200, f.read_bytes(), KINDS[f.suffix]); return True
+
+        def _report(self, method: str) -> bool:
+            """The results routes, answered here even while the recorder is away; any failure becomes {"error"}."""
+            u = urlsplit(self.path)
+            name = u.path.rstrip("/").rsplit("/", 1)[-1]
+            if name not in REPORTS:
+                return False
+            if method == "POST":
+                self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 10_000))
+            nights, export = rec_dir.resolve().parent / "nights", rec_dir.resolve().parent / "export"
+            try:
+                if nf is None:
+                    raise RuntimeError("scripts/night_files.py did not load")
+                if name == "hypnogram.png":
+                    png = nf.hypnogram(nights, parse_qs(u.query).get("date", [None])[0])
+                    if png is None:
+                        self._send(404, b"no chart", "text/plain"); return True
+                    self._send(200, png.read_bytes(), "image/png"); return True
+                sleep = name == "sleep-report"
+                if method == "POST":
+                    body = (nf.start_job if sleep else nf.start_morning)(rec_dir, nights, export)
+                else:
+                    body = nf.job_state(rec_dir, nights) if sleep else nf.morning_state(rec_dir, nights)
+            except Exception as e:
+                body = {"error": f"{type(e).__name__}: {e}"}
+            self._send(200, json.dumps(body).encode(), "application/json")
+            return True
 
         def _away(self) -> None:
             if urlsplit(self.path).path.rstrip("/").endswith("state"):
@@ -80,11 +115,12 @@ def make_handler(rec_host: str, rec_port: int):
                 c.close()
 
         def do_GET(self) -> None:
-            if not self._page():
+            if not self._page() and not self._report("GET"):
                 self._forward("GET")
 
         def do_POST(self) -> None:
-            self._forward("POST")
+            if not self._report("POST"):
+                self._forward("POST")
 
     return H
 
@@ -93,9 +129,11 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8770)
     ap.add_argument("--recorder", default="http://127.0.0.1:8765")
+    ap.add_argument("--recordings", type=Path, default=HERE.parent / "_local" / "recordings",
+                    help="the recorder's --out; the results live in the nights folder next to it")
     a = ap.parse_args()
     u = urlsplit(a.recorder)
-    srv = ThreadingHTTPServer(("0.0.0.0", a.port), make_handler(u.hostname or "127.0.0.1", u.port or 80))
+    srv = ThreadingHTTPServer(("0.0.0.0", a.port), make_handler(u.hostname or "127.0.0.1", u.port or 80, a.recordings))
     srv.daemon_threads = True
     print(f"pages on port {a.port}, recorder at {a.recorder}", flush=True)
     srv.serve_forever()

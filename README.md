@@ -77,4 +77,5 @@ MIT licence.
 The recorder restarts itself after every Bluetooth drop and for every contact re-check, and its pages go away for
 20-40 s each time. `python3 scripts/page_server.py` (port 8770) never restarts: it serves the pages itself and
 passes live data through from the recorder, answering "reconnecting" while the recorder is away. Use
-`http://<laptop>:8770/` instead of port 8765.
+`http://<laptop>:8770/` instead of port 8765. It answers the Sleep page and the morning result itself, so they
+work while the headband is off or charging (the recorder has no page server then).

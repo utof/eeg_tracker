@@ -271,3 +271,39 @@ def test_long_nights_go_through_the_model_in_pieces():
         assert 0 <= w0 <= c0 < c1 <= w1 <= n
         assert w1 - w0 <= score_sleep.PIECE_EP + 2 * score_sleep.CONTEXT_EP
         assert c0 - w0 == min(c0, score_sleep.CONTEXT_EP) and w1 - c1 == min(n - c1, score_sleep.CONTEXT_EP)
+
+
+def test_page_server_answers_results_while_the_recorder_is_away(tmp_path, fake_scorer):
+    """Headband off after waking: the recorder has no page server, the always-on one still serves the results."""
+    import socket
+    import threading
+    import urllib.error
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    import page_server
+
+    rec, nights, export, args = dirs(tmp_path)
+    write_rec(rec, datetime.now().replace(microsecond=0) - timedelta(minutes=30), 12)
+    with socket.socket() as s:  # a port nobody listens on: the recorder is away
+        s.bind(("127.0.0.1", 0)); away = s.getsockname()[1]
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), page_server.make_handler("127.0.0.1", away, rec))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}/"
+    get = lambda p: urllib.request.urlopen(base + p, timeout=10)  # noqa: E731
+    try:
+        assert json.loads(get("state").read())["status"] == "reconnecting"
+        st = json.loads(get("sleep-report").read())
+        assert st["stale"] and not st["running"] and st["report"] is None
+        assert json.loads(get("morning-report").read())["report"] is None
+        with pytest.raises(urllib.error.HTTPError) as no_chart:
+            get("hypnogram.png")
+        assert no_chart.value.code == 404
+        assert sr.main(args) == 0
+        st = json.loads(get("sleep-report").read())
+        assert not st["stale"] and st["report"]["total"]["asleep_min"] == 10
+        png = get(f"hypnogram.png?date={st['report']['night_of']}")
+        assert png.headers["Content-Type"] == "image/png" and png.read()[:4] == b"\x89PNG"
+        assert b"Sleep" in get("sleep.html").read()
+    finally:
+        srv.shutdown()
