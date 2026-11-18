@@ -371,6 +371,14 @@ class NightRecorder {
     var lost = false;
     bool isLost() => lost;
     final rangeSub = band.rangeChanges.listen((inRange) => lost = lost || !inRange);
+    // Our own connection writes its drops, reconnects and lost packets into the run's log, and says when the
+    // headband's packet numbers start again inside the run (BrainBit's SDK has no such notes).
+    final notesSub = band is BandNotes
+        ? (band as BandNotes).notes.listen((n) {
+            if (n.newStream) _packets.startRun();
+            if (n.line != null && !w.isClosed) w.log(n.line!);
+          })
+        : null;
     StreamSubscription<List<Sample>>? sigSub;
     var end = _End.failed;
     try {
@@ -409,6 +417,7 @@ class NightRecorder {
     } on SdkStuck catch (e) {
       await sigSub?.cancel();
       await rangeSub.cancel();
+      await notesSub?.cancel();
       await _stuck(e, w);
       return _End.stuck;
     } catch (e) {
@@ -417,6 +426,7 @@ class NightRecorder {
     }
     await sigSub?.cancel();
     await rangeSub.cancel();
+    await notesSub?.cancel();
     return _finish(band, w, end, isLost);
   }
 
