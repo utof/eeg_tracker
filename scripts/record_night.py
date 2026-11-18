@@ -111,10 +111,24 @@ def main() -> None:
             log(f"start failed ({attempt + 1}/10): {e}"); time.sleep(3)
     log("recording started, 250 Hz, Ctrl+C to stop")
 
-    t0 = time.time(); last_report = t0; last_total = 0; stalled = 0; lost = [False]
+    t0 = time.time(); last_report = t0; last_total = 0; stalled = 0; lost = [False]; beat = [t0]
+
+    def watchdog() -> None:  # an SDK call can block forever (seen 2026-11-18 03:04 in connect after a drop)
+        while True:
+            time.sleep(5)
+            if time.time() - beat[0] > 60:
+                with lock:
+                    chunk, ichunk = b"".join(buf), b"".join(idx); buf.clear(); idx.clear()
+                try:
+                    data.write(chunk); idxf.write(ichunk)
+                    data.flush(); os.fsync(data.fileno()); idxf.flush(); os.fsync(idxf.fileno())
+                    log("main loop stuck in an SDK call for 60 s; saved, exiting so record_night.sh starts a fresh one")
+                finally:
+                    os._exit(3)
+    threading.Thread(target=watchdog, daemon=True).start()
     try:
         while not a.seconds or time.time() - t0 < a.seconds:
-            time.sleep(1)
+            time.sleep(1); beat[0] = time.time()
             if want_contact.is_set():
                 want_contact.clear(); live["status"] = "checking contact"
                 n0 = resist_n[0]
