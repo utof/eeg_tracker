@@ -48,6 +48,7 @@ def main() -> None:
     data = open(out / f"{stamp}.f32", "ab")
     logf = open(out / f"{stamp}.log", "a")
     idxf = open(out / f"{stamp}.idx", "ab")
+    markf = open(out / f"{stamp}.markers.jsonl", "a")  # page markers: {"t": unix time, "i": sample index, "text"}
     log(f"connected {info.Name} {info.Address} serial {info.SerialNumber} battery {s.batt_power}% signal {info.RSSI} dBm")
 
     last = {}
@@ -73,7 +74,17 @@ def main() -> None:
             self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body)
 
         def do_POST(self) -> None:
-            want_contact.set(); self._send(b"ok", "text/plain")
+            name = self.path.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+            if name == "contact":
+                want_contact.set(); self._send(b"ok", "text/plain")
+            elif name == "marker":  # body: plain text, e.g. "eyes closed start"
+                n = min(int(self.headers.get("Content-Length") or 0), 2000)
+                text = self.rfile.read(n).decode("utf-8", "replace").strip()[:200] or "marker"
+                with lock:
+                    markf.write(json.dumps(dict(t=round(time.time(), 3), i=seen[0], text=text)) + "\n"); markf.flush()
+                self._send(b"ok", "text/plain")
+            else:
+                self.send_error(404)
 
         def do_GET(self) -> None:
             if self.path.rstrip("/").endswith("state"):
@@ -87,8 +98,14 @@ def main() -> None:
                 body = dict(status=live["status"], battery=live.get("battery", "?"), minutes=round(total / FS / 60, 1),
                             age=round(time.time() - live["t"], 1), names=NAMES, fs=FS, contact=contact, data=data)
                 self._send(json.dumps(body).encode(), "application/json")
-            else:
-                self._send((Path(__file__).parent / "live_page.html").read_bytes(), "text/html; charset=utf-8")
+            else:  # pages in scripts/web/ by file name; anything else gets the live check page
+                name = self.path.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+                kind = {".html": "text/html", ".js": "text/javascript", ".css": "text/css"}.get(Path(name).suffix)
+                f = Path(__file__).parent / "web" / name
+                if kind and f.is_file():
+                    self._send(f.read_bytes(), kind + "; charset=utf-8")
+                else:
+                    self._send((Path(__file__).parent / "live_page.html").read_bytes(), "text/html; charset=utf-8")
 
     if a.port:
         srv = ThreadingHTTPServer(("0.0.0.0", a.port), Page)
@@ -189,7 +206,7 @@ def main() -> None:
                 log(f"stop failed: {e}")
             try: s.disconnect()
             except Exception: pass
-        logf.close()
+        markf.close(); logf.close()
 
 
 if __name__ == "__main__":

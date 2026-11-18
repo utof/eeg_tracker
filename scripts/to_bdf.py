@@ -8,7 +8,7 @@ time order. Missing time, inside a file or between files, is filled by holding t
 The start is moved back to a whole second (pyedflib 0.1.42 mishandles sub-second starts) and the end is padded
 to a whole second with the edge value ("BAD_padding"). Review: docs/research/bdf-plus-writing.md section 7.
 """
-import argparse
+import argparse, json
 from datetime import datetime
 from pathlib import Path
 
@@ -67,6 +67,12 @@ def join(paths: list[Path]) -> tuple[datetime, np.ndarray, list[tuple[float, flo
         elif want < n - FS:  # overlap of over a second means the clocks disagree: keep data, say so
             notes.append((n / FS, -1, f"overlap {(n - want) / FS:.1f}s"))
         parts.append(x); n += len(x)
+    for p in paths:  # page markers (scripts/web/ pages POST /marker) become annotations at their clock time
+        mf = p.with_suffix(".markers.jsonl")
+        for line in (mf.read_text().splitlines() if mf.exists() else []):
+            try: m = json.loads(line)
+            except json.JSONDecodeError: continue
+            notes.append((max(0.0, round(m["t"] - start.timestamp(), 3)), -1, str(m.get("text", "marker"))))
     pad = (-n) % FS
     if pad:
         parts.append(np.repeat(parts[-1][-1][None, :], pad, axis=0))

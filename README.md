@@ -7,6 +7,7 @@ a build-it-yourself ADS1299 helmet ([hardware and guides](https://github.com/uto
 **Status: day one.** So far: a decisions log, a laptop recorder for the BrainBit and first sleep scoring. Not a medical device.
 
 - [DECISIONS.md](DECISIONS.md): every choice made so far, its alternatives, and what would change it.
+- [ROADMAP.md](ROADMAP.md): the owner's wishes, what each honestly becomes, and the status of every feature.
 - [docs/data-format.md](docs/data-format.md): raw recordings, night files and the events other apps can read.
 - `scripts/record_night.sh`: records a BrainBit on Linux until Ctrl+C (needs BrainBit's `libneurosdk2.so`
   and libc++ in `~/.local/lib/neurosdk2`). Live check page on port 8765.
@@ -19,6 +20,10 @@ uv run --project analysis python scripts/to_bdf.py _local/recordings/2026-11-18-
 uv run --project analysis python scripts/score_sleep.py night.bdf   # night.sleep.json + night.hypnogram.png
 python3 scripts/export_events.py night.sleep.json    # eeg_sleep_night event for utof_tracker
 ```
+
+No headband? `PYTHONPATH=tests/fake_neurosdk python3 scripts/record_night.py --port 8765` runs the recorder on a fake
+signal (alpha that switches every minute, jaw bursts, blinks). Pages in `scripts/web/` are served by name; they can
+`POST /marker` with a text body to mark a moment (it becomes a BDF annotation).
 
 BrainBit's NeuroSDK2 core is a closed binary from BrainBit; it is not part of this repository.
 
