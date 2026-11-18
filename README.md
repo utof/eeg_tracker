@@ -61,3 +61,10 @@ bundle the same files. After editing a note, run `python3 scripts/evidence_to_js
 BrainBit's NeuroSDK2 core is a closed binary from BrainBit; it is not part of this repository.
 
 MIT licence.
+
+### Pages that stay up while the recorder reconnects
+
+The recorder restarts itself after every Bluetooth drop and for every contact re-check, and its pages go away for
+20-40 s each time. `python3 scripts/page_server.py` (port 8770) never restarts: it serves the pages itself and
+passes live data through from the recorder, answering "reconnecting" while the recorder is away. Use
+`http://<laptop>:8770/` instead of port 8765.
