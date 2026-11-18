@@ -73,6 +73,29 @@ def test_a_fresh_import_puts_raw_nights_with_the_laptops_and_the_rest_under_phon
     assert not list(dest.rglob("*.importing"))
 
 
+def test_self_experiments_arrive_whole_and_their_hidden_order_is_never_printed(tmp_path: Path) -> None:
+    exp_files = {
+        "experiments/2026-11-19-143000/plan.json": b'{"plan": {"version": 1}, "sha256": "00"}',
+        "experiments/2026-11-19-143000/sealed.json": b'{"salt": "secret-salt", "allocation": "1001"}',
+        "experiments/2026-11-19-143000/progress.json": b'{"kept": {"2026-11-20": true}}',
+        "experiments/2026-11-19-143000/events.jsonl": b'{"event": "plan frozen"}\n',
+    }
+    exp, dest = make_export(tmp_path / "eeg-export", dict(FILES, **exp_files)), tmp_path / "_local"
+    code, text = run(exp, dest)
+    assert code == 0, text
+    assert "12 new" in text and "9 into _local/phone" in text
+    for p, b in exp_files.items():
+        assert (dest / "phone" / p).read_bytes() == b
+    assert "secret-salt" not in text and "1001" not in text
+    # an answer added on the phone later replaces the laptop's copy and keeps the old one
+    newer = dict(FILES, **exp_files)
+    newer["experiments/2026-11-19-143000/progress.json"] = b'{"kept": {"2026-11-20": true, "2026-11-21": false}}'
+    code, text = run(make_export(tmp_path / "later", newer, modified=T0 + 86_400_000), dest)
+    assert code == 0, text
+    assert b"2026-11-21" in (dest / "phone" / "experiments" / "2026-11-19-143000" / "progress.json").read_bytes()
+    assert len(list((dest / "phone" / "replaced").rglob("progress.json"))) == 1
+
+
 def test_importing_the_same_folder_again_copies_nothing(tmp_path: Path) -> None:
     exp, dest = make_export(tmp_path / "eeg-export"), tmp_path / "_local"
     run(exp, dest)

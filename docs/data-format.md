@@ -226,7 +226,7 @@ folder). It never changes or deletes anything in the app's folder, and never run
 
 - The layout is the app's own: `recordings/` (raw nights, the recorder's format above), `nights/<date>.report.json`,
   `mornings/`, `meditations/`, `alpha-theta/` (sessions and `journal.json`), `replay-check/<kind>/` and
-  `settings.json`, `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers, `prompts/`), `sound-states/`, and any folder
+  `settings.json`, `experiments/<made at>/` (self-experiments, below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers, `prompts/`), `sound-states/`, and any folder
   a later feature adds. Left on the phone: `models/` (copies of the app's model assets), `export/` (the export's own
   index), half-written `*.tmp` files, the scorer's `*.scoring` markers, and the two files Android and a plugin keep
   there for themselves (`profileInstalled`, `flutter_callback_cache.json`; DECISIONS row 160).
@@ -249,6 +249,22 @@ folder). It never changes or deletes anything in the app's folder, and never run
   copied whole.
 - The manifest keeps listing a file after the owner deletes it from the export folder (to free space after an
   import): the laptop then checks it has that file with the same SHA-256.
+
+### Self-experiments (`experiments/<made at>/`)
+
+One folder per experiment (DECISIONS rows 200-209), named by when it was set up (`2026-11-19-143000`). The first two
+files are written once, before day 1, and never change; please do not open `sealed.json` before the app shows the
+answer: it holds the days ahead.
+
+| File | Content |
+|---|---|
+| `sealed.json` | `salt` (the random secret, 64 hex characters) and `allocation` (one character per day from day 1: `1` = a "do" day, `0` = a "don't" day). The order can be drawn again from the salt alone |
+| `plan.json` | `plan` and `sha256` (SHA-256 of `plan` as JSON with sorted keys and no spaces). `plan`: `version` 1, `id`, `created`, `question` (`preset` id or `custom`, `do`, `dont`: the two lines), `primary` (`id` and `label` of the one tested number, which `day` it is read on, how it is `compared`, `matters`: the smallest difference that matters), `start` (day 1, `YYYY-MM-DD`; a day runs 04:00 to 04:00), `days`, `unlocks` (the day the answer opens), `design`, `blockSize`, `analysis`, `words`, `secondary`, `honesty` (the rules in words) and `allocationSha256` (SHA-256 of `sealed.json`'s content in the same canonical form) |
+| `progress.json` | `kept` (day -> `true` kept, `false` not kept; no entry = not answered), `early_looks` (each `at`, `day`, `daysDone`), `stopped` (the same, when the owner stopped it) |
+| `events.jsonl` | one line per event: `plan frozen` (with the plan's hash), `answer` (`day`, `kept`), `early look`, `stopped` |
+
+The tested number of day D is the trends' per-day number of day D+1 (from `nights/` and `mornings/`); the app works
+the answer out again from those files each time, so nothing else is stored.
 
 On the laptop, `scripts/import_phone.py <folder>` (standard library only) checks the manifest, copies
 `recordings/<stamp>.*` into `_local/recordings/` beside the laptop's own recordings and everything else into

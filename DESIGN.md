@@ -96,6 +96,8 @@ at the top; trends is a day log (today's entry, sleep pressure, the last 14 days
 Between nights a "Your data" section (after Headband) says what the app keeps and when it last left the phone, with
 Export data and Export a night. Export data is its own page: status word, what is new as two readouts, the copy
 strip, the route (this phone, the folder, the laptop) as numbered log rows, Export everything, and Export new pinned.
+Self-experiments (from Trends) is a page per experiment: status, today's task, "did you keep to it?", the day bill,
+the answer's place, Kept honest; its setup is a page of choices with Start tomorrow pinned.
 
 ## Elevation & Depth
 
@@ -154,6 +156,12 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
 - **Copy strip** (Export data): sixteen of the watch strip's own cells (track, 6 dp, a wider gap every four), filling
   from the left with `saved` by the share of the phone's data that has reached the export folder; while copying,
   the cell in progress is outlined green like the half hour in progress. A muted sentence under it gives both sizes.
+- **Day bill** (self-experiments): one row per week, seven of the watch strip's own cells under weekday letters:
+  a "do" day filled `saved`, a "don't" day outlined in ink-muted on `track`, a day not kept keeps its cell and gets
+  a cross, today outlined green like the half hour in progress, days ahead faint `rule` outlines (sealed). The
+  legend says all of it in words. The answer has its place on the page from day 1: "Sealed until <date>", later
+  one sentence in titleLarge with its range and verdict, then log rows; a look before the end is an amber warning
+  line with its icon.
 - **Buttons:** one filled button per screen: Start night on the night screen (Lights off while a night records), Start on the meditation screen, and on
   each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before
   stopping, except in alpha-theta, where stopping must be instant. Session faces (dream catcher, sound for states)

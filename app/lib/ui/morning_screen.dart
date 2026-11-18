@@ -8,6 +8,8 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../morning/controller.dart';
 import '../morning/store.dart';
 import '../phone.dart';
+import 'experiments_screen.dart' show currentExperiment;
+import 'experiments_view.dart' show experimentLine;
 import '../recorder/brainbit.dart';
 import '../recorder/contact.dart';
 import '../sound/check_in_sound.dart';
@@ -61,7 +63,7 @@ class _MorningScreenState extends State<MorningScreen> {
   final BrainBitFinder _finder = BrainBitFinder();
   late final MorningController _c = MorningController(finder: _finder, sound: SoloudCheckInSound.new);
   String? _recordings;
-  String? _doneAt;
+  String? _doneAt, _experiment;
   bool _nightRunning = false;
   bool _screenOn = false;
   MorningStage _lastStage = MorningStage.intro;
@@ -82,6 +84,7 @@ class _MorningScreenState extends State<MorningScreen> {
         final store = MorningStore(morningsDirFor(rec));
         _c.store = store;
         _doneAt = checkedInTodayAt(store.list(), DateTime.now());
+        _experiment = experimentLine(currentExperiment(rec, DateTime.now()));
       }
     } catch (_) {
       // without the folder the check-in still runs; it is just not saved
@@ -186,6 +189,7 @@ class _MorningScreenState extends State<MorningScreen> {
       stage: c.stage,
       message: c.message,
       soundNote: c.soundNote,
+      experimentLine: _experiment,
       saveNote: c.saveNote ?? (c.store == null && c.stage == MorningStage.result ? 'This check-in was not saved.' : null),
       contact: [
         if (grades != null)

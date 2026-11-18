@@ -66,7 +66,7 @@ Update the status column whenever something lands.
 | 11 | utof_tracker importer for `eeg_*` events | waits for the owner's OK | - |
 | 12 | Calibration for any electrode positions (helmet) | after the helmet exists | DECISIONS row 4 |
 | 13 | DIY board driver (E9 frames) in the app | after the helmet exists | DECISIONS row 5 |
-| 14 | Statistics engine + random self-experiments | after a month of data | DECISIONS row 12 |
+| 14 | Statistics engine + random self-experiments | **self-experiments built in the phone app** (2026-11-19, branch `feat/app-self-experiments`; not yet run on a phone): a question, one number, 4-8 weeks of random days in blocks with every weekday mixed, the plan and the order's fingerprint frozen before day 1, today's task each day, "did you keep to it?", the answer sealed until the planned end, then one sentence with a range from a randomisation test, labelled "tested" apart from "seen together". The laptop statistics engine (observational screens, Bayesian models) still waits for a month of data | DECISIONS rows 12, 200-209; app/README.md "Self-experiments"; `docs/evidence/self-experiments.md` |
 | 15 | Build guides for the helmet | in `eeg_ads1299_lab` | other repo |
 | 16 | Eyes open/closed test (high beep open, low beep closed) | working | `scripts/web/eyes.html` |
 | 17 | Sound for states: binaural, isochronic, pulsed noise; presets per state; markers for checking | in the phone app (2026-11-18, branch `feat/app-sound-states`; not yet heard on the phone): calm beds as the default (rain, pink, brown, ocean), beats as optional extras, "no beat" at the same loudness, one -23 LUFS level, safe tone pitches, Listen to set the volume, works with or without the headband; each session saved with its sound and your 1-5 answer. The laptop page stays as a bench | `app/lib/states/`, `app/lib/sound/state_synth.dart`, `scripts/web/beats.html` |
@@ -199,7 +199,7 @@ Anyone, including the assistant, adds ideas here. When one is started, move it i
 | Lucid dream cues | soft sound cues during dream sleep (REM) to become aware you are dreaming | evidence weak; fun |
 | Hands-free controls | a double jaw clench or a look left-right as a switch: pause sound, mark a moment | jaw and eye movements are what these electrodes see best |
 | Reaction-time check | a 1-minute daily tap test next to the EEG, an objective alertness number | now part of "Sharp-hours log" below |
-| Self-experiments | the app picks random days (e.g. no coffee after 14:00) for a few weeks and reports the effect with a range | the only route to "this causes that" |
+| Self-experiments | the app picks random days (e.g. no coffee after 14:00) for a few weeks and reports the effect with a range | the only route to "this causes that". **Built 2026-11-19** (status row 14) |
 | Helmet-only | frontal brain asymmetry, a brain-typing speller (P300), flicker games (SSVEP) | need electrodes the headband lacks |
 
 ### Proposals from research round 2 (the assistant's; not approved yet)
