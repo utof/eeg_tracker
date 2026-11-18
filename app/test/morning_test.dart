@@ -15,7 +15,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// Streams the demo signal far faster than real time; the eyes follow the check-in's phase.
 class EyesBand implements Headband {
-  EyesBand(this.demo, this.eyes);
+  EyesBand(this.demo, this.eyes, {this.resists = true});
+  final bool resists;
   final DemoSignal demo;
   final String Function() eyes;
   int pack = 0;
@@ -70,6 +71,7 @@ class EyesBand implements Headband {
   @override
   Future<void> startResist() async {
     calls.add('startResist');
+    if (!resists) return;
     Timer(const Duration(milliseconds: 1), () => _resist.add({'O1': 4e5, 'O2': 6e5, 'T3': 1.2e6, 'T4': double.infinity}));
   }
 
@@ -227,5 +229,17 @@ void main() {
     await c.start();
     expect(c.stage, MorningStage.failed);
     expect(c.message, contains('not found'));
+  });
+
+  test('no contact reading: the signal decides the words and the check-in can start', () async {
+    late MorningController c;
+    final band = EyesBand(DemoSignal(), () => c.stage == MorningStage.closed ? 'closed' : 'open', resists: false);
+    c = MorningController(finder: OneFinder(band), store: MorningStore(tmp), timing: fast);
+    await c.start();
+    expect(c.contact, isEmpty);
+    await until(c, () => c.grades['O1']!.word != 'not touching');
+    c.begin();
+    expect(c.stage, MorningStage.closed);
+    await c.stop();
   });
 }

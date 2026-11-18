@@ -188,7 +188,7 @@ class _MorningScreenState extends State<MorningScreen> {
       soundNote: c.soundNote,
       saveNote: c.saveNote ?? (c.store == null && c.stage == MorningStage.result ? 'This check-in was not saved.' : null),
       contact: [
-        if (grades != null && c.contact.isNotEmpty)
+        if (grades != null)
           for (final ch in channelNames)
             (
               channel: ch,

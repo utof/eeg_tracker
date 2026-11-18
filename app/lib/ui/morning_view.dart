@@ -100,7 +100,7 @@ class MorningView extends StatelessWidget {
       )),
       MorningStage.connecting || MorningStage.contact => _page(context, _contact(context), _action(
         FilledButton.icon(
-          onPressed: m.stage == MorningStage.contact && !m.rechecking && m.contact.isNotEmpty ? onBegin : null,
+          onPressed: m.stage == MorningStage.contact && !m.rechecking ? onBegin : null,
           icon: const Icon(Icons.play_arrow_rounded),
           label: const Text('Start: eyes closed'),
         ),

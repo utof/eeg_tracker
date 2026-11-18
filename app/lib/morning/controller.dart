@@ -145,8 +145,9 @@ class MorningController extends ChangeNotifier {
     final n = (gradeWindowS * morningFs).round();
     return {
       for (final c in channelNames)
+        // a channel the contact check did not report is unknown, not held against it: its signal decides
         c: gradeChannel(
-          contact[c],
+          contact.containsKey(c) ? contact[c] : 0,
           _uv[c]!.isEmpty ? null : _uv[c]!.sublist(math.max(0, _uv[c]!.length - n)),
         ),
     };
