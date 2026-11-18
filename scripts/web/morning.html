@@ -1,0 +1,71 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Morning check-in</title>
+<style>
+:root{color-scheme:dark}
+body{margin:0;background:#101214;color:#e8e6e1;font:18px/1.45 system-ui,sans-serif;transition:background 1.5s}
+body.dim{background:#000}
+main{max-width:640px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:24px;font-weight:600;margin:0 0 8px}
+p{margin:8px 0}.muted{color:#9aa0a6;font-size:15px}
+button{font:inherit;padding:12px 20px;border-radius:12px;border:1px solid #3a4046;background:#1d2125;color:inherit;cursor:pointer}
+button.main{background:#2a5d43;border-color:#3d7a5a}button:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+.ch{display:grid;grid-template-columns:56px 1fr auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid #24282c}
+.name{font-weight:600}.where{color:#9aa0a6;font-size:13px}
+.badge{display:inline-block;padding:2px 10px;border-radius:99px;font-size:14px;font-weight:600;color:#101214}
+.good{background:#7fd1a0}.fair{background:#e6c35c}.bad{background:#e8836f}
+#count{font-size:64px;font-weight:300;text-align:center;margin:32px 0 8px;font-variant-numeric:tabular-nums;color:#5a6066}
+#dot{width:14px;height:14px;border-radius:50%;background:#e8e6e1;margin:60px auto}
+.scale{display:flex;flex-direction:column;gap:6px;margin:8px 0 18px}
+.scale button{text-align:left;padding:10px 14px;display:flex;gap:12px}
+.scale button b{min-width:1.2em}.scale button.on{background:#2a5d43;border-color:#7fd1a0}
+.hidden{display:none}
+#cue{font-size:34px;text-align:center;margin:48px 0 12px;min-height:1.4em}
+</style>
+<main>
+  <section id="intro">
+    <h1>Morning check-in</h1>
+    <p>About 5 minutes: a contact check, 2 minutes with your eyes closed, 2 minutes looking at a dot, then three quick ratings.</p>
+    <p class="muted">Sit comfortably, headband on, in a quiet place. Sound on: soft tones tell you when to open your eyes.
+      Results are compared only with your own earlier mornings.</p>
+    <div class="row"><button class="main" id="go">Check contact</button><button id="setup">Setup test (what can it see?)</button></div>
+  </section>
+
+  <section id="contact" class="hidden">
+    <h1>Contact</h1>
+    <p id="cstat" class="muted">Checking contact (about 7 seconds)…</p>
+    <div id="chs"></div>
+    <p class="muted" id="chint">Red: part the hair under that electrode, press it to the skin, sit still. The back two (O1, O2) matter most here.</p>
+    <div class="row"><button id="recheck">Check again</button><button class="main" id="begin" disabled>Start</button></div>
+  </section>
+
+  <section id="phase" class="hidden">
+    <h1 id="ptitle"></h1><p id="psay"></p>
+    <div id="count"></div><div id="dot" class="hidden"></div>
+    <div class="row" style="justify-content:center"><button id="stop">Stop</button></div>
+  </section>
+
+  <section id="rate" class="hidden">
+    <h1>How do you feel right now?</h1>
+    <p class="muted">Sleepiness (last 5 minutes)</p><div class="scale" id="kss"></div>
+    <p class="muted">Mood</p><div class="scale" id="mood"></div>
+    <p class="muted">Tension</p><div class="scale" id="tension"></div>
+    <div class="row"><button class="main" id="save" disabled>Save</button></div>
+  </section>
+
+  <section id="setupsec" class="hidden">
+    <h1>Setup test</h1>
+    <p class="muted">About 2 minutes: 20 blinks, 10 glances, 5 jaw clenches, each on a tone. It shows what these electrodes can pick up.</p>
+    <div id="cue"></div><div id="dot2" style="width:14px;height:14px;border-radius:50%;background:#e8e6e1;margin:24px auto"></div>
+    <div class="row" style="justify-content:center"><button id="stop2">Stop</button></div>
+  </section>
+
+  <section id="done" class="hidden">
+    <h1 id="dtitle">Saved</h1>
+    <p id="dsay">Thank you. To see how this morning compares with your earlier ones, run on the laptop:</p>
+    <pre class="muted" style="white-space:pre-wrap">uv run --project analysis python scripts/morning_check.py _local/recordings</pre>
+    <div class="row"><button onclick="location.reload()">Back to start</button></div>
+  </section>
+  <p id="err" class="muted"></p>
+</main>
+<script type="module" src="morning.js"></script>
