@@ -25,22 +25,22 @@ select{font:inherit;font-size:15px;background:#1d2125;color:inherit;border:1px s
 <a href="/" style="display:inline-block;margin:0 0 10px;color:#8ab4f8;text-decoration:none;font-size:14px">← Headband check</a>
 
 <h1>Brain sound</h1>
-<p class="sub">Rain and a low drone. Close your eyes and settle: as the alpha rhythm at the back of your head rises, the rain softens and the drone warms. Hold it about 3 s and a bell rings. A tight jaw pauses the bells.</p>
+<p class="sub">Rain and a low drone. Close your eyes and settle. When the alpha rhythm at the back of your head rises above your usual eyes-closed level, the rain softens and the drone warms; stay there a few seconds and a bell rings. You don't need to make it happen: just notice what you feel when the rain softens. A tight jaw or a blink pauses it; if you start drifting off, the sound gets a little brighter.</p>
 
 <div id="say">Press start. Headphones, low volume.</div>
 <div id="why"></div>
 
 <div class="row">
-  <button class="main" id="go">Start (60 s calibration)</button>
+  <button class="main" id="go">Start (90 s quiet calibration)</button>
   <button id="go2">Start without calibration</button>
   <button id="stop" disabled>Stop</button>
 </div>
 <div class="row">
-  <label><input type="checkbox" id="light"> Light sound (for phones: fewer dropouts)</label>
+  <label>Mode <select id="mode"><option value="training">training: fast sound (wired headphones or speaker)</option><option value="relax">relax: smoother sound, rarer bells (Bluetooth is fine)</option></select></label>
   <label>Signal <select id="src"><option value="live">headband (recorder on this laptop)</option><option value="demo">demo (built-in fake signal)</option></select></label>
 </div>
 <div class="row" id="demo">
-  <label>Demo eyes <select id="eyes"><option value="">auto (switch every minute)</option><option value="open">open</option><option value="closed">closed</option></select></label>
+  <label>Demo eyes <select id="eyes"><option value="">auto (switch every minute)</option><option value="open">open</option><option value="closed">closed</option><option value="drowsy">closed, drifting off (slow alpha)</option></select></label>
   <button id="clench">Clench jaw (3 s)</button>
 </div>
 
@@ -48,13 +48,13 @@ select{font:inherit;font-size:15px;background:#1d2125;color:inherit;border:1px s
   <div class="k">Alpha at the back (O1, O2)</div>
   <div class="v" id="alpha">–</div>
   <div class="bar"><i id="alphabar" style="width:0"></i></div>
-  <div class="ends"><span id="lo">your eyes-open level</span><span id="hi">your eyes-closed level</span></div>
+  <div class="ends"><span>below your line</span><span>your line</span><span>above</span></div>
 </div>
 <div class="panel grid">
   <div><div class="k">Jaw (T3, T4)</div><div class="v" id="jaw">–</div></div>
   <div><div class="k">Bells</div><div class="v" id="bells">–</div></div>
   <div><div class="k">Contact</div><div id="contact"><span class="dot"></span>O1<span class="dot"></span>O2<span class="dot"></span>T3<span class="dot"></span>T4</div></div>
-  <div><div class="k">Baseline</div><div id="base">–</div></div>
+  <div><div class="k">Line</div><div id="base">–</div></div>
   <div><div class="k">Sound</div><div id="snd">–</div></div>
 </div>
 
