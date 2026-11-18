@@ -75,3 +75,47 @@ From `docs/research/android-overnight-ble-xiaomi.md` section 8. Nothing here has
    lines connect, or the app restarted itself, tell the assistant (DECISIONS row 49).
 
 If the headband is not found without location permission (test T0), see DECISIONS row 54.
+
+### Extra checks for the same session
+
+These settle the open questions of the research report (`_local/research/2026-11-18-07-app-tech-and-data-pass2.md`,
+step 2). All take a few minutes.
+
+1. **Which phone is it?** Run `adb shell getprop ro.product.model` once and write the answer in your notes
+   (Xiaomi 11T or 12T). Also `adb shell getprop bluetooth.core.gap.le.conn.min.limit` (it may print nothing).
+2. **Does the drop test survive deep sleep?** Right before the drop test (step 8 above), put the phone into
+   Android's deep-sleep state on purpose: with the night recording, the screen off and the phone
+   unplugged from the charger (`adb shell dumpsys battery unplug` if the USB cable has to stay in), run
+   `adb shell dumpsys deviceidle force-idle`. It prints `Now forced in to idle mode`. Do the walk-away, then
+   leave the idle state with `adb shell dumpsys deviceidle unforce` (or `adb shell dumpsys battery reset`
+   if you used `battery unplug`). In the `.log` look for `reconnect try ... (direct to ...): connected`. If
+   only scans connect, or nothing does, tell the assistant: that decides whether the Companion Device
+   Manager is needed.
+3. **Link speed (3-minute Bluetooth log with one walk-away).**
+   1. On the phone: Settings > About phone, tap "OS version" 7 times (or "MIUI/HyperOS version") until it
+      says you are a developer. Then Settings > Additional settings > Developer options > turn on
+      **Enable Bluetooth HCI snoop log** (the wording may be "Bluetooth HCI snoop log"; set it to
+      "Enabled" or "Enabled filtered"). Switch Bluetooth off and on once so the log starts clean.
+   2. Start a night, headband on. Wait 1 minute. Carry the headband out of range for about 30 seconds and
+      bring it back, then wait until the `.log` says `reconnected`. About 3 minutes in all. Press Stop.
+   3. Take the log off the phone. Easiest: `adb bugreport hci-bugreport.zip` and open
+      `FS/data/misc/bluetooth/logs/btsnoop_hci.log` inside it. Or, if the phone lets `adb` read it,
+      `adb pull /data/misc/bluetooth/logs/btsnoop_hci.log` (or `/sdcard/btsnoop_hci.log` on some Xiaomi
+      builds; try `adb shell ls /data/misc/bluetooth/logs/ /sdcard/ | grep -i snoop`).
+   4. Keep the file. The assistant opens it in Wireshark and filters `hci_evt.code == 0x3e` for "LE
+      Connection Update Complete" to read the interval (15 ms means the fast link).
+   5. Turn the snoop log off again (it grows).
+4. **Where to read the new lines.** In each night's `.log`, after you export it (above; the app's own folder
+   is not readable by `adb` on a release build):
+   - `phone battery 87% charge 3612345 uAh current -310250 uA unplugged temp 31.2 C` once a minute while
+     recording. Charge counter is the real drain meter (uAh = 1/1000 mAh); the sign of the current depends
+     on the phone, so ignore it. `plugged usb` means the cable was in: that night is not a drain
+     measurement.
+   - `packets: 7200000 samples, missing 0 in 0 gaps, repeated 2, longest gap 0 samples` every 10 minutes,
+     at the end of each run (before `total samples`) and, as `end of night, packets: ...`, at the very end.
+     It counts the whole night so far. "Missing" is numbers skipped inside a run; the hole made by a
+     reconnect is not in it (see the `drop` and `reconnected` lines for that). "Repeated" is a sample with
+     the same number as the one before, or an older one.
+   - `phone battery summary: 8% in 8.0 h = 1.00 %/h, 320 mAh = 40 mAh/h` as the last lines of the night.
+     The report's estimate is 1-2 % an hour; for a fair number unplug the phone, no charger all night, and
+     if you can, do one 3-hour run with the app idle and one recording for comparison.
