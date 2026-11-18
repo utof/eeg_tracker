@@ -1,0 +1,119 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Eyes open or closed</title>
+<style>
+:root{color-scheme:dark}body{margin:0;background:#101214;color:#e8e6e1;font:17px/1.45 system-ui,sans-serif}
+main{max-width:640px;margin:0 auto;padding:20px}
+h1{font-size:18px;font-weight:600;margin:0 0 4px}.dim{color:#9aa0a6;font-size:14px}
+#state{font-size:72px;font-weight:700;letter-spacing:-1px;margin:28px 0 4px;line-height:1}
+#why{min-height:1.5em}
+.open{color:#f2c14e}.closed{color:#7fb3f2}.unknown{color:#6b7178}
+#bar{position:relative;height:18px;border-radius:9px;background:#1b1f23;margin:22px 0 6px;overflow:hidden}
+#fill{position:absolute;left:0;top:0;bottom:0;background:#3d5a80;border-radius:9px;transition:width .2s}
+#mark{position:absolute;top:-4px;bottom:-4px;width:3px;background:#e8e6e1}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}
+button{font:inherit;padding:12px 18px;border-radius:12px;border:1px solid #3a4046;background:#1d2125;color:inherit;cursor:pointer}
+button.main{background:#e8e6e1;color:#101214;border-color:#e8e6e1;font-weight:600}
+#cal{margin-top:18px;min-height:1.5em}
+ul{padding-left:20px;color:#9aa0a6;font-size:14px}
+</style>
+<main>
+<h1>Eyes open or closed</h1>
+<div class="dim" id="top">connecting…</div>
+<div id="state" class="unknown">…</div>
+<div id="why" class="dim"></div>
+<div id="bar"><div id="fill"></div><div id="mark"></div></div>
+<div class="dim">alpha at the back of the head (O1, O2) · the line is where "closed" starts</div>
+<div class="row">
+  <button class="main" id="sound">Start sound</button>
+  <button id="calibrate">Calibrate (20 s)</button>
+</div>
+<div id="cal" class="dim"></div>
+<ul>
+  <li>High beep: eyes open. Low beep: eyes closed.</li>
+  <li>Calibrate once: 10 s eyes open, then 10 s eyes closed when you hear the low tone. Sit still, relax the jaw.</li>
+  <li>It works from alpha waves (8-12 Hz), which rise at the back of the head when the eyes close. Some people show little alpha; then the two states look alike.</li>
+</ul>
+</main>
+<script>
+const FS = 250, WIN = 250;                      // 1 s analysis window, updated 4 times a second
+let thr = null, lo = null, hi = null, audio = null, soundOn = false, last = 'unknown', calib = null;
+
+function bandPower(x, f0, f1) {                  // mean power over integer frequencies f0..f1 (Hann window)
+  const N = x.length; let s = 0, n = 0;
+  for (let f = f0; f <= f1; f++) {
+    let re = 0, im = 0;
+    for (let i = 0; i < N; i++) {
+      const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1)), a = 2 * Math.PI * f * i / FS;
+      re += w * x[i] * Math.cos(a); im -= w * x[i] * Math.sin(a);
+    }
+    s += re * re + im * im; n++;
+  }
+  return s / n;
+}
+// alpha relative to its neighbours: robust to how loud the whole signal is
+function alphaScore(x) {
+  const a = bandPower(x, 8, 12), nb = (bandPower(x, 4, 6) + bandPower(x, 15, 20)) / 2;
+  return Math.log10((a + 1e-9) / (nb + 1e-9));
+}
+function beep(freq) {
+  if (!audio || !soundOn) return;
+  const o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime;
+  o.frequency.value = freq; o.type = 'sine';
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.25, t + 0.02); g.gain.linearRampToValueAtTime(0, t + 0.16);
+  o.connect(g).connect(audio.destination); o.start(t); o.stop(t + 0.2);
+}
+document.getElementById('sound').onclick = e => {
+  audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+  soundOn = !soundOn; e.target.textContent = soundOn ? 'Stop sound' : 'Start sound';
+};
+document.getElementById('calibrate').onclick = () => {
+  audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+  calib = { t0: Date.now(), open: [], closed: [] };
+  fetch('marker', { method: 'POST', body: 'eyes test: calibration start (open 10 s, closed 10 s)' }).catch(() => {});
+};
+setInterval(() => { if (last === 'open') beep(880); else if (last === 'closed') beep(330); }, 700);
+
+async function tick() {
+  let s;
+  try { s = await (await fetch('state')).json(); } catch { show('unknown', 'no connection to the recorder'); return; }
+  document.getElementById('top').textContent = `${s.status} · ${s.minutes} min recorded · data ${s.age} s old`;
+  const o1 = s.data[0].slice(-WIN), o2 = s.data[1].slice(-WIN);
+  if (s.age > 2 || o1.length < WIN) { show('unknown', 'no fresh data'); return; }
+  const flat = x => Math.max(...x.map(Math.abs)) < 0.5, wild = x => Math.max(...x.map(Math.abs)) > 400;
+  if (flat(o1) && flat(o2)) { show('unknown', 'O1 and O2 are flat: not touching the head?'); return; }
+  if (wild(o1) || wild(o2)) { show('unknown', 'movement or a blink: wait a second'); return; }
+  const score = (alphaScore(o1) + alphaScore(o2)) / 2;
+
+  if (calib) {
+    const el = (Date.now() - calib.t0) / 1000;
+    if (el < 2) { calib.msg = 'Eyes open, look at the screen…'; }
+    else if (el < 10) { calib.open.push(score); calib.msg = `Eyes open… ${Math.ceil(10 - el)}`; }
+    else if (el < 12) { if (!calib.toned) { calib.toned = true; const was = soundOn; soundOn = true; beep(330); soundOn = was; }
+                        calib.msg = 'Close your eyes now'; }
+    else if (el < 20) { calib.closed.push(score); calib.msg = `Eyes closed… ${Math.ceil(20 - el)}`; }
+    else {
+      const med = a => a.slice().sort((p, q) => p - q)[a.length >> 1];
+      lo = med(calib.open); hi = med(calib.closed); thr = (lo + hi) / 2;
+      const ok = hi - lo > 0.15;
+      calib.msg = ok ? `Done. Eyes-closed alpha is ${(10 ** (hi - lo)).toFixed(1)}× the open level.`
+                     : `Done, but open and closed look alike (${(10 ** (hi - lo)).toFixed(1)}×). Check O1/O2 contact and try again.`;
+      fetch('marker', { method: 'POST', body: `eyes test: calibrated open=${lo.toFixed(2)} closed=${hi.toFixed(2)}` }).catch(() => {});
+      const done = calib.msg; calib = null; document.getElementById('cal').textContent = done;
+      const was = soundOn; soundOn = true; beep(660); soundOn = was;
+    }
+    if (calib) document.getElementById('cal').textContent = calib.msg;
+  }
+  const t = thr ?? 0.35;                          // a rough default until calibrated
+  const state = last === 'closed' ? (score > t - 0.05 ? 'closed' : 'open') : (score > t + 0.05 ? 'closed' : 'open');
+  show(state, thr === null ? 'not calibrated yet: using a rough default' : '');
+  const a = (lo ?? -0.2) - 0.3, b = (hi ?? 0.9) + 0.3, pos = v => Math.max(0, Math.min(100, 100 * (v - a) / (b - a)));
+  document.getElementById('fill').style.width = pos(score) + '%';
+  document.getElementById('mark').style.left = pos(t) + '%';
+}
+function show(state, why) {
+  last = state; const el = document.getElementById('state');
+  el.textContent = state === 'unknown' ? '…' : state === 'open' ? 'Open' : 'Closed'; el.className = state;
+  document.getElementById('why').textContent = why;
+}
+setInterval(tick, 250);
+</script>
