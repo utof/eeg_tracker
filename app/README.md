@@ -123,7 +123,8 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    `adb shell dumpsys activity services io.github.utof.eeg_tracker` shows `SessionService` with
    `isForeground=true types=0x00000092`, and `adb shell dumpsys media.audio_flinger` one active track on an
    output thread that is not in standby. In the app itself: **Sound**, **Sound only**, **Start**, lock, and
-   `adb shell input keyevent 86` (the media Stop key) ends the session like Stop on the lock screen. Reinstall
+   `adb shell cmd media_session dispatch stop` ends the session like Stop on the lock screen (`end: stopped` in
+   the newest `files/sound-states/*.sound.json`). Reinstall
    the app afterwards.
 
 The night of 2026-11-17 (58 recordings, 12.9 h) scored on the emulator in 99 s with a peak of 438 MB (PSS; 561 MB
