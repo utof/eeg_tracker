@@ -1,6 +1,10 @@
 // Web Audio ambient engine: a warm drone, a rain/wind noise layer, reward bells.
 // Every slow movement uses loops of unequal length (prime-ish seconds), so the mix never repeats
-// the same way. Settings come from the mixer (sound-mixer.js); this file only turns them into sound.
+// the same way. Settings come from the mapping (sound-mapping.js); this file only turns them into sound.
+// Smoothness: the page's timers never touch the sound sample by sample. glide() hands each new target
+// to the audio thread once (setTargetAtTime with the mixer's rise/fall times), and the audio thread
+// moves there smoothly on its own, so a busy or throttled page cannot make the sound step or stutter.
+import { MIX_TIMES } from './sound-mixer.js';
 
 const ROOT = 110;  // A2
 // drone partials: [frequency, level, LFO period s, part of "warmth"]
@@ -50,9 +54,11 @@ function lfo(ctx, periodS, depth, target) {
 }
 
 export class AmbientEngine {
-  async start() {
-    const ctx = (this.ctx = new AudioContext({ latencyHint: 'interactive' }));
-    if (ctx.state !== 'running') await ctx.resume();
+  // ctx: an OfflineAudioContext for tests and speed checks; by default a live one with large buffers
+  // ('playback': ~0.1 s more delay, far fewer dropouts on a busy machine; nothing here needs speed).
+  async start(ctx = new AudioContext({ latencyHint: 'playback' })) {
+    this.ctx = ctx; this.sent = {};
+    if (typeof AudioContext !== 'undefined' && ctx instanceof AudioContext && ctx.state !== 'running') await ctx.resume();
     const now = ctx.currentTime;
 
     const comp = ctx.createDynamicsCompressor();
@@ -61,9 +67,11 @@ export class AmbientEngine {
     this.master.connect(comp).connect(ctx.destination);
     this.master.gain.setTargetAtTime(0.8, now, 0.8);   // fade in
 
-    const verb = ctx.createConvolver(); verb.buffer = impulse(ctx, 3.5);
+    // reverb fed in mono (2 convolutions instead of 4 for a stereo input), 2.5 s tail
+    const verb = ctx.createConvolver(); verb.buffer = impulse(ctx, 2.5);
     const wet = ctx.createGain(); wet.gain.value = 0.3; verb.connect(wet).connect(this.master);
-    this.verb = verb;
+    this.verb = ctx.createGain(); this.verb.channelCount = 1; this.verb.channelCountMode = 'explicit';
+    this.verb.connect(verb);
 
     // roughness: tremolo at 33 Hz (heard as rough, not as a beat) on the drone and rain
     this.trem = ctx.createGain(); this.trem.gain.value = 1; this.trem.connect(this.master); this.trem.connect(verb);
@@ -100,18 +108,27 @@ export class AmbientEngine {
     this.bellN = 0;
   }
 
-  // v: mixer values (see sound-mapping.js). Called about 20 times a second.
-  set(v) {
+  // target: settings from mapState(); now: the mixer's current values (to pick the rise or fall time).
+  // Call whenever the target may have changed (4 times a second is plenty); unchanged settings are skipped.
+  glide(target, now) {
     if (!this.ctx) return;
-    const t = this.ctx.currentTime, k = 0.08;
-    this.rainGain.gain.setTargetAtTime(0.55 * v.rain, t, k);
-    this.rainFilter.frequency.setTargetAtTime(v.rainTone, t, k);
-    this.droneGain.gain.setTargetAtTime(0.5 * v.drone, t, k);
-    this.droneFilter.frequency.setTargetAtTime(v.droneTone, t, k);
-    for (const g of this.warmGains) g.gain.setTargetAtTime(v.warmth, t, k);
-    this.tremDepth.gain.setTargetAtTime(0.45 * v.rough, t, k);
-    this.trem.gain.setTargetAtTime(1 - 0.45 * v.rough, t, k);
-    this.oscs.forEach((o, i) => o.frequency.setTargetAtTime(PARTIALS[i][0] * (1 + (i % 2 ? 0.012 : -0.012) * v.rough), t, k));
+    const t = this.ctx.currentTime;
+    for (const [key, [up, down]] of Object.entries(MIX_TIMES)) {
+      const v = target[key];
+      if (!Number.isFinite(v) || Math.abs(v - (this.sent[key] ?? Infinity)) < 1e-3 * Math.max(1, Math.abs(v))) continue;
+      this.sent[key] = v;
+      // the same first-order glide the mixer computes, but run by the audio thread
+      const tau = v > (now?.[key] ?? v) ? up : down, go = (param, value) => param.setTargetAtTime(value, t, tau);
+      if (key === 'rain') go(this.rainGain.gain, 0.55 * v);
+      else if (key === 'rainTone') go(this.rainFilter.frequency, v);
+      else if (key === 'drone') go(this.droneGain.gain, 0.5 * v);
+      else if (key === 'droneTone') go(this.droneFilter.frequency, v);
+      else if (key === 'warmth') for (const g of this.warmGains) go(g.gain, v);
+      else if (key === 'rough') {
+        go(this.tremDepth.gain, 0.45 * v); go(this.trem.gain, 1 - 0.45 * v);
+        this.oscs.forEach((o, i) => go(o.frequency, PARTIALS[i][0] * (1 + (i % 2 ? 0.012 : -0.012) * v)));
+      }
+    }
   }
 
   // reward bell: inharmonic partials, slow decay, into the room

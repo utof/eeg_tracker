@@ -1,4 +1,5 @@
-// sound.html glue: signal source (recorder or demo) -> Session -> mixer -> engine, plus the display.
+// sound.html glue: signal source (recorder or demo) -> Session -> targets -> engine (which glides on the
+// audio thread), plus the display. The mixer only mirrors the glide for the words on screen.
 import { Session } from './sound-session.js';
 import { mapState } from './sound-mapping.js';
 import { createMixer } from './sound-mixer.js';
@@ -7,7 +8,7 @@ import { AmbientEngine } from './sound-engine.js';
 
 const $ = (id) => document.getElementById(id);
 const RATE_MS = 250;   // analysis 4 times a second on the last 1 s
-const MIX_MS = 50;
+const MIX_MS = 200;   // display mirror only; the sound itself glides on the audio thread
 
 let run = null;
 // for automated checks: every analysis step and every bell
@@ -67,6 +68,7 @@ async function analyse() {
   if (!run) return;
   const r = run.session.update(f, t);
   run.targets = r.targets;
+  run.engine.glide(r.targets, run.mixer.values);
   if (r.cue) {
     run.engine.cue(); log.cues.push({ t, cue: r.cue });
     mark(r.cue === 'close-eyes' ? 'calibration eyes closed' : 'calibration done, ' + run.session.note);
@@ -89,9 +91,10 @@ async function start(calibrate) {
     mixer: createMixer(neutral), targets: neutral, t0: performance.now(), last: performance.now() };
   run.session.begin(0, calibrate); log.t0wall = Date.now();
   mark(calibrate ? 'start, calibration eyes open' : 'start without calibration');
+  engine.glide(neutral, run.mixer.values);
   run.mix = setInterval(() => {
     const now = performance.now();
-    engine.set(run.mixer.step(run.targets, (now - run.last) / 1000)); run.last = now;
+    run.mixer.step(run.targets, (now - run.last) / 1000); run.last = now;
   }, MIX_MS);
   $('go').disabled = $('go2').disabled = $('src').disabled = true; $('stop').disabled = false;
   analyse();

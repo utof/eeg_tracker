@@ -178,7 +178,7 @@ function marker(text) { fetch('marker', { method: 'POST', body: text }).catch(()
 // --- start: a quiet minute first (when the headband is streaming), so the baseline has no sound in it --------
 $('go').onclick = async () => {
   if (playing || waiting) { stop(); return; }
-  ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); await ctx.resume();
+  ctx = ctx || new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' }); await ctx.resume();
   baseline = null;
   if (lastState && lastState.age < 3) {
     waiting = { until: Date.now() + 60000, sum: new Float64Array(20), n: 0 };
