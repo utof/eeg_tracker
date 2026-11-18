@@ -26,6 +26,12 @@ Future<String?> exportBlocked() async {
   return null;
 }
 
+/// The page's numbers, read off the screen's thread. A top-level function on purpose: a closure made inside the
+/// State shares its scope with the State's setState closures, and Isolate.run would then try to send the whole
+/// screen along ("object is unsendable", found on the emulator).
+Future<ExportSummary> _summarizeInBackground(String filesPath) =>
+    Isolate.run(() => summarizeExport(Directory(filesPath)));
+
 class ExportScreen extends StatefulWidget {
   const ExportScreen({super.key});
 
@@ -54,8 +60,7 @@ class _ExportScreenState extends State<ExportScreen> {
       final rec = await Phone.recordingsDir();
       if (rec == null) throw StateError("the app's folder is not known");
       final files = Directory(rec).parent;
-      final path = files.path;
-      final sum = await Isolate.run(() => summarizeExport(Directory(path)));
+      final sum = await _summarizeInBackground(files.path);
       final folder = sum.folder;
       final usable = folder == null || await Phone.exportFolderUsable(folder);
       final blocked = await exportBlocked();
