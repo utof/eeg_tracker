@@ -26,6 +26,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # The "i" notes: assets/evidence links to ../docs/evidence (one source for the pages and the app).
+  assets:
+    - assets/evidence/
 
 hooks:
   user_defines:

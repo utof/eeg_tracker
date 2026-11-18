@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../recorder/contact.dart';
 import 'night_strip.dart';
+import 'parts.dart';
 import 'phone_checks.dart';
 import 'theme.dart';
 
@@ -62,6 +63,7 @@ class NightView extends StatelessWidget {
     required this.onStop,
     required this.onFix,
     this.onExport,
+    this.onMeditate,
   });
 
   final NightViewModel model;
@@ -69,12 +71,13 @@ class NightView extends StatelessWidget {
   final VoidCallback onStop;
   final void Function(FixAction action) onFix;
   final VoidCallback? onExport;
+  final VoidCallback? onMeditate;
 
   @override
   Widget build(BuildContext context) {
     final m = model;
     final text = Theme.of(context).textTheme;
-    final headband = [const _Heading('Headband'), _Headband(m)];
+    final headband = [const SectionHeading('Headband'), _Headband(m)];
     return Scaffold(
       appBar: AppBar(
         title: Text('EEG Tracker', style: text.titleMedium?.copyWith(color: Night.inkMuted)),
@@ -84,17 +87,19 @@ class NightView extends StatelessWidget {
         children: [
           _Status(m),
           if (m.minutes != null) ...[const SizedBox(height: 28), _Readouts(m)],
-          if (m.rows.isNotEmpty) ...[_Heading(m.stripTitle), NightStrip(rows: m.rows)],
+          if (m.rows.isNotEmpty) ...[SectionHeading(m.stripTitle), NightStrip(rows: m.rows)],
           // Before the night the phone settings matter most; during it, the headband.
           if (m.running) ...headband,
-          const _Heading('Phone'),
+          const SectionHeading('Phone'),
           PhoneChecksList(checks: m.checks, onFix: onFix),
           if (!m.running) ...headband,
           // A night being recorded is not finished, so Export waits for Stop.
           if (!m.running && m.nightsOnPhone > 0) ...[
-            const _Heading('Recordings'),
+            const SectionHeading('Recordings'),
             _Recordings(nights: m.nightsOnPhone, onExport: onExport),
           ],
+          // The headband connects to one thing at a time, so meditation waits for the night to end.
+          if (!m.running) ...[const SectionHeading('Meditation'), _Meditation(onMeditate: onMeditate)],
         ],
       ),
       bottomNavigationBar: SafeArea(
@@ -106,24 +111,6 @@ class NightView extends StatelessWidget {
       ),
     );
   }
-}
-
-class _Heading extends StatelessWidget {
-  const _Heading(this.text);
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 32, bottom: 14),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Divider(),
-        const SizedBox(height: 20),
-        Text(text, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w500)),
-      ],
-    ),
-  );
 }
 
 Color _toneColor(Tone t) => switch (t) {
@@ -234,8 +221,8 @@ class _Readouts extends StatelessWidget {
     final age = m.dataAgeSeconds;
     final ageColor = !m.running || age == null || age < 5 ? Night.ink : (age < 40 ? Night.caution : Night.problem);
     final second = m.running
-        ? _Readout(parts: _age(age), label: 'since the last data', color: ageColor)
-        : _Readout(
+        ? Readout(parts: _age(age), label: 'since the last data', color: ageColor)
+        : Readout(
             parts: [(m.coverage == null ? '–' : '${(m.coverage! * 100).floor()}', true), (' %', false)],
             label: 'of the night saved',
           );
@@ -244,7 +231,7 @@ class _Readouts extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
-            child: _Readout(parts: _minutes(m.minutes!), label: m.running ? 'recorded' : 'recorded last night'),
+            child: Readout(parts: _minutes(m.minutes!), label: m.running ? 'recorded' : 'recorded last night'),
           ),
           const VerticalDivider(width: 33),
           Expanded(child: second),
@@ -264,39 +251,6 @@ class _Readouts extends StatelessWidget {
     if (s < 120) return [('$s', true), (' s', false)];
     if (s < 7200) return [('${s ~/ 60}', true), (' min', false)];
     return [('${s ~/ 3600}', true), (' h', false)];
-  }
-}
-
-class _Readout extends StatelessWidget {
-  const _Readout({required this.parts, required this.label, this.color = Night.ink});
-
-  /// (text, isNumber): numbers large, units small.
-  final List<(String, bool)> parts;
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final big = text.displayMedium?.copyWith(color: color);
-    final unit = text.titleLarge?.copyWith(color: color == Night.ink ? Night.inkMuted : color);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text.rich(
-            TextSpan(
-              children: [for (final (s, isNumber) in parts) TextSpan(text: s, style: isNumber ? big : unit)],
-            ),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(label, style: text.bodyMedium?.copyWith(color: Night.inkMuted)),
-      ],
-    );
   }
 }
 
@@ -351,7 +305,7 @@ class _Headband extends StatelessWidget {
           Text('Checked once, when the night starts.', style: text.bodyLarge)
         else
           Row(
-            children: [for (final n in channelNames) Expanded(child: _ContactCell(n, classifyOhms(m.contactOhms[n])))],
+            children: [for (final n in channelNames) Expanded(child: ContactCell(n, classifyOhms(m.contactOhms[n])))],
           ),
       ],
     );
@@ -359,41 +313,6 @@ class _Headband extends StatelessWidget {
 
   /// Planning thresholds for Bluetooth LE signal strength, not measured on this headband.
   static String _signalWord(int dbm) => dbm >= -70 ? 'strong' : (dbm >= -85 ? 'fair' : 'weak');
-}
-
-class _ContactCell extends StatelessWidget {
-  const _ContactCell(this.channel, this.contact);
-  final String channel;
-  final Contact contact;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final (icon, color, word) = switch (contact) {
-      Contact.good => (Icons.circle, Night.live, 'good'),
-      Contact.fair => (Icons.adjust, Night.caution, 'fair'),
-      Contact.poor => (Icons.radio_button_unchecked, Night.problem, 'poor'),
-      Contact.none => (Icons.remove, Night.inkMuted, 'none'),
-    };
-    return Semantics(
-      label: '$channel contact $word',
-      excludeSemantics: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(channel, style: text.titleMedium),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Icon(icon, size: 18, color: color),
-              const SizedBox(width: 6),
-              Text(word, style: text.bodyLarge?.copyWith(color: color)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _Recordings extends StatelessWidget {
@@ -417,6 +336,32 @@ class _Recordings extends StatelessWidget {
           onPressed: onExport,
           icon: const Icon(Icons.drive_folder_upload_outlined),
           label: const Text('Export a night'),
+        ),
+      ],
+    );
+  }
+}
+
+class _Meditation extends StatelessWidget {
+  const _Meditation({required this.onMeditate});
+  final VoidCallback? onMeditate;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '5 to 20 minutes eyes closed, with rain and a drone that follow your alpha rhythm, and a short report '
+          'after.',
+          style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: onMeditate,
+          icon: const Icon(Icons.self_improvement),
+          label: const Text('Meditate'),
         ),
       ],
     );

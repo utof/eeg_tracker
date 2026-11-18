@@ -10,6 +10,9 @@ const MethodChannel _channel = MethodChannel('eeg_tracker/phone');
 /// Only in the screen's engine: the folder picker needs the Activity (MainActivity.kt, NightExport.kt).
 const MethodChannel _export = MethodChannel('eeg_tracker/export');
 
+/// Only in the screen's engine: window flags of MainActivity (the meditation keeps the screen on).
+const MethodChannel _window = MethodChannel('eeg_tracker/window');
+
 /// What an export copied.
 typedef ExportResult = ({int files, int bytes, String folder});
 
@@ -48,6 +51,9 @@ class Phone {
       folder: r['folder'] is String ? r['folder'] as String : folder,
     );
   }
+
+  /// Keeps the screen on (or lets it sleep again) while the app is in front.
+  static Future<void> keepScreenOn({required bool on}) => _window.invokeMethod<void>('keepScreenOn', {'on': on});
 
   static Future<PhoneSnapshot> snapshot() async =>
       PhoneSnapshot(await _channel.invokeMethod<Map<Object?, Object?>>('snapshot') ?? const {});

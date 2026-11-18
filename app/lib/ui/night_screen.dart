@@ -5,7 +5,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import '../phone.dart';
 import '../recorder/headband.dart';
@@ -13,6 +12,8 @@ import '../recorder/nights.dart';
 import '../recorder/recorder_service.dart';
 import '../recorder/status.dart';
 import 'night_strip.dart';
+import 'meditation_screen.dart';
+import 'nearby.dart';
 import 'night_view.dart';
 import 'phone_checks.dart';
 import 'theme.dart';
@@ -182,7 +183,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
 
   Future<void> _refresh() async {
     final phone = await _safe(Phone.snapshot, const PhoneSnapshot({}));
-    final nearby = await _nearbyAllowed(phone.sdkInt);
+    final nearby = await nearbyAllowed(phone.sdkInt);
     final running = await FlutterForegroundTask.isRunningService;
     final last = await loadNight();
     final xiaomiDone = await FlutterForegroundTask.getData<bool>(key: _xiaomiDoneKey) ?? false;
@@ -209,26 +210,12 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     }
   }
 
-  static Future<bool> _nearbyAllowed(int sdk) async {
-    if (sdk >= 31) {
-      return await Permission.bluetoothScan.isGranted && await Permission.bluetoothConnect.isGranted;
-    }
-    return Permission.locationWhenInUse.isGranted;
-  }
-
-  Future<bool> _requestNearby() async {
-    final sdk = _phone.sdkInt;
-    final asked = sdk >= 31 ? [Permission.bluetoothScan, Permission.bluetoothConnect] : [Permission.locationWhenInUse];
-    final result = await asked.request();
-    if (result.values.every((s) => s.isGranted)) return true;
-    if (result.values.any((s) => s.isPermanentlyDenied)) await openAppSettings();
-    return false;
-  }
+  Future<bool> _requestNearby() => requestNearby(_phone.sdkInt);
 
   Future<void> _start() async {
     setState(() => _busy = true);
     try {
-      if (!await _nearbyAllowed(_phone.sdkInt) && !await _requestNearby()) {
+      if (!await nearbyAllowed(_phone.sdkInt) && !await _requestNearby()) {
         _say('Allow Nearby devices first: without it the headband cannot be found.');
         return;
       }
@@ -308,6 +295,13 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Meditation owns the headband while it runs, so it starts only between nights (DECISIONS row 75).
+  Future<void> _meditate() async {
+    if (_running) return;
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const MeditationScreen()));
+    unawaited(_refresh());
+  }
+
   Future<void> _fix(FixAction a) async {
     switch (a) {
       case FixAction.requestNearby:
@@ -375,7 +369,14 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) =>
-      NightView(model: _model(), onStart: _start, onStop: _stop, onFix: _fix, onExport: _export);
+      NightView(
+        model: _model(),
+        onStart: _start,
+        onStop: _stop,
+        onFix: _fix,
+        onExport: _export,
+        onMeditate: _meditate,
+      );
 }
 
 String _mb(int bytes) => '${(bytes / 1e6).toStringAsFixed(bytes < 1e7 ? 1 : 0)} MB';
