@@ -88,7 +88,8 @@ One scrolling column, 24 dp page margins, sections separated by a hairline and 3
 Order: status, readouts, watch strip, then Headband and Phone (Phone first before a night, Headband first
 during one). Between nights the Sleep section (last night's asleep total and a Sleep report button) comes
 right after the strip, then the Morning section (today's check-in, Morning check-in and Trends buttons). The
-primary action is pinned at the bottom, full width, 64 dp. The sleep report is its own page: totals, the honest
+primary action is pinned at the bottom, full width, 64 dp; while a night records the pinned bar is a hairline, one
+muted line about the drift-off detector, then Lights off and Stop side by side (3 : 2). The sleep report is its own page: totals, the honest
 note, the chart, the periods, jaw and movement with
 the night hour by hour, past nights. The morning check-in is one page per step with the steps as state marks
 at the top; trends is a day log (today's entry, sleep pressure, the last 14 days, earlier days, the forecast).
@@ -137,6 +138,15 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   compare your nights, not a test for teeth grinding". "Hour by hour" is a table of log rows: the hour in
   tabular figures, the Signal lane's marks as a bar whose full width is 60 recorded minutes, then Jaw and Moves
   right-aligned; the swatches and one muted sentence under it. Past nights add "jaw N an hour".
+- **Lights off bar** (night screen, while a night records): a hairline sets it apart from the page scrolling under
+  it; above the buttons one muted bodyMedium line in words, tabular figures ("Tap Lights off as you close your eyes
+  to sleep." / "Lights off 23:42. Asleep since 23:51, by the detector."), no colour for the detector's states; Lights
+  off is the night's one filled button (`live-fill`, a moon icon) until tapped, then an outlined "Lights off again"
+  in the same place that asks before it moves the moment; Stop stays outlined beside it.
+- **Falling asleep** (sleep report, after the periods): a heading with an "i", a muted lead line ("Lights off at
+  23:45. From then until asleep:"), two label-left / value-right lines in the periods' form (The detector, The sleep
+  model; half minutes as ½), then plain sentences: agree or not, where lights off came from when it was not a tap,
+  the check toward 4 of 5 nights, and "Both are guesses" in muted ink. No ring, no score.
 - **Phone checks:** icon, one plain sentence, right-aligned text buttons that open the exact setting.
 - **Export line** (Your data): an icon and one sentence, muted ("Last export yesterday; 3 new files since"), or
   `caution` amber with a warning icon once something new has been only on the phone for 3 days, or nothing was ever
@@ -144,7 +154,7 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
 - **Copy strip** (Export data): sixteen of the watch strip's own cells (track, 6 dp, a wider gap every four), filling
   from the left with `saved` by the share of the phone's data that has reached the export folder; while copying,
   the cell in progress is outlined green like the half hour in progress. A muted sentence under it gives both sizes.
-- **Buttons:** one filled button per screen: Start night on the night screen, Start on the meditation screen, and on
+- **Buttons:** one filled button per screen: Start night on the night screen (Lights off while a night records), Start on the meditation screen, and on
   each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before
   stopping, except in alpha-theta, where stopping must be instant. Session faces (dream catcher, sound for states)
   are true black with words only.

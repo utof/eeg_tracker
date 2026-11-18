@@ -45,6 +45,10 @@ dry headband like this keeps good contact through a whole night at home.
 - Battery: stuck readings are ignored and a line through the last 90 minutes gives "about N h left".
 - Phone app (in progress): one background service of Android's "connected device" type, which has no time
   limit, reconnecting straight to the saved headband instead of scanning for it.
+- The same service watches for falling asleep (the drift-off detector, back-of-head alpha fading for 3 minutes) on
+  the samples it already receives, after they are saved; if the detector ever fails or takes too long it switches
+  itself off and the recording goes on. **Lights off** on the night screen marks the moment you close your eyes,
+  and the morning report compares the detector with the sleep model.
 - Nothing is uploaded. There is no account and no server.
 
 ## Sources

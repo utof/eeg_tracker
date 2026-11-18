@@ -53,7 +53,12 @@ well.
   covers the drift-off and the detector can be checked against the sleep model.
 - Afterwards the screen lists the rounds: play each answer and type a note.
 - The detector ships only when its sleep onset falls within 5 minutes of the sleep model's on 4 of 5 recorded
-  nights (2 so far, both within half a minute); until then the timers make every round happen anyway.
+  nights (2 so far on the laptop, both within half a minute); until then the timers make every round happen anyway.
+- The same detector runs during every night the phone records: tap **Lights off** on the night screen as you close
+  your eyes (a night without the tap counts from its start). The morning sleep report shows "Falling asleep": the
+  minutes from lights off to sleep by the detector and by the sleep model, whether they agree within 5 minutes, and
+  how many of your nights so far agree. A dream catcher session's lights off counts too when the night follows it.
+  Both are guesses, so the check shows that they agree, not that either is right.
 - Optional later: a home "insight test" that rotates prompted rest, unprompted rest and awake rest on different days.
 
 ## Sources
