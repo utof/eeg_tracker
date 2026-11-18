@@ -20,18 +20,24 @@ class MainActivity : FlutterActivity() {
             if (call.method == "exportNight") startExport(call.argument<List<String>>("paths"), call.argument<String>("folder"), result)
             else result.notImplemented()
         }
-        // The meditation keeps the screen on while it runs: it lives in this Activity, and a locked phone
-        // could freeze it (DECISIONS row 75).
+        // Meditation and the dream catcher keep the screen on while they run: they live in this Activity, and a
+        // locked phone could freeze them (DECISIONS rows 75 and 110). The dream catcher also dims this window to
+        // the lowest brightness while you lie in bed; "off" hands the brightness back to the phone's setting.
         MethodChannel(messenger, "eeg_tracker/window").setMethodCallHandler { call, result ->
-            if (call.method != "keepScreenOn") {
-                result.notImplemented()
-                return@setMethodCallHandler
-            }
             val on = call.argument<Boolean>("on") == true
-            runOnUiThread {
-                if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                result.success(null)
+            when (call.method) {
+                "keepScreenOn" -> runOnUiThread {
+                    if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    result.success(null)
+                }
+                "dim" -> runOnUiThread {
+                    val attrs = window.attributes
+                    attrs.screenBrightness = if (on) 0.01f else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                    window.attributes = attrs
+                    result.success(null)
+                }
+                else -> result.notImplemented()
             }
         }
     }

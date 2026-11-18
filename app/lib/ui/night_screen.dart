@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
+import '../dream/store.dart';
 import '../phone.dart';
 import '../recorder/headband.dart';
 import '../recorder/nights.dart';
@@ -14,9 +15,11 @@ import '../recorder/status.dart';
 import '../sleep/onnx_runs.dart';
 import '../sleep/report.dart';
 import '../sleep/scorer.dart';
-import 'night_strip.dart';
+import 'dream_screen.dart';
+import 'dream_view.dart' show clock;
 import 'meditation_screen.dart';
 import 'nearby.dart';
+import 'night_strip.dart';
 import 'night_view.dart';
 import 'phone_checks.dart';
 import 'sleep_report_screen.dart';
@@ -139,6 +142,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   int _ticks = 0;
   Completer<void>? _stopped;
   SleepScoring? _scoring;
+  String? _dreamLine;
 
   @override
   void initState() {
@@ -239,8 +243,10 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
         ),
       )..addListener(_onScoring);
     }
-    // Last night is scored on the phone once it has ended (DECISIONS row 97); never while a night records.
-    if (!running) unawaited(_scoring?.run());
+    // Last night is scored on the phone once it has ended (DECISIONS row 97); never while a night records, nor
+    // while a dream catcher session writes its recording.
+    if (!running && !dreamSessionRunning) unawaited(_scoring?.run());
+    final dreamLine = dir == null ? null : _lastDream(dir);
     if (!mounted) return;
     setState(() {
       _nights = nights;
@@ -250,7 +256,22 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       _last = last;
       _xiaomiDone = xiaomiDone;
       _dir = dir;
+      _dreamLine = dreamLine;
     });
+  }
+
+  /// The dream catcher's newest session in a line, when it is under a day old.
+  static String? _lastDream(String dir) {
+    try {
+      final sessions = DreamStore(dreamDirFor(dir)).list();
+      if (sessions.isEmpty) return null;
+      final s = sessions.first;
+      if (DateTime.now().difference(s.start) > const Duration(hours: 24)) return null;
+      final n = s.answers;
+      return 'Last session: ${n == 1 ? '1 answer' : '$n answers'}, ${nightLabel(s.start)} ${clock(s.start)}.';
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<T> _safe<T>(Future<T> Function() f, T fallback) async {
@@ -353,6 +374,13 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     unawaited(_refresh());
   }
 
+  /// The dream catcher holds the headband too, so it also starts only between nights (DECISIONS row 110).
+  Future<void> _dream() async {
+    if (_running) return;
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const DreamScreen()));
+    unawaited(_refresh());
+  }
+
   Future<void> _fix(FixAction a) async {
     switch (a) {
       case FixAction.requestNearby:
@@ -416,6 +444,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       checks: phoneChecks(phone: _phone, nearbyAllowed: _nearby, xiaomiDone: _xiaomiDone),
       nightsOnPhone: _nights.length,
       sleep: _running ? null : _sleepSummary(),
+      dreamLine: _dreamLine,
     );
   }
 
@@ -430,6 +459,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onFix: _fix,
       onExport: _export,
       onMeditate: _meditate,
+      onDream: _dream,
       onSleepReport: sleep == null ? null : () => _openSleep(sleep.nightOf),
       onRetrySleep: sleep == null ? null : () => _scoring?.retry(sleep.nightOf),
     );

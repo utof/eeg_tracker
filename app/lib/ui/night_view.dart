@@ -52,6 +52,7 @@ class NightViewModel {
     this.checks = const [],
     this.nightsOnPhone = 0,
     this.sleep,
+    this.dreamLine,
   });
 
   final String title;
@@ -82,6 +83,9 @@ class NightViewModel {
 
   /// The Sleep section, shown between nights.
   final SleepSummary? sleep;
+
+  /// The dream catcher's newest session in a line ("Last session: 3 answers, Tue 18 Nov 23:10"), if any.
+  final String? dreamLine;
 }
 
 class NightView extends StatelessWidget {
@@ -93,6 +97,7 @@ class NightView extends StatelessWidget {
     required this.onFix,
     this.onExport,
     this.onMeditate,
+    this.onDream,
     this.onSleepReport,
     this.onRetrySleep,
   });
@@ -103,6 +108,7 @@ class NightView extends StatelessWidget {
   final void Function(FixAction action) onFix;
   final VoidCallback? onExport;
   final VoidCallback? onMeditate;
+  final VoidCallback? onDream;
   final VoidCallback? onSleepReport;
   final VoidCallback? onRetrySleep;
 
@@ -139,6 +145,8 @@ class NightView extends StatelessWidget {
           ],
           // The headband connects to one thing at a time, so meditation waits for the night to end.
           if (!m.running) ...[const SectionHeading('Meditation'), _Meditation(onMeditate: onMeditate)],
+          // The dream catcher holds the headband too, so it also waits for the night to end (DECISIONS row 110).
+          if (!m.running) ...[const SectionHeading('Dream catcher'), _Dream(line: m.dreamLine, onDream: onDream)],
         ],
       ),
       bottomNavigationBar: SafeArea(
@@ -458,6 +466,35 @@ class _Meditation extends StatelessWidget {
           onPressed: onMeditate,
           icon: const Icon(Icons.self_improvement),
           label: const Text('Meditate'),
+        ),
+      ],
+    );
+  }
+}
+
+class _Dream extends StatelessWidget {
+  const _Dream({required this.line, required this.onDream});
+  final String? line;
+  final VoidCallback? onDream;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final muted = text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'At bedtime or a nap: as you drift off, the app asks what is on your mind and records your answer, 3 or 4 '
+          'times. For ideas.',
+          style: muted,
+        ),
+        if (line != null) ...[const SizedBox(height: 8), Text(line!, style: text.bodyLarge?.copyWith(height: 1.4))],
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: onDream,
+          icon: const Icon(Icons.nights_stay_outlined),
+          label: const Text('Dream catcher'),
         ),
       ],
     );

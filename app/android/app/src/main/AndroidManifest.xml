@@ -24,6 +24,10 @@
          would open the settings list instead (research note section 2). -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- The dream catcher records your spoken answers and your own prompts (asked when first needed; DECISIONS
+         row 112). Only while its screen is open: no microphone service type, nothing in the background. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
     <!-- No backup of any kind: recordings and night state are EEG (DECISIONS row 57). -->

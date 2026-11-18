@@ -9,7 +9,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('every evidence note is in the app bundle', () async {
-    for (final name in ['meditation-feedback', 'brain-sound', 'jaw-and-blinks', 'sleep-recording']) {
+    for (final name in ['meditation-feedback', 'brain-sound', 'jaw-and-blinks', 'sleep-recording', 'dream-catcher']) {
       final md = await rootBundle.loadString('assets/evidence/$name.md');
       expect(md, startsWith('# '), reason: name);
     }
