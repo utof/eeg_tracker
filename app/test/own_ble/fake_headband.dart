@@ -231,7 +231,7 @@ class FakeLink implements BleLink {
   @override
   int? get mtu => hb.mtu;
 
-  /// Notifications while connected: signal packets every `interval`, resistance 10 times a second.
+  /// Notifications while connected: signal packets every `interval`, resistance every third interval.
   void _start() {
     _since = _due = DateTime.now();
     _timer = Timer.periodic(hb.interval, (_) => _tick());
@@ -242,11 +242,11 @@ class FakeLink implements BleLink {
     final now = DateTime.now();
     // A late timer catches up, so the sample rate holds on a busy test machine (capped: no long bursts).
     var due = 0;
-    while (!_due.isAfter(now) && due < 8) {
+    while (!_due.isAfter(now) && due < 64) {
       _due = _due.add(hb.interval);
       due++;
     }
-    if (due == 8) _due = now.add(hb.interval);
+    if (due == 64) _due = now.add(hb.interval);
     for (var i = 0; i < due * hb.packetsPerTick && _connected; i++) {
       _packet(now);
     }
@@ -268,7 +268,7 @@ class FakeLink implements BleLink {
       }
     }
     if ((hb.mode == 4 || hb.mode == 5) && !now.isBefore(_nextResist)) {
-      _nextResist = now.add(const Duration(milliseconds: 100));
+      _nextResist = now.add(hb.interval * 3); // about 10 a second at the real packet rate (32 ms)
       _notify(fakeUuid(5, hb.suffix), encodeResist(hb.packets, hb.resistOhms));
     }
     final after = hb.dropAfter;
