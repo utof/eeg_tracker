@@ -89,3 +89,13 @@ def test_a_replay_scores_each_edge_with_only_the_past():
     # the call at edge 13 used the window 2..13 only: its scores of epoch 12 match a direct call on that window
     direct = ls.run_probs(ls.sessions(2, runs=(1,)), ls.scale(res[2 * ls.EPS:13 * ls.EPS]))[0, -1]
     assert np.allclose(lag[0, 0, 12], direct, atol=1e-6)
+
+
+def test_a_window_over_half_held_is_not_scored():
+    gap = np.array([False, True, True, False, True, False])
+    assert ls.window_ok(gap, 0, 4) and not ls.window_ok(gap, 1, 5) and ls.window_ok(gap, 3, 6)
+    lag = np.ones((1, 3, 6, 5), np.float32)
+    m = ls.mask_gappy(lag, gap, window=3)
+    # lag 0 of epoch 2: edge 3, window 0..3 has 2 of 3 held -> not scored; epoch 3: edge 4, window 1..4 the same
+    assert np.isnan(m[0, 0, 2]).all() and np.isnan(m[0, 0, 3]).all() and not np.isnan(m[0, 0, 5]).any()
+    assert not np.isnan(lag).any(), "the input is left alone"

@@ -108,6 +108,20 @@ void main() {
     expect(s.stages.where((st) => st.stage == 'gap'), hasLength(1));
   });
 
+  test('a window with over half of its epochs lost is not scored: its epochs come as gaps, without a model call', () async {
+    final m = ScriptedModel((_) => 'N3');
+    final s = stager(m); // a 12-epoch window
+    await feed(s, 3);
+    s.hold(6 * inputEpochSamples); // epochs 3..8 lost
+    await feed(s, 4, from: 9);
+    // edges 10 and 11: windows 0..10 (6 of 10 lost) and 0..11 (6 of 11) are skipped; 0..12 (6 of 12) is scored
+    expect([for (final c in m.seen) c.first + c.epochs], [12]);
+    expect(s.skipped, 2);
+    expect([for (final st in s.stages.take(7)) st.stage], everyElement('gap'));
+    expect(s.stages.map((st) => st.epoch), [0, 1, 2, 3, 4, 5, 6, 7], reason: 'still in order, nothing skipped');
+    expect(s.stages.last.stage, 'gap', reason: 'epoch 7 was lost');
+  });
+
   test('a busy model is not queued: the next call covers the newest epoch and every epoch since the last', () async {
     final m = ScriptedModel((e) => 'N2')..gate = Completer<void>();
     final s = stager(m);

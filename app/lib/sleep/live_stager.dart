@@ -8,6 +8,8 @@
 // queued: the next call starts as soon as it ends, on the newest epoch, and hands out every epoch since the last one
 // it gave (those few read slightly further behind). It times every call and steps down when one is too slow for the
 // 30 s rhythm: 3 runs, then 1 run, then the timer only (no model); a model that fails also leaves the timer only.
+// A window with over half of its epochs lost is not scored (its scaling would be set by the held stretches, which sit
+// at about 0 after the high-pass): its epochs come out as gaps, as do lost epochs in a scored window.
 // Callers must work without stages: a nap still ends at its length.
 import 'dart:async';
 import 'dart:isolate';
@@ -118,6 +120,9 @@ class LiveStager {
   /// Calls skipped because [mayRun] said no.
   int waited = 0;
 
+  /// Windows not scored because over half of their epochs were lost.
+  int skipped = 0;
+
   Future<void>? _running;
   int _scoredUpTo = -1; // the last epoch handed out
   bool _closed = false;
@@ -156,6 +161,16 @@ class LiveStager {
     final t0 = _ms();
     final w = prep.window(prep.epochs);
     final runs = this.runs;
+    final newest = w.end - 1 - behind;
+    if (w.gap.where((g) => g).length * 2 > w.epochs) {
+      skipped++;
+      for (var e = math.max(_scoredUpTo + 1, w.first); e <= newest; e++) {
+        stages.add(LiveStage(e, gapStage, 0, w.end - 1 - e));
+        onStage?.call(stages.last);
+      }
+      _scoredUpTo = math.max(_scoredUpTo, newest);
+      return;
+    }
     try {
       final x = await scale(w);
       final prepMs = _ms() - t0;
@@ -165,7 +180,6 @@ class LiveStager {
       final ms = _ms() - t0;
       calls.add(LiveCall(w.end, w.epochs, runs, ms, prepMs));
       if (_closed) return;
-      final newest = w.end - 1 - behind;
       for (var e = math.max(_scoredUpTo + 1, w.first); e <= newest; e++) {
         stages.add(_stageOf(p, e - w.first, e, w.end - 1 - e, w.gap[e - w.first]));
         onStage?.call(stages.last);

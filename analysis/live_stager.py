@@ -10,6 +10,8 @@ The phone hears the headband sample by sample and cannot look ahead, so it prepa
   - AnySleep's robust scaling (median / IQR, clip at 20 IQR around 0) over the window only;
   - the window = the last 120 epochs (60 min), fewer at the start; a call each time an epoch is complete, from the
     10th epoch on (AnySleep's 5-minute minimum).
+A window with over half of its epochs held is not scored: its scaling would be set by the held stretches (after the
+high-pass they sit at about 0, so the quartiles become rounding noise); its epochs count as lost.
 Each call runs AnySleep's three runs (ONNX, the app's models) and keeps the stage of the epoch 4 epochs (2 min)
 behind the newest one. Holes in the stream are held at the last value, as the BDF and the phone do; an epoch with
 over 5 s held is not scored ("gap").
@@ -48,6 +50,7 @@ WINDOW_EP = 120  # 60 minutes
 BEHIND_EP = 4  # the stage read 2 minutes behind the newest epoch
 MIN_EP = 10  # AnySleep's shortest input (5 minutes)
 N3_RUN = 2  # deep sleep counts after 2 epochs in a row
+MAX_GAP_SHARE = 0.5  # a window with more of its epochs held than this is not scored
 STAGES = ["W", "N1", "N2", "N3", "R"]
 LAGS = 17  # lags kept by the replay: 0..16 epochs behind the newest
 
@@ -94,6 +97,24 @@ def gap_epochs(missing: np.ndarray, n_ep: int) -> np.ndarray:
     """Per epoch: over 5 s held. `missing` is per input sample."""
     m = missing[: n_ep * EPOCH_IN].reshape(n_ep, EPOCH_IN).sum(1)
     return m > MAX_MISSING
+
+
+def window_ok(gap: np.ndarray, w0: int, e: int) -> bool:
+    """The window [w0, e) has at most half of its epochs held."""
+    return int(gap[w0:e].sum()) <= (e - w0) * MAX_GAP_SHARE
+
+
+def mask_gappy(lag: np.ndarray, gap: np.ndarray, window: int = WINDOW_EP, first: int = 0) -> np.ndarray:
+    """A copy of a replay's lag array without the scores of windows over half held (for replays made before the
+    rule; replay() skips them itself)."""
+    out = lag.copy()
+    n_ep = lag.shape[2]
+    for k in range(lag.shape[1]):
+        for ep in range(n_ep):
+            e = ep + 1 + k
+            if e <= n_ep and not window_ok(gap, max(first, e - window), e):
+                out[:, k, ep] = np.nan
+    return out
 
 
 def softmax(z: np.ndarray) -> np.ndarray:
@@ -150,6 +171,8 @@ def replay(res: np.ndarray, gap: np.ndarray, n_in: int, sess, *, window: int = W
     t_all = time.time()
     for j, e in enumerate(edges):
         w0 = max(first, e - window)
+        if not window_ok(gap, w0, e):
+            continue
         t = time.perf_counter()
         p = run_probs(sess, scale(res[w0 * EPS:e * EPS]))
         secs.append(time.perf_counter() - t)
@@ -258,7 +281,8 @@ def cmd_replay(a) -> None:
 def cmd_report(a) -> None:
     z = np.load(a.npz)
     offline_all = [e["anysleep"] for e in json.loads(Path(a.sleep_json).read_text())["epochs"]]
-    lag, gap = z["lag"], z["gap"]
+    gap = z["gap"]
+    lag = mask_gappy(z["lag"], gap)
     n = min(len(offline_all), lag.shape[2])
     offline = offline_all[:n]
     lag = lag[:, :, :n]
@@ -293,7 +317,7 @@ def cmd_report(a) -> None:
     for j in range(8):
         if f"nap{j}_ep" not in z:
             break
-        e0 = int(z[f"nap{j}_ep"]); nl = z[f"nap{j}_lag"]
+        e0 = int(z[f"nap{j}_ep"]); nl = mask_gappy(z[f"nap{j}_lag"], gap[e0:e0 + z[f"nap{j}_lag"].shape[2]])
         st = stages_at(nl, BEHIND_EP, gap[e0:e0 + nl.shape[2]])
         trig = deep_trigger(st)
         off = offline[e0:e0 + nl.shape[2]]
@@ -319,11 +343,14 @@ def cmd_dart(a) -> None:
     n_ep = ready_epochs(len(uv))
     gap = gap_epochs(missing, n_ep)
     sess = sessions(4) if a.score else None
-    worst, same, n = 0.0, 0, 0
+    worst, same, n, skipped = 0.0, 0, 0, 0
     with open(a.windows, "rb") as f:
         for w in meta["windows"]:
             e, w0 = w["edge"], w["first"]
             got = np.fromfile(f, dtype="<f4", count=(e - w0) * EPS * 4).reshape(-1, 4)
+            if not window_ok(gap, w0, e):  # not scored (ill-conditioned scaling): the app skips it too
+                skipped += 1
+                continue
             want = scale(res[w0 * EPS:e * EPS]).astype(np.float32)
             d = float(np.abs(got - want).max())
             worst = max(worst, d)
@@ -332,7 +359,7 @@ def cmd_dart(a) -> None:
                 pg = run_probs(sess, got).mean(0)[e - 1 - BEHIND_EP - w0]
                 pw = run_probs(sess, want).mean(0)[e - 1 - BEHIND_EP - w0]
                 same += int(pg.argmax() == pw.argmax()); n += 1
-    print(json.dumps(dict(windows=len(meta["windows"]), max_abs_diff=worst, same_stage=same, scored=n,
+    print(json.dumps(dict(windows=len(meta["windows"]), skipped_over_half_held=skipped, max_abs_diff=worst, same_stage=same, scored=n,
                           dart_prep_s=meta.get("prepare_s"), dart_window_ms=meta.get("window_ms")), indent=1))
 
 
