@@ -20,7 +20,11 @@ Update the status column whenever something lands.
 10. **A state and trends page**: a few numbers (drowsiness, sleep, alertness, tension) to see at a glance where you
    are and where it is going.
 11. **Meditation feedback, live and after the session** (added 2026-11-18, high priority): to improve faster.
-12. **Mission**: affordable EEG for everyone: build-at-home guides for the helmet plus this open app, with contributors.
+12. **Neurofeedback training** (added 2026-11-18): alpha-theta training (owner: yes, aware it can bring up strong
+   memories), and an honest check of whether the feedback itself helps: on some sessions the app replays an earlier
+   session's feedback instead of the live one, and later shows whether live sessions did better. In the app this is
+   behind a toggle (off by default), and before each meditation a reminder says it is on.
+13. **Mission**: affordable EEG for everyone: build-at-home guides for the helmet plus this open app, with contributors.
 
 ## What each wish becomes (honest version)
 
@@ -62,6 +66,8 @@ Update the status column whenever something lands.
 | 18 | Sound for states: measure "did I get there", stop when asleep, learn what works for you | after research + 6 | - |
 | 19 | Research: sound for states; states and their markers; more features | done 2026-11-18 | `_local/research/2026-11-18-06-brain-states-sound-and-features.md` |
 | 21 | Meditation feedback: live (sound + settled / restless / drowsy) and a report after each session, progress across sessions | **high priority (owner)**, next after the 3 running lanes | builds on `feat/brain-sound` (live sound) and the morning check-in's alpha measures |
+| 22 | Alpha-theta training (eyes closed, back of the head; 20-30 sessions of about 25 min; stop button; "practice, not treatment"; a note that strong memories can come up) | planned, after meditation feedback | uses the meditation feedback engine; research lane on neurofeedback first |
+| 23 | Replayed-feedback check: some sessions secretly replay an earlier session's feedback; after enough sessions, live vs replayed is compared (feeling, the trained signal, ratings) | planned with 21/22 | toggle, off by default; reminder text before each meditation while it is on |
 | 20 | Dream catcher (owner: "definitely build"): at sleep onset, ask what you're thinking, record the answer, let you drift again, 3-4 rounds | planned, right after the current features | see Ideas |
 
 ## What comes next, in order (2026-11-18)
