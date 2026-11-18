@@ -12,6 +12,8 @@ import '../sleep/report.dart';
 import '../training/control.dart' show SessionKind;
 import '../trends/trends.dart';
 import 'evidence_sheet.dart';
+import 'experiments_screen.dart';
+import 'experiments_view.dart' show experimentLine;
 import 'trends_view.dart';
 
 /// Everything the trends need, read from the app's folders (a missing folder is simply empty).
@@ -36,7 +38,7 @@ class TrendsScreen extends StatefulWidget {
 
 class _TrendsScreenState extends State<TrendsScreen> {
   TrendsModel? _model;
-  String? _error;
+  String? _error, _dir, _experiment;
 
   @override
   void initState() {
@@ -48,8 +50,15 @@ class _TrendsScreenState extends State<TrendsScreen> {
     try {
       final dir = widget.recordingsDir ?? await Phone.recordingsDir();
       if (dir == null) throw StateError("the app's folder is not known");
-      final m = buildTrends(readTrendInputs(dir), DateTime.now());
-      if (mounted) setState(() => _model = m);
+      final now = DateTime.now();
+      final m = buildTrends(readTrendInputs(dir), now);
+      final line = experimentLine(currentExperiment(dir, now));
+      if (!mounted) return;
+      setState(() {
+        _model = m;
+        _dir = dir;
+        _experiment = line;
+      });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
@@ -58,7 +67,17 @@ class _TrendsScreenState extends State<TrendsScreen> {
   @override
   Widget build(BuildContext context) {
     final m = _model;
-    if (m != null) return TrendsView(model: m, onInfo: () => showEvidence(context, 'trends'));
+    if (m != null) {
+      return TrendsView(
+        model: m,
+        onInfo: () => showEvidence(context, 'trends'),
+        experimentLine: _experiment,
+        onExperiments: () async {
+          await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ExperimentsScreen(recordingsDir: _dir)));
+          await _load();
+        },
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Trends')),
       body: Padding(

@@ -10,6 +10,8 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../dream/store.dart';
 import '../export/store.dart';
 import '../phone.dart';
+import 'experiments_screen.dart' show currentExperiment;
+import 'experiments_view.dart' show experimentLine;
 import '../morning/store.dart';
 import '../recorder/headband.dart';
 import '../recorder/nights.dart';
@@ -151,7 +153,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   Completer<void>? _stopped;
   SleepScoring? _scoring;
   String? _dreamLine;
-  String? _checkedInAt;
+  String? _checkedInAt, _experiment;
   Pending? _pending;
 
   @override
@@ -261,6 +263,12 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     if (!running && !dreamSessionRunning && !soundSessionRunning) unawaited(_scoring?.run());
     final dreamLine = dir == null ? null : _lastDream(dir);
     final pending = dir == null || running ? null : await _pendingExport(dir);
+    String? experiment;
+    try {
+      experiment = dir == null ? null : experimentLine(currentExperiment(dir, DateTime.now()));
+    } catch (_) {
+      // a line of text is never worth breaking the night screen
+    }
     if (!mounted) return;
     setState(() {
       _nights = nights;
@@ -272,6 +280,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       _dir = dir;
       _dreamLine = dreamLine;
       _checkedInAt = checkedInAt;
+      _experiment = experiment;
       _pending = pending;
     });
   }
@@ -529,7 +538,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onSound: _sound,
       onSleepReport: sleep == null ? null : () => _openSleep(sleep.nightOf),
       onRetrySleep: sleep == null ? null : () => _scoring?.retry(sleep.nightOf),
-      morning: MorningSection(doneAt: _checkedInAt, onCheckIn: _checkIn, onTrends: _trends),
+      morning: MorningSection(doneAt: _checkedInAt, onCheckIn: _checkIn, onTrends: _trends, experiment: _experiment),
     );
   }
 }

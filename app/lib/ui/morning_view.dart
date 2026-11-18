@@ -45,6 +45,7 @@ class MorningViewModel {
     this.message = '',
     this.soundNote,
     this.saveNote,
+    this.experimentLine,
     this.contact = const [],
     this.rechecking = false,
     this.noSignal = false,
@@ -57,6 +58,9 @@ class MorningViewModel {
   final MorningStage stage;
   final String message;
   final String? soundNote, saveNote;
+
+  /// Today's self-experiment task in one line (experiments_view.dart), shown with the result.
+  final String? experimentLine;
 
   /// Empty before the contact check.
   final List<ContactLine> contact;
@@ -305,6 +309,7 @@ class MorningView extends StatelessWidget {
         color: Night.inkMuted,
       ),
       if (m.saveNote != null) Para(m.saveNote!, color: Night.caution),
+      if (m.experimentLine != null) Para(m.experimentLine!),
       const SizedBox(height: 12),
       Align(
         alignment: Alignment.centerLeft,

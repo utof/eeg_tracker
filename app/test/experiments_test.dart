@@ -8,6 +8,7 @@ import 'dart:math' as math;
 import 'package:eeg_tracker/experiments/analysis.dart';
 import 'package:eeg_tracker/experiments/experiment.dart';
 import 'package:eeg_tracker/experiments/store.dart';
+import 'package:eeg_tracker/export/store.dart' show storedFiles;
 import 'package:eeg_tracker/training/check.dart' show sha256Hex;
 import 'package:eeg_tracker/training/reveal.dart' show permutationTest;
 import 'package:eeg_tracker/trends/days.dart';
@@ -427,6 +428,19 @@ void main() {
       expect(next.plan.days, 42);
       expect(store.all(day9).map((e) => e.plan.id), ['2026-11-28-120000', '2026-11-19-143000']);
       expect(store.active(day9)!.plan.id, '2026-11-28-120000');
+    });
+
+    test('Export data takes the whole experiment folder, hidden order included (its rule is "everything except")', () {
+      final files = Directory('${tmp.path}/files')..createSync();
+      final st = ExperimentStore(experimentsDirFor('${files.path}/recordings'));
+      st.create(preset: 'screens', doText: 'a', dontText: 'b', outcome: outcomeById('asleep')!, weeks: 4, now: made, random: math.Random(3));
+      expect(st.dir.path, '${files.path}/experiments');
+      expect([for (final f in storedFiles(files)) f.path], [
+        'experiments/2026-11-19-143000/events.jsonl',
+        'experiments/2026-11-19-143000/plan.json',
+        'experiments/2026-11-19-143000/progress.json',
+        'experiments/2026-11-19-143000/sealed.json',
+      ]);
     });
 
     test('empty lines and odd lengths are refused; damaged files read as nothing', () {

@@ -45,9 +45,14 @@ String pressureHeadline(PressureModel p, DateTime now) {
 }
 
 class TrendsView extends StatelessWidget {
-  const TrendsView({super.key, required this.model, this.onInfo});
+  const TrendsView({super.key, required this.model, this.onInfo, this.onExperiments, this.experimentLine});
   final TrendsModel model;
   final VoidCallback? onInfo;
+
+  /// Opens the self-experiments page; the section shows only with it. [experimentLine]: today's task or where the
+  /// experiment stands (experiments_view.dart), null without one.
+  final VoidCallback? onExperiments;
+  final String? experimentLine;
 
   @override
   Widget build(BuildContext context) {
@@ -117,6 +122,22 @@ class TrendsView extends StatelessWidget {
               if (i > 0) const Divider(height: 25),
               _DayEntry(day: d, rows: m.rows, today: m.today),
             ],
+          ],
+          if (onExperiments != null) ...[
+            const SectionHeading('Self-experiments'),
+            Para(
+              experimentLine ??
+                  'Everything above is only seen together. To test one habit, let the app draw random days for a '
+                      'few weeks.',
+              color: experimentLine == null ? Night.inkMuted : Night.ink,
+              top: 0,
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: onExperiments,
+              icon: const Icon(Icons.science_outlined),
+              label: const Text('Experiments'),
+            ),
           ],
           const SectionHeading("Tomorrow's sleepiness"),
           if (m.forecast.shown) ...[

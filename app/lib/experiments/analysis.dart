@@ -358,7 +358,8 @@ String sizeWords(Outcome o, double d) {
   return '${_digits(o, n)} $unit ${n > 0 ? o.more : o.less}';
 }
 
-String pWords(double p) => p < 0.001 ? '< 0.001' : p.toStringAsFixed(p < 0.01 ? 3 : 2);
+/// "p = 0.03", "p < 0.001".
+String pWords(double p) => p < 0.001 ? 'p < 0.001' : 'p = ${p.toStringAsFixed(p < 0.01 ? 3 : 2)}';
 
 String _days(int n) => n == 1 ? '1 day' : '$n days';
 
@@ -386,13 +387,13 @@ String verdictNote(ExpResults r) {
     Verdict.tooFew => 'An experiment needs days of both kinds with a number the next morning. Record the night and do the check-in on more days, then run it again.',
     Verdict.likelyReal =>
       'The app drew the days by chance, and a difference this large would come up by chance alone in fewer than 1 '
-          'of 20 draws (p = ${pWords(t!.p)}). The range is where the true effect most likely lies. It is one '
+          'of 20 draws (${pWords(t!.p)}). The range is where the true effect most likely lies. It is one '
           'experiment on one person: run it once more before you rely on it.',
     Verdict.littleOrNone =>
       'Whatever the effect is, the range says it is smaller than what would matter for this number. That is a '
           'real answer too: this habit does not move it much for you.',
     Verdict.notClear =>
-      'The range includes zero and also effects large enough to matter, so these days cannot tell (p = '
+      'The range includes zero and also effects large enough to matter, so these days cannot tell ('
           '${pWords(t!.p)}). It does not mean there is no effect. A longer run narrows the range.',
   };
 }
