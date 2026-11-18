@@ -24,6 +24,11 @@ flutter build apk --profile --target-platform android-arm64
 
 `flutter test` also renders the screen in four states to `build/screens/*.png` (normal and 130 % text).
 
+The first build on the owner's laptop (2026-11-18) took about 5 minutes and fits under
+`systemd-run --user --scope -p MemoryMax=4500M`. Use `--profile`: `--release` fails because the neurosdk2 1.0.21
+plugin shrinks its own release build without keep rules, so its `Neurosdk2Plugin` class is stripped (R8 "Missing
+class"). A profile build runs ahead-of-time compiled like a release build, so speed and battery tests are valid.
+
 ## If the headband drops out
 
 The app saves what it has and reconnects by itself: first straight to the same headband (no Bluetooth scan,
