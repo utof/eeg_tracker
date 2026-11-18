@@ -11,11 +11,12 @@ The results (GET/POST /sleep-report and /morning-report, GET /hypnogram.png) it 
 night_files.py, like the recorder does, so the Sleep page works while the headband is off or charging, which is
 when the recorder has no page server at all. Standard library only.
 """
-import argparse, http.client, json
+import argparse, http.client, json, sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # find night_files.py even under `python3 -I`
 try:
     import night_files as nf  # scripts/night_files.py: the results jobs (standard library only)
 except Exception:
