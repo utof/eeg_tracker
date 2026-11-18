@@ -431,6 +431,68 @@ Good to know:
   results.
 - **Change folder** starts again in the new folder: use **Export everything** there.
 
+## Share on Wi-Fi (the laptop watches and copies while the phone records)
+
+Off unless you switch it on. With it on, the phone answers the laptop over your home Wi-Fi: the live signal with
+contact, battery and drops (the same pages the laptop recorder has), and every file the app keeps, so the laptop has
+a copy of the night within minutes instead of after Stop and Export data. Nothing is sent anywhere by itself, nothing
+goes to the internet, and nothing on the phone can be changed or deleted this way.
+
+**Safety, in plain words.** It is your brain data, so: every request needs the code the app shows (12 characters);
+only devices on the same local network are answered; it turns itself off 12 hours after you switched it on, and 15
+minutes after Stop. It is **not encrypted** (plain HTTP; encryption is deferred, DECISIONS rows 37 and 225): a device
+on the same Wi-Fi could listen in, so use it on your home Wi-Fi only, never on a shared or public one. **New code**
+on the sheet shuts out every laptop that has the old one.
+
+**It cannot hurt the recording.** The server runs apart from the recorder, which only hands it copies of the samples
+and never waits for it. If the server fails, sharing goes off with one line in the night's log and the night goes on
+(DECISIONS row 221; tested with servers that crash and hang).
+
+### Owner step: switch it on before a night (2 minutes; the first night doubles as the phone test)
+
+1. Phone on your home Wi-Fi, the laptop on the same one. On the main screen scroll to **Your data** and switch
+   **Share on Wi-Fi** on. A sheet shows the **Address** (like `192.168.1.23:8765`), the **Code**, and both as a QR
+   code. **Address and code** opens it again.
+2. On the laptop, in the repo folder, with the address and code from the sheet (the sheet shows both commands
+   whole):
+   - the live pages: `python3 scripts/page_server.py --recorder http://<address> --token <code>`, then open
+     `http://localhost:8770/` (the live check page; `sound.html`, `beats.html`, `eyes.html` work too);
+   - the copy: `python3 scripts/pull_phone.py http://<address> --token <code>`; leave it running. Every 2 minutes
+     it prints what it fetched. Raw nights land in `_local/recordings/`, everything else in `_local/phone/`.
+3. Start the night as usual. The notification says "shared on Wi-Fi at <address>". Sleep.
+4. In the morning, Stop. Leave the app open for a few minutes: sharing stays on for 15 minutes so the laptop gets
+   the end of the night, then turns itself off. `pull_phone.py` prints "finished and checked" for the night's files.
+5. **What to tell the assistant after the first night** (only the real phone can show these): did `pull_phone.py`
+   keep printing lines all night with the phone's screen off, or did it say "no answer" for long stretches? Was the
+   phone on the charger? The night's `.log` has the phone battery once a minute, so a night with sharing on against
+   one without gives its real cost.
+
+Good to know:
+
+- The code stays the same until you tap **New code**, so the laptop commands stay the same every night. To keep the
+  code out of the shell history, set it once: `export EEG_PHONE_TOKEN=<code>`; all three scripts read it.
+- Between nights the phone answers only while the app is open on the screen (Android freezes a closed app); the app
+  keeps the screen on for the first 15 minutes. During a night it answers with the screen off.
+- During a night the laptop's **Re-check contact** button does nothing: the phone checks contact once, at the start
+  (DECISIONS row 52). The Sleep page and the morning result are the laptop's own jobs and use the laptop's files,
+  which `pull_phone.py` keeps filled.
+- If the phone's address changes (the router gave it a new one), the main screen and the sheet show the new one
+  within a minute; restart the two laptop commands with it. A fixed address for the phone in the router avoids this.
+- Without Wi-Fi but with a cable: `adb forward tcp:8765 tcp:8765`, then use `http://127.0.0.1:8765` as the address.
+- Export data stays the full, checked hand-over (and the only one that works without Wi-Fi). Files the laptop
+  already mirrored are found "already here" by `import_phone.py`.
+
+What else it is useful for:
+
+- **Your own signal on a big screen**: the live page on the laptop or a TV browser while you fit the headband.
+- **The laptop's sound pages driven by the phone's recording**: `sound.html` and `beats.html` read the same live
+  stream, so the laptop's speakers can follow a night or a session the phone records.
+- **A continuous backup during the night**: if the phone dies at 5 a.m., the laptop has the night up to the last
+  2 minutes.
+- **Other EEG tools**: `uv run --no-project --with pylsl python scripts/lsl_bridge.py --url http://<address>/stream
+  --token <code>` re-publishes the phone's signal as Lab Streaming Layer streams (MNE-LSL, OpenViBE, LabRecorder).
+- Meditation, the check-in, the dream catcher and sound sessions are served live too while they record.
+
 ## Export a night
 
 The recordings stay inside the app. To get one night out on its own (Export data above takes everything):
