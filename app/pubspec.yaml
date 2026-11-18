@@ -18,6 +18,9 @@ dependencies:
   # hook compiles the C++ engine with the NDK; the Xiph decoders are left out (below), we only play WAV and
   # waveforms made in memory.
   flutter_soloud: ^5.3.0
+  # ONNX Runtime 1.28 for the sleep model (AnySleep, assets/models; DECISIONS row 95). MIT. Pinned: the export
+  # script checks the models with the same ONNX Runtime version (analysis/pyproject.toml, group "onnx").
+  flutter_onnxruntime: 1.9.0
 
 dev_dependencies:
   flutter_test:
@@ -29,6 +32,12 @@ flutter:
   # The "i" notes: assets/evidence links to ../docs/evidence (one source for the pages and the app).
   assets:
     - assets/evidence/
+    # AnySleep's three runs as ONNX (scripts/export_anysleep_onnx.py) and its MIT licence, which must travel with
+    # the weights. Listed one by one so the folder's README stays out of the APK.
+    - assets/models/anysleep-run1.onnx
+    - assets/models/anysleep-run2.onnx
+    - assets/models/anysleep-run3.onnx
+    - assets/models/LICENSE-AnySleep.txt
 
 hooks:
   user_defines:

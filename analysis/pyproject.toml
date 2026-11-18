@@ -25,3 +25,8 @@ torch = { index = "pytorch-cpu" }
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
+
+# Only for scripts/export_anysleep_onnx.py and its check (the phone app's sleep model):
+#   uv run --project analysis --group onnx python scripts/export_anysleep_onnx.py
+[dependency-groups]
+onnx = ["onnx>=1.19", "onnxruntime==1.28.0", "onnxscript>=0.5"]  # the ONNX Runtime the phone has (flutter_onnxruntime 1.9.0)
