@@ -5,7 +5,7 @@
 //   jumping at once), each counted in the epoch where it starts; events after the last whole epoch are dropped;
 // - the same per clock hour (the first and last hours partial) and over the asleep epochs inside the sleep
 //   periods, with jaw bursts and movements per hour asleep: a trend to compare nights, not a bruxism count (row 65).
-// The detectors' pass reads the night's recordings once more, sample by sample (a few kilobytes of memory), in a
+// The detectors' pass reads the night's recordings once more, sample by sample (streamed: one 330 KB read at a time), in a
 // background isolate while the sleep model runs. Plain Dart: no Flutter.
 import 'dart:io';
 import 'dart:isolate';

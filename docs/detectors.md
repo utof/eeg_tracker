@@ -123,9 +123,10 @@ validation's per-stage numbers above because the long morning sleep was restless
 recording alone N2 had 21.8 jaw bursts and 30.5 movements an hour.
 
 **Time and memory** on the laptop (AOT-compiled Dart, the same night): the detectors' pass 11.3 s, the sleep model's
-preparation 12.5 s, both side by side 11.8 s; the pass streams the files, so it needs a few kilobytes beyond the
-code. The Python reference needs about 2 GB and 20-35 s; in the laptop's sleep report it made the night's job 88 s
-instead of 64 s, and the peak memory stayed the scoring's 2.8 GB.
+preparation 12.5 s, both side by side 11.8 s; the pass streams the files (its own data: a few hundred kilobytes);
+the Dart process running only the pass peaked at 109 MB, mostly the garbage collector's room. The Python reference
+needs about 2 GB and 20-35 s; in the laptop's sleep report it made the night's job 88 s instead of 64 s, and the
+peak memory stayed the scoring's 2.8 GB.
 
 ## What still needs the owner
 

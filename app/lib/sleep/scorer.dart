@@ -2,7 +2,7 @@
 // out of date (night_files.py's rule), the recordings are joined and prepared in a background isolate, the three
 // AnySleep runs score it piece by piece, the stages are split into sleep periods and `files/nights/<date>.report.json`
 // is written. Beside them a second background isolate runs the shared detectors over the same samples for the
-// report's extras (jaw, movement, signal quality; extras.dart): a few kilobytes of memory, and done before the model
+// report's extras (jaw, movement, signal quality; extras.dart): little memory (the files are streamed), and done before the model
 // on the laptop; if it fails the report is still written, without extras. A `<date>.scoring` marker stays while it
 // works: if the app dies while scoring (memory, a kill), the marker is still there next time and that night waits
 // for "Try again" instead of crashing the app on every start.

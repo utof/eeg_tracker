@@ -98,7 +98,7 @@ class NightLayout {
 
   /// Every sample of the night in time order, all four channels at once, the values [channel] gives (held over
   /// gaps, clipped to ±400 000 µV), with whether it was filled in (a gap or the end padding). [row] is reused
-  /// between calls. For the detectors' pass over a whole night: memory stays a few kilobytes.
+  /// between calls. For the detectors' pass over a whole night: one 330 KB read at a time.
   void forEachRow(void Function(Float64List row, bool missing) emit) {
     final row = Float64List(4);
     var started = false;
