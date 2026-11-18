@@ -25,6 +25,10 @@ No headband? `PYTHONPATH=tests/fake_neurosdk python3 scripts/record_night.py --p
 signal (alpha that switches every minute, jaw bursts, blinks). Pages in `scripts/web/` are served by name; they can
 `POST /marker` with a text body to mark a moment (it becomes a BDF annotation).
 
+Brain-reactive sound: with the recorder running, open `http://localhost:8765/sound.html` (rain softens and a drone
+warms as eyes-closed alpha rises; jaw clench pauses the bells). It also has a demo signal. See
+[docs/brain-sound.md](docs/brain-sound.md). JS tests: `node --test tests/web/*.test.mjs`.
+
 BrainBit's NeuroSDK2 core is a closed binary from BrainBit; it is not part of this repository.
 
 MIT licence.
