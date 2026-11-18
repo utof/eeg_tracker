@@ -83,6 +83,7 @@ async function start(calibrate) {
   const demo = $('src').value === 'demo';
   const engine = new AmbientEngine();
   await engine.start();
+  log.audio = engine.ctx.state;
   const neutral = mapState({ alpha: null, jaw: null, quality: 'none' });
   run = { demo: demo ? new DemoSignal(Date.now() & 0xffff) : null, engine, session: new Session(),
     mixer: createMixer(neutral), targets: neutral, t0: performance.now(), last: performance.now() };

@@ -73,8 +73,10 @@ The mapping and mixer are the parts to port to Dart (`flutter_soloud`) for the p
 Calibration: 30 s eyes open, then 30 s eyes closed (first 5 s of each dropped). Your eyes-open alpha becomes 0
 and your eyes-closed alpha becomes 1 on the bar. If eyes closed did not raise alpha at least 1.5× (no clear
 alpha, poor contact at the back, eyes not shut), or you skip calibration, the scale comes from your recent range:
-10th to 90th percentile of the last 5 minutes (at least a 2× span), starting after 5 s. The recent range keeps
-adapting, so in a long eyes-closed sit the bar drifts back toward the middle; the calibrated scale does not.
+10th to 90th percentile of the last 5 minutes, starting after 5 s. If alpha has hardly changed (under 2×), a
+2× span is centred on it, so a steady level sits mid-scale: without calibration the page cannot tell a high
+steady level from a low one, so open and close your eyes a couple of times early on to teach it. The recent
+range keeps adapting, so in a long eyes-closed sit the bar drifts back toward the middle; the calibrated scale does not.
 DECISIONS row 18.
 
 ### Sound

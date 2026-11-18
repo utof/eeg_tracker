@@ -5,7 +5,8 @@
 // closed. Eyes-open alpha becomes 0 on the person's scale, eyes-closed alpha becomes 1. If eyes
 // closed did not raise alpha at least 1.5x (no clear alpha, bad contact, eyes not really shut), or
 // the person skips calibration, the scale comes from their own recent range instead:
-// 10th to 90th percentile of the last 5 minutes (at least a 2x span), after 5 s of data.
+// 10th to 90th percentile of the last 5 minutes, after 5 s of data. When that range is under 2x
+// (alpha has hardly changed) a 2x span is centred on it, so a steady level sits mid-scale.
 // Jaw: resting level = 20th percentile of the last 2 minutes of 30-45 Hz power at T3/T4.
 
 import { measure, BACK, SIDE } from './sound-features.js';
@@ -66,8 +67,12 @@ export class Session {
     if (this.phase === 'run') {
       if (this.calRef) this.ref = this.calRef;
       else if (this.alphaHist.length && t - this.alphaHist[0][0] >= RUN.warmupS) {
-        const v = this.alphaHist.map((h) => h[1]), lo = percentile(v, 0.1);
-        this.ref = { lo, hi: Math.max(percentile(v, 0.9), lo + RUN.minSpan), from: 'recent range' };
+        const v = this.alphaHist.map((h) => h[1]);
+        let lo = percentile(v, 0.1), hi = percentile(v, 0.9);
+        if (hi - lo < RUN.minSpan) {  // too little change to know high from low: centre a 2x span on it
+          const mid = (lo + hi) / 2; lo = mid - RUN.minSpan / 2; hi = mid + RUN.minSpan / 2;
+        }
+        this.ref = { lo, hi, from: 'recent range' };
       }
     }
 

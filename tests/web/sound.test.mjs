@@ -144,3 +144,10 @@ test('stale or missing data: neutral bed with a reason', () => {
   r = s.update({ fs: 250, names: ['O1', 'O2', 'T3', 'T4'], data: [flat, flat, flat, flat], contact: {}, age: 0.1 }, 3);
   assert.equal(r.quality, 'poor'); assert.match(r.reason, /not touching/);
 });
+
+test('recent range with steady alpha sits mid-scale, not at the bottom', () => {
+  const demo = new DemoSignal(3), s = new Session(); s.begin(0, false); demo.eyes = 'closed';
+  let r;
+  for (let t = 0.25; t <= 30; t += 0.25) r = s.update(demo.frame(t), t);
+  assert.ok(r.targets.calm > 0.3 && r.targets.calm < 0.7, `calm ${r.targets.calm}`);
+});
