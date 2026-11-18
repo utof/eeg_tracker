@@ -68,6 +68,12 @@ for this headband: strong, some, weak or none. The pages open them from a round 
 bundle the same files. After editing a note, run `python3 scripts/evidence_to_js.py` (it writes
 `scripts/web/evidence.js`; tests: `node --test tests/web/evidence.test.mjs`).
 
+**Our own headband connection (no BrainBit SDK).** `scripts/brainbit_ble.py` talks to the BrainBit Black over
+Bluetooth itself (Python + bleak), so recording needs no closed library, never unpairs other Bluetooth devices and
+survives drops without restarting. Not yet tried on the real headband: run the 15-minute probe first
+(`uv run --no-project --python 3.12 --with bleak==3.1.0 python scripts/ble_probe.py`), then record with
+`DRIVER=ble scripts/record_night.sh`. See [docs/own-ble-driver.md](docs/own-ble-driver.md).
+
 BrainBit's NeuroSDK2 core is a closed binary from BrainBit; it is not part of this repository.
 
 MIT licence.

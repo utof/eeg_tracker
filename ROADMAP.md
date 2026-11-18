@@ -98,6 +98,8 @@ findings are on `_local/research/2026-11-18-findings.html`.
    public (Neiry's MIT `web_sdk_neiry`); a 15-minute probe with the headband on, then a Python driver for the laptop
    (no process restarts: reconnects in seconds, no unpairing, no crashes, contact all night if command 5 works), then
    Dart in the app. BrainBit's library stays as a fallback. (Research D; DECISIONS 68, 84)
+   Status 2026-11-18: driver, recorder (`DRIVER=ble`) and probe built and tested on a fake headband, branch
+   `feat/own-ble-driver` (DECISIONS 90-92, docs/own-ble-driver.md); next: the probe with the headband on.
 7. **Dream catcher** (row 20), then the nap preset. (Research C: a rule plus a timer is the proven design)
 8. **State and trends page** (row 10): a sleep-pressure curve from the sleep log (not from EEG yet), "your usual"
    and "same as yesterday" next to every number; caffeine, alcohol and sleepiness taps in the morning check-in.
@@ -116,6 +118,9 @@ findings are on `_local/research/2026-11-18-findings.html`.
 - **Extended setup test** (2 min, `morning.html`): blinks, left-right glances, clenches; it confirms the 55-120 Hz jaw band
   on real clenches, gives µV per degree for glances on T3-T4, and settles the blink sign on 20 cued blinks.
 - **First real morning check-in** (`morning.html`).
+- **Own-driver probe** (about 15 min, docs/own-ble-driver.md): stop the recorder, run `scripts/ble_probe.py`, follow
+  the spoken steps (eyes closed / open, lift each electrode for 4 s). Settles the channel order, the scale and
+  whether contact can be measured all night.
 
 ## Decisions waiting for the owner
 
