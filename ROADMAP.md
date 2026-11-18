@@ -58,11 +58,11 @@ Update the status column whenever something lands.
 | 3 | Sleep scoring + hypnogram chart | working on test data; first real night 2026-11-18; **on the phone too** (2026-11-18, branch `feat/app-sleep-report`): AnySleep as ONNX scores each night after Stop, a sleep report screen with the chart, periods and past nights; agrees with the laptop on 96.6 % of 30-s epochs of the owner's night; phone speed not yet measured | `scripts/score_sleep.py`; app: `lib/sleep/`, DECISIONS 95-99 |
 | 4 | Export to utof_tracker's event format | working; utof_tracker does not read it yet (needs the owner's OK to change it) | `scripts/export_events.py` |
 | 5 | Android recorder app (one tap, screen off all night) | code + tests done; first release APK built 2026-11-18 (30 MB, sent to the owner); phone test pending | branch `feat/android-recorder` |
-| 6 | Morning check-in (eyes closed / open, ratings) + setup test | page, analysis, export and tests done on the fake headband; first real morning pending | `scripts/web/morning.html`, `scripts/morning_check.py` |
+| 6 | Morning check-in (eyes closed / open, ratings) + setup test | page, analysis, export and tests done; first real morning 2026-11-18; **in the phone app** (2026-11-18, branch `feat/app-morning-trends`): the same routine and the same numbers (exact on the recorded check-in), plus caffeine, alcohol and an optional reaction test; not yet run on the phone | `scripts/web/morning.html`, `scripts/morning_check.py`; app: `lib/morning/`, DECISIONS 120-129 |
 | 7 | Brain-reactive sound (alpha → calmer sound, jaw blocks) | feedback core v1 done (research A pass 2, item 1): live stream input, alpha in ~0.15 s around your own alpha peak, a target line held for 3-min blocks, at most 6 bells a minute, muscle / blink / drifting-to-sleep gates (shared `sleep-guard.js`), training and relax modes, a session log that replays exactly; tested on the demo and the fake headband. Real-head bench tests pending. The page is a stopgap: the pure modules port to the phone app | `scripts/web/sound.html`, [docs/brain-sound.md](docs/brain-sound.md) |
 | 8 | Break hints stage 0 (ActivityWatch) | code + tests done; not yet run on the owner's laptop | `scripts/break_hints.py`, docs/break-hints.md |
 | 9 | Night extras: jaw clench count, movement, signal quality per hour | the detectors exist (2026-11-18, row 25): jaw bursts per hour, movement, good / degraded / missing per 30 s, on both recorded sleeps; next: put the counts into the night's sleep report | `analysis/eeg_detectors.py`, [docs/detectors.md](docs/detectors.md) |
-| 10 | State and trends page (numbers + arrows vs your usual, 14-day lines; laptop first, then phone) | after 6 and 3 | - |
+| 10 | State and trends page (numbers + arrows vs your usual, 14-day lines; laptop first, then phone) | **built in the phone app** (2026-11-18, branch `feat/app-morning-trends`; phone first, no laptop page): today's numbers with yesterday's and your usual (from 7 days), worded arrows beyond the normal spread (from 14 days), 14-day lines, sleep pressure from the sleep log, the forecast hidden behind its gate; tested on made-up days, not yet on the phone | app: `lib/trends/`, `lib/ui/trends_*.dart`, DECISIONS 120-129 |
 | 11 | utof_tracker importer for `eeg_*` events | waits for the owner's OK | - |
 | 12 | Calibration for any electrode positions (helmet) | after the helmet exists | DECISIONS row 4 |
 | 13 | DIY board driver (E9 frames) in the app | after the helmet exists | DECISIONS row 5 |
@@ -110,9 +110,12 @@ findings are on `_local/research/2026-11-18-findings.html`.
    (no process restarts: reconnects in seconds, no unpairing, no crashes, contact all night if command 5 works), then
    Dart in the app. BrainBit's library stays as a fallback. (Research D; DECISIONS 68, 84)
 7. **Dream catcher** (row 20), then the nap preset. (Research C: a rule plus a timer is the proven design)
-8. **State and trends page** (row 10): a sleep-pressure curve from the sleep log (not from EEG yet), "your usual"
-   and "same as yesterday" next to every number; caffeine, alcohol and sleepiness taps in the morning check-in.
-   Forecasts stay hidden until 60 days of ratings exist and they beat "same as yesterday" by 5 %. (Research B, C)
+8. ~~**State and trends page** (row 10)~~: built 2026-11-18 on `feat/app-morning-trends` with the morning
+   check-in in the app (DECISIONS 120-129): sleep pressure from the sleep log, "your usual" and "same as yesterday"
+   next to every number, caffeine, alcohol and sleepiness taps, the forecast hidden until 60 rated days and a 5 %
+   win over "same as yesterday". Next: the owner's first phone check-ins (`app/README.md`, "Owner step"), then
+   exporting check-ins with a night, and fitting the sleep-pressure constants once mornings of ratings exist.
+   (Research B, C)
 9. **Data safety**: a checksum file per night, a catalog, an encrypted restic backup to the `архив` drive and a
    monthly restore test (does not change DECISIONS 37). (Research D)
 
@@ -134,7 +137,8 @@ findings are on `_local/research/2026-11-18-findings.html`.
 - **Extended setup test** (2 min, `morning.html`): blinks, left-right glances, clenches; it sets the detectors' blink
   depth, gives µV per degree and left vs right for glances on T3-T4, and confirms the 55-120 Hz jaw band
   ([docs/detectors.md](docs/detectors.md)).
-- **First real morning check-in** (`morning.html`).
+- **First morning check-ins on the phone** (about 10 minutes, two mornings; `app/README.md` on
+  `feat/app-morning-trends`, "Owner step"): tones, the dim eyes-closed page, contact words, the numbers, Trends.
 - **Sleep report on the phone** (one morning, about 15 minutes; `app/README.md` on `feat/app-sleep-report`,
   "Owner step"): after a recorded night press Stop and note how long the phone takes to show the time asleep,
   whether the app stays open, and whether the report looks like the night you remember.

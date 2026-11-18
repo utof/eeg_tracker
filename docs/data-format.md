@@ -9,6 +9,7 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 | Sleep report | `_local/nights/<date>.report.json` beside that night's `<date>.bdf`, `.sleep.json`, `.hypnogram.png` | `scripts/sleep_report.py` (the Sleep page starts it) |
 | Sleep report on the phone | `files/nights/<date>.report.json` in the app's private folder | the phone app after Stop (`app/lib/sleep/scorer.dart`) |
 | Morning check-in | `<start>.morning.json` (or `<start>.setup.json` for a setup test alone) | `scripts/morning_check.py` |
+| Morning check-in on the phone | `files/mornings/<start>.morning.json` and the visit's raw `<stamp>.f32/.idx/.log/.markers.jsonl` | the phone app (`app/lib/morning/`) |
 | Events for other apps | `<root>/events/<dev>/eeg-YYYY-MM.jsonl`, `<root>/events/<dev>/breaks-YYYY-MM.jsonl` | `scripts/export_events.py`, `scripts/break_hints.py` |
 
 ## Raw recording (BrainBit)
@@ -107,6 +108,28 @@ same folder are the history it compares with (the last 14 before this one). Star
 (`POST /morning-report`), it runs with `--job-dir <nights> --export <root>`: one run at a time
 (`morning-report.lock`, progress in `morning-report.status.json`, output in `morning-report.log`), and it appends
 the `eeg_morning_check` event itself.
+
+## The phone's `files/mornings/`
+
+The phone app runs the morning check-in itself (DECISIONS rows 120 and 125) and keeps each one in its private
+`files/mornings/` folder (not `files/recordings/`: a check-in there would join the night before it):
+
+- `<stamp>.f32`, `.idx`, `.log`: the raw signal of the whole visit (contact step included), the recorder's format
+  above; `<stamp>` is when the signal began.
+- `<stamp>.markers.jsonl`: the laptop page's markers (`morning:start`, `morning:eyes_closed:start` ... `morning:end`),
+  `i` counting samples of that `.f32`. `scripts/morning_check.py` analyses an exported copy as it is.
+- `<start>.morning.json`: the result, every field of the laptop's `<start>.morning.json` above (same names, same
+  rounding, `compared` against the last 14 earlier phone check-ins), worked out on the phone from the samples
+  rounded to float32 as the laptop reads them, so both give the same numbers. Added by the phone:
+
+| Field | Meaning |
+|---|---|
+| `app` | `phone` |
+| `habits` | `caffeine_cups` (cups of coffee, strong tea or energy drinks the day before, 0-5, 5 = 5 or more), `caffeine_late` (any in the 8 hours before sleep; `false` with no cups), `caffeine_today` (caffeine before this check-in), `alcohol_drinks` (0-5, 5 = 5 or more) |
+| `reaction` | the 1-minute reaction test: `median_ms` (`null` with under 5 taps), `taps`, `lapses` (over 500 ms), `false_starts`, `length_s`; `null` when skipped |
+| `contact` | `{O1, O2, T3, T4}` ohms from the contact check at the start, `null` = no contact |
+
+A stopped check-in, or one whose headband dropped out, leaves no files. Nothing is exported yet.
 
 ## Events (for utof_tracker and anything else)
 

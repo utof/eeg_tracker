@@ -87,8 +87,10 @@ headings titleMedium 500; everything else bodyLarge. No monospace, no display fa
 One scrolling column, 24 dp page margins, sections separated by a hairline and 32 dp above the heading.
 Order: status, readouts, watch strip, then Headband and Phone (Phone first before a night, Headband first
 during one). Between nights the Sleep section (last night's asleep total and a Sleep report button) comes
-right after the strip. The primary action is pinned at the bottom, full width, 64 dp. The sleep report is
-its own page: totals, the honest note, the chart, the periods, past nights.
+right after the strip, then the Morning section (today's check-in, Morning check-in and Trends buttons). The
+primary action is pinned at the bottom, full width, 64 dp. The sleep report is its own page: totals, the honest
+note, the chart, the periods, past nights. The morning check-in is one page per step with the steps as state marks
+at the top; trends is a day log (today's entry, sleep pressure, the last 14 days, earlier days, the forecast).
 
 ## Elevation & Depth
 
@@ -114,6 +116,14 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   period log below it. No stage colours: the levels are words.
 - **Sleep periods:** ruled log entries: a numbered cell, the clock span, then label-left / minutes-right
   lines (Asleep, Deep, Dream, Light), wake-ups and missing minutes as plain sentences.
+- **Day entries (trends, check-in result):** label left, value right in tabular titleLarge, then yesterday's value
+  and your usual in muted body, then the arrow's meaning in words with the normal range. An arrow is a drawn
+  north / south icon in ink beside the value, never a colour; no arrow before 14 days of values.
+- **Watch bill (trends):** one row per measure, fourteen of the strip's own cells (track, 6 dp), oldest left, today
+  outlined in ink-muted; the normal range a faint rule band; the values an ink line, a dot where a day stands
+  alone; a day without a value stays an empty cell. Weekday letters under the last row.
+- **Sleep-pressure chart:** 36 hours on the track ground, sleep periods as rule bands, dashed worded levels
+  ("rested", "regular bedtime"), an ink line that stops where the log cannot tell, now as a hairline with a dot.
 - **Phone checks:** icon, one plain sentence, right-aligned text buttons that open the exact setting.
 - **Buttons:** one filled button per screen: Start night on the night screen, Start on the meditation screen, and on
   each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before
