@@ -2,9 +2,14 @@
 // sleep-pressure estimate from the sleep log, and the gate that keeps forecasts hidden.
 import 'dart:math' as math;
 
+import 'package:eeg_tracker/meditation/tracker.dart';
+import 'package:eeg_tracker/morning/store.dart';
+import 'package:eeg_tracker/sleep/report.dart';
+import 'package:eeg_tracker/training/control.dart';
 import 'package:eeg_tracker/trends/days.dart';
 import 'package:eeg_tracker/trends/forecast.dart';
 import 'package:eeg_tracker/trends/pressure.dart';
+import 'package:eeg_tracker/trends/trends.dart';
 import 'package:eeg_tracker/trends/usual.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -188,6 +193,101 @@ void main() {
       final f = sleepinessForecast(s, '2027-02-01');
       expect(f.shown, isFalse);
       expect(f.why, contains('same as yesterday'));
+    });
+  });
+
+  group('the page from the phone\'s files', () {
+    SleepReport night(DateTime start, DateTime end, double asleep) => SleepReport({
+      'night_of': dayKey(start.subtract(const Duration(hours: 8))),
+      'scored': true,
+      'data_start': isoLocal(start),
+      'data_end': isoLocal(end),
+      'total': {'asleep_min': asleep, 'recorded_min': asleep, 'missing_min': 0, 'stray_sleep_min': 0},
+      'periods': [
+        {
+          'start': isoLocal(start),
+          'end': isoLocal(end),
+          'asleep_min': asleep,
+          'light_min': asleep / 2,
+          'deep_min': asleep / 4,
+          'dream_min': asleep / 4,
+          'awake_min': 0,
+          'wake_ups': 0,
+          'missing_min': 0,
+        },
+      ],
+    });
+    MorningRecord morning(DateTime start, {int kss = 4, double iaf = 9.6, double? reaction = 300}) =>
+        MorningRecord.fromJson({
+          'version': 'morning-v1',
+          'start': isoLocal(start),
+          'back': {'alpha_ec_uv2': 31.3, 'ec_rise': 2.56, 'iaf_hz': iaf, 'clean_share': 0.97},
+          'ratings': {'kss': kss, 'mood': 4, 'tension': 2},
+          'habits': {'caffeine_cups': 2, 'caffeine_late': false, 'caffeine_today': false, 'alcohol_drinks': 0},
+          'reaction': reaction == null ? null : {'median_ms': reaction},
+        })!;
+    MeditationSummary session(DateTime start, double runS, double settledS, {SessionKind kind = SessionKind.meditation}) =>
+        MeditationSummary(
+          kind: kind,
+          start: start,
+          lengthMin: runS / 60,
+          runS: runS,
+          complete: true,
+          settledS: settledS,
+          longestSettledS: settledS,
+          bells: 0,
+          restless: const {},
+          drifting: 0,
+          drowsyS: 0,
+          calm: const [],
+          iafHz: null,
+          note: '',
+          logFile: 'x.session.json',
+        );
+    final now = DateTime(2026, 11, 18, 15);
+
+    test('one night, one check-in, two sessions: values, no usual yet, honest counts', () {
+      final m = buildTrends((
+        nights: [night(DateTime(2026, 11, 17, 23), DateTime(2026, 11, 18, 7), 420)],
+        mornings: [morning(DateTime(2026, 11, 18, 9), kss: 8)],
+        sessions: [
+          session(DateTime(2026, 11, 18, 10), 600, 300),
+          session(DateTime(2026, 11, 18, 11), 900, 0, kind: SessionKind.alphaTheta),
+          session(DateTime(2026, 11, 19, 2), 300, 300), // 2 a.m.: still the 18th
+        ],
+      ), now);
+      TrendRow row(String id) => m.rows.singleWhere((r) => r.spec.id == id);
+      expect(m.today, '2026-11-18');
+      expect(row('asleep').value, 420);
+      expect(row('asleep').day, '2026-11-18');
+      expect(row('asleep').yesterday, isNull);
+      expect(row('asleep').usual.daysToUsual, 7);
+      expect(row('asleep').line.last, 420);
+      expect(row('asleep').line, hasLength(14));
+      expect(row('kss').value, 8);
+      expect(row('reaction').value, 300);
+      expect(row('caffeine').spec.format(row('caffeine').value!), '2 cups');
+      expect(row('practice').value, 30);
+      expect(row('settled').value, closeTo(600 / 900 * 100, 1e-9));
+      expect((m.nights, m.mornings, m.sessions, m.daysWithData), (1, 1, 3, 1));
+      expect(m.pressure.hoursAwakeLike(now)!, closeTo(8, 0.5));
+      expect(m.forecast.shown, isFalse);
+      expect(m.forecast.why, contains('1 so far'));
+    });
+
+    test('three weeks of check-ins: a sleepy morning gets its arrow and words; a value 2 weeks old is not "now"', () {
+      final mornings = [
+        for (var k = 1; k <= 20; k++) morning(DateTime(2026, 11, 18 - k, 9), kss: 4, reaction: null),
+        morning(DateTime(2026, 11, 18, 9), kss: 8, reaction: null),
+      ];
+      final m = buildTrends((nights: const [], mornings: mornings, sessions: const []), now);
+      final kss = m.rows.singleWhere((r) => r.spec.id == 'kss');
+      expect(kss.arrow, Arrow.up);
+      expect(kss.spec.up, 'sleepier than usual');
+      expect(kss.yesterday, 4);
+      expect(kss.usual.median, 4);
+      final reaction = m.rows.singleWhere((r) => r.spec.id == 'reaction');
+      expect(reaction.hasData, isFalse);
     });
   });
 }
