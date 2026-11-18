@@ -47,7 +47,8 @@ signal (alpha that switches every minute, jaw bursts, blinks). Pages in `scripts
 `POST /marker` with a text body to mark a moment (it becomes a BDF annotation).
 
 Brain-reactive sound: with the recorder running, open `http://localhost:8765/sound.html` (rain softens and a drone
-warms as eyes-closed alpha rises; jaw clench pauses the bells). It also has a demo signal. See
+warms as eyes-closed alpha rises above your own line; a tight jaw, a blink or drifting toward sleep pauses the bells).
+It reads the live stream, answers in about 0.3 s in training mode, and also has a demo signal. See
 [docs/brain-sound.md](docs/brain-sound.md). JS tests: `node --test tests/web/*.test.mjs`.
 
 BrainBit's NeuroSDK2 core is a closed binary from BrainBit; it is not part of this repository.

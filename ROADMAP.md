@@ -52,7 +52,7 @@ Update the status column whenever something lands.
 | 4 | Export to utof_tracker's event format | working; utof_tracker does not read it yet (needs the owner's OK to change it) | `scripts/export_events.py` |
 | 5 | Android recorder app (one tap, screen off all night) | code + tests done; APK not built yet; phone test pending | branch `feat/android-recorder` |
 | 6 | Morning check-in (eyes closed / open, ratings) + setup test | page, analysis, export and tests done on the fake headband; first real morning pending | `scripts/web/morning.html`, `scripts/morning_check.py` |
-| 7 | Brain-reactive sound (alpha → calmer sound, jaw blocks) | browser prototype working on the fake headband; real-head test pending; phone port next | `scripts/web/sound.html`, [docs/brain-sound.md](docs/brain-sound.md) |
+| 7 | Brain-reactive sound (alpha → calmer sound, jaw blocks) | feedback core v1 done (research A pass 2, item 1): live stream input, alpha in ~0.15 s around your own alpha peak, a target line held for 3-min blocks, at most 6 bells a minute, muscle / blink / drifting-to-sleep gates (shared `sleep-guard.js`), training and relax modes, a session log that replays exactly; tested on the demo and the fake headband. Real-head bench tests pending. The page is a stopgap: the pure modules port to the phone app | `scripts/web/sound.html`, [docs/brain-sound.md](docs/brain-sound.md) |
 | 8 | Break hints stage 0 (ActivityWatch) | code + tests done; not yet run on the owner's laptop | `scripts/break_hints.py`, docs/break-hints.md |
 | 9 | Night extras: jaw clench count, movement, signal quality per hour | next | - |
 | 10 | State and trends page (numbers + arrows vs your usual, 14-day lines; laptop first, then phone) | after 6 and 3 | - |
@@ -84,7 +84,7 @@ Update the status column whenever something lands.
 
 - Eyes closed 2 min, eyes open 2 min, with the headband on (is alpha there?): `morning.html` on the live page's port.
 - 20 cued blinks, 10 left-right glances, 5 jaw clenches (what the electrodes can see): the setup test on the same page.
-- Brain sound: open `http://localhost:8765/sound.html` while recording, calibrate, sit 5 min eyes closed, clench twice (does the rain soften, do bells come, does a clench stop them?).
+- Brain sound bench tests (`http://localhost:8765/sound.html` while recording, training mode): calibrate and sit 5 min eyes closed (does the rain soften, how often do bells come?); 20 min reclined (does the drifting-off gate catch dozing, and stay quiet while awake?); light and strong jaw clenches (gated? any leak into O1/O2?); jaw relaxed while the sound is roughened (does the roughness itself raise the jaw measure?); wired against Bluetooth headphones (how late does it feel?); 20 cued blinks (blink gate).
 - Install the phone app and run the 1-hour screen-off test (`app/README.md` on the app branch).
 
 ## Ideas for later (after the wishes above are built)
