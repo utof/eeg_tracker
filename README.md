@@ -8,6 +8,8 @@ a build-it-yourself ADS1299 helmet ([hardware and guides](https://github.com/uto
 
 - [DECISIONS.md](DECISIONS.md): every choice made so far, its alternatives, and what would change it.
 - [docs/data-format.md](docs/data-format.md): raw recordings, night files and the events other apps can read.
+- `app/`: the Android recorder (Flutter): one tap starts the night, files in the same format as the
+  laptop's. Built, unit-tested, not yet run on a phone; see [app/README.md](app/README.md).
 - `scripts/record_night.sh`: records a BrainBit on Linux until Ctrl+C (needs BrainBit's `libneurosdk2.so`
   and libc++ in `~/.local/lib/neurosdk2`). Live check page on port 8765.
 
