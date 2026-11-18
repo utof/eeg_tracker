@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Turn the evidence notes (docs/evidence/<id>.md) into scripts/web/evidence.js for the pages' "i" buttons.
+
+    python3 scripts/evidence_to_js.py           # write scripts/web/evidence.js
+    python3 scripts/evidence_to_js.py --check   # exit 1 if evidence.js is out of date
+
+Standard library only. Output: `export const EVIDENCE = {id: {title, grade, html}}`, ids in file-name order, so
+the same notes always give the same bytes. The notes use a small Markdown subset (docs/evidence/README.md):
+`#` title, `##` / `###` headings, `- ` bullets with two-space continuation lines, paragraphs, **bold**, `code`
+and [text](https://...) links. Everything else is escaped as text, links open in a new tab with
+rel="noopener noreferrer", and a link that is not a public http(s) address stops the run.
+The phone app bundles the same .md files, so the notes stay the single source.
+"""
+from __future__ import annotations
+
+import argparse, html, json, re, sys
+from pathlib import Path
+from urllib.parse import urlsplit
+
+ROOT = Path(__file__).resolve().parent.parent
+NOTES = ROOT / "docs" / "evidence"
+OUT = ROOT / "scripts" / "web" / "evidence.js"
+GRADES = ("strong", "some", "weak", "none")
+GRADE_LINE = re.compile(r"^## Evidence for this (?:headband|helmet): (\S+)\s*$")
+INLINE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)|\*\*(.+?)\*\*|`([^`]+)`")
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+
+
+class NoteError(ValueError):
+    pass
+
+
+def safe_url(url: str, where: str) -> str:
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if parts.scheme not in ("http", "https") or not host or host in LOCAL_HOSTS or host.endswith(".local"):
+        raise NoteError(f"{where}: only public http(s) links are allowed, got {url!r}")
+    return url
+
+
+def inline(text: str, where: str) -> str:
+    out, pos = [], 0
+    for m in INLINE.finditer(text):
+        out.append(html.escape(text[pos:m.start()]))
+        label, url, bold, code = m.groups()
+        if url is not None:
+            href = html.escape(safe_url(url, where), quote=True)
+            out.append(f'<a href="{href}" target="_blank" rel="noopener noreferrer">{html.escape(label)}</a>')
+        elif bold is not None:
+            out.append(f"<strong>{inline(bold, where)}</strong>")
+        else:
+            out.append(f"<code>{html.escape(code)}</code>")
+        pos = m.end()
+    out.append(html.escape(text[pos:]))
+    return "".join(out)
+
+
+def convert(path: Path) -> dict[str, str]:
+    """One note -> {title, grade, html}. The title is the `# ` line; the html is everything after it."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    title, grade, blocks = None, None, []
+    para: list[str] = []
+    items: list[str] = []
+
+    def flush() -> None:
+        if para:
+            blocks.append(f"<p>{inline(' '.join(para), path.name)}</p>")
+            para.clear()
+        if items:
+            blocks.append("<ul>" + "".join(f"<li>{inline(i, path.name)}</li>" for i in items) + "</ul>")
+            items.clear()
+
+    for n, raw in enumerate(lines, 1):
+        line, where = raw.rstrip(), f"{path.name}:{n}"
+        if not line.strip():
+            flush()
+        elif line.startswith("# "):
+            if title is not None or blocks or para or items:
+                raise NoteError(f"{where}: the '# ' title must be the first line, and only one")
+            title = line[2:].strip()
+        elif line.startswith("## ") or line.startswith("### "):
+            flush()
+            if m := GRADE_LINE.match(line):
+                if m[1] not in GRADES:
+                    raise NoteError(f"{where}: grade must be one of {', '.join(GRADES)}, got {m[1]!r}")
+                grade = m[1]
+            tag = "h3" if line.startswith("## ") else "h4"
+            blocks.append(f"<{tag}>{inline(line.split(' ', 1)[1].strip(), where)}</{tag}>")
+        elif line.startswith("- "):
+            if para:
+                flush()
+            items.append(line[2:].strip())
+        elif line.startswith("  ") and items:
+            items[-1] += " " + line.strip()
+        else:
+            if items:
+                flush()
+            para.append(line.strip())
+    flush()
+    if not title:
+        raise NoteError(f"{path.name}: no '# ' title")
+    if grade is None:
+        raise NoteError(f"{path.name}: no '## Evidence for this headband: <grade>' line")
+    if not any(b.startswith("<p>Checked: ") for b in blocks):
+        raise NoteError(f"{path.name}: no 'Checked: YYYY-MM-DD' line")
+    return {"title": title, "grade": grade, "html": "".join(blocks)}
+
+
+def render(notes_dir: Path = NOTES) -> str:
+    notes = {p.stem: convert(p) for p in sorted(notes_dir.glob("*.md")) if p.name != "README.md"}
+    if not notes:
+        raise NoteError(f"no notes in {notes_dir}")
+    body = ",\n".join(f"  {json.dumps(k)}: {json.dumps(v, ensure_ascii=False)}" for k, v in notes.items())
+    return ("// Generated by scripts/evidence_to_js.py from docs/evidence/*.md. Do not edit: change the notes and\n"
+            "// rerun the script. Used by info.js (the pages' \"i\" buttons).\n"
+            f"export const EVIDENCE = {{\n{body}\n}};\n")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--check", action="store_true", help="exit 1 if scripts/web/evidence.js is out of date")
+    a = ap.parse_args()
+    try:
+        text = render()
+    except NoteError as e:
+        print(f"evidence_to_js: {e}", file=sys.stderr)
+        return 2
+    if a.check:
+        if not OUT.is_file() or OUT.read_text(encoding="utf-8") != text:
+            print("evidence_to_js: scripts/web/evidence.js is out of date; run python3 scripts/evidence_to_js.py",
+                  file=sys.stderr)
+            return 1
+        return 0
+    OUT.write_text(text, encoding="utf-8")
+    print(f"wrote {OUT.relative_to(ROOT)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

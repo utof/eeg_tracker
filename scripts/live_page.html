@@ -24,7 +24,7 @@ nav a:hover,nav a:focus-visible{border-color:#8ab4f8;outline:none}nav b{display:
 <a href="beats.html"><b>Sound for states</b><span>beats and noise for sleep, focus, breaks</span></a>
 </nav>
 <div id="chs"></div>
-<div id="alpha"></div>
+<div id="alpha"><span id="alphatxt"></span><div id="alphabar"></div></div>
 <button onclick="fetch('contact',{method:'POST'});this.textContent='Restarting, back in about 30 s…';setTimeout(()=>this.textContent='Re-check contact (pauses ~30 s)',35000)">Re-check contact (pauses ~30 s)</button>
 <div id="hint">Green on all four = good. Red: part the hair under that electrode, press it to the skin, sit still.
 Alpha test: close your eyes for 20 s; the bar for the back pair should grow.</div></main>
@@ -58,7 +58,12 @@ async function tick(){try{const s=await (await fetch('state')).json();
   draw(cv[n],smooth(x,s.fs));
   if(n=='O1'||n=='O2'){const r=band(sp,8,12)/Math.max((band(sp,4,7)+band(sp,14,20))/2,1e-9);
    if(r>best.r){let pk=7,pv=0;for(let k=Math.ceil(7/sp.df);k*sp.df<=13;k++)if(sp.p[k]>pv){pv=sp.p[k];pk=k*sp.df}best={r,pk}}}});
- document.getElementById('alpha').innerHTML=`Alpha at the back: <b>${best.r.toFixed(1)}×</b> its neighbours, peak ${best.pk.toFixed(1)} Hz
-  <div style="height:10px;background:#24282c;border-radius:5px;margin-top:8px"><div style="height:10px;border-radius:5px;background:#7fd1a0;width:${Math.min(100,best.r*20)}%"></div></div>`
+ document.getElementById('alphatxt').innerHTML=`Alpha at the back: <b>${best.r.toFixed(1)}×</b> its neighbours, peak ${best.pk.toFixed(1)} Hz`
+ document.getElementById('alphabar').innerHTML=`<div style="height:10px;background:#24282c;border-radius:5px;margin-top:8px"><div style="height:10px;border-radius:5px;background:#7fd1a0;width:${Math.min(100,best.r*20)}%"></div></div>`
  }catch(e){document.getElementById('top').textContent='no answer from the laptop'}setTimeout(tick,500)}
 tick()</script>
+<script type="module">
+import { addInfo } from './info.js'; // served from scripts/web/ by name
+addInfo(document.querySelector('h1'), 'sleep-recording');
+addInfo(document.getElementById('alphatxt'), 'eyes-test');
+</script>

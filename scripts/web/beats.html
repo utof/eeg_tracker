@@ -237,3 +237,7 @@ async function tick() {
 setInterval(tick, 1000);
 render();
 </script>
+<script type="module">
+import { addInfo } from './info.js';
+addInfo(document.querySelector('h1'), 'sound-for-states');
+</script>
