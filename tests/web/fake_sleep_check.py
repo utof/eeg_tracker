@@ -26,7 +26,8 @@ def main() -> None:
     ap.add_argument("--chrome", default="/usr/bin/google-chrome")
     ap.add_argument("--shot")
     a = ap.parse_args()
-    base = f"http://localhost:{a.port}/"
+    base = f"http://127.0.0.1:{a.port}/"  # not localhost: Chrome on this laptop tries [::1] first, and after a
+    # recorder restart each request then waits ~20 s for an IPv6 answer that never comes
     while (m := get(base, "state")["minutes"]) < a.minutes:
         print(f"recorded {m} min, waiting for {a.minutes}", flush=True)
         time.sleep(20)

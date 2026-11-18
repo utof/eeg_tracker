@@ -22,7 +22,8 @@ def main() -> None:
     ap.add_argument("--chrome", default="/usr/bin/google-chrome")
     ap.add_argument("--shot")
     a = ap.parse_args()
-    base = f"http://localhost:{a.port}/"
+    base = f"http://127.0.0.1:{a.port}/"  # not localhost: Chrome on this laptop tries [::1] first, and after a
+    # recorder restart each request then waits ~20 s for an IPv6 answer that never comes
     problems: list[str] = []
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=a.chrome, headless=True,
@@ -59,7 +60,8 @@ def main() -> None:
         "ratings shown": "5 of 9" in text and "3 of 5" in text and "2 of 5" in text,
         "laptop command hidden": cmd_hidden,
         "sleep page shows it": "Morning check-in" in sleep_text and "5 of 9" in sleep_text,
-        "no console errors": not problems,
+        # the contact step restarts the recorder: "connection refused" while it is away is expected
+        "no console errors": not [x for x in problems if "ERR_CONNECTION_REFUSED" not in x],
     }
     print(json.dumps(dict(checks=checks, seconds=seconds, problems=problems, text=text), indent=1, ensure_ascii=False))
     sys.exit(0 if all(checks.values()) else 1)
