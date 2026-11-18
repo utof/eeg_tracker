@@ -1,5 +1,6 @@
 // What the night recorder needs from a headband. The BrainBit implementation is in brainbit.dart;
 // tests use a fake, so the recorder's rules can be checked without a phone.
+import 'battery.dart';
 import 'chunk_writer.dart';
 
 /// What it takes to reach the same headband again without a scan: the SDK's sensor info minus the signal
@@ -102,6 +103,9 @@ abstract class PhoneProbe {
 
   /// Exit records of earlier app processes newer than [sinceMs], one line each.
   Future<List<String>> exitReasons(int sinceMs);
+
+  /// The phone's own battery now (level, charge counter, current, charger, temperature), or null.
+  Future<PhoneBattery?> battery();
 }
 
 /// Night state that must survive the app process being restarted by Android.
@@ -117,6 +121,7 @@ class NightState {
     this.band,
     this.directPending = false,
     this.directOff = false,
+    this.phoneBattery = const BatteryTrack(),
   });
 
   final bool active;
@@ -139,6 +144,9 @@ class NightState {
   /// No more direct connections tonight (see [directPending]).
   final bool directOff;
 
+  /// The phone battery's first and last reading tonight (the end-of-night drain line).
+  final BatteryTrack phoneBattery;
+
   NightState copyWith({
     bool? active,
     int? startMs,
@@ -150,6 +158,7 @@ class NightState {
     BandId? band,
     bool? directPending,
     bool? directOff,
+    BatteryTrack? phoneBattery,
   }) => NightState(
     active: active ?? this.active,
     startMs: startMs ?? this.startMs,
@@ -161,6 +170,7 @@ class NightState {
     band: band ?? this.band,
     directPending: directPending ?? this.directPending,
     directOff: directOff ?? this.directOff,
+    phoneBattery: phoneBattery ?? this.phoneBattery,
   );
 
   Map<String, Object?> toJson() => {
@@ -178,6 +188,7 @@ class NightState {
     'band': band?.toJson(),
     'directPending': directPending,
     'directOff': directOff,
+    'phoneBattery': phoneBattery.toJson(),
   };
 
   static NightState fromJson(Object? j) {
@@ -200,6 +211,7 @@ class NightState {
       band: BandId.fromJson(j['band']),
       directPending: j['directPending'] == true,
       directOff: j['directOff'] == true,
+      phoneBattery: BatteryTrack.fromJson(j['phoneBattery']),
     );
   }
 }

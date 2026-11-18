@@ -2,6 +2,7 @@
 // screen's and the recorder service's, so the recorder can find its folder and log the power state.
 import 'package:flutter/services.dart';
 
+import 'recorder/battery.dart';
 import 'recorder/headband.dart';
 
 const MethodChannel _channel = MethodChannel('eeg_tracker/phone');
@@ -60,6 +61,10 @@ class Phone {
   static Future<List<String>> exitReasons(int sinceMs) async =>
       (await _channel.invokeListMethod<String>('exitReasons', {'sinceMs': sinceMs})) ?? const [];
 
+  /// The phone's battery now: level, charge counter, current, charger, temperature (BatteryManager).
+  static Future<PhoneBattery?> battery() async =>
+      PhoneBattery.fromMap(await _channel.invokeMapMethod<Object?, Object?>('battery'));
+
   /// Schedules the foreground service to start again in [delayMs], then ends this process.
   static Future<void> restartProcess(int delayMs) =>
       _channel.invokeMethod<void>('restartProcess', {'delayMs': delayMs});
@@ -76,6 +81,9 @@ class ChannelPhoneProbe implements PhoneProbe {
         'standby bucket ${s.standbyBucket ?? '?'}, notifications ${yn(s.notificationsEnabled)}'
         '${s.xiaomiOs != null ? ', xiaomi ${s.xiaomiOs}' : ''}';
   }
+
+  @override
+  Future<PhoneBattery?> battery() => Phone.battery();
 
   @override
   Future<List<String>> exitReasons(int sinceMs) => Phone.exitReasons(sinceMs);

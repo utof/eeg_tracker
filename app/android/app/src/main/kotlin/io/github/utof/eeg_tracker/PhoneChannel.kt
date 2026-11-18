@@ -8,7 +8,9 @@ import android.bluetooth.BluetoothManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -45,6 +47,7 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
             when (call.method) {
                 "recordingsDir" -> result.success(recordingsDir())
                 "snapshot" -> result.success(snapshot())
+                "battery" -> result.success(battery())
                 "openSettings" -> result.success(openSettings(call.argument<String>("page") ?: "appDetails"))
                 "exitReasons" -> result.success(exitReasons(call.argument<Number>("sinceMs")?.toLong() ?: 0L))
                 "restartProcess" -> {
@@ -80,6 +83,40 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
         m["bluetoothOn"] = bluetoothOn()
         m["hyperOs"] = getprop("ro.mi.os.version.name")
         m["miui"] = getprop("ro.miui.ui.version.name")
+        return m
+    }
+
+    /**
+     * The phone battery for the night's `.log`, read once a minute by the recorder. Two cheap reads of
+     * BatteryManager plus the sticky ACTION_BATTERY_CHANGED intent (no receiver is registered, so nothing
+     * is held or woken). A property the phone does not support comes back as Integer.MIN_VALUE and is sent
+     * as null. CURRENT_NOW has a different sign on different phones; the app only logs it.
+     */
+    private fun battery(): Map<String, Any?> {
+        val bm = context.getSystemService(BatteryManager::class.java)
+        fun prop(id: Int): Int? = bm?.getIntProperty(id)?.takeIf { it != Int.MIN_VALUE }
+        val sticky = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val m = HashMap<String, Any?>()
+        m["percent"] = prop(BatteryManager.BATTERY_PROPERTY_CAPACITY)?.takeIf { it in 0..100 }
+        m["chargeUah"] = prop(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
+        m["currentUa"] = prop(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
+        if (sticky != null) {
+            val plugged = sticky.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
+            m["plugged"] = when {
+                plugged and BatteryManager.BATTERY_PLUGGED_AC != 0 -> "ac"
+                plugged and BatteryManager.BATTERY_PLUGGED_USB != 0 -> "usb"
+                plugged and BatteryManager.BATTERY_PLUGGED_WIRELESS != 0 -> "wireless"
+                plugged != 0 -> "dock"
+                else -> "no"
+            }
+            val tenths = sticky.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
+            if (tenths != Int.MIN_VALUE) m["tempC"] = tenths / 10.0
+            if (m["percent"] == null) {
+                val level = sticky.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+                val scale = sticky.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+                if (level >= 0 && scale > 0) m["percent"] = level * 100 / scale
+            }
+        }
         return m
     }
 

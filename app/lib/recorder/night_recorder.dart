@@ -14,6 +14,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
+import 'battery.dart';
 import 'chunk_writer.dart';
 import 'contact.dart';
 import 'headband.dart';
@@ -44,6 +45,7 @@ class RecorderTiming {
     ],
     this.scanEvery = 3,
     this.rescanFor = const Duration(seconds: 15),
+    this.phoneLogEvery = const Duration(minutes: 1),
   });
 
   /// Buffered samples go to the files and a status goes to the screen this often.
@@ -79,6 +81,9 @@ class RecorderTiming {
 
   /// Scan length of a reconnect try (well under Android's 5 scan starts per 30 s).
   final Duration rescanFor;
+
+  /// The phone battery line goes into the `.log` this often (the check that finds it due runs every 10 s).
+  final Duration phoneLogEvery;
 }
 
 /// An SDK call passed its deadline. Never swallowed by the ordinary error handling.
@@ -134,6 +139,9 @@ class NightRecorder {
   ({int? lastDataMs, String? stem, String why})? _drop;
   ({String how, int tryNo})? _via;
 
+  /// When the phone battery line was last written (unix ms).
+  int _batteryLoggedMs = 0;
+
   /// Reconnect tries since the last run that recorded anything.
   int _tries = 0;
 
@@ -156,6 +164,7 @@ class NightRecorder {
     try {
       await _begin(restartedBySystem);
       await _loop();
+      if (_stopping && _endNight) await _logNightEnd();
     } finally {
       _set(_status.copyWith(phase: Phase.idle));
       if (!_done.isCompleted) _done.complete();
@@ -366,6 +375,7 @@ class NightRecorder {
         'signal ${rssi == null ? 'unknown (no scan)' : '$rssi dBm'}',
       );
       await _logPhone(w);
+      await _logBattery(w);
       _set(
         _status.copyWith(
           phase: Phase.connecting,
@@ -494,6 +504,9 @@ class NightRecorder {
       final battery = await _battery(band) ?? _status.battery;
       _set(_status.copyWith(battery: battery));
       w.log('samples ${w.samplesWritten} (+$got) battery $battery%');
+      if (_now().millisecondsSinceEpoch - _batteryLoggedMs >= timing.phoneLogEvery.inMilliseconds) {
+        await _logBattery(w);
+      }
       stalled = got == 0 ? stalled + 1 : 0;
       if (stalled == 0) {
         if (_status.note != 'recording') _set(_status.copyWith(note: 'recording'));
@@ -661,6 +674,35 @@ class NightRecorder {
       final power = await probe?.powerLine();
       if (power != null) w.log('phone $power');
     } catch (_) {}
+  }
+
+  /// One phone battery line in the run's `.log`, and the reading kept for the end-of-night drain. A phone
+  /// that gives no numbers, or a slow channel call, only costs the line.
+  Future<void> _logBattery(ChunkWriter w) async {
+    _batteryLoggedMs = _now().millisecondsSinceEpoch;
+    final b = await _readBattery();
+    if (b == null) return;
+    _night = _night.copyWith(phoneBattery: _night.phoneBattery.add(b, _now().millisecondsSinceEpoch));
+    w.log('phone ${b.logLine()}');
+  }
+
+  Future<PhoneBattery?> _readBattery() async {
+    try {
+      return await probe?.battery().timeout(const Duration(seconds: 5));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The night was ended by the user: one last reading and the drain per hour, into the last run's `.log`.
+  Future<void> _logNightEnd() async {
+    final b = await _readBattery();
+    if (b != null) {
+      _night = _night.copyWith(phoneBattery: _night.phoneBattery.add(b, _now().millisecondsSinceEpoch));
+      _note('phone ${b.logLine()}');
+    }
+    _note(_night.phoneBattery.summaryLine());
+    await _save();
   }
 
   Future<void> _quietly(Future<void> Function() call) async {

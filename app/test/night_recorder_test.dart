@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:eeg_tracker/recorder/battery.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/night_recorder.dart';
@@ -142,6 +143,33 @@ class FakeFinder implements HeadbandFinder {
   }
 }
 
+/// Phone battery readings that fall by 100 mAh and 1 % a call, like a phone running on battery.
+class FakePhone implements PhoneProbe {
+  FakePhone({this.plugged = 'no', this.broken = false});
+  final String plugged;
+  final bool broken;
+  int reads = 0;
+
+  @override
+  Future<PhoneBattery?> battery() async {
+    reads++;
+    if (broken) throw StateError('no battery service');
+    return PhoneBattery(
+      percent: 90 - reads,
+      chargeUah: 4000000 - reads * 100000,
+      currentUa: -300000,
+      plugged: plugged,
+      tempC: 31.25,
+    );
+  }
+
+  @override
+  Future<String?> powerLine() async => null;
+
+  @override
+  Future<List<String>> exitReasons(int sinceMs) async => const [];
+}
+
 const fast = RecorderTiming(
   tick: Duration(milliseconds: 10),
   ticksPerCheck: 5,
@@ -158,6 +186,7 @@ const fast = RecorderTiming(
   reconnectWaits: [Duration(milliseconds: 5), Duration(milliseconds: 10), Duration(milliseconds: 20)],
   scanEvery: 3,
   rescanFor: Duration(milliseconds: 20),
+  phoneLogEvery: Duration(minutes: 1),
 );
 
 int f32Records(File f) => f.lengthSync() ~/ recordBytes;
@@ -176,8 +205,10 @@ void main() {
   });
   tearDown(() => dir.deleteSync(recursive: true));
 
-  NightRecorder recorder(HeadbandFinder finder) => NightRecorder(
+  NightRecorder recorder(HeadbandFinder finder, {PhoneProbe? probe, DateTime Function()? clock}) => NightRecorder(
     finder: finder,
+    probe: probe,
+    clock: clock,
     dir: dir,
     store: store,
     onStatus: statuses.add,
@@ -456,5 +487,61 @@ void main() {
     expect(finder.scans, greaterThan(2));
     expect(dir.listSync(), isEmpty);
     expect(statuses.any((s) => s.note.contains('not found')), isTrue);
+  });
+
+  test('phone battery: a line every minute and a drain summary at the end of the night', () async {
+    // The recorder's clock runs 3600 times faster than the wall clock: 0.4 s is 24 minutes.
+    final t0 = DateTime(2026, 11, 18, 23);
+    final sw = Stopwatch()..start();
+    final phone = FakePhone();
+    final r = recorder(
+      FakeFinder([FakeBand('a')]),
+      probe: phone,
+      clock: () => t0.add(Duration(milliseconds: sw.elapsedMilliseconds * 3600)),
+    );
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await r.stop();
+    await running;
+
+    final log = files('log').single.readAsStringSync();
+    final lines = RegExp(r'phone battery (\d+)% charge (\d+) uAh current -300000 uA unplugged temp 31\.3 C')
+        .allMatches(log);
+    expect(lines.length, greaterThanOrEqualTo(3)); // at connect, then each due check, then the last one at Stop
+    expect(log, contains('phone battery summary: '));
+    final m = RegExp(r'summary: (\d+)% in ([\d.]+) h = ([\d.]+) %/h, (\d+) mAh = (\d+) mAh/h').firstMatch(log);
+    expect(m, isNotNull, reason: log);
+    expect(int.parse(m!.group(1)!), phone.reads - 1);
+    expect(int.parse(m.group(4)!), (phone.reads - 1) * 100);
+    expect(log, isNot(contains('charger was connected')));
+    expect(store.state.phoneBattery.first!.percent, 89);
+  });
+
+  test('phone battery: a charger is said in the summary', () async {
+    final t0 = DateTime(2026, 11, 18, 23);
+    final sw = Stopwatch()..start();
+    final r = recorder(
+      FakeFinder([FakeBand('a')]),
+      probe: FakePhone(plugged: 'usb'),
+      clock: () => t0.add(Duration(milliseconds: sw.elapsedMilliseconds * 3600)),
+    );
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await r.stop();
+    await running;
+    expect(files('log').single.readAsStringSync(), contains('plugged usb'));
+    expect(files('log').single.readAsStringSync(), contains('a charger was connected at some point'));
+  });
+
+  test('phone battery: a broken battery service costs the lines, not the recording', () async {
+    final broken = FakeBand('b');
+    final r = recorder(FakeFinder([broken]), probe: FakePhone(broken: true));
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await r.stop();
+    await running;
+    final log = files('log').single.readAsStringSync();
+    expect(log, contains('phone battery summary: no readings'));
+    expect(log, contains('total samples ${broken.emitted}')); // recording went on
   });
 }
