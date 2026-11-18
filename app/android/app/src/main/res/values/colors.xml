@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The app's night ground (DESIGN.md), so no white flash at launch in a dark bedroom. -->
+    <color name="night_ground">#FF100D0B</color>
+</resources>
