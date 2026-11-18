@@ -1,0 +1,68 @@
+# Sleep scoring (the night chart)
+
+## What it does
+
+The morning after, two sleep models read the night's file and label every 30 seconds as awake, light, deep or
+dream (REM) sleep. The result is a chart of the night (a hypnogram) plus sleep onset, time asleep and wake-ups.
+
+## Evidence for this headband: some
+
+Similar dry headbands matched lab scoring for sleep timing and for wake, dream and non-dream sleep, but this
+headband has never been checked against a lab recording, and the five-stage detail (light and deep sleep) is weak.
+
+## What the research says
+
+- AnySleep, the main model, accepts any set of electrodes (it learned from 19,909 nights). On lab recordings it
+  scores about 0.68 with one channel and 0.73 with four (macro-F1: a 0-1 score averaged over the stages).
+- The closest dry headbands set the range. Dreem reached kappa 0.748 (kappa: agreement beyond chance, 0 to 1),
+  while human experts agree with each other at 0.798. Muse-S reached 0.76. At home, dry ZMax nights averaged
+  0.45 and 10% of nights failed.
+- A fair target here is kappa 0.6-0.75 on nights with good contact, with light sleep (N1, the drowsy first
+  stage) staying poor.
+- Big pretrained "brain foundation models" lost or tied on every test on headbands like this one; on two-channel
+  sleep data, plain hand-made measures tied the big models.
+- Retraining a model on lab nights reshaped to look like the device added 0.058 kappa in an ear-EEG study, and
+  one labelled night per person added 2-4.5 accuracy points.
+
+## Where the data does not support it
+
+- Nobody has scored sleep from a BrainBit next to a lab sleep study. Until that is done, the chart is a first
+  guess.
+- Light sleep (N1) is missed by every headband. Dry electrodes may record extra slow waves, which can push light
+  sleep into "deep", so treat deep-sleep minutes with care.
+- When the two models agree, that shows they are consistent, not that they are right.
+- YASA was trained on a top-of-head channel; back and side electrodes are outside its training.
+- AnySleep cannot run live as shipped: it looks about 7 minutes forward and back, so it scores the night
+  afterwards, not while you sleep.
+
+## How the app uses this
+
+- AnySleep (three runs averaged, all four channels, plus a filter that removes slow drift) is the main model; YASA on
+  the O1-T3 pair is the second opinion. Where they disagree, the chart shows low confidence.
+- A 30-second stretch missing more than 5 seconds of data is not scored: missing data never becomes "awake" or
+  "deep".
+- An upgrade (AnySleep fine-tuned on public nights reshaped to this headband's channels) is adopted only if it
+  adds at least 0.03 kappa on nights it has not seen.
+- Big foundation models only in a later side-by-side test; none is used now.
+
+## Sources
+
+- [AnySleep preprint](https://arxiv.org/html/2512.14461v1)
+- [Dreem dry headband vs experts (Arnal 2020)](https://www.ebi.ac.uk/europepmc/webservices/rest/PMC7751170/fullTextXML)
+- [Muse-S sleep study (Lanthier 2026)](https://espace2.etsmtl.ca/33349/1/Lina-JM-2026-33349.pdf)
+- [ZMax home nights](https://www.medrxiv.org/content/10.64898/2026.06.01.26354591v1)
+- [BrainCodes: tiny model beat big ones on the 4-electrode Muse](https://arxiv.org/html/2610.29320v1)
+- [Zare 2026: two-channel sleep, hand-made measures tie big models](https://arxiv.org/html/2607.24519v3)
+- [Lebiecka-Johansen 2025: adapting sleep models to ear-EEG](https://ece.au.dk/fileadmin/ece/Center/Ear-eeg/News_files/EMBC2025papers/LebieckaJohansen2025_BenefitsOfDifferentStrategiesToAdaptSleepScoringModelsFromScalpToEarEEG.pdf)
+- [Mikhaylov 2024: dry electrodes record extra slow power](https://pmc.ncbi.nlm.nih.gov/articles/PMC11679099/)
+- [Wang 2025: dry 8-site band, light sleep missed](https://europepmc.org/article/PMC/PMC12561290)
+- [SLEEPYLAND: model agreement vs accuracy](https://arxiv.org/html/2506.08574v2)
+
+## Libraries and models
+
+- [AnySleep](https://github.com/dslaborg/AnySleep) (MIT; code and weights): the main sleep model.
+- [YASA](https://github.com/raphaelvallat/yasa) 0.8.1 (BSD-3): the second opinion.
+- [MNE](https://pypi.org/project/mne/) (BSD-3): reads and filters the recording.
+- [pyedflib](https://github.com/holgern/pyedflib/blob/master/LICENSE) (BSD-3): reads and writes BDF+ files.
+
+Checked: 2026-11-18

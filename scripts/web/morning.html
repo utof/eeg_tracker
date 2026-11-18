@@ -71,3 +71,8 @@ button.main{background:#2a5d43;border-color:#3d7a5a}button:disabled{opacity:.5;c
   <p id="err" class="muted"></p>
 </main>
 <script type="module" src="morning.js"></script>
+<script type="module">
+import { addInfo } from './info.js';
+addInfo(document.querySelector('#intro h1'), 'morning-check-in');
+addInfo(document.querySelector('#setupsec h1'), 'jaw-and-blinks');
+</script>
