@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../sleep/report.dart' show isoLocal;
 import 'measures.dart';
 import 'pyfmt.dart';
 
@@ -222,4 +223,59 @@ List<Map<String, Object?>> compareRows(Map<String, Object?> today, List<Map<Stri
     out.add(row);
   }
   return out;
+}
+
+// ---------------------------------------------------------------- the result file
+
+DateTime _fromUnix(double t) => DateTime.fromMicrosecondsSinceEpoch((t * 1e6).round());
+
+/// `<start>.morning.json` in the laptop's layout (morning_check.analyse + compared) with the phone's additions:
+/// `app` ("phone"), `habits`, `reaction` (null when skipped) and `contact` (ohms at the start, null = none).
+/// [past]: earlier results, oldest first (the last 14 are compared with).
+Map<String, Object?> buildMorningResult({
+  required String source,
+  required Map<String, PhaseWindow> win,
+  required Map<String, ChannelMeasures> channels,
+  required Map<String, double?> back,
+  required Map<String, Object?>? ratings,
+  required List<Map<String, Object?>> past,
+  Map<String, Object?>? habits,
+  Map<String, Object?>? reaction,
+  Map<String, double?> contact = const {},
+  int fs = morningFs,
+}) {
+  final closed = win['eyes_closed']!;
+  final start = _fromUnix(closed.t0);
+  final end = _fromUnix(win.values.map((w) => w.t1).reduce((a, b) => a > b ? a : b));
+  final iso = isoLocal(start);
+  final res = <String, Object?>{
+    'version': morningVersion,
+    'source': source,
+    'start': iso,
+    'end': isoLocal(end),
+    'date': iso.substring(0, 10),
+    'phase_s': {for (final e in win.entries) e.key: pyRound((e.value.i1 - e.value.i0) / fs, 1)},
+    'channels': {for (final e in channels.entries) e.key: e.value.toJson()},
+    'back': back,
+    'ratings': ratings,
+    'setup_test': null,
+    'method': {
+      'segment_s': segS,
+      'reject_p2p_uv': p2pUv,
+      'reject_rel_spread': relSpread,
+      'alpha_band_hz': [alphaBand.$1, alphaBand.$2],
+      'iaf': 'centre of gravity of power above the 1/f line, 7-14 Hz',
+      'fit_hz': [fitRange.$1, fitRange.$2],
+      'fit_excludes_hz': [iafRange.$1, iafRange.$2],
+      'skip_s': [skipStartS, skipEndS],
+    },
+    'device': {'model': 'BrainBit Black', 'channels': recordedChannels},
+    'validated': false,
+    'app': 'phone',
+    'habits': habits,
+    'reaction': reaction,
+    'contact': {for (final ch in recordedChannels) ch: contact[ch]},
+  };
+  res['compared'] = compareRows(res, past.length > historyN ? past.sublist(past.length - historyN) : past);
+  return res;
 }
