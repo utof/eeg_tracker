@@ -56,9 +56,9 @@ Update the status column whenever something lands.
 | 14 | Statistics engine + random self-experiments | after a month of data | DECISIONS row 12 |
 | 15 | Build guides for the helmet | in `eeg_ads1299_lab` | other repo |
 | 16 | Eyes open/closed test (high beep open, low beep closed) | working | `scripts/web/eyes.html` |
-| 17 | Sound for states: binaural, isochronic, pulsed noise; presets per state; markers for checking | first page being built | `scripts/web/beats.html` |
+| 17 | Sound for states: binaural, isochronic, pulsed noise; presets per state; markers for checking | first page working (review fixes in); next: calm beds as the default, beats as optional extras | `scripts/web/beats.html` |
 | 18 | Sound for states: measure "did I get there", stop when asleep, learn what works for you | after research + 6 | - |
-| 19 | Research: sound for states; states and their markers; more features | in progress | `_local/research/` |
+| 19 | Research: sound for states; states and their markers; more features | done 2026-11-18 | `_local/research/2026-11-18-06-brain-states-sound-and-features.md` |
 | 20 | Dream catcher (owner: "definitely build"): at sleep onset, ask what you're thinking, record the answer, let you drift again, 3-4 rounds | planned, right after the current features | see Ideas |
 
 ## Next tests that need the owner (each about 5 minutes)
