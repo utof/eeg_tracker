@@ -6,7 +6,8 @@ contact per channel, and phone settings that could stop the recording.
 
 - Files: `<stamp>.f32/.idx/.log` in the app's private folder (other apps cannot read it), the same format as
   `scripts/record_night.py` (`docs/data-format.md`); join a night with `scripts/to_bdf.py`. Only "Export a
-  night" copies them out (below; DECISIONS rows 22 and 25).
+  night" copies them out (below; DECISIONS rows 22 and 25). Android backups and phone-to-phone transfers
+  skip the app completely (row 26), so a new phone starts empty: export what you want to keep first.
 - Recorder: a foreground service of type `connectedDevice` (`lib/recorder/recorder_service.dart`) whose
   isolate owns the BrainBit session (`lib/recorder/night_recorder.dart`, rules in DECISIONS rows 17-23).
 - Screen: `lib/ui/`, design in `../DESIGN.md`.
