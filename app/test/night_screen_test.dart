@@ -54,12 +54,26 @@ void main() {
         contactTried: true,
         contactOhms: {'O1': double.infinity},
         slots: {7: 9},
+        band: BandId(name: 'BrainBit', address: 'AA:BB', serial: '1', family: 'leBrainBitBlack', model: 3),
+        directPending: true,
+        directOff: true,
       );
       final back = NightState.fromJson(n.toJson());
       expect(back.active, isTrue);
       expect(back.samples, 9);
       expect(back.contactOhms, {'O1': null});
       expect(back.slots, {7: 9});
+      expect(back.band?.address, 'AA:BB');
+      expect(back.band?.family, 'leBrainBitBlack');
+      expect(back.band?.model, 3);
+      expect(back.directPending, isTrue);
+      expect(back.directOff, isTrue);
+      expect(
+        NightState.fromJson({
+          'band': {'address': 5},
+        }).band,
+        isNull,
+      );
       expect(NightState.fromJson('garbage').active, isFalse);
     });
   });

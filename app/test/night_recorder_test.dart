@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// A headband that sends a 5-sample batch every 10 ms while its signal runs.
 class FakeBand implements Headband {
-  FakeBand(this.label, {this.hangOn});
+  FakeBand(this.label, {this.hangOn, this.rssi = -60, bool outOfRange = false}) : lost = outOfRange;
 
   final String label;
 
@@ -17,12 +17,12 @@ class FakeBand implements Headband {
   final String? hangOn;
   final List<String> calls = [];
   final List<String> callsWhileLost = [];
-  bool lost = false;
+  bool lost;
   bool sending = true;
   int emitted = 0;
   int _pack = 0;
   Timer? _timer;
-  final _signal = StreamController<List<Sample>>.broadcast();
+  final _signal = StreamController<List<Sample>>.broadcast(sync: true); // sync: a counted batch is a delivered one
   final _resist = StreamController<Map<String, double>>.broadcast();
   final _range = StreamController<bool>.broadcast();
 
@@ -46,7 +46,9 @@ class FakeBand implements Headband {
   @override
   String get serial => '123';
   @override
-  int get rssi => -60;
+  final int? rssi;
+  @override
+  BandId get id => BandId(name: name, address: address, serial: serial, family: 'leBrainBitBlack', model: 1);
   @override
   Stream<List<Sample>> get signal => _signal.stream;
   @override
@@ -59,7 +61,9 @@ class FakeBand implements Headband {
     await _call('startSignal');
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(milliseconds: 10), (_) {
-      if (!sending) return;
+      // Only batches someone receives count: one sent after the recorder unsubscribed is lost on a real
+      // headband too, and counting it made the sample-count checks fail on a busy machine.
+      if (!sending || !_signal.hasListener) return;
       _signal.add([for (var i = 0; i < 5; i++) (pack: _pack++ % 2048, o1: 1e-6, o2: 2e-6, t3: 3e-6, t4: 4e-6)]);
       emitted += 5;
     });
@@ -103,18 +107,38 @@ class FakeBand implements Headband {
 }
 
 class FakeFinder implements HeadbandFinder {
-  FakeFinder(this.bands);
+  FakeFinder(this.bands, {List<Headband>? direct}) : direct = direct ?? [];
+
+  /// Handed out by scans, then by direct connections; each one once.
   final List<Headband> bands;
-  int scans = 0;
+  final List<Headband> direct;
+
+  /// 'scan' or 'direct AA:BB', in order.
+  final List<String> calls = [];
+
+  /// A direct connection that never returns, to imitate the wedged SDK.
+  bool hangDirect = false;
+
+  int get scans => calls.where((c) => c == 'scan').length;
+  int get directs => calls.where((c) => c.startsWith('direct')).length;
 
   @override
   Future<Headband?> find(Duration scanFor, {void Function(String name, int rssi)? onFound}) async {
-    scans++;
+    calls.add('scan');
     await Future<void>.delayed(const Duration(milliseconds: 5));
     if (bands.isEmpty) return null;
     final b = bands.removeAt(0);
-    onFound?.call(b.name, b.rssi);
+    onFound?.call(b.name, b.rssi ?? 0);
     return b;
+  }
+
+  @override
+  Future<Headband> connectDirect(BandId id) async {
+    calls.add('direct ${id.address}');
+    if (hangDirect) await Completer<void>().future;
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+    if (direct.isEmpty) throw StateError('Sensor not founded');
+    return direct.removeAt(0);
   }
 }
 
@@ -131,6 +155,9 @@ const fast = RecorderTiming(
   notFoundWaitLong: Duration(milliseconds: 10),
   stallChecksToGiveUp: 3,
   stopTimeout: Duration(seconds: 2),
+  reconnectWaits: [Duration(milliseconds: 5), Duration(milliseconds: 10), Duration(milliseconds: 20)],
+  scanEvery: 3,
+  rescanFor: Duration(milliseconds: 20),
 );
 
 int f32Records(File f) => f.lengthSync() ~/ recordBytes;
@@ -170,7 +197,7 @@ void main() {
     await r.stop();
     await running;
 
-    expect(band.calls.take(4), ['battery', 'startResist', 'stopResist', 'startSignal']);
+    expect(band.calls.take(5), ['state', 'battery', 'startResist', 'stopResist', 'startSignal']);
     expect(band.calls, containsAllInOrder(['stopSignal', 'disconnect']));
     final f32 = files('f32');
     expect(f32, hasLength(1));
@@ -203,7 +230,7 @@ void main() {
     expect(first.callsWhileLost, isEmpty);
     expect(r.abandoned, [first]);
     expect(second.calls, isNot(contains('startResist')));
-    expect(second.calls.first, 'battery');
+    expect(second.calls.take(2), ['state', 'battery']);
     final f32 = files('f32');
     expect(f32, hasLength(2));
     expect(f32Records(f32[0]), first.emitted);
@@ -226,7 +253,7 @@ void main() {
 
     final log = files('log').first.readAsStringSync();
     expect(log, contains('restarting stream (try 1)'));
-    expect(log, contains('still no data; starting over with a fresh scan'));
+    expect(log, contains('still no data; reconnecting'));
     // Still in range, so it was stopped and disconnected properly.
     expect(first.calls, containsAllInOrder(['stopSignal', 'startSignal', 'stopSignal', 'disconnect']));
     expect(second.calls, contains('startSignal'));
@@ -273,6 +300,150 @@ void main() {
     expect(store.state.runs, 2);
     expect(store.state.samples, 2500 + band.emitted);
     expect(store.state.startMs, 1000);
+  });
+
+  test('after a drop the same headband is reached directly, without a scan', () async {
+    final first = FakeBand('a');
+    final again = FakeBand('a again', rssi: null); // a direct connection has no scan, so no signal reading
+    final finder = FakeFinder([first], direct: [again]);
+    final r = recorder(finder);
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    first.goOutOfRange();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await r.stop();
+    await running;
+
+    expect(finder.calls, ['scan', 'direct AA:BB']);
+    expect(first.callsWhileLost, isEmpty);
+    expect(r.abandoned, [first]);
+    expect(again.calls, contains('startSignal'));
+    expect(again.calls, isNot(contains('startResist')));
+    final logs = files('log');
+    expect(logs, hasLength(2));
+    final before = logs[0].readAsStringSync();
+    expect(before, contains('drop (out of range); last data '));
+    expect(before, contains('reconnect try 1 (direct to AA:BB): connected'));
+    expect(logs[1].readAsStringSync(), contains('reconnected (direct, try 1) after a drop'));
+    expect(logs[1].readAsStringSync(), contains('signal unknown (no scan)'));
+    expect(store.state.band?.address, 'AA:BB');
+    expect(store.state.directPending, isFalse);
+  });
+
+  test('failed direct tries back off, every third try is a scan, each try is logged', () async {
+    final first = FakeBand('a');
+    final second = FakeBand('b');
+    final finder = FakeFinder([first, second]);
+    final r = recorder(finder);
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    first.goOutOfRange();
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await r.stop();
+    await running;
+
+    expect(finder.calls, ['scan', 'direct AA:BB', 'direct AA:BB', 'scan']);
+    expect(second.calls, contains('startSignal'));
+    final log = files('log')[0].readAsStringSync();
+    expect(log, contains('reconnect try 1 (direct to AA:BB): failed after '));
+    expect(log, contains('Sensor not founded'));
+    expect(log, contains('reconnect try 2 (direct to AA:BB): failed'));
+    expect(log, contains('reconnect try 3 (scan): connected'));
+    expect(files('f32'), hasLength(2));
+  });
+
+  test('a headband that answers but reports out of range gets only the state read', () async {
+    final first = FakeBand('a');
+    final ghost = FakeBand('ghost', outOfRange: true);
+    final again = FakeBand('a again');
+    final finder = FakeFinder([first], direct: [ghost, again]);
+    final r = recorder(finder);
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    first.goOutOfRange();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await r.stop();
+    await running;
+
+    expect(ghost.calls, ['state']);
+    expect(r.abandoned, [first, ghost]);
+    expect(again.calls, contains('startSignal'));
+    expect(files('log')[0].readAsStringSync(), contains('reports out of range; left alone'));
+  });
+
+  test('a direct connection that blocks marks direct connections unsafe for the restarted process', () async {
+    final first = FakeBand('a');
+    final finder = FakeFinder([first])..hangDirect = true;
+    final r = recorder(finder);
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    first.goOutOfRange();
+    await running.timeout(const Duration(seconds: 3));
+
+    expect(stuck.single, contains('direct connect'));
+    expect(store.state.active, isTrue);
+    expect(store.state.directPending, isTrue);
+  });
+
+  test('a direct connection stays marked unsafe-if-we-crash until its first data', () async {
+    final first = FakeBand('a');
+    final silent = FakeBand('silent', rssi: null)..sending = false;
+    final r = recorder(FakeFinder([first], direct: [silent]));
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    first.goOutOfRange();
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(silent.calls, contains('startSignal'));
+    expect(store.state.directPending, isTrue);
+    silent.sending = true;
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    expect(store.state.directPending, isFalse);
+    await r.stop();
+    await running;
+  });
+
+  test('a process that died during a direct connection scans only', () async {
+    store.state = const NightState(
+      active: true,
+      startMs: 1000,
+      samples: 2500,
+      runs: 1,
+      contactTried: true,
+      band: BandId(name: 'BrainBit a', address: 'AA:BB', serial: '123', family: 'leBrainBitBlack', model: 1),
+      directPending: true,
+    );
+    final band = FakeBand('a');
+    final finder = FakeFinder([band], direct: [FakeBand('never')]);
+    final r = recorder(finder);
+    final running = r.run(restartedBySystem: true);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await r.stop();
+    await running;
+
+    expect(finder.directs, 0);
+    expect(finder.scans, 1);
+    expect(store.state.directOff, isTrue);
+    expect(files('log').single.readAsStringSync(), contains('scans only for the rest of the night'));
+  });
+
+  test('a restarted process tries the known headband directly first', () async {
+    store.state = const NightState(
+      active: true,
+      startMs: 1000,
+      runs: 1,
+      contactTried: true,
+      band: BandId(name: 'BrainBit a', address: 'AA:BB', serial: '123', family: 'leBrainBitBlack', model: 1),
+    );
+    final band = FakeBand('a');
+    final finder = FakeFinder([], direct: [band]);
+    final r = recorder(finder);
+    final running = r.run(restartedBySystem: true);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await r.stop();
+    await running;
+
+    expect(finder.calls, ['direct AA:BB']);
+    expect(band.calls, contains('startSignal'));
   });
 
   test('no headband: keeps scanning, writes no files, stops promptly', () async {

@@ -15,7 +15,11 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 - `.idx`: one `<dQ` record per batch that arrived: unix time of arrival (float seconds) and the index of the
   batch's first record. Gaps are found from these times; packet numbers can repeat.
 - `.log`: plain text, one line per event: connection (model, signal strength), contact resistance in ohms, a
-  sample count and battery reading every 10 s, stalls and restarts.
+  sample count and battery reading every 10 s, stalls and restarts. On the phone a run that ends in a drop logs
+  `drop (out of range | no data | run failed); last data <time>; reconnecting`, then one line per try,
+  appended after its data files are closed: `reconnect try N (direct to <address> | scan): connected | not found |
+  failed after <s> s ...`. The next run's `.log` starts with `reconnected (direct | scan, try N) after a drop`,
+  the previous run's stem and the time of its last data.
 - The device's Bluetooth address and serial number are in the `.log`. They stay on the owner's machine
   (`_local/` is never committed).
 

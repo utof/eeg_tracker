@@ -27,6 +27,10 @@ String _two(int v) => v.toString().padLeft(2, '0');
 /// Seconds since the unix epoch as a float, like Python's `time.time()`.
 double unixSeconds(DateTime t) => t.microsecondsSinceEpoch / 1e6;
 
+/// Adds one line to a closed run's `.log`: drops and reconnect tries happen after its data files are closed.
+void appendLogLine(File log, String message, DateTime at) =>
+    log.writeAsStringSync('${logTime(at)} $message\n', mode: FileMode.append, flush: true);
+
 /// Buffers samples in memory; [append] adds them to the files (call it about once a second) and
 /// [sync] also flushes them to disk with fsync (about every 10 s). Add-only: nothing is ever rewritten.
 class ChunkWriter {

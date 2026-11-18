@@ -24,6 +24,13 @@ flutter build apk --profile --target-platform android-arm64
 
 `flutter test` also renders the screen in four states to `build/screens/*.png` (normal and 130 % text).
 
+## If the headband drops out
+
+The app saves what it has and reconnects by itself: first straight to the same headband (no Bluetooth scan,
+because Android blocks scans while the screen is off), after 2, 5, 10, 30 s and then every minute; every
+third try is a short scan instead. Each try is written in the night's `.log` with its time (`drop`,
+`reconnect try`, `reconnected`), so gaps can be marked later. It never stops trying until you press Stop.
+
 ## Export a night
 
 The recordings stay inside the app. To get one night out:
@@ -57,5 +64,9 @@ From `docs/research/android-overnight-ble-xiaomi.md` section 8. Nothing here has
    `scripts/to_bdf.py` on the `.f32` files: expect at least 99.9 % of the expected samples and no gap.
 7. Collect `adb shell am get-standby-bucket io.github.utof.eeg_tracker` and
    `adb logcat -b events -d | grep -i -E "am_kill|am_proc_died"`.
+8. Drop test (T3(d)), 5 minutes: start a night, screen off, carry the headband to another room for 60 s,
+   bring it back, wait 3 minutes. Stop, export, and look in the `.log` files for `reconnect try`. A line
+   `(direct to ...): connected` means reconnecting without a scan works on this phone; if only `(scan)`
+   lines connect, or the app restarted itself, tell the assistant (DECISIONS row 18).
 
 If the headband is not found without location permission (test T0), see DECISIONS row 23.

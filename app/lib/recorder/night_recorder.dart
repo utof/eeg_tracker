@@ -1,17 +1,23 @@
 // The night loop, ported from scripts/record_night.py with its lessons (DECISIONS rows 17-21):
 // - contact check at the start of the night;
 // - a stalled stream is restarted; 40 s without data ends the run;
-// - never an SDK call on a headband that is out of range (on the laptop that segfaulted the SDK);
-// - after a drop: fresh scan, new sensor object, new file set (to_bdf.py joins a night's sets by time);
+// - never an SDK call on a headband that is out of range (on the laptop that segfaulted the SDK); the
+//   one call made on a sensor that may be out of range is the state read, as on the laptop;
+// - after a drop: a new sensor object and a new file set (to_bdf.py joins a night's sets by time), like
+//   the laptop's fresh process. The phone reaches the same headband directly by its address, because
+//   Android stops unfiltered scans while the screen is off; growing waits, every third try a scan
+//   (row 18). Each drop and try goes into the .log with its time;
 // - every SDK call has a deadline; one that blocks means the SDK is wedged, so the data is saved and the
 //   app process is restarted (the phone's version of "exit and let record_night.sh start a fresh one");
 // - the data is saved before every risky SDK call.
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'chunk_writer.dart';
 import 'contact.dart';
 import 'headband.dart';
+import 'nights.dart';
 import 'status.dart';
 
 class RecorderTiming {
@@ -29,6 +35,15 @@ class RecorderTiming {
     this.stallChecksToGiveUp = 4,
     this.startAttempts = 10,
     this.stopTimeout = const Duration(seconds: 20),
+    this.reconnectWaits = const [
+      Duration(seconds: 2),
+      Duration(seconds: 5),
+      Duration(seconds: 10),
+      Duration(seconds: 30),
+      Duration(seconds: 60),
+    ],
+    this.scanEvery = 3,
+    this.rescanFor = const Duration(seconds: 15),
   });
 
   /// Buffered samples go to the files and a status goes to the screen this often.
@@ -55,6 +70,15 @@ class RecorderTiming {
   final int stallChecksToGiveUp;
   final int startAttempts;
   final Duration stopTimeout;
+
+  /// Wait before each reconnect try after a drop; the last one repeats until the headband is back.
+  final List<Duration> reconnectWaits;
+
+  /// Every this many-th reconnect try is a scan instead of a direct connection (3: direct, direct, scan).
+  final int scanEvery;
+
+  /// Scan length of a reconnect try (well under Android's 5 scan starts per 30 s).
+  final Duration rescanFor;
 }
 
 /// An SDK call passed its deadline. Never swallowed by the ordinary error handling.
@@ -98,8 +122,20 @@ class NightRecorder {
   final Completer<void> _done = Completer<void>();
   bool _endNight = true;
   ChunkWriter? _writer;
-  List<String> _restartNotes = const [];
   int _misses = 0;
+
+  /// Log lines waiting for the next run's `.log` (no closed run of tonight to put them in), with their times.
+  List<(DateTime, String)> _notes = const [];
+
+  /// The `.log` of the last closed run: drops and reconnect tries between runs go there.
+  File? _lastLog;
+
+  /// The drop being recovered from, and how the headband came back.
+  ({int? lastDataMs, String? stem, String why})? _drop;
+  ({String how, int tryNo})? _via;
+
+  /// Reconnect tries since the last run that recorded anything.
+  int _tries = 0;
 
   /// Samples received per half hour of clock time (the screen's night strip).
   final Map<int, int> _slots = {};
@@ -110,6 +146,9 @@ class NightRecorder {
   RecorderStatus get status => _status;
   bool get _stopping => _stopSignal.isCompleted;
   Future<void> get done => _done.future;
+
+  /// [run] has returned: no session is using a headband any more.
+  bool get finished => _done.isCompleted;
 
   /// Records until [stop]. [restartedBySystem]: Android restarted the service after the process died,
   /// so an active night is continued (new file set) instead of a new night begun.
@@ -139,10 +178,19 @@ class NightRecorder {
     if (restartedBySystem && prior.active) {
       _night = prior;
       _slots.addAll(prior.slots);
-      _restartNotes = [
+      final notes = [
         'service restarted by Android after the app process ended',
         for (final r in await _exitReasons(prior.startMs)) 'previous process ended: $r',
       ];
+      if (prior.directPending) {
+        _night = _night.copyWith(directPending: false, directOff: true);
+        notes.add('the previous process ended during a direct connection; scans only for the rest of the night');
+      }
+      final t = _now();
+      _notes = [for (final n in notes) (t, n)];
+      _lastLog = _newestLog(prior.startMs);
+      final stem = _lastLog?.uri.pathSegments.last.replaceFirst(RegExp(r'\.log$'), '');
+      if (prior.band != null) _drop = (lastDataMs: null, stem: stem, why: 'app process restarted');
     } else {
       _night = NightState(active: true, startMs: _now().millisecondsSinceEpoch);
     }
@@ -155,36 +203,30 @@ class NightRecorder {
         runs: _night.runs,
         contactOhms: _night.contactOhms,
         slots: Map.of(_slots),
-        note: _restartNotes.isEmpty ? 'looking for the headband' : 'restarted by Android; reconnecting',
+        note: _notes.isEmpty ? 'looking for the headband' : 'restarted by Android; reconnecting',
       ),
     );
   }
 
   Future<void> _loop() async {
     while (!_stopping) {
-      _set(_status.copyWith(phase: _night.runs == 0 ? Phase.searching : Phase.reconnecting));
       final Headband? band;
       try {
-        band = await _find();
+        band = _night.band == null ? await _search() : await _reconnectTry();
+        if (band != null && !_stopping && !await _inRange(band)) {
+          abandoned.add(band);
+          _note('${band.name} ${band.address} answered but reports out of range; left alone');
+          continue;
+        }
       } on SdkStuck catch (e) {
         await _stuck(e, null);
         return;
-      } catch (e) {
-        _set(_status.copyWith(note: 'could not connect: ${_short(e)}'));
-        await _pause(timing.notFoundWait);
-        continue;
       }
+      if (band == null) continue;
       if (_stopping) {
-        if (band != null) await _quietly(band.disconnectAndDispose);
+        await _quietly(band.disconnectAndDispose);
         return;
       }
-      if (band == null) {
-        _misses++;
-        _set(_status.copyWith(note: 'headband not found; is it on and charged?'));
-        await _pause(_misses >= 6 ? timing.notFoundWaitLong : timing.notFoundWait);
-        continue;
-      }
-      _misses = 0;
       final ChunkWriter w;
       try {
         w = ChunkWriter.open(dir, _now());
@@ -198,21 +240,105 @@ class NightRecorder {
     }
   }
 
-  Future<Headband?> _find() async {
-    final search = finder.find(
-      timing.scanFor,
+  /// No headband yet tonight: scan until it turns up.
+  Future<Headband?> _search() async {
+    _set(_status.copyWith(phase: _night.runs == 0 ? Phase.searching : Phase.reconnecting));
+    try {
+      final band = await _scan(timing.scanFor);
+      if (band != null || _stopping) {
+        _misses = 0;
+        return band;
+      }
+      _misses++;
+      _set(_status.copyWith(note: 'headband not found; is it on and charged?'));
+      await _pause(_misses >= 6 ? timing.notFoundWaitLong : timing.notFoundWait);
+    } on SdkStuck {
+      rethrow;
+    } catch (e) {
+      _set(_status.copyWith(note: 'could not connect: ${_short(e)}'));
+      await _pause(timing.notFoundWait);
+    }
+    return null;
+  }
+
+  /// One try to get tonight's headband back after a drop or a process restart: directly by its address
+  /// after a growing wait; every [RecorderTiming.scanEvery]-th try, or every try once direct connections
+  /// are off, a short scan instead.
+  Future<Headband?> _reconnectTry() async {
+    final id = _night.band!;
+    final n = ++_tries;
+    final waits = timing.reconnectWaits;
+    _set(_status.copyWith(phase: Phase.reconnecting));
+    await _pause(waits.isEmpty ? Duration.zero : waits[min(n, waits.length) - 1]);
+    if (_stopping) return null;
+    final scan = _night.directOff || timing.scanEvery <= 1 || n % timing.scanEvery == 0;
+    final how = scan ? 'scan' : 'direct to ${id.address}';
+    final t0 = _now();
+    String took() => '${(_now().difference(t0).inMilliseconds / 1000).toStringAsFixed(1)} s';
+    try {
+      final band = scan ? await _scan(timing.rescanFor) : await _direct(id);
+      if (band != null) {
+        _via = (how: scan ? 'scan' : 'direct', tryNo: n);
+        _note('reconnect try $n ($how): connected after ${took()}');
+        return band;
+      }
+      if (_stopping) return null;
+      _note('reconnect try $n ($how): not found after ${took()}');
+    } on SdkStuck {
+      _note('reconnect try $n ($how): no answer for ${took()} (SDK stuck)');
+      rethrow;
+    } catch (e) {
+      _note('reconnect try $n ($how): failed after ${took()}: ${_short(e)}');
+    }
+    _set(_status.copyWith(note: 'headband not found yet (try $n); trying again'));
+    return null;
+  }
+
+  Future<Headband?> _scan(Duration scanFor) => _race(
+    finder.find(
+      scanFor,
       onFound: (name, rssi) {
         _set(_status.copyWith(phase: Phase.connecting, rssi: rssi, note: 'found $name; connecting'));
       },
-    );
-    final deadline = timing.scanFor + timing.connectTimeout;
+    ),
+    'scan and connect',
+    scanFor + timing.connectTimeout,
+  );
+
+  /// A direct connection. The flag is saved first and stays set until the new run's first data (cleared
+  /// in [_record]): if the SDK takes the process down anywhere in between (the laptop SDK crashed on
+  /// reconnects), the restarted process finds it set and scans only. A blocked call leaves it set too;
+  /// a plain failure clears it.
+  Future<Headband?> _direct(BandId id) async {
+    _night = _night.copyWith(directPending: true);
+    await _save();
+    final Headband? band;
+    try {
+      band = await _race(finder.connectDirect(id), 'direct connect', timing.connectTimeout);
+    } on SdkStuck {
+      rethrow;
+    } catch (_) {
+      await _clearDirectPending();
+      rethrow;
+    }
+    if (band == null) await _clearDirectPending(); // stopped
+    return band;
+  }
+
+  Future<void> _clearDirectPending() async {
+    if (!_night.directPending) return;
+    _night = _night.copyWith(directPending: false);
+    await _save();
+  }
+
+  /// [attempt] with a deadline, or null as soon as Stop is pressed (a headband connected after Stop is let go).
+  Future<Headband?> _race(Future<Headband?> attempt, String what, Duration deadline) async {
     final first = await Future.any<Object?>([
-      search.timeout(deadline, onTimeout: () => throw SdkStuck('scan and connect', deadline)),
+      attempt.timeout(deadline, onTimeout: () => throw SdkStuck(what, deadline)),
       _stopSignal.future.then((_) => _stopMarker),
     ]);
     if (identical(first, _stopMarker)) {
-      // A headband found after Stop must not stay connected.
-      unawaited(search.then((b) => b?.disconnectAndDispose(), onError: (_) {}));
+      unawaited(attempt.then((b) => b?.disconnectAndDispose(), onError: (_) {}));
       return null;
     }
     return first as Headband?;
@@ -220,21 +346,24 @@ class NightRecorder {
 
   Future<_End> _session(Headband band, ChunkWriter w) async {
     _writer = w;
-    _night = _night.copyWith(runs: _night.runs + 1);
+    _night = _night.copyWith(runs: _night.runs + 1, band: band.id);
     var lost = false;
     bool isLost() => lost;
     final rangeSub = band.rangeChanges.listen((inRange) => lost = lost || !inRange);
     StreamSubscription<List<Sample>>? sigSub;
     var end = _End.failed;
     try {
-      for (final line in _restartNotes) {
-        w.log(line);
+      for (final (t, line) in _notes) {
+        w.log(line, at: t);
       }
-      _restartNotes = const [];
+      _notes = const [];
+      _logReconnected(w);
+      await _save();
       final battery = await _battery(band);
+      final rssi = band.rssi;
       w.log(
         'connected ${band.name} ${band.address} serial ${band.serial} battery $battery% '
-        'signal ${band.rssi} dBm',
+        'signal ${rssi == null ? 'unknown (no scan)' : '$rssi dBm'}',
       );
       await _logPhone(w);
       _set(
@@ -261,12 +390,27 @@ class NightRecorder {
       await _stuck(e, w);
       return _End.stuck;
     } catch (e) {
-      // Anything unexpected ends this run only; the night goes on with a fresh scan.
+      // Anything unexpected ends this run only; the night goes on with a reconnect.
       w.log('unexpected error: ${_short(e)}');
     }
     await sigSub?.cancel();
     await rangeSub.cancel();
     return _finish(band, w, end, isLost);
+  }
+
+  /// First line of a run that follows a drop: how the headband came back and how long the gap was so far.
+  void _logReconnected(ChunkWriter w) {
+    final d = _drop;
+    final v = _via;
+    _drop = null;
+    _via = null;
+    if (d == null || v == null) return;
+    final last = d.lastDataMs;
+    final gap = last == null ? '' : ', ${((_now().millisecondsSinceEpoch - last) / 1000).toStringAsFixed(1)} s ago';
+    w.log(
+      'reconnected (${v.how}, try ${v.tryNo}) after a drop (${d.why}); previous run ${d.stem ?? 'unknown'}, '
+      'last data ${last == null ? 'unknown' : logTime(DateTime.fromMillisecondsSinceEpoch(last))}$gap',
+    );
   }
 
   void _onRows(ChunkWriter w, List<Sample> rows) {
@@ -320,7 +464,7 @@ class NightRecorder {
         await _pause(timing.retryWait);
       }
     }
-    if (!_stopping) w.log('the signal would not start; starting over with a fresh scan');
+    if (!_stopping) w.log('the signal would not start; reconnecting');
     return false;
   }
 
@@ -334,7 +478,7 @@ class NightRecorder {
       _set(_status);
       if (_stopping) return _End.stopped;
       if (lost()) {
-        w.log('headband out of range; saving and starting over with a fresh scan');
+        w.log('headband out of range; saving');
         return _End.lost;
       }
       if (++ticks % timing.ticksPerCheck != 0) continue;
@@ -342,8 +486,9 @@ class NightRecorder {
       await _save();
       final got = w.samplesReceived - lastTotal;
       lastTotal = w.samplesReceived;
+      if (got > 0) await _clearDirectPending(); // a direct connection has proved itself
       if (lost() || !await _inRange(band)) {
-        w.log('headband out of range; saving and starting over with a fresh scan');
+        w.log('headband out of range; saving');
         return _End.lost;
       }
       final battery = await _battery(band) ?? _status.battery;
@@ -355,7 +500,7 @@ class NightRecorder {
         continue;
       }
       if (stalled >= timing.stallChecksToGiveUp) {
-        w.log('still no data; starting over with a fresh scan');
+        w.log('still no data; reconnecting');
         return _End.stalled;
       }
       await _restartStream(band, w, stalled);
@@ -388,6 +533,8 @@ class NightRecorder {
     _night = _night.copyWith(samples: _night.samples + w.samplesWritten);
     _status = _status.copyWith(nightSamples: _night.samples);
     w.log('total samples ${w.samplesWritten}, ${(w.samplesWritten / sampleRateHz / 60).toStringAsFixed(1)} min');
+    if (end != _End.stopped) _logDrop(w, end);
+    if (w.samplesWritten > 0) _tries = 0; // a run that recorded something restarts the waits from the shortest
     try {
       if (end == _End.lost || lost() || !await _inRange(band)) {
         abandoned.add(band);
@@ -414,6 +561,7 @@ class NightRecorder {
       return _End.stuck;
     }
     w.close();
+    _lastLog = File('${dir.path}/${w.stem}.log');
     await _save();
     if (end != _End.stopped) {
       _set(
@@ -424,6 +572,49 @@ class NightRecorder {
       );
     }
     return end;
+  }
+
+  /// The drop line in the run's own `.log`; the reconnect tries follow it there.
+  void _logDrop(ChunkWriter w, _End end) {
+    final why = switch (end) {
+      _End.lost => 'out of range',
+      _End.stalled => 'no data',
+      _ => 'run failed',
+    };
+    final last = _status.lastDataMs;
+    w.log(
+      'drop ($why); last data ${last == null ? 'none' : logTime(DateTime.fromMillisecondsSinceEpoch(last))}; reconnecting',
+    );
+    _drop = (lastDataMs: last, stem: w.stem, why: why);
+  }
+
+  /// A line for the night's log between runs, with its own time: into the last closed run's `.log`, or,
+  /// before tonight has one, kept for the next run's `.log`.
+  void _note(String message) {
+    final t = _now();
+    final log = _lastLog;
+    if (log != null) {
+      try {
+        appendLogLine(log, message, t);
+        return;
+      } catch (_) {}
+    }
+    _notes = [..._notes, (t, message)];
+  }
+
+  /// The newest `.log` of tonight in [dir] (a restarted process continues the night's log there).
+  File? _newestLog(int sinceMs) {
+    try {
+      final logs = [
+        for (final f in dir.listSync().whereType<File>())
+          if (f.path.endsWith('.log') &&
+              (stemTime(f.uri.pathSegments.last)?.millisecondsSinceEpoch ?? 0) >= sinceMs - 1000)
+            f,
+      ]..sort((a, b) => a.path.compareTo(b.path));
+      return logs.isEmpty ? null : logs.last;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// An SDK call blocked: save, then let the app restart its process (unless the user is stopping).

@@ -2,14 +2,67 @@
 // tests use a fake, so the recorder's rules can be checked without a phone.
 import 'chunk_writer.dart';
 
+/// What it takes to reach the same headband again without a scan: the SDK's sensor info minus the signal
+/// strength. Plain data, kept with the night, so a restarted app process can try it too.
+class BandId {
+  const BandId({
+    required this.name,
+    required this.address,
+    this.serial = '',
+    this.family = '',
+    this.model = 0,
+    this.pairingRequired = false,
+  });
+
+  final String name;
+
+  /// Bluetooth address.
+  final String address;
+  final String serial;
+
+  /// The SDK's sensor family by name (e.g. `leBrainBitBlack`) and its model number.
+  final String family;
+  final int model;
+  final bool pairingRequired;
+
+  Map<String, Object?> toJson() => {
+    'name': name,
+    'address': address,
+    'serial': serial,
+    'family': family,
+    'model': model,
+    'pairingRequired': pairingRequired,
+  };
+
+  /// Null unless [j] has at least a name and an address.
+  static BandId? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final name = j['name'];
+    final address = j['address'];
+    if (name is! String || address is! String || address.isEmpty) return null;
+    final serial = j['serial'];
+    final family = j['family'];
+    final model = j['model'];
+    return BandId(
+      name: name,
+      address: address,
+      serial: serial is String ? serial : '',
+      family: family is String ? family : '',
+      model: model is num ? model.toInt() : 0,
+      pairingRequired: j['pairingRequired'] == true,
+    );
+  }
+}
+
 /// One connected headband. Every call except the streams goes to the vendor SDK.
 abstract class Headband {
   String get name;
   String get address;
   String get serial;
+  BandId get id;
 
-  /// dBm seen by the scan before connecting.
-  int get rssi;
+  /// dBm seen by the scan before connecting; null after a direct connection (no scan, no reading).
+  int? get rssi;
 
   /// Batches of samples as they arrive.
   Stream<List<Sample>> get signal;
@@ -35,6 +88,11 @@ abstract class HeadbandFinder {
   /// Fresh scan for up to [scanFor], then a new sensor object for the best headband found, which also
   /// connects. Returns null when none was seen. [onFound] fires between the scan and the connection.
   Future<Headband?> find(Duration scanFor, {void Function(String name, int rssi)? onFound});
+
+  /// A new sensor object for the headband [id] without a scan, which connects to its address. Throws when
+  /// the SDK cannot reach it (out of range, or it insists on a scan first). Never touches an earlier sensor
+  /// object of the same headband: that one may be out of range.
+  Future<Headband> connectDirect(BandId id);
 }
 
 /// The phone side of the log: power state and why the last process ended. Optional in tests.
@@ -56,6 +114,9 @@ class NightState {
     this.contactTried = false,
     this.contactOhms = const {},
     this.slots = const {},
+    this.band,
+    this.directPending = false,
+    this.directOff = false,
   });
 
   final bool active;
@@ -68,6 +129,16 @@ class NightState {
   /// Samples saved per half hour of clock time: key = unix ms ~/ slotMs (status.dart).
   final Map<int, int> slots;
 
+  /// The headband recorded tonight, reconnected without a scan after a drop.
+  final BandId? band;
+
+  /// A direct connection was under way when this was saved. Still set when a new process starts means the
+  /// old one died inside it (the laptop SDK crashed on reconnects), so the new one scans only.
+  final bool directPending;
+
+  /// No more direct connections tonight (see [directPending]).
+  final bool directOff;
+
   NightState copyWith({
     bool? active,
     int? startMs,
@@ -76,6 +147,9 @@ class NightState {
     bool? contactTried,
     Map<String, double?>? contactOhms,
     Map<int, int>? slots,
+    BandId? band,
+    bool? directPending,
+    bool? directOff,
   }) => NightState(
     active: active ?? this.active,
     startMs: startMs ?? this.startMs,
@@ -84,6 +158,9 @@ class NightState {
     contactTried: contactTried ?? this.contactTried,
     contactOhms: contactOhms ?? this.contactOhms,
     slots: slots ?? this.slots,
+    band: band ?? this.band,
+    directPending: directPending ?? this.directPending,
+    directOff: directOff ?? this.directOff,
   );
 
   Map<String, Object?> toJson() => {
@@ -98,6 +175,9 @@ class NightState {
         e.key: e.value == null || e.value!.isInfinite || e.value!.isNaN ? null : e.value,
     },
     'slots': {for (final e in slots.entries) '${e.key}': e.value},
+    'band': band?.toJson(),
+    'directPending': directPending,
+    'directOff': directOff,
   };
 
   static NightState fromJson(Object? j) {
@@ -117,6 +197,9 @@ class NightState {
                 if (int.tryParse('${e.key}') != null && e.value is num) int.parse('${e.key}'): (e.value as num).toInt(),
             }
           : const {},
+      band: BandId.fromJson(j['band']),
+      directPending: j['directPending'] == true,
+      directOff: j['directOff'] == true,
     );
   }
 }

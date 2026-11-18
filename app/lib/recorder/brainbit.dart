@@ -10,6 +10,12 @@ import 'headband.dart';
 const List<FSensorFamily> _families = [FSensorFamily.leBrainBit, FSensorFamily.leBrainBitBlack];
 
 class BrainBitFinder implements HeadbandFinder {
+  /// The scanner that last found or reached the headband, and what it reported. The SDK appears to make
+  /// sensors only for devices its scanner knows ("Sensor not founded" in the library), so a direct
+  /// connection goes through this scanner, without starting a scan.
+  Scanner? _scanner;
+  FSensorInfo? _info;
+
   @override
   Future<Headband?> find(Duration scanFor, {void Function(String name, int rssi)? onFound}) async {
     final scanner = await Scanner.create(_families);
@@ -41,26 +47,75 @@ class BrainBitFinder implements HeadbandFinder {
     }
     final info = seen.values.reduce((a, b) => a.rssi >= b.rssi ? a : b);
     onFound?.call(info.name, info.rssi);
+    final band = await _create(scanner, info, rssi: info.rssi, newScanner: true);
+    _keep(scanner, info);
+    return band;
+  }
+
+  @override
+  Future<Headband> connectDirect(BandId id) async {
+    final known = _scanner != null && _info?.address == id.address;
+    // After a process restart no scanner knows the headband; the SDK may refuse, and the recorder scans.
+    final scanner = known ? _scanner! : await Scanner.create(_families);
+    final info = known ? _info! : _infoOf(id);
+    final band = await _create(scanner, info, rssi: null, newScanner: !known);
+    _keep(scanner, info);
+    return band;
+  }
+
+  Future<_BrainBitBand> _create(
+    Scanner scanner,
+    FSensorInfo info, {
+    required int? rssi,
+    required bool newScanner,
+  }) async {
     final Sensor? sensor;
     try {
       sensor = await scanner.createSensor(info); // also connects
     } catch (_) {
-      scanner.dispose();
+      if (newScanner) scanner.dispose();
       rethrow;
     }
     if (sensor is! BrainBit) {
       await sensor?.dispose();
-      scanner.dispose();
+      if (newScanner) scanner.dispose();
       throw StateError('not a BrainBit: ${info.sensFamily.name}');
     }
-    return _BrainBitBand(scanner, sensor, info);
+    return _BrainBitBand(sensor, info, rssi);
+  }
+
+  /// A replaced scanner is dropped without dispose: its sensor may have been left out of range, and no SDK
+  /// call goes near a lost sensor. It ends with the process.
+  void _keep(Scanner scanner, FSensorInfo info) {
+    _scanner = scanner;
+    _info = info;
+  }
+
+  /// End of the night. The scanner is disposed only if no headband was left behind out of range.
+  void dispose({required bool anyLost}) {
+    if (!anyLost) _scanner?.dispose();
+    _scanner = null;
+    _info = null;
+  }
+
+  static FSensorInfo _infoOf(BandId id) {
+    final family = FSensorFamily.values.asNameMap()[id.family];
+    if (family == null) throw StateError('unknown sensor family "${id.family}"');
+    return FSensorInfo(
+      name: id.name,
+      address: id.address,
+      serialNumber: id.serial,
+      pairingRequired: id.pairingRequired,
+      sensModel: id.model,
+      sensFamily: family,
+      rssi: 0,
+    );
   }
 }
 
 class _BrainBitBand implements Headband {
-  _BrainBitBand(this._scanner, this._sensor, this._info);
+  _BrainBitBand(this._sensor, this._info, this.rssi);
 
-  final Scanner _scanner;
   final BrainBit _sensor;
   final FSensorInfo _info;
 
@@ -71,7 +126,16 @@ class _BrainBitBand implements Headband {
   @override
   String get serial => _info.serialNumber;
   @override
-  int get rssi => _info.rssi;
+  final int? rssi;
+  @override
+  BandId get id => BandId(
+    name: _info.name,
+    address: _info.address,
+    serial: _info.serialNumber,
+    family: _info.sensFamily.name,
+    model: _info.sensModel,
+    pairingRequired: _info.pairingRequired,
+  );
 
   @override
   Stream<List<Sample>> get signal => _sensor.signalDataStream.map(
@@ -100,10 +164,10 @@ class _BrainBitBand implements Headband {
   @override
   Future<int> battery() => _sensor.batteryPower.value;
 
+  /// The scanner stays with [BrainBitFinder] for the next direct connection.
   @override
   Future<void> disconnectAndDispose() async {
     await _sensor.disconnect();
     await _sensor.dispose();
-    _scanner.dispose();
   }
 }

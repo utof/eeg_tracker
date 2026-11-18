@@ -65,6 +65,7 @@ void recorderEntryPoint() => FlutterForegroundTask.setTaskHandler(RecorderTaskHa
 
 class RecorderTaskHandler extends TaskHandler {
   NightRecorder? _recorder;
+  BrainBitFinder? _finder;
   Phase? _shownPhase;
   int _shownAtMs = 0;
   bool _stopping = false;
@@ -72,8 +73,10 @@ class RecorderTaskHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     final dir = await _recordingsDir();
+    final finder = BrainBitFinder();
+    _finder = finder;
     final recorder = NightRecorder(
-      finder: BrainBitFinder(),
+      finder: finder,
       dir: Directory(dir),
       store: _PrefsNightStore(),
       probe: ChannelPhoneProbe(),
@@ -106,7 +109,10 @@ class RecorderTaskHandler extends TaskHandler {
   Future<void> _stop({required bool endNight}) async {
     if (_stopping) return;
     _stopping = true;
-    await _recorder?.stop(endNight: endNight);
+    final r = _recorder;
+    await r?.stop(endNight: endNight);
+    // The scanner kept for direct reconnects goes too, unless a headband was left out of range.
+    _finder?.dispose(anyLost: r == null || !r.finished || r.abandoned.isNotEmpty);
     FlutterForegroundTask.sendDataToMain(stoppedMessage);
   }
 
