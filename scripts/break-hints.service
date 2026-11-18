@@ -1,0 +1,20 @@
+# Soft "take a break" hints from ActivityWatch (docs/break-hints.md).
+# Install:  cp scripts/break-hints.service ~/.config/systemd/user/
+#           (edit the two paths below if the repo is not in ~/eeg_tracker)
+#           systemctl --user daemon-reload && systemctl --user enable --now break-hints
+# Settings: add flags to ExecStart, e.g. --threshold 75 --quiet 22:00-09:00, then
+#           systemctl --user daemon-reload && systemctl --user restart break-hints
+[Unit]
+Description=Soft break hints from ActivityWatch (eeg_tracker stage 0)
+
+[Service]
+Type=simple
+WorkingDirectory=%h/eeg_tracker
+ExecStart=/usr/bin/python3 %h/eeg_tracker/scripts/break_hints.py
+Restart=on-failure
+RestartSec=30
+# print() lines go to the journal right away
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

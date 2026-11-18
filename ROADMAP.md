@@ -40,7 +40,7 @@ Update the status column whenever something lands.
 | 5 | Android recorder app (one tap, screen off all night) | code + tests done; APK not built yet; phone test pending | branch `feat/android-recorder` |
 | 6 | Morning check-in (eyes closed / open, ratings) | in progress | branch `feat/morning-check` |
 | 7 | Brain-reactive sound (alpha → calmer sound, jaw blocks) | in progress (browser prototype first, then the app) | branch `feat/brain-sound` |
-| 8 | Break hints stage 0 (ActivityWatch) | in progress | branch `feat/break-hints` |
+| 8 | Break hints stage 0 (ActivityWatch) | code + tests done; not yet run on the owner's laptop | `scripts/break_hints.py`, docs/break-hints.md |
 | 9 | Night extras: jaw clench count, movement, signal quality per hour | next | - |
 | 10 | Today screen (one headline, details a tap down) | after 6 and 3 | - |
 | 11 | utof_tracker importer for `eeg_*` events | waits for the owner's OK | - |
