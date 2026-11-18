@@ -1,0 +1,55 @@
+---
+version: 1
+slug: "app-lib-ui-night-screen-dart"
+primary_target: "app/lib/ui/night_screen.dart"
+related_targets: []
+---
+
+# Night screen (app/lib/ui/night_screen.dart)
+
+Scope: the recorder app's only screen. Mode: Operate. Platform: Android (Flutter, Material 3).
+Audience and job: one tired person at bedtime and on waking (and half-asleep at 3 a.m. after a drop)
+starts the night, checks contact, trusts that recording is happening, stops in the morning, fixes phone
+settings once. Constraints: dark bedroom, eyes dark-adapted; 48 dp targets; system font scale; nothing
+bright or blinking. Decided without the owner (asleep, no question channel): every choice below is an
+assistant proposal under DECISIONS row 14.
+
+Physical scene: lying in a dark bedroom at 23:30 or 03:00, phone at arm's length; a bright field glares
+and wakes the user, so the screen is dark, warm and low-luminance.
+
+Ordered grounded list (resonance): 1 bedside alarm clock (dim amber numerals); 2 darkroom safelight /
+astronomer's red mode; 3 sleep-lab night-tech console; 4 hospital ward night observation chart;
+5 night sleeper-train timetable; 6 moon and tide almanac; 7 a ship's bridge on the night watch and its
+deck log (assigned by the roll).
+
+Challenger verdicts (all declined; kept discipline in brackets): split-flap concourse [values sit in fixed
+cells, columns never move]; doujin catalog [whole-cell marks, state by fill not colour alone]; orienteering
+map [one hue reserved for the single live element]; acetate tab board [one ply only, no nested cards];
+Saville sleeve [quiet black field, one figure owns it]; Japanese high-density [hairline rules group,
+not boxes].
+
+## Direction contract
+
+THESIS: The night is a watch being kept, logged half hour by half hour, so the user sees at a glance
+that nothing is missing. Refuses the category default: a fitness-style dashboard of metric cards.
+
+OWN-WORLD: Bridge-at-night palette: warm chart-table black ground, parchment ink, the navigation-light
+trio dimmed for dark-adapted eyes (starboard green = live and good, amber = caution, port red = problem).
+Roboto with tabular figures; deck-log rhythm of ruled rows with times; hairline rules, one surface ply,
+no cards, no glow.
+
+STORY: The user reads one word (Recording), sees minutes and data age, sees the night's half hours
+filled, trusts it, puts the phone down. Problems appear as plain rows with one button each.
+
+FIRST VIEWPORT: Top: small title. Upper third: phase word at display size with a live mark, one plain
+sentence under it. Then two big tabular readouts (minutes recorded, seconds since data) split by a
+hairline. Then the watch strip: half-hour cells in rows of four hours, the current cell outlined green.
+Headband facts and contact marks below; phone checks follow. Primary action pinned at the bottom,
+full width, 64 dp: Start night (filled green) or Stop (outlined, confirmed).
+
+SIGNATURE: the watch strip; each half-hour cell fills with the share of samples actually saved, so gaps
+show as hollow cells.
+
+FORM: ship's bridge on the night watch and its deck log, position 7 of 7; seed:a24d111eb0ab99e7.
+
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
