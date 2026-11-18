@@ -3,7 +3,8 @@
 Records a BrainBit headband all night on an Android phone. The main screen: Start night, Stop, the state,
 minutes recorded, seconds since the last data, a half-hour strip of what was saved, battery, signal,
 contact per channel, and phone settings that could stop the recording. Between nights, **Meditate** opens
-a guided eyes-closed session whose sound follows your alpha rhythm (below).
+a guided eyes-closed session whose sound follows your alpha rhythm (below); from there, **Alpha-theta** training
+and the **replay check** (both below).
 
 - Files: `<stamp>.f32/.idx/.log` in the app's private folder (other apps cannot read it), the same format as
   `scripts/record_night.py` (`docs/data-format.md`); join a night with `scripts/to_bdf.py`. Only "Export a
@@ -14,6 +15,10 @@ a guided eyes-closed session whose sound follows your alpha rhythm (below).
 - Screen: `lib/ui/`, design in `../DESIGN.md`.
 - Meditation: `lib/feedback/` (the laptop page's feedback core in Dart), `lib/sound/` (flutter_soloud),
   `lib/meditation/` (session and report), `lib/ui/meditation_*.dart`; DECISIONS rows 72-77.
+- Replay check: `lib/training/` (schedule, frozen plan, replay, results), `lib/ui/training_settings_screen.dart`,
+  `lib/ui/check_views.dart`, `lib/ui/replay_results_screen.dart`; DECISIONS rows 100-103.
+- Alpha-theta: `lib/alphatheta/` (rules, engine, notebook), `lib/sound/alpha_theta_sound.dart`,
+  `lib/ui/alpha_theta_*.dart`; DECISIONS rows 104-107.
 
 ## Build and test
 
@@ -25,8 +30,8 @@ flutter test --concurrency=1               # writer, recorder rules (fake headba
 flutter build apk --release --target-platform android-arm64
 ```
 
-`flutter test` also renders the night screen in four states and the meditation screen in eleven to
-`build/screens/*.png` (normal and 130 % text). The meditation tests stream a synthetic headband through whole
+`flutter test` also renders the night screen in four states, the meditation screen in eleven and the replay check's
+and alpha-theta's pages in nineteen to `build/screens/*.png` (normal and 130 % text). The meditation tests stream a synthetic headband through whole
 sessions; `test/feedback_cross_check_test.dart` checks the Dart core against a session made by the JavaScript
 core (`node app/test/fixtures/make_js_session.mjs` from the repo root remakes it after a change to the JS core).
 
@@ -59,6 +64,51 @@ a treatment, and no "meditation depth" is measured. Each session is kept in the 
 in the laptop page's session format, so it can be replayed). They are not exported yet.
 
 If the headband drops out, the countdown pauses ("No signal") and the app reconnects by itself.
+
+## Replay check (off unless you switch it on)
+
+Does the live link to your brain matter, or would a similar sound do as well? The replay check finds out for you.
+
+1. On the Meditation screen tap the **gear** button (Training settings) and switch **Replay check** on. The page
+   says what it does and, for meditation and alpha-theta separately, where it stands.
+2. Meditate as usual. Before every session the screen says "Replay check is on". Some sessions now replay the sound
+   of one of your own earlier sessions instead of following you; you are not told which. Jaw, blinks and dozing still
+   act on the sound in both, and the screen shows no bell count and no "settled" word, so it cannot give it away.
+3. The first 4 sessions of each kind are always live (the check needs something to replay; older sessions count).
+   Before the 5th, the phone draws the hidden order and saves the plan with its fingerprint; it never changes after.
+4. After each check session, before the report: how calm you feel, your guess (live, replay, not sure, and how
+   sure), how in control and how random the sound felt.
+5. After 12 such sessions, **See the results** in Training settings opens: live against replay for the brain
+   measure with a fair test, how often you guessed right, how the sessions felt, every session of the set, and what
+   it means. Plan 24 to 36 sessions; one person often finds no difference, and that is a real answer.
+
+Please do not test it (for example by opening your eyes to see whether the rain reacts): your guesses show whether
+the blinding held. Switching it off keeps everything; switching it on again continues the same plan.
+
+## Alpha-theta
+
+An eyes-closed drift toward the edge of sleep: a stream sound while the alpha rhythm leads, ocean waves as the
+slower theta rhythm rises, a soft high chime and a low gong. Practice, not treatment. It can bring up strong
+memories or feelings, and leave you drowsy for a while.
+
+1. On the Meditation screen scroll to **Other practice** and tap **Alpha-theta training**.
+2. The first time: a few screening questions (if any applies, the app does not offer it: talk to a doctor or
+   therapist first), what it can do, and your stop plan (someone to call, what grounds you).
+3. Each session: **Check in** (sleepiness, distress, side effects since last time; in the first three also a
+   1-minute reaction test that sets your usual speed), then **Start the session**. Recline with the back of your head
+   free, wired headphones. The same 1½ minutes of silent calibration as meditation, then 15 minutes (the first three
+   sessions) or 20 or 25.
+4. If you fall asleep, the sound fades and a soft rising tone wakes you. **Stop** is always there and does not ask;
+   the sound fades over about 10 seconds.
+5. Afterwards: a minute of eyes-open grounding, the questions (with the replay check's guess when it applies), then
+   **Before you leave**: a sleepiness rating and a 1-minute reaction test. If you are slower than usual or sleepy,
+   do not drive or cycle yet; the retest opens after 10 minutes. Then the report.
+6. The app pauses alpha-theta after distress of 7/10 or more, distressing memories two sessions in a row, feeling
+   unreal or detached, a side effect lasting into the next day, or anything like a seizure. It resumes only when you
+   confirm you have talked to someone. After 10 sessions it asks you to decide whether to go on.
+
+Sessions are kept in `files/alpha-theta/` (`<time>.alphatheta.json`, `<time>.session.json` and `journal.json` with
+your answers), app-private like the meditations; the replay check's files are in `files/replay-check/`.
 
 ## If the headband drops out
 

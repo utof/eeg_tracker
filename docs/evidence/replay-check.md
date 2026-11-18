@@ -2,9 +2,10 @@
 
 ## What it does
 
-Planned. When switched on (it is off by default), some meditation sessions secretly replay the sound of one of
-your own earlier sessions instead of following your brain live. After enough sessions, the app compares live with
-replayed sessions: how you felt, the trained brain signal, and your guesses about which was which.
+In the phone app (not yet run on a phone). When switched on (it is off by default), some meditation or alpha-theta
+sessions secretly replay the sound of one of your own earlier sessions instead of following your brain live. After
+every 12 sessions, the app compares live with replayed sessions: the trained brain signal, how you felt, and your
+guesses about which was which.
 
 ## Evidence for this headband: some
 
@@ -36,19 +37,30 @@ study; but whole-session replays can be partly sensed, and one person needs many
 
 ## How the app uses this
 
-- Off by default. While on, the same reminder appears before every session: "Replay check is on. This session's
-  sound may follow your brain live or replay one of your earlier sessions. Practise as usual; afterwards you'll be
-  asked to guess."
-- What is replayed: the logged sound settings and bells of one of your own earlier live sessions of the same
-  kind, with a similar length and reward rate. The first 4-6 sessions are always live.
-- The muscle, blink, contact and sleep checks act the same way in both kinds of session, so a jaw clench cannot
-  give a replay away.
-- Sessions are drawn in shuffled blocks of 4 (2 live, 2 replay), fixed before each session starts. No live alpha
-  bar or bell count is shown while the check is on.
-- After each session: your ratings first, then a guess (live, replay or don't know, with how sure), "how in
-  control did you feel?" and "how random did the sound seem?".
-- Results are revealed every 8-12 sessions, never per session. The plan is saved before the first randomised
-  session; every session is reported, and the check never stops early on a good result.
+- Off by default: Training settings, from the gear button on the meditation and alpha-theta screens. While on, the
+  same reminder appears before every session: "Replay check is on. This session's sound may follow your brain live
+  or replay one of your earlier sessions. Practise as usual; afterwards you'll be asked to guess."
+- Each kind of session (meditation, alpha-theta) has its own check. It first collects 4 live sessions of that kind
+  with a saved log (sessions from before you switched it on count), so there is something to replay.
+- What is replayed: the sound settings and bells (or chimes and gongs) logged in your own earlier live sessions of
+  the same kind, never the raw EEG. The app picks from the last 10 with a reward rate close to their usual, the
+  least replayed first, and joins two when one is shorter than the session.
+- Jaw tension always roughens the sound live, and the muscle, blink, signal and sleep checks act the same way in
+  both kinds of session: the sound goes neutral and no bell sounds until the check has been clear as long as a live
+  bell needs. So a jaw clench cannot give a replay away.
+- Sessions are drawn in shuffled blocks of 4 (2 live, 2 replay) from a random secret made on the phone. Before the
+  first such session the plan (what is measured, how many sessions, which sessions are left out, the analysis) and
+  the SHA-256 fingerprint of the hidden order are saved, and they never change; Training settings shows the date
+  and the start of the fingerprint. No bell count and no "settled" word are shown while the check is on.
+- After each check session, before the report: how calm you feel, your guess (live, replay or not sure, and how
+  sure), "how in control did you feel?" and "how random did the sound seem?".
+- The measure: meditation, your alpha during the sound against the same session's silent eyes-closed minute;
+  alpha-theta, the change in theta against alpha; both on awake, clean seconds only. A session with over 30 % of its
+  time asleep, restless or without signal is shown but left out of the test.
+- Results only for whole sets of 12 sessions, never one session: live minus replay with a test that reshuffles the
+  labels the way the draw could have fallen, your guesses against chance, how the sessions felt, every session of
+  the set, and a check that the plan and the order are unchanged. Plan 24 to 36; every session is reported, and
+  the check never stops early on a good result.
 
 ## Sources
 

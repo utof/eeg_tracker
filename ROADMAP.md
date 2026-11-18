@@ -75,8 +75,8 @@ Update the status column whenever something lands.
 | 19 | Research: sound for states; states and their markers; more features | done 2026-11-18 | `_local/research/2026-11-18-06-brain-states-sound-and-features.md` |
 | 21 | Meditation feedback: live (sound + settled / restless / drowsy) and a report after each session, progress across sessions | **v1 in the phone app** (2026-11-18): the feedback core ported to Dart (agrees with the JS core on a JS-made session), sound with `flutter_soloud`, a meditation screen (5 / 10 / 20 min, silent calibration, state chip, report with a calm line, comparison with earlier sessions, the "i" note); tested with a fake headband; not yet heard or run on the phone. "Drifting" also comes from the shared drift-off detector since 2026-11-18 (row 25). Later: a no-feedback block, the learning verdict at 8 / 12 sessions, Bluetooth route detection | branch `feat/app-meditation` (from `feat/android-recorder`), `app/lib/feedback`, `app/lib/meditation`, DECISIONS 72-77 |
 | 25 | Shared detectors ("what the electrodes see") and the drift-off detector | **built 2026-11-18**: Python reference checked on the night, the morning sleep and the check-in; Dart port in the app (same events on recorded excerpts), wired into meditation's "drifting". Sleep onset within 0.5 min of AnySleep on both recorded onsets (2 of the 5 nights it needs); blinks 3.1 a minute eyes open vs 0.5 closed; 86 % of loud muscle seconds flagged. Waits for the setup test (blink depth, glances, clenches) and 3 more lights-off nights | branch `feat/app-detectors`, [docs/detectors.md](docs/detectors.md), DECISIONS 85-89 |
-| 22 | Alpha-theta training (eyes closed, back of the head; 10 sessions, the first 3 only 15 min, then decide; side-effect checklist every session; alertness check before driving; stop button; "practice, not treatment"; a note that strong memories can come up) | planned, after meditation feedback and the replay check | uses the meditation feedback engine; plan changed by research A pass 2 (`_local/research/2026-11-18-07-neurofeedback-and-sound-feedback-pass2.md`): alpha-theta is the protocol with the most reported side effects |
-| 23 | Replayed-feedback check: some sessions secretly replay an earlier session's feedback; after enough sessions, live vs replayed is compared (feeling, the trained signal, ratings) | planned with 21/22 | toggle, off by default; reminder text before each meditation while it is on |
+| 22 | Alpha-theta training (eyes closed, back of the head; 10 sessions, the first 3 only 15 min, then decide; side-effect checklist every session; alertness check before driving; stop button; "practice, not treatment"; a note that strong memories can come up) | **built in the phone app** (2026-11-18; not yet heard or run on the phone): screening, consent and stop plan, check-in and after-session checklist with pause rules, the length rule and the decision after 10, stream-to-ocean sound with chime and gong, the drift-off detector as sleep guard (fade, rising wake tone), grounding, a 1-minute reaction test before you leave; tested with a fake headband | branch `feat/app-replay-alphatheta`, `app/lib/alphatheta`, DECISIONS 104-107 |
+| 23 | Replayed-feedback check: some sessions secretly replay an earlier session's feedback; after enough sessions, live vs replayed is compared (feeling, the trained signal, ratings) | **built in the phone app** (2026-11-18; not yet run on the phone): toggle off by default with the reminder before every session, 4 live donor sessions per kind, then shuffled blocks of 4 drawn from a phone-made secret with the plan and the order's SHA-256 frozen first, own-replay of the sound with live gates, no live bell count, guess / control / randomness after each session, results per 12 with a permutation test; tested end to end with a fake headband | branch `feat/app-replay-alphatheta`, `app/lib/training`, DECISIONS 100-103 |
 | 20 | Dream catcher (owner: "definitely build"): at sleep onset, ask what you're thinking, record the answer, let you drift again, 3-4 rounds | planned; its trigger exists: the drift-off detector's "drowsy" (1 min of faded alpha) with the random-time timer as fallback (row 25) | see Ideas |
 
 ## What comes next, in order (updated 2026-11-18 after research round 2)
@@ -96,7 +96,10 @@ findings are on `_local/research/2026-11-18-findings.html`.
    of AnySleep's on 4 of 5 recorded nights (2 so far). (Research B, C)
 4. ~~"i" evidence notes~~ (wish 14): done 2026-11-18: 15 notes in `docs/evidence/`, "i" buttons on every page;
    the app will bundle the same files.
-5. **Replayed-feedback check** (row 23), then **alpha-theta** (row 22). (Research A)
+5. ~~**Replayed-feedback check** (row 23), then **alpha-theta** (row 22)~~: built 2026-11-18 on
+   `feat/app-replay-alphatheta` (DECISIONS 100-107). Next: the owner listens to the stream-and-ocean sound, runs the
+   first alpha-theta sessions, and switches the check on once 4 meditations are logged; the check needs 24-36
+   sessions before it can say anything. (Research A)
 6. **Dream catcher** (row 20), then the nap preset. (Research C: a rule plus a timer is the proven design)
 7. **State and trends page** (row 10): a sleep-pressure curve from the sleep log (not from EEG yet), "your usual"
    and "same as yesterday" next to every number; caffeine, alcohol and sleepiness taps in the morning check-in.
@@ -115,6 +118,10 @@ findings are on `_local/research/2026-11-18-findings.html`.
 - **First meditations on the phone** (5-10 min each, `app/README.md` on `feat/app-meditation`): does the sound
   start and feel right (levels, rain, bells), does it follow eyes closing within about a second on wired
   headphones, does the chip say "restless" on a clench, and is the report believable.
+- **Alpha-theta and the replay check** (`app/README.md` on `feat/app-replay-alphatheta`): read the screening and
+  consent once; in the first session, are the stream and the waves pleasant at the same volume, are the chime and
+  gong soft enough; does a short doze fade the sound and wake you gently; does the reaction test feel fair. For the
+  check: switch it on in Training settings (gear button), and just meditate; results come after 12 sessions.
 - **Extended setup test** (2 min, `morning.html`): blinks, left-right glances, clenches; it sets the detectors' blink
   depth, gives µV per degree and left vs right for glances on T3-T4, and confirms the 55-120 Hz jaw band
   ([docs/detectors.md](docs/detectors.md)).
