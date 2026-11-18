@@ -4,7 +4,7 @@ Output in --out: <stamp>.f32 (records: uint32 PackNum + 4 float32 volts O1 O2 T3
 <stamp>.idx (one record per arriving batch: float64 unix time + uint64 index of its first sample;
 used to find gaps, since packet numbers can repeat), <stamp>.log (wall-clock lines: contact check, sample counts every 10 s, disconnects).
 """
-import argparse, collections, json, os, struct, threading, time
+import argparse, collections, json, os, queue, struct, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime
 from pathlib import Path
@@ -50,6 +50,9 @@ def main() -> None:
     idxf = open(out / f"{stamp}.idx", "ab")
     markf = open(out / f"{stamp}.markers.jsonl", "a")  # page markers: {"t": unix time, "i": sample index, "text"}
     log(f"connected {info.Name} {info.Address} serial {info.SerialNumber} battery {s.batt_power}% signal {info.RSSI} dBm")
+    for attr in ("features", "commands", "parameters"):  # what this headband offers (e.g. pulse or motion sensors)
+        try: log(f"{attr} {getattr(s, attr)}")
+        except Exception as e: log(f"{attr} unavailable: {e}")
 
     last = {}
     resist_n = [0]
@@ -65,6 +68,14 @@ def main() -> None:
 
     ring: collections.deque = collections.deque(maxlen=FS * 5)
     want_contact = threading.Event(); live = dict(status="recording", t=time.time())
+    subs: list[queue.Queue] = []; subs_lock = threading.Lock()  # live stream: one queue per connected consumer
+
+    def publish(event: dict) -> None:
+        line = json.dumps(event, separators=(",", ":"))
+        with subs_lock:
+            for q in subs:
+                try: q.put_nowait(line)
+                except queue.Full: pass  # a consumer that cannot keep up loses batches, the recording does not
 
     class Page(BaseHTTPRequestHandler):
         def log_message(self, *_a) -> None: pass
@@ -81,12 +92,36 @@ def main() -> None:
                 n = min(int(self.headers.get("Content-Length") or 0), 2000)
                 text = self.rfile.read(n).decode("utf-8", "replace").strip()[:200] or "marker"
                 with lock:
-                    markf.write(json.dumps(dict(t=round(time.time(), 3), i=seen[0], text=text)) + "\n"); markf.flush()
+                    m = dict(t=round(time.time(), 3), i=seen[0], text=text)
+                    markf.write(json.dumps(m) + "\n"); markf.flush()
+                publish(dict(marker=text, i=m["i"], t=m["t"]))
                 self._send(b"ok", "text/plain")
             else:
                 self.send_error(404)
 
+        def stream(self) -> None:
+            """Server-sent events: a hello line, then every batch as {"i": first sample, "t": arrival, "uv": [[O1,O2,T3,T4]...]}
+            and every page marker as {"marker": text, "i", "t"}. Any number of consumers (pages, scripts/lsl_bridge.py)."""
+            self.send_response(200); self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store"); self.send_header("Access-Control-Allow-Origin", "*"); self.end_headers()
+            q: queue.Queue = queue.Queue(maxsize=200)
+            with subs_lock: subs.append(q)
+            try:
+                hello = dict(hello=True, names=NAMES, fs=FS, unit="uV", status=live["status"], next_i=seen[0])
+                self.wfile.write(f"data: {json.dumps(hello)}\n\n".encode()); self.wfile.flush()
+                while True:
+                    try: line = q.get(timeout=10)
+                    except queue.Empty: self.wfile.write(b": keepalive\n\n"); self.wfile.flush(); continue
+                    self.wfile.write(f"data: {line}\n\n".encode()); self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                with subs_lock:
+                    if q in subs: subs.remove(q)
+
         def do_GET(self) -> None:
+            if self.path.split("?")[0].rstrip("/").endswith("/stream"):
+                self.stream(); return
             if self.path.rstrip("/").endswith("state"):
                 with lock:
                     rows = list(ring)[-FS * 4:]
@@ -118,6 +153,10 @@ def main() -> None:
             idx.append(IDX.pack(now, seen[0])); seen[0] += len(samples)
             buf.extend(REC.pack(x.PackNum, x.O1, x.O2, x.T3, x.T4) for x in samples)
             ring.extend((x.O1, x.O2, x.T3, x.T4) for x in samples)
+            first = seen[0] - len(samples)
+        if subs:
+            publish(dict(i=first, t=round(now, 3), uv=[[round(x.O1 * 1e6, 2), round(x.O2 * 1e6, 2), round(x.T3 * 1e6, 2),
+                                                       round(x.T4 * 1e6, 2)] for x in samples]))
     s.signalDataReceived = on_signal
     for attempt in range(10):
         try:

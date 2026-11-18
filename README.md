@@ -33,6 +33,15 @@ python3 scripts/export_events.py _local/recordings/*.morning.json             # 
 Tests (no headband): `uv run --project analysis --with pytest pytest analysis/tests` (add `-m "not slow"` to skip
 the 2.5-minute fake-headband run) and `node --test tests/js/*.test.mjs`.
 
+**One headband, many readers.** The headband allows one Bluetooth connection, so the recorder owns it, always
+records to disk, and shares the data: `GET /stream` (server-sent events: every batch of samples in µV and every
+marker) can have any number of readers, and `scripts/lsl_bridge.py` re-publishes it as Lab Streaming Layer streams
+for standard EEG tools (MNE-LSL, OpenViBE, LabRecorder):
+
+```bash
+uv run --no-project --with pylsl python scripts/lsl_bridge.py   # LSL streams "BrainBit" (EEG) and "BrainBit-markers"
+```
+
 No headband? `PYTHONPATH=tests/fake_neurosdk python3 scripts/record_night.py --port 8765` runs the recorder on a fake
 signal (alpha that switches every minute, jaw bursts, blinks). Pages in `scripts/web/` are served by name; they can
 `POST /marker` with a text body to mark a moment (it becomes a BDF annotation).
