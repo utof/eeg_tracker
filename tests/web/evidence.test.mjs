@@ -11,7 +11,7 @@ const GRADES = ['strong', 'some', 'weak', 'none'];
 const PAGES = ['scripts/live_page.html', 'scripts/web/eyes.html', 'scripts/web/beats.html', 'scripts/web/sound.html',
   'scripts/web/morning.html', 'scripts/web/sleep.html'];
 const REQUIRED = ['sleep-recording', 'sleep-scoring', 'morning-check-in', 'eyes-test', 'brain-sound', 'sound-for-states',
-  'break-hints', 'meditation-feedback', 'alpha-theta', 'replay-check', 'dream-catcher', 'trends', 'jaw-and-blinks',
+  'break-hints', 'meditation-feedback', 'alpha-theta', 'replay-check', 'dream-catcher', 'nap-coach', 'trends', 'jaw-and-blinks',
   'noise-cleaning', 'helmet'];
 const SECTIONS = ['What it does', 'Evidence for this ', 'What the research says', 'Where the data does not support it',
   'How the app uses this', 'Sources', 'Libraries and models'];

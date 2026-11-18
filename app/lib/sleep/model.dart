@@ -61,7 +61,7 @@ Future<Float64List> stageProbabilities(
           throw StateError('the model gave ${logits.length} values for ${p.w1 - p.w0} epochs');
         }
         for (var e = p.c0; e < p.c1; e++) {
-          _addSoftmax(logits, (e - p.w0) * 5, sum, e * 5);
+          addSoftmax(logits, (e - p.w0) * 5, sum, e * 5);
         }
       }
     } finally {
@@ -74,7 +74,8 @@ Future<Float64List> stageProbabilities(
   return sum;
 }
 
-void _addSoftmax(Float32List z, int at, Float64List out, int to) {
+/// Adds the softmax of the 5 logits at z[at..] to out[to..].
+void addSoftmax(Float32List z, int at, Float64List out, int to) {
   var m = double.negativeInfinity;
   for (var k = 0; k < 5; k++) {
     m = math.max(m, z[at + k]);

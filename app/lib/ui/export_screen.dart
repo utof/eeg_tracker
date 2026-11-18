@@ -15,6 +15,7 @@ import '../export/store.dart';
 import '../phone.dart';
 import 'dream_screen.dart' show dreamSessionRunning;
 import 'export_view.dart';
+import 'nap_screen.dart' show napSessionRunning;
 import 'states_screen.dart' show soundSessionRunning;
 
 /// Why nothing may be exported now, or null: a night records, or a session holds the headband.
@@ -22,7 +23,7 @@ Future<String?> exportBlocked() async {
   if (await FlutterForegroundTask.isRunningService) {
     return 'A night is recording. Stop it first: nothing is exported while it records.';
   }
-  if (dreamSessionRunning || soundSessionRunning) return 'A session is running. Export after it ends.';
+  if (dreamSessionRunning || soundSessionRunning || napSessionRunning) return 'A session is running. Export after it ends.';
   return null;
 }
 

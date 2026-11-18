@@ -9,7 +9,16 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('every evidence note is in the app bundle', () async {
-    for (final name in ['meditation-feedback', 'brain-sound', 'jaw-and-blinks', 'sleep-recording', 'dream-catcher', 'sound-for-states', 'self-experiments']) {
+    for (final name in [
+      'meditation-feedback',
+      'brain-sound',
+      'jaw-and-blinks',
+      'sleep-recording',
+      'dream-catcher',
+      'sound-for-states',
+      'self-experiments',
+      'nap-coach',
+    ]) {
       final md = await rootBundle.loadString('assets/evidence/$name.md');
       expect(md, startsWith('# '), reason: name);
     }
@@ -43,7 +52,12 @@ void main() {
   testWidgets('the note renders as text without overflow', (tester) async {
     // real file reads need runAsync inside a widget test (its clock is fake)
     final md = (await tester.runAsync(() => rootBundle.loadString('assets/evidence/meditation-feedback.md')))!;
-    await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: Scaffold(body: EvidenceText(markdown: md))));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: nightTheme(),
+        home: Scaffold(body: EvidenceText(markdown: md)),
+      ),
+    );
     expect(tester.takeException(), isNull);
     expect(find.textContaining('Meditation feedback', findRichText: true), findsWidgets);
   });

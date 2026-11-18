@@ -32,8 +32,9 @@ headband has never been checked against a lab recording, and the five-stage deta
   sleep into "deep", so treat deep-sleep minutes with care.
 - When the two models agree, that shows they are consistent, not that they are right.
 - YASA was trained on a top-of-head channel; back and side electrodes are outside its training.
-- AnySleep cannot run live as shipped: it looks about 7 minutes forward and back, so it scores the night
-  afterwards, not while you sleep.
+- AnySleep looks about 7 minutes forward and back, so the night's chart is scored afterwards. Read live, 2 minutes
+  behind the newest data (the nap coach does this), it agreed with its own full-night scoring on most of one
+  recorded night, a little less at the live edge.
 
 ## How the app uses this
 

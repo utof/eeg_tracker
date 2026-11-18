@@ -13,6 +13,7 @@ import '../phone.dart';
 import 'experiments_screen.dart' show currentExperiment;
 import 'experiments_view.dart' show experimentLine;
 import '../morning/store.dart';
+import '../nap/store.dart';
 import '../recorder/headband.dart';
 import '../recorder/nights.dart';
 import '../recorder/recorder_service.dart';
@@ -25,6 +26,8 @@ import 'dream_view.dart' show clock;
 import 'export_screen.dart';
 import 'lights_off_view.dart';
 import 'meditation_screen.dart';
+import 'nap_screen.dart';
+import 'nap_view.dart' show endWords;
 import 'morning_screen.dart';
 import 'morning_section.dart';
 import 'nearby.dart';
@@ -155,6 +158,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   SleepScoring? _scoring;
   int? _lightsOffSentMs;
   String? _dreamLine;
+  String? _napLine;
   String? _checkedInAt, _experiment;
   Pending? _pending;
 
@@ -262,8 +266,9 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     }
     // Last night is scored on the phone once it has ended (DECISIONS row 97); never while a night records, nor
     // while a dream catcher session writes its recording.
-    if (!running && !dreamSessionRunning && !soundSessionRunning) unawaited(_scoring?.run());
+    if (!running && !dreamSessionRunning && !soundSessionRunning && !napSessionRunning) unawaited(_scoring?.run());
     final dreamLine = dir == null ? null : _lastDream(dir);
+    final napLine = dir == null ? null : _lastNap(dir);
     final pending = dir == null || running ? null : await _pendingExport(dir);
     String? experiment;
     try {
@@ -281,6 +286,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       _xiaomiDone = xiaomiDone;
       _dir = dir;
       _dreamLine = dreamLine;
+      _napLine = napLine;
       _checkedInAt = checkedInAt;
       _experiment = experiment;
       _pending = pending;
@@ -292,6 +298,19 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     final files = Directory(dir).parent.path;
     try {
       return await Isolate.run(() => pendingExport(Directory(files)));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The nap coach's newest nap in a line, when it is under a day old.
+  static String? _lastNap(String dir) {
+    try {
+      final naps = NapStore(napDirFor(dir)).list();
+      if (naps.isEmpty) return null;
+      final s = naps.first;
+      if (DateTime.now().difference(s.start) > const Duration(hours: 24)) return null;
+      return 'Last nap: ${nightLabel(s.start)} ${clock(s.start)}, ${s.lengthMin} min, ${endWords(s)}.';
     } catch (_) {
       return null;
     }
@@ -444,6 +463,13 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     unawaited(_refresh());
   }
 
+  /// The nap coach holds the headband too, so it also starts only between nights (DECISIONS row 173).
+  Future<void> _nap() async {
+    if (_running) return;
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const NapScreen()));
+    unawaited(_refresh());
+  }
+
   /// The check-in owns the headband while it runs, so it too starts only between nights.
   Future<void> _checkIn() async {
     if (_running) return;
@@ -541,6 +567,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
               recording: s.phase == Phase.recording,
             ),
       lightsOffTapped: (s?.lightsOffMs ?? _lightsOffSentMs) != null,
+      napLine: _napLine,
     );
   }
 
@@ -557,6 +584,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onExportData: _exportData,
       onMeditate: _meditate,
       onDream: _dream,
+      onNap: _nap,
       onSound: _sound,
       onSleepReport: sleep == null ? null : () => _openSleep(sleep.nightOf),
       onRetrySleep: sleep == null ? null : () => _scoring?.retry(sleep.nightOf),
