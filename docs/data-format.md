@@ -11,6 +11,7 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 | Morning check-in | `<start>.morning.json` (or `<start>.setup.json` for a setup test alone) | `scripts/morning_check.py` |
 | Morning check-in on the phone | `files/mornings/<start>.morning.json` and the visit's raw `<stamp>.f32/.idx/.log/.markers.jsonl` | the phone app (`app/lib/morning/`) |
 | The phone's export folder | `<picked folder>/eeg-export/`: the app's files in their own layout, `manifest.json`, `exports.jsonl` | the phone app's Export data (`app/lib/export/`); read by `scripts/import_phone.py` |
+| The phone over Wi-Fi | `GET /files`, `GET /files/<path>` on the phone; mirrored into `_local/recordings/` and `_local/phone/`, with `_local/phone/pull-state.json` and `pulls.jsonl` | the phone app's Share on Wi-Fi (`app/lib/share/`); read by `scripts/pull_phone.py` |
 | Events for other apps | `<root>/events/<dev>/eeg-YYYY-MM.jsonl`, `<root>/events/<dev>/breaks-YYYY-MM.jsonl` | `scripts/export_events.py`, `scripts/break_hints.py` |
 
 ## Raw recording (BrainBit)
@@ -220,6 +221,31 @@ On the laptop, `scripts/import_phone.py <folder>` (standard library only) checks
 `phone/imports.jsonl` and the copies' SHA-256 in `phone/import-index.json`. A copy is renamed into place only when its
 size and SHA-256 match. A differing file on the laptop is replaced only by a copy the phone changed later (the old one
 goes to `phone/replaced/<import time>/`); otherwise it is left alone and named in the summary.
+
+## The phone over Wi-Fi (Share on Wi-Fi)
+
+With **Share on Wi-Fi** on (DECISIONS rows 220-229), the phone app answers on port 8765, to local-network clients
+that send its code (`Authorization: Bearer <code>`, `X-EEG-Token`, or `?token=`):
+
+- The laptop recorder's live routes with the same JSON: `GET /state`, `GET /stream` (server-sent events: a hello,
+  batches `{"i", "t", "uv"}`, markers), `POST /marker` (a line `{"t", "i", "text"}` in the run's `.markers.jsonl`;
+  503 while nothing records). `i` counts samples within the run being recorded. `status` is `recording`,
+  `reconnecting`, `checking contact`, `stopping`, `not recording`, or `session` (a meditation, check-in, dream
+  catcher or sound session is recording). The field lists both recorders are tested against:
+  `app/test/fixtures/share_api.json`.
+- `GET /files`: `{"format": "eeg-tracker-phone-files", "version": 1, "listed", "recording", "files": [...],
+  "totals"}`; each file has the manifest's `path`, `bytes`, `sha256`, `modified_ms` (the same files and paths as the
+  export folder above). A file changed in the last 20 s is still being written: `"sha256": null, "growing": true`.
+  `?sha=0` lists without working out missing SHA-256 values.
+- `GET /files/<path>`: the file, with HTTP `Range: bytes=<from>-<to>` (206 and `Content-Range`; 416 with
+  `Content-Range: bytes */<size>` when it starts past the end), `X-Modified-Ms`, and HEAD. Read-only.
+
+`scripts/pull_phone.py` mirrors these into the layout of `scripts/import_phone.py` (raw nights into
+`_local/recordings/`, the rest into `_local/phone/`). `_local/phone/pull-state.json` holds `partial` (copies of files
+the phone is still writing, with their size) and `raw` (checked raw files, which the phone may add to later);
+`_local/phone/pulls.jsonl` has a line per pass that fetched something or found a problem. A partial copy ends where
+the phone's file ended when it was listed; readers should ignore an incomplete last record, as they do for a
+recording that is still running.
 
 ## Events (for utof_tracker and anything else)
 

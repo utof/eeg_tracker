@@ -53,3 +53,11 @@ show as hollow cells.
 FORM: ship's bridge on the night watch and its deck log, position 7 of 7; seed:a24d111eb0ab99e7.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+
+## Addition 2026-11-19: Share on Wi-Fi (DECISIONS rows 220-229)
+
+A narrow addition inside this surface, no new direction (headless run, the brief stood in for the owner): in "Your
+data", under a hairline, a switch row "Share on Wi-Fi" with one sentence and, while on, "Address and code", which
+opens a sheet (`app/lib/ui/share_sheet.dart`): who can read and that it is not encrypted, Address / Code / Turns off
+at as log rows, a parchment QR code, the two laptop commands, New code. During a night the section holds only this
+row. Checked as test renders at 100 and 130 % text (`app/test/export_screens_test.dart`), not on the phone.
