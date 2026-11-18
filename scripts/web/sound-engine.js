@@ -4,6 +4,10 @@
 // Smoothness: the page's timers never touch the sound sample by sample. glide() hands each new target
 // to the audio thread once (setTargetAtTime with the mixer's rise/fall times), and the audio thread
 // moves there smoothly on its own, so a busy or throttled page cannot make the sound step or stutter.
+// Modes (DECISIONS row 45): 'training' asks the browser for small buffers ('interactive') and glides in
+// 0.25-0.3 s; 'relax' keeps the large 'playback' buffers and ~1 s glides of before.
+// Port notes (Dart): not ported line by line; flutter_soloud (DECISIONS row 11) plays the same layers from
+// the same settings (sound-mapping.js layers()) with the same glide times (sound-mixer.js).
 import { MIX_TIMES } from './sound-mixer.js';
 
 const ROOT = 110;  // A2
@@ -58,11 +62,14 @@ function lfo(ctx, periodS, depth, target) {
 export const isPhone = () => typeof navigator !== 'undefined' && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
 
 export class AmbientEngine {
-  constructor({ light = false } = {}) { this.light = light; }
+  constructor({ light = false, mode = 'training' } = {}) {
+    this.light = light; this.mode = mode; this.times = MIX_TIMES[mode];
+    this.hint = mode === 'training' ? 'interactive' : 'playback';
+  }
 
-  // ctx: an OfflineAudioContext for tests and speed checks; by default a live one with large buffers
-  // ('playback': ~0.1 s more delay, far fewer dropouts on a busy machine; nothing here needs speed).
-  async start(ctx = new AudioContext({ latencyHint: 'playback' })) {
+  // ctx: an OfflineAudioContext for tests and speed checks; by default a live one. 'interactive' = small
+  // buffers (fast answer, more dropouts on a busy machine); 'playback' = ~0.1 s more delay, far fewer dropouts.
+  async start(ctx = new AudioContext({ latencyHint: this.hint })) {
     this.ctx = ctx; this.sent = {};
     if (typeof AudioContext !== 'undefined' && ctx instanceof AudioContext && ctx.state !== 'running') await ctx.resume();
     const now = ctx.currentTime;
@@ -93,7 +100,9 @@ export class AmbientEngine {
     }
 
     // roughness: tremolo at 33 Hz (heard as rough, not as a beat) on the drone and rain
-    this.trem = ctx.createGain(); this.trem.gain.value = 1; this.trem.connect(this.master); this.trem.connect(this.verb);
+    // bed level: 0 while calibrating (silent), 1 otherwise; bells and cues bypass it
+    this.bedGain = ctx.createGain(); this.bedGain.gain.value = 1; this.bedGain.connect(this.master); this.bedGain.connect(this.verb);
+    this.trem = ctx.createGain(); this.trem.gain.value = 1; this.trem.connect(this.bedGain);
     this.tremDepth = ctx.createGain(); this.tremDepth.gain.value = 0;
     const to = ctx.createOscillator(); to.frequency.value = 33; to.connect(this.tremDepth).connect(this.trem.gain); to.start();
 
@@ -132,7 +141,7 @@ export class AmbientEngine {
   glide(target, now) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    for (const [key, [up, down]] of Object.entries(MIX_TIMES)) {
+    for (const [key, [up, down]] of Object.entries(this.times)) {
       const v = target[key];
       if (!Number.isFinite(v) || Math.abs(v - (this.sent[key] ?? Infinity)) < 1e-3 * Math.max(1, Math.abs(v))) continue;
       this.sent[key] = v;
@@ -148,6 +157,18 @@ export class AmbientEngine {
         this.oscs.forEach((o, i) => go(o.frequency, PARTIALS[i][0] * (1 + (i % 2 ? 0.012 : -0.012) * v)));
       }
     }
+  }
+
+  // the bed (drone, rain) on or off, fading over about a second; bells and cues still sound
+  bed(on) {
+    if (!this.ctx || this.bedOn === on) return;
+    this.bedOn = on; this.bedGain.gain.setTargetAtTime(on ? 1 : 0, this.ctx.currentTime, 0.3);
+  }
+
+  // what the browser says about its output delay (seconds; null when it does not say)
+  latency() {
+    const c = this.ctx;
+    return { hint: this.hint, base: c?.baseLatency ?? null, output: c?.outputLatency ?? null };
   }
 
   // reward bell: inharmonic partials, slow decay, into the room
