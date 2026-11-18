@@ -207,8 +207,11 @@ class LiveStager {
     }
   }
 
-  /// Stops scoring and releases the model (after any running call).
-  Future<void> close() async {
+  /// Stops scoring and releases the model (after any running call); calling it again waits for the same close.
+  Future<void> close() => _closing ??= _close();
+  Future<void>? _closing;
+
+  Future<void> _close() async {
     _closed = true;
     await idle();
     await model.close();
