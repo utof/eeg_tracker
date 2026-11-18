@@ -16,7 +16,7 @@ button{font:inherit;padding:10px 16px;border-radius:10px;border:1px solid #3a404
 <h1>Headband check</h1><div id="top">connecting…</div>
 <div id="chs"></div>
 <div id="alpha"></div>
-<button onclick="fetch('contact',{method:'POST'});this.textContent='Checking contact (7 s)…';setTimeout(()=>this.textContent='Re-check contact',8000)">Re-check contact</button>
+<button onclick="fetch('contact',{method:'POST'});this.textContent='Restarting, back in about 30 s…';setTimeout(()=>this.textContent='Re-check contact (pauses ~30 s)',35000)">Re-check contact (pauses ~30 s)</button>
 <div id="hint">Green on all four = good. Red: part the hair under that electrode, press it to the skin, sit still.
 Alpha test: close your eyes for 20 s; the bar for the back pair should grow.</div></main>
 <script>

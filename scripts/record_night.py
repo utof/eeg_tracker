@@ -147,20 +147,11 @@ def main() -> None:
         while not a.seconds or time.time() - t0 < a.seconds:
             time.sleep(1); beat[0] = time.time()
             if want_contact.is_set():
-                want_contact.clear(); live["status"] = "checking contact"
-                n0 = resist_n[0]
-                try:
-                    s.exec_command(SensorCommand.StopSignal); time.sleep(1)
-                    s.exec_command(SensorCommand.StartResist); time.sleep(6)
-                    s.exec_command(SensorCommand.StopResist); time.sleep(1)
-                    s.exec_command(SensorCommand.StartSignal)
-                    if resist_n[0] > n0:
-                        log("contact ohms " + " ".join(f"{k}={v:.0f}" for k, v in last.items()))
-                    else:
-                        log("contact re-check: no resistance data arrived")
-                except Exception as e:
-                    log(f"contact re-check failed: {e}")
-                live["status"] = "recording"
+                # Measuring contact mid-stream never worked with the Linux SDK (no resistance data, then the stream
+                # would not restart; 2026-11-18 02:42 and 05:51). A fresh connection measures it reliably, so restart.
+                live["status"] = "restarting to re-check contact"
+                log("contact re-check asked: saving and exiting; record_night.sh starts a fresh recorder, which measures contact")
+                raise SystemExit(3)
             with lock:
                 chunk, buf[:] = b"".join(buf), []
                 ichunk, idx[:] = b"".join(idx), []
