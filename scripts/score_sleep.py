@@ -34,23 +34,36 @@ def gap_mask(raw: mne.io.BaseRaw, n_ep: int) -> np.ndarray:
     return missing > MAX_MISSING_S
 
 
-def anysleep(raw: mne.io.BaseRaw, repo: Path, n_ep: int, device: str,
-             progress: Callable[[str], None] = print) -> np.ndarray:
-    """Mean softmax of the three AnySleep runs, shape (n_ep, 5) in STAGES order."""
-    import torch
+CHANNELS = ["O1", "O2", "T3", "T4"]
+HIGH_PASS_HZ = 0.3
+MODEL_HZ = 128
+
+
+def prepare(raw: mne.io.BaseRaw) -> np.ndarray:
+    """The model's input before epoching: (4, samples at 128 Hz), O1 O2 T3 T4, each channel robust-scaled.
+
+    The phone app does the same in Dart (app/lib/sleep/prep.dart; cross-checked by app/test/sleep_prep_test.dart)."""
     from scipy.signal import resample_poly
-    spec = importlib.util.spec_from_file_location("anysleep_no_hydra", repo / "examples" / "anysleep_no_hydra.py")
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
     # PSG amplifiers high-pass the signal; the BrainBit drifts by tens of mV, which would swamp the robust scaling.
     # The 0.3 Hz high-pass is our choice, not part of the AnySleep recipe.
-    r = raw.copy().pick(["O1", "O2", "T3", "T4"]).filter(0.3, None, verbose="error")
-    f = Fraction(128, round(r.info["sfreq"]))
+    r = raw.copy().pick(CHANNELS).filter(HIGH_PASS_HZ, None, verbose="error")
+    f = Fraction(MODEL_HZ, round(r.info["sfreq"]))
     x = resample_poly(r.get_data(), f.numerator, f.denominator, axis=1)
     del r
     for c in range(len(x)):  # AnySleep's recipe: clip at 20 x IQR around 0, then robust scaling
         q25, q50, q75 = np.percentile(x[c], [25, 50, 75]); iqr = (q75 - q25) or 1.0
         x[c] = (np.clip(x[c], -20 * iqr, 20 * iqr) - q50) / iqr
+    return x
+
+
+def anysleep(raw: mne.io.BaseRaw, repo: Path, n_ep: int, device: str,
+             progress: Callable[[str], None] = print) -> np.ndarray:
+    """Mean softmax of the three AnySleep runs, shape (n_ep, 5) in STAGES order."""
+    import torch
+    spec = importlib.util.spec_from_file_location("anysleep_no_hydra", repo / "examples" / "anysleep_no_hydra.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    x = prepare(raw)
     t = torch.from_numpy(np.ascontiguousarray(x[:, : n_ep * 3840].T)).float().unsqueeze(0).to(device)
     del x
     probs = []
