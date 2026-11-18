@@ -91,8 +91,8 @@ findings are on `_local/research/2026-11-18-findings.html`.
 3. **Shared detectors** (rows 9, 18, 20, 21): "what the electrodes see" (blinks, eye movements on T3-T4, jaw
    20-70 Hz, movement) and the drift-off detector grown from `sleep-guard.js`, with a "lights off" button; it
    ships when its sleep onset falls within 5 minutes of AnySleep's on 4 of 5 recorded nights. (Research B, C)
-4. **"i" evidence notes** (wish 14): one note per feature from the reports' grade tables, shown by the pages now
-   and by the app later.
+4. ~~"i" evidence notes~~ (wish 14): done 2026-11-18: 15 notes in `docs/evidence/`, "i" buttons on every page;
+   the app will bundle the same files.
 5. **Replayed-feedback check** (row 23), then **alpha-theta** (row 22). (Research A)
 6. **Dream catcher** (row 20), then the nap preset. (Research C: a rule plus a timer is the proven design)
 7. **State and trends page** (row 10): a sleep-pressure curve from the sleep log (not from EEG yet), "your usual"
