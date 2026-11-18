@@ -36,8 +36,9 @@ night, never with a sleep lab, and no study has tested an EEG-timed nap alarm.
 - No study has shown that an EEG-timed nap or alarm makes you less groggy than a plain timer. A bedroom alarm
   with light, sound and temperature did no better than a normal one.
 - The live stages are AnySleep, the same sleep model as the morning report, read 2 minutes behind the newest
-  data. On one recorded night they agreed with the model's own full-night scoring on most 30-second stretches;
-  that shows the live version is consistent with the full one, not that either is right on this headband.
+  data. On one recorded night they agreed with the model's own full-night scoring on about 9 in 10 of the
+  30-second stretches; that shows the live version is consistent with the full one, not that either is right on
+  this headband.
 - Live mistakes lean to calling light sleep "deep", which wakes you a little early; deep sleep missed for a few
   minutes is the rarer mistake.
 - Light sleep (N1) is poorly scored everywhere; the "fell asleep" time comes from the alpha rule instead, checked
@@ -54,8 +55,8 @@ night, never with a sleep lab, and no study has tested an EEG-timed nap alarm.
   prepared the way a phone can (only the past) and keeps the stage of the stretch 2 minutes back. Two such
   stretches of deep sleep in a row wake you: about 3 minutes into deep sleep, before it settles.
 - The length counts from Lights off and always ends the nap, so the nap works on the timer alone if the model is
-  too slow (it times every check: over 15 seconds it drops to 1 of its 3 runs, then to the timer), fails, or the
-  signal is lost. The screen and the report say which.
+  too slow (it times every check: two in a row over 15 seconds drop it to 1 of its 3 runs, then to the timer),
+  fails, or the signal is lost. The screen and the report say which.
 - The wake sound is three soft rising notes, a little louder every 20 seconds until you tap "I'm awake" (5
   minutes at most).
 - The report: when you fell asleep, minutes of light, deep and dream sleep, why it woke you, how long you took to

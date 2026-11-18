@@ -78,6 +78,7 @@ Update the status column whenever something lands.
 | 22 | Alpha-theta training (eyes closed, back of the head; 10 sessions, the first 3 only 15 min, then decide; side-effect checklist every session; alertness check before driving; stop button; "practice, not treatment"; a note that strong memories can come up) | **built in the phone app** (2026-11-18; not yet heard or run on the phone): screening, consent and stop plan, check-in and after-session checklist with pause rules, the length rule and the decision after 10, stream-to-ocean sound with chime and gong, the drift-off detector as sleep guard (fade, rising wake tone), grounding, a 1-minute reaction test before you leave; tested with a fake headband | branch `feat/app-replay-alphatheta`, `app/lib/alphatheta`, DECISIONS 104-107 |
 | 23 | Replayed-feedback check: some sessions secretly replay an earlier session's feedback; after enough sessions, live vs replayed is compared (feeling, the trained signal, ratings) | **built in the phone app** (2026-11-18; not yet run on the phone): toggle off by default with the reminder before every session, 4 live donor sessions per kind, then shuffled blocks of 4 drawn from a phone-made secret with the plan and the order's SHA-256 frozen first, own-replay of the sound with live gates, no live bell count, guess / control / randomness after each session, results per 12 with a permutation test; tested end to end with a fake headband | branch `feat/app-replay-alphatheta`, `app/lib/training`, DECISIONS 100-103 |
 | 20 | Dream catcher (owner: "definitely build"): at sleep onset, ask what you're thinking, record the answer, let you drift again, 3-4 rounds | **built in the phone app** (2026-11-18; not yet run on a phone or a head): your own recorded theme and question (tones if none), Lights off with the 60 s baseline, round 1 at the detector's "drowsy" or a random moment in the usual time to fall asleep, later rounds when alpha came back and faded again (2 min apart at least, 4-7 min at most), answers recorded until 3 s of quiet, a two-halves "were you drifting?" tap, 3 or 4 rounds, 45 min cap, wake tone or the night starts by itself; its EEG is part of that night with markers; answers list with playback and notes; tested with a fake headband and microphone. Next: the owner's first nap (`app/README.md`, "Dream catcher") | branch `feat/app-dream-catcher`, `app/lib/dream`, DECISIONS 110-116 |
+| 26 | Nap coach (Ideas, 2026-11-18): a nap that ends before deep sleep starts, or at a chosen length, whichever comes first; live sleep stages on the phone | **built in the phone app** (2026-11-19, branch `feat/app-nap-coach`; not yet run on a phone or a head): AnySleep scored live every 30 s on the last 60 minutes, read 2 min behind (Dart = the Python reference to 2e-6 on the recorded night; on the owner's recorded night the same stage as the full-night scoring on 88.9 % of epochs, kappa 0.84, deep sleep known 2-3 min after it started), Lights off with the drift-off detector for "fell asleep", 20 / 30 / 45 / 90 min, woken when 2 epochs in a row read deep sleep or at the length, a soft rising wake sound until "I'm awake", a report (fell asleep, stages, why it woke you, the model's time per check); the timer alone when the model is too slow, fails or the signal is lost, and the screen says so. Next: the owner's first nap (`app/README.md`, "Nap coach"): the phone's speed and the wake sound's volume | `app/lib/sleep/live_*.dart`, `app/lib/nap`, `analysis/live_stager.py`, DECISIONS 170-179 |
 
 ## What comes next, in order (updated 2026-11-18 after research round 2)
 
@@ -126,6 +127,10 @@ findings are on `_local/research/2026-11-18-findings.html`.
    after 3 days); `scripts/import_phone.py` checks every file and copies it into `_local/` without overwriting
    anything silently. Not yet run on the phone. Encryption and restic backups: deferred by the owner (2026-11-18;
    DECISIONS 37). Later: a catalog of nights, xz for nights older than 90 days. (Research D)
+10. ~~**Nap coach**~~ (row 26, from Ideas): built 2026-11-19 on `feat/app-nap-coach` (from `feat/app-line`;
+   DECISIONS 170-179) with live sleep stages on the phone. Next: the owner's first nap (the phone's speed per check,
+   the wake sound); then the smart alarm, which first needs ONNX smoke-tested inside the night recorder's service
+   (DECISIONS 178). (Research C, D)
 
 ## Next tests that need the owner
 
@@ -157,6 +162,9 @@ findings are on `_local/research/2026-11-18-findings.html`.
 - **Export data, once set up** (5 minutes, `app/README.md` on `feat/app-export-all`, "Export data"): pick the folder
   (Syncthing's or Download/EEG), Export new, then `python3 scripts/import_phone.py <folder>` on the laptop; tell the
   assistant how long the first export took, and anything the summary called a PROBLEM.
+- **First nap coach nap** (about 30 min, `app/README.md` on `feat/app-nap-coach`, "Nap coach"): pick 30 min, set the
+  volume, Lights off; tell the assistant the report's "Sleep model" line (the phone's speed), whether the wake sound
+  woke you and how loud its first note felt, and whether it woke you before deep sleep or at 30 minutes.
 - **First dream catcher nap** (about 20-45 min, `app/README.md` on `feat/app-dream-catcher`, "Owner step"): record
   both prompts and set the volume; 3 rounds, Wake me; tell the assistant whether the questions came half-asleep,
   too early or too late, whether the prompts' volume and the dim screen were right, whether answers were cut off or
@@ -178,8 +186,7 @@ Anyone, including the assistant, adds ideas here. When one is started, move it i
 
 | Idea | What it is | Notes |
 |---|---|---|
-| Smart alarm | wakes you within a chosen window at a moment of light sleep, not deep sleep | AnySleep works live about 2 min behind the newest data (DECISIONS 79); needs the phone speed test |
-| Nap coach | a nap that ends before deep sleep starts (so no groggy wake-up) | same as the smart alarm (DECISIONS 79) |
+| Smart alarm | wakes you within a chosen window at a moment of light sleep, not deep sleep | the live scorer is built (nap coach, row 26); inside the night recorder it first needs ONNX smoke-tested in the service's engine (DECISIONS 178) |
 | Dream catcher (now row 20 above) | as you drift off, the app notices the half-dream stage (back-of-head alpha fading), quietly asks "what are you thinking about?", records your spoken answer, lets you drift again; 3-4 rounds. For creative ideas | MIT's Dormio; a 2021 study found 15 s in that stage tripled insight on a puzzle; needs only O1/O2 |
 | Lucid dream cues | soft sound cues during dream sleep (REM) to become aware you are dreaming | evidence weak; fun |
 | Hands-free controls | a double jaw clench or a look left-right as a switch: pause sound, mark a moment | jaw and eye movements are what these electrodes see best |
@@ -200,7 +207,7 @@ or delete any of these.
 | Evening study, morning review | a plain reminder to study in the evening and review in the morning | some (B) |
 | Open BrainBit driver | our own Bluetooth code instead of the closed SDK; contact quality all night | protocol mostly public via Neiry's MIT package; legal for your own device (D) |
 | Sleep-scorer upgrade | AnySleep fine-tuned on public nights reshaped to the headband's channels (CHAT has them); adopt only if clearly better | some (C; needs the 58 GB download) |
-| Live sleep stages on the phone | AnySleep itself, 2 min behind the newest data (DECISIONS 79); a small model only if the phone is too slow | Traumschreiber (MIT, Nov 2026) already runs AnySleep on a phone (C, D) |
+| Live sleep stages on the phone | built for the nap coach (row 26, DECISIONS 170-172): AnySleep itself, 2 min behind; a small model only if the phone is too slow | Traumschreiber (MIT, Nov 2026) already runs AnySleep on a phone (C, D) |
 | "Was this you?" | a warning when someone else wears the headband, after a month of nights | about 6 % error with two enrolment days (D) |
 | Helmet layout | 8 sites M1 M2 F7 F8 Fz C3 C4 Pz plus the forehead reference, then 16; noted in `eeg_ads1299_lab` as a planning assumption | some (B) |
 | Noise repair (ZUNA) | re-draw bad stretches on the laptop, mainly for the helmet | untested on 4 channels (C; Apache-2.0) |

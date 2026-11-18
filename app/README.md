@@ -6,7 +6,8 @@ contact per channel, and phone settings that could stop the recording. Between n
 opens the **morning check-in** and the **trends** page (below), and **Meditate** opens a guided eyes-closed
 session whose sound follows your alpha rhythm (below); from there, **Alpha-theta** training and the **replay
 check** (both below). Also between nights, the **Dream catcher** asks what is on your mind as you drift off and
-records your answers (below). **Sound** (at the bottom, also during a night) plays calm sound
+records your answers, and the **Nap coach** wakes you before deep sleep starts or at the length you pick (both
+below). **Sound** (at the bottom, also during a night) plays calm sound
 for a state, with an optional beat, and with the headband shows what your brain does (below).
 
 - Files: `<stamp>.f32/.idx/.log` in the app's private folder (other apps cannot read it), the same format as
@@ -29,6 +30,9 @@ for a state, with an optional beat, and with the headband shows what your brain 
   `lib/ui/alpha_theta_*.dart`; DECISIONS rows 104-107.
 - Dream catcher: `lib/dream/` (rounds, answer end, files, headband link, session), `lib/sound/dream_sound.dart`,
   `lib/ui/dream_*.dart`; DECISIONS rows 110-116.
+- Nap coach: `lib/sleep/live_prep.dart` and `live_stager.dart` (live sleep stages, reference
+  `../analysis/live_stager.py`), `lib/nap/` (rules, file, session), `lib/sound/nap_sound.dart`, `lib/ui/nap_*.dart`;
+  DECISIONS rows 170-179.
 - Morning check-in and trends: `lib/morning/` (the laptop's `morning_check.py` in Dart, the session, the files),
   `lib/trends/` (days, your usual, sleep pressure, the forecast gate), `lib/ui/morning_*.dart`,
   `lib/ui/trends_*.dart`; DECISIONS rows 120-129.
@@ -111,7 +115,10 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    `adb pull /sdcard/Download/EEG/eeg-export <dir>` and `python3 scripts/import_phone.py <dir> --dest <scratch>`
    (not the real `_local`).
 5. **Start night** without a headband: the service starts ("Searching ... The app keeps looking"); Stop ends it.
-6. **The phone's own arm64 APK** also runs on this x86_64 image through Android's ARM translation (slowly: about
+6. **The live sleep scorer's speed** (the nap coach): `flutter build apk --release --target-platform android-x64
+   -t tool/live_bench.dart`, install, open, then `adb logcat | grep BENCH`: the time per 30-second check at 5 to 60
+   minutes of window and the peak memory. Reinstall the app afterwards.
+7. **The phone's own arm64 APK** also runs on this x86_64 image through Android's ARM translation (slowly: about
    a minute per model part), but only with `hw.cpu.ncore=2` in the AVD's `config.ini`: the translator's stand-in
    `/proc/cpuinfo` lists 2 processors, and with 4 cores in sysfs ONNX Runtime's CPU detection (cpuinfo) crashes
    while the library loads, at app start. That crash is the emulator's, not the phone's.
@@ -337,6 +344,46 @@ asking at the right moment.
    - Could you tap Drifting / Awake half-asleep?
 4. With **Record the night** on a later evening, check in the morning that the night recorded and that **Sleep
    report** covers the time from Lights off.
+
+## Nap coach
+
+A nap that ends before deep sleep starts (waking from deep sleep is what makes you groggy), or at the length you
+pick, whichever comes first, with a soft wake sound that rises until you tap. The **i** button shows what the
+research says (`docs/evidence/nap-coach.md`).
+
+1. Between nights, on the main screen scroll to **Nap coach** and tap it.
+2. Pick the length: **20**, **30** (the default), **45** or **90 min**, counted from Lights off. The plan on the
+   screen shows the rule: Awake, then Light sleep; it wakes you where Deep would start, or at your length.
+3. Set the phone's media volume to where you would hear an alarm. Headband on and switched on, lie on your side or
+   half reclined (lying flat presses the back electrodes), phone near you with the screen up. Tap **Lights off**.
+4. The screen goes black and dim. Close your eyes; the first minute sets your starting level. One dim word says
+   what the app sees (Eyes closed, Resting, Drifting, Asleep), with the minutes and whether the sleep model is on.
+   From 5 minutes in the sleep model checks every 30 seconds; if it is too slow, fails, or the signal is lost, the
+   line says "timer" and the length alone ends the nap.
+5. The wake: the screen comes up and three soft rising notes play, a little louder every 20 seconds. Tap the big
+   **I'm awake**. **Stop** (or Back) ends the nap at any time.
+6. The report: when you fell asleep (the alpha rule), minutes of light, deep and dream sleep (the live model, a
+   first guess), why it woke you, how long you took to tap, and how fast the model was. Earlier naps are below.
+
+Keep the app open with the screen on during a nap: locking the phone can stop it. Files, app-private:
+`files/naps/<time>.nap.json` (the length, the onset, the live stages one letter per 30 s, why it ended, the model's
+time per check). The nap's EEG is a normal recording in `files/recordings/` with markers (lights off, drowsy,
+asleep, deep sleep starting, the wake), so the sleep report scores it in full afterwards and Export copies it. While
+last night is still being scored, the nap's model checks wait (the line says so) and the timer covers.
+
+### Owner step: the first nap (about 30 minutes, once)
+
+Nothing of this has run on a phone yet: not the model's speed, the wake sound's volume or the dim screen.
+
+1. Some afternoon with no night recording: open **Nap coach**, pick **30 min**, set the volume, Lights off, nap.
+2. Tell the assistant:
+   - The **Sleep model** line of the report (for example "3 runs, 2.1 s a check"): the phone's speed, which the
+     laptop cannot measure. If it says "1 run" or "timer only", what the sentence under it says.
+   - Did the wake sound wake you, and was its first note too soft or too loud? How many notes until you tapped (the
+     report's "Up after")?
+   - Did it wake you before deep sleep or at 30 minutes, and did you feel groggy?
+   - Whether the dim screen or the headband bothered you lying down.
+3. Later, Export data: the laptop can then score the nap in full and compare it with what the phone saw live.
 
 ## Sound for states
 
