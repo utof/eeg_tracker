@@ -51,7 +51,8 @@ typedef _Material = ({
   Uint8List wake,
 });
 
-Float32List _wakeTone() {
+/// The wake cue: [wakeNotes] struck 0.45 s apart (also the dream catcher's end).
+Float32List wakeTone() {
   final parts = [for (final hz in wakeNotes) strike(hz, cuePartials)];
   final gap = (0.45 * synthRate).round(), out = Float32List(parts.first.length + gap * (parts.length - 1));
   for (var k = 0; k < parts.length; k++) {
@@ -68,7 +69,7 @@ _Material _make() => (
   chime: wav16([strike(chimeHz, chimePartials)]),
   gong: wav16([strike(gongHz, gongPartials)]),
   cue: wav16([strike(220, cuePartials)]),
-  wake: wav16([_wakeTone()]),
+  wake: wav16([wakeTone()]),
 );
 
 class SoloudAlphaThetaSound implements SessionSound {

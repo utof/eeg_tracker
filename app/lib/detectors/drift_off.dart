@@ -167,17 +167,23 @@ class DriftTimers {
 /// when drowsy is known, or, if that never comes, at a random moment ([u] in 0..1) inside the usual time to fall
 /// asleep (the middle half of earlier onset latencies once there are 3, else 10-20 min).
 DriftTimers driftTimers(DriftOff d, List<double> earlierLatenciesMin, double u) {
-  if (!(u >= 0 && u <= 1)) throw ArgumentError.value(u, 'u', 'must be in 0..1');
-  var lo = Drift.dreamWindowMin[0], hi = Drift.dreamWindowMin[1];
-  if (earlierLatenciesMin.length >= 3) {
-    lo = percentile(earlierLatenciesMin, 0.25);
-    hi = percentile(earlierLatenciesMin, 0.75);
-  }
-  final fallback = ((lo + (hi - lo) * u) * 60 + 0.5).floor();
+  final fallback = dreamFallbackS(earlierLatenciesMin, u);
   var fade = Drift.soundCapS - Drift.soundFadeS;
   final asleep = d.asleepAt, drowsy = d.drowsyAt;
   if (asleep != null) fade = math.min(fade, asleep - d.lightsOff + 1);
   var cue = fallback;
   if (drowsy != null) cue = math.min(cue, drowsy - d.lightsOff + 1);
   return DriftTimers(fade, math.min(Drift.soundCapS, fade + Drift.soundFadeS), cue);
+}
+
+/// The dream catcher's timer (seconds after lights off): a random moment ([u] in 0..1) inside the usual time to fall
+/// asleep: the middle half of [earlierLatenciesMin] once there are 3, else [Drift.dreamWindowMin].
+int dreamFallbackS(List<double> earlierLatenciesMin, double u) {
+  if (!(u >= 0 && u <= 1)) throw ArgumentError.value(u, 'u', 'must be in 0..1');
+  var lo = Drift.dreamWindowMin[0], hi = Drift.dreamWindowMin[1];
+  if (earlierLatenciesMin.length >= 3) {
+    lo = percentile(earlierLatenciesMin, 0.25);
+    hi = percentile(earlierLatenciesMin, 0.75);
+  }
+  return ((lo + (hi - lo) * u) * 60 + 0.5).floor();
 }
