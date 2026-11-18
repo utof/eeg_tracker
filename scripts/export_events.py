@@ -1,8 +1,9 @@
-"""Append eeg_sleep_night events (utof_tracker's event envelope) from score_sleep.py results.
+"""Append events in utof_tracker's envelope: eeg_sleep_night (from score_sleep.py's <night>.sleep.json) and
+eeg_morning_check (from morning_check.py's <stamp>.morning.json).
 
-usage: export_events.py <night>.sleep.json [...] [--root _local/export]
-Writes <root>/events/<dev>/eeg-YYYY-MM.jsonl. Same result twice: nothing added. A changed result for a night
-already exported: a new event whose data.replaces is the newest earlier id. Format: docs/data-format.md.
+usage: export_events.py <night>.sleep.json | <stamp>.morning.json [...] [--root _local/export]
+Writes <root>/events/<dev>/eeg-YYYY-MM.jsonl. Same result twice: nothing added. A changed result for a night or
+a check-in already exported: a new event whose data.replaces is the newest earlier id. Format: docs/data-format.md.
 """
 import argparse, hashlib, json, os, secrets
 from datetime import datetime, timedelta
@@ -69,6 +70,29 @@ def night_event(res: dict) -> tuple[datetime, dict]:
     return start, data
 
 
+MORNING_KEYS = ("alpha_ec_uv2", "alpha_eo_uv2", "ec_rise", "iaf_hz", "iaf_peak_hz", "alpha_peak_present",
+                "aperiodic_slope_ec", "clean_share_ec", "clean_share_eo")
+
+
+def morning_event(res: dict) -> tuple[datetime, dict]:
+    """(local start with offset, data) from one morning_check.py result."""
+    if "back" not in res:
+        raise SystemExit(f"{res.get('source')}: not a morning check-in result")
+    start = datetime.fromisoformat(res["start"])
+    b = res["back"]
+    data = dict(
+        date=res["date"], start=res["start"], end=res.get("end"), phase_s=res["phase_s"],
+        alpha_ec_uv2=b["alpha_ec_uv2"], alpha_eo_uv2=b["alpha_eo_uv2"], ec_rise=b["ec_rise"], iaf_hz=b["iaf_hz"],
+        aperiodic_slope_ec=b["aperiodic_slope_ec"], clean_share=b["clean_share"],
+        channels={n: {k: c.get(k) for k in MORNING_KEYS} for n, c in res["channels"].items()},
+        ratings=res.get("ratings"),
+        setup_visible={k: v["visible"] for k, v in (res.get("setup_test") or {}).items()} or None,
+        method=res["version"], validated=False,
+        device=res.get("device") or dict(model="BrainBit Black", channels=["O1", "O2", "T3", "T4"]),
+    )
+    return start, data
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("results", nargs="+", type=Path)
@@ -76,13 +100,20 @@ def main() -> None:
     a = ap.parse_args()
     dev = device_id(a.root); folder = a.root / "events" / dev; folder.mkdir(parents=True, exist_ok=True)
     for path in a.results:
-        start, data = night_event(json.loads(path.read_text()))
-        key = f"{data['start']}|{MODEL}|{data['hypnogram']}"
+        res = json.loads(path.read_text())
+        if path.name.endswith(".morning.json"):
+            kind, (start, data) = "eeg_morning_check", morning_event(res)
+            key = f"{data['start']}|morning|" + json.dumps(data, sort_keys=True)
+            same_as = lambda e, d=data: e["data"].get("start") == d["start"]  # noqa: E731
+        else:
+            kind, (start, data) = "eeg_sleep_night", night_event(res)
+            key = f"{data['start']}|{MODEL}|{data['hypnogram']}"
+            same_as = lambda e, d=data: e["data"].get("night_of") == d["night_of"]  # noqa: E731
         eid = "eeg:" + hashlib.sha1(key.encode()).hexdigest()
-        old = [e for e in read_events(folder) if e.get("type") == "eeg_sleep_night"]
+        old = [e for e in read_events(folder) if e.get("type") == kind]
         if any(e["id"] == eid for e in old):
             print(f"{path.name}: already exported ({eid[:16]}…)"); continue
-        same = [e for e in old if e["data"].get("night_of") == data["night_of"]]
+        same = [e for e in old if same_as(e)]
         if same:
             data["replaces"] = max(same, key=lambda e: (e["ts"], e["seq"]))["id"]
         f = folder / f"eeg-{start:%Y-%m}.jsonl"
@@ -90,10 +121,12 @@ def main() -> None:
         if f.exists():
             done = [ln for ln in f.read_text().splitlines(keepends=True) if ln.endswith("\n")]
             seq = (json.loads(done[-1])["seq"] + 1) if done else 1
-        ev = dict(v=1, id=eid, dev=dev, seq=seq, ts=data["start"], tz=zone_name(), type="eeg_sleep_night", data=data)
+        ev = dict(v=1, id=eid, dev=dev, seq=seq, ts=data["start"], tz=zone_name(), type=kind, data=data)
         with open(f, "a", encoding="utf-8") as out:
             out.write(json.dumps(ev, ensure_ascii=False, separators=(",", ":")) + "\n")
-        print(f"{path.name}: night of {data['night_of']}, {data['total_sleep_min']} min asleep -> {f}")
+        what = (f"night of {data['night_of']}, {data['total_sleep_min']} min asleep" if kind == "eeg_sleep_night"
+                else f"morning check-in {data['date']}")
+        print(f"{path.name}: {what} -> {f}")
 
 
 if __name__ == "__main__":

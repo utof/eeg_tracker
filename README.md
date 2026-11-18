@@ -21,6 +21,17 @@ uv run --project analysis python scripts/score_sleep.py night.bdf   # night.slee
 python3 scripts/export_events.py night.sleep.json    # eeg_sleep_night event for utof_tracker
 ```
 
+Morning check-in (about 5 minutes): while the recorder runs, open `http://localhost:8765/morning.html`
+(`?short=1` for 60 s phases), then:
+
+```bash
+uv run --project analysis python scripts/morning_check.py _local/recordings   # <start>.morning.json + summary
+python3 scripts/export_events.py _local/recordings/*.morning.json             # eeg_morning_check events
+```
+
+Tests (no headband): `uv run --project analysis --with pytest pytest analysis/tests` (add `-m "not slow"` to skip
+the 2.5-minute fake-headband run) and `node --test tests/js/*.test.mjs`.
+
 No headband? `PYTHONPATH=tests/fake_neurosdk python3 scripts/record_night.py --port 8765` runs the recorder on a fake
 signal (alpha that switches every minute, jaw bursts, blinks). Pages in `scripts/web/` are served by name; they can
 `POST /marker` with a text body to mark a moment (it becomes a BDF annotation).

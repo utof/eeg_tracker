@@ -51,7 +51,7 @@ Update the status column whenever something lands.
 | 3 | Sleep scoring + hypnogram chart | working on test data; first real night 2026-11-18 | `scripts/score_sleep.py` |
 | 4 | Export to utof_tracker's event format | working; utof_tracker does not read it yet (needs the owner's OK to change it) | `scripts/export_events.py` |
 | 5 | Android recorder app (one tap, screen off all night) | code + tests done; APK not built yet; phone test pending | branch `feat/android-recorder` |
-| 6 | Morning check-in (eyes closed / open, ratings) | in progress | branch `feat/morning-check` |
+| 6 | Morning check-in (eyes closed / open, ratings) + setup test | page, analysis, export and tests done on the fake headband; first real morning pending | `scripts/web/morning.html`, `scripts/morning_check.py` |
 | 7 | Brain-reactive sound (alpha → calmer sound, jaw blocks) | browser prototype working on the fake headband; real-head test pending; phone port next | `scripts/web/sound.html`, [docs/brain-sound.md](docs/brain-sound.md) |
 | 8 | Break hints stage 0 (ActivityWatch) | in progress | branch `feat/break-hints` |
 | 9 | Night extras: jaw clench count, movement, signal quality per hour | next | - |
@@ -82,8 +82,8 @@ Update the status column whenever something lands.
 
 ## Next tests that need the owner (each about 5 minutes)
 
-- Eyes closed 2 min, eyes open 2 min, with the headband on (is alpha there?).
-- 20 cued blinks, 10 left-right glances, 5 jaw clenches (what the electrodes can see).
+- Eyes closed 2 min, eyes open 2 min, with the headband on (is alpha there?): `morning.html` on the live page's port.
+- 20 cued blinks, 10 left-right glances, 5 jaw clenches (what the electrodes can see): the setup test on the same page.
 - Brain sound: open `http://localhost:8765/sound.html` while recording, calibrate, sit 5 min eyes closed, clench twice (does the rain soften, do bells come, does a clench stop them?).
 - Install the phone app and run the 1-hour screen-off test (`app/README.md` on the app branch).
 
