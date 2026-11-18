@@ -10,9 +10,12 @@ records your answers (below). **Sound** (at the bottom, also during a night) pla
 for a state, with an optional beat, and with the headband shows what your brain does (below).
 
 - Files: `<stamp>.f32/.idx/.log` in the app's private folder (other apps cannot read it), the same format as
-  `scripts/record_night.py` (`docs/data-format.md`); join a night with `scripts/to_bdf.py`. Only "Export a
-  night" copies them out (below; DECISIONS rows 53 and 56). Android backups and phone-to-phone transfers
-  skip the app completely (row 57), so a new phone starts empty: export what you want to keep first.
+  `scripts/record_night.py` (`docs/data-format.md`); join a night with `scripts/to_bdf.py`. Only **Export data**
+  (everything the app keeps) and **Export a night** copy anything out (below; DECISIONS rows 53, 56 and 150-156).
+  Android backups and phone-to-phone transfers skip the app completely (row 57), so a new phone starts empty:
+  export first.
+- Export data: `lib/export/` (what leaves the phone, the index, the manifest), `lib/ui/export_*.dart`,
+  `android/.../DataExport.kt` (the folder grant), `../scripts/import_phone.py` on the laptop; DECISIONS rows 150-156.
 - Recorder: a foreground service of type `connectedDevice` (`lib/recorder/recorder_service.dart`) whose
   isolate owns the BrainBit session (`lib/recorder/night_recorder.dart`, rules in DECISIONS row 17 and rows 49-54).
 - Screen: `lib/ui/`, design in `../DESIGN.md`.
@@ -45,7 +48,9 @@ flutter build apk --release --target-platform android-arm64
 
 `flutter test` also renders the night screen in four states, the meditation screen in eleven, the sleep report in
 eight, the replay check's and alpha-theta's pages in nineteen, the dream catcher in thirteen, the check-in, trends
-and Morning section in eighteen and sound for states in fourteen to `build/screens/*.png` (normal and 130 % text).
+and Morning section in eighteen, sound for states in fourteen and Export data in nine to `build/screens/*.png`
+(normal and 130 % text). `test/export_test.dart` exports a fake app folder (every place the app writes) and remakes,
+with `EXPORT_FIXTURE=write`, the export the laptop importer's test reads (`test/fixtures/phone_export/`).
 `test/dream_test.dart` runs whole dream catcher sessions on a fake
 headband whose alpha fades and comes back, with a fake microphone. `test/morning_cross_check_test.dart` checks the
 check-in's numbers against a fixture made by the laptop's Python (`test/fixtures/make_morning_fixture.py`); with
@@ -88,7 +93,7 @@ rules, which stripped its `Neurosdk2Plugin` class; `android/build.gradle.kts` bu
 The **i** button shows what the research says (`docs/evidence/meditation-feedback.md`): a guided practice, not
 a treatment, and no "meditation depth" is measured. Each session is kept in the app's private folder,
 `files/meditations/<time>.meditation.json` (the summary) and `<time>.session.json` (every sample and decision,
-in the laptop page's session format, so it can be replayed). They are not exported yet.
+in the laptop page's session format, so it can be replayed). **Export data** copies them out (below).
 
 If the headband drops out, the countdown pauses ("No signal") and the app reconnects by itself.
 
@@ -164,7 +169,7 @@ laptop's morning page did and works the numbers out itself, the same way (DECISI
    a number is beyond your normal spread (from 14 days). **See trends** opens the trends page.
 
 Kept in `files/mornings/` (the result in the laptop's format, and the raw signal with the page's markers;
-`docs/data-format.md`); not exported yet. The **i** button shows `docs/evidence/morning-check-in.md`.
+`docs/data-format.md`); **Export data** copies them out. The **i** button shows `docs/evidence/morning-check-in.md`.
 
 ## Trends
 
@@ -340,12 +345,50 @@ because Android blocks scans while the screen is off), after 2, 5, 10, 30 s and 
 third try is a short scan instead. Each try is written in the night's `.log` with its time (`drop`,
 `reconnect try`, `reconnected`), so gaps can be marked later. It never stops trying until you press Stop.
 
+## Export data (everything, every few days)
+
+Everything the app keeps stays inside it until you export it: nights, sleep reports, check-ins, meditations,
+alpha-theta and its notebook, the replay check, dream catcher answers, notes and prompts, sound sessions. **Export
+data** copies all of it into a folder you pick once, adding only what is new each time. Nothing on the phone is
+deleted, and it never runs while a night records. The laptop then checks every file against the export's list of
+checksums (`manifest.json`) before copying it in.
+
+### Owner step: set it up once, then export every few days (5 minutes)
+
+1. Between nights, on the main screen scroll to **Your data** and tap **Export data**.
+2. Tap **Pick a folder**. With Syncthing on the phone, pick its folder (the one it shares with the laptop); else open
+   `Download`, make a folder `EEG` and pick it (Android does not allow `Download` itself). Tap **Use this folder** and
+   **Allow**. The app keeps this permission, so you pick it only once.
+3. Tap **Export new** and keep the app open; the cells fill as files arrive. The first export copies everything
+   (about 160 MB a night), later ones only what is new. **Stop** keeps what was copied.
+4. On the laptop, get the folder `eeg-export`: Syncthing brings it by itself (share it from the phone as "Send
+   Only"); otherwise, with the phone on USB, `adb pull /sdcard/Download/EEG/eeg-export /tmp/eeg-export`, or copy the
+   folder with the file manager.
+5. In the repo folder on the laptop: `python3 scripts/import_phone.py /tmp/eeg-export` (or the Syncthing folder). It
+   prints what it copied and ends with "Everything in the phone's list is on the laptop." A `PROBLEM:` line says what
+   to do (wait for Syncthing, or **Export everything** on the phone). Run it again any time: it copies only what is
+   new and never overwrites a file silently.
+6. Every few days, **Export new** again. The main screen says when the last export was, in amber once new data has
+   been only on the phone for 3 days.
+
+Good to know:
+
+- Raw nights go into `_local/recordings/` next to the laptop's own; everything else into `_local/phone/` in the
+  app's layout. Phone sleep reports are in `_local/phone/nights/`, apart from the laptop's own.
+- The export folder grows as large as the app's data. Once the import says everything is on the laptop, you may
+  delete the files in `eeg-export` on the phone to free space; the app keeps its own copies, and the next import
+  still checks that the laptop has every file.
+- The replay check's files (`replay-check/`) hold the hidden order of live and replayed sessions. They are exported
+  so a lost phone does not lose the check; do not open them (or ask the assistant to) before the app shows the
+  results.
+- **Change folder** starts again in the new folder: use **Export everything** there.
+
 ## Export a night
 
-The recordings stay inside the app. To get one night out:
+The recordings stay inside the app. To get one night out on its own (Export data above takes everything):
 
 1. Stop the night (Export is hidden while recording).
-2. Scroll down to **Recordings** and tap **Export a night**.
+2. Scroll down to **Your data** and tap **Export a night**.
 3. Tap the night you want.
 4. Android's folder picker opens. Pick a folder, or make a new one (for example `Download/EEG`; Android
    does not allow `Download` itself), then tap **Use this folder** and **Allow**.

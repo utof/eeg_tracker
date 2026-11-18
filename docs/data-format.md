@@ -10,6 +10,7 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 | Sleep report on the phone | `files/nights/<date>.report.json` in the app's private folder | the phone app after Stop (`app/lib/sleep/scorer.dart`) |
 | Morning check-in | `<start>.morning.json` (or `<start>.setup.json` for a setup test alone) | `scripts/morning_check.py` |
 | Morning check-in on the phone | `files/mornings/<start>.morning.json` and the visit's raw `<stamp>.f32/.idx/.log/.markers.jsonl` | the phone app (`app/lib/morning/`) |
+| The phone's export folder | `<picked folder>/eeg-export/`: the app's files in their own layout, `manifest.json`, `exports.jsonl` | the phone app's Export data (`app/lib/export/`); read by `scripts/import_phone.py` |
 | Events for other apps | `<root>/events/<dev>/eeg-YYYY-MM.jsonl`, `<root>/events/<dev>/breaks-YYYY-MM.jsonl` | `scripts/export_events.py`, `scripts/break_hints.py` |
 
 ## Raw recording (BrainBit)
@@ -108,7 +109,7 @@ and each period's `agreement` are `null`; `epoch_s` is 30 and `stages` holds one
 a pass that fails leaves `extras` `null` and the night still scored). While a night is being scored a `<date>.scoring`
 file sits beside it; if it is still there when
 no scoring runs, the last attempt stopped (its text is the error, empty if the app was killed) and the app waits
-for "Try again". The report is not exported yet.
+for "Try again". Export data copies the reports out (below).
 
 ## The phone's `files/sound-states/<stamp>.sound.json`
 
@@ -177,7 +178,45 @@ The phone app runs the morning check-in itself (DECISIONS rows 120 and 125) and 
 | `reaction` | the 1-minute reaction test: `median_ms` (`null` with under 5 taps), `taps`, `lapses` (over 500 ms), `false_starts`, `length_s`; `null` when skipped |
 | `contact` | `{O1, O2, T3, T4}` ohms from the contact check at the start, `null` = no contact |
 
-A stopped check-in, or one whose headband dropped out, leaves no files. Nothing is exported yet.
+A stopped check-in, or one whose headband dropped out, leaves no files. Export data copies them out (below).
+
+## The phone's export folder (`eeg-export/`)
+
+**Export data** in the phone app (DECISIONS rows 150-156) copies everything the app keeps in its private `files/`
+folder into `eeg-export/` inside a folder the owner picked once (for example `Download/EEG`, or the phone's Syncthing
+folder). It never changes or deletes anything in the app's folder, and never runs while a night records.
+
+- The layout is the app's own: `recordings/` (raw nights, the recorder's format above), `nights/<date>.report.json`,
+  `mornings/`, `meditations/`, `alpha-theta/` (sessions and `journal.json`), `replay-check/<kind>/` and
+  `settings.json`, `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers, `prompts/`), `sound-states/`, and any folder
+  a later feature adds. Left on the phone: `models/` (copies of the app's model assets), `export/` (the export's own
+  index), half-written `*.tmp` files and the scorer's `*.scoring` markers.
+- **Export new** copies files that are new or changed (size or modified time) since the last export to this folder;
+  **Export everything** copies every file again. A file is replaced whole; files the app rewrites (a session file
+  once you answer its question, a dream note, the alpha-theta journal, a rebuilt sleep report) are copied again.
+- `manifest.json` is written last, every time. It lists every file exported to this folder so far:
+
+| Field | Meaning |
+|---|---|
+| `format`, `version` | `eeg-tracker-phone-export`, 1 |
+| `exported` | when this export ran (local ISO time with offset) |
+| `mode` | `new` or `everything` |
+| `complete` | `false` when the export stopped before copying everything it meant to |
+| `files` | one object per file, sorted by path: `path` (relative, `/`-separated), `bytes`, `sha256` (of the bytes written, worked out while copying), `modified_ms` (the phone's modified time of that copy, ms since 1970), `written` (the `exported` time of the export that copied it); `on_phone: false` when the app no longer has the file |
+| `not_exported` | paths still only on the phone (the export stopped, or the folder failed) |
+| `totals` | `files`, `bytes` of the list |
+
+- `exports.jsonl`: one line per export (`exported`, `mode`, `files`, `bytes`, `complete`, `error`), the phone's log
+  copied whole.
+- The manifest keeps listing a file after the owner deletes it from the export folder (to free space after an
+  import): the laptop then checks it has that file with the same SHA-256.
+
+On the laptop, `scripts/import_phone.py <folder>` (standard library only) checks the manifest, copies
+`recordings/<stamp>.*` into `_local/recordings/` beside the laptop's own recordings and everything else into
+`_local/phone/<path>`, and keeps `phone/manifests/<exported>.manifest.json`, one line per import in
+`phone/imports.jsonl` and the copies' SHA-256 in `phone/import-index.json`. A copy is renamed into place only when its
+size and SHA-256 match. A differing file on the laptop is replaced only by a copy the phone changed later (the old one
+goes to `phone/replaced/<import time>/`); otherwise it is left alone and named in the summary.
 
 ## Events (for utof_tracker and anything else)
 

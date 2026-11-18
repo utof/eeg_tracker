@@ -62,7 +62,7 @@ Update the status column whenever something lands.
 | 7 | Brain-reactive sound (alpha → calmer sound, jaw blocks) | feedback core v1 done (research A pass 2, item 1): live stream input, alpha in ~0.15 s around your own alpha peak, a target line held for 3-min blocks, at most 6 bells a minute, muscle / blink / drifting-to-sleep gates (shared `sleep-guard.js`), training and relax modes, a session log that replays exactly; tested on the demo and the fake headband. Real-head bench tests pending. The page is a stopgap: the pure modules port to the phone app | `scripts/web/sound.html`, [docs/brain-sound.md](docs/brain-sound.md) |
 | 8 | Break hints stage 0 (ActivityWatch) | code + tests done; not yet run on the owner's laptop | `scripts/break_hints.py`, docs/break-hints.md |
 | 9 | Night extras: jaw clench count, movement, signal quality per hour | **in the sleep report** (2026-11-18, branch `feat/app-night-extras`; not yet run on a phone): the phone runs the detectors beside the sleep model and the report shows how much of the sleep was read through noise, a Signal lane under the chart, jaw-muscle bursts and movements per hour asleep with earlier nights' jaw numbers, and the night hour by hour; the laptop report has the same `extras`. Phone code = Python reference on the owner's night (924 bursts, 508 movements, every epoch's quality); asleep: 22.8 jaw bursts and 18.9 movements an hour, 13 % read through noise. Next: the owner's setup test (clench limits) and a few nights to see the trend | `app/lib/sleep/extras.dart`, `analysis/night_extras.py`, [docs/detectors.md](docs/detectors.md), DECISIONS 140-146 |
-| 10 | State and trends page (numbers + arrows vs your usual, 14-day lines; laptop first, then phone) | **built in the phone app** (2026-11-18, branch `feat/app-morning-trends`; phone first, no laptop page): today's numbers with yesterday's and your usual (from 7 days), worded arrows beyond the normal spread (from 14 days), 14-day lines, sleep pressure from the sleep log, the forecast hidden behind its gate; tested on made-up days, not yet on the phone | app: `lib/trends/`, `lib/ui/trends_*.dart`, DECISIONS 120-129 |
+| 10 | State and trends page (numbers + arrows vs your usual, 14-day lines; laptop first, then phone) | **built in the phone app** (2026-11-18, branch `feat/app-morning-trends`; phone first, no laptop page): today's numbers with yesterday's and your usual (from 7 days), worded arrows beyond the normal spread (from 14 days), 14-day lines, sleep pressure from the sleep log, the forecast hidden behind its gate; the night's jaw muscle bursts an hour asleep added 2026-11-18 (`feat/app-export-all`, DECISIONS 155); tested on made-up days, not yet on the phone | app: `lib/trends/`, `lib/ui/trends_*.dart`, DECISIONS 120-129 |
 | 11 | utof_tracker importer for `eeg_*` events | waits for the owner's OK | - |
 | 12 | Calibration for any electrode positions (helmet) | after the helmet exists | DECISIONS row 4 |
 | 13 | DIY board driver (E9 frames) in the app | after the helmet exists | DECISIONS row 5 |
@@ -119,8 +119,13 @@ findings are on `_local/research/2026-11-18-findings.html`.
    win over "same as yesterday". Next: the owner's first phone check-ins (`app/README.md`, "Owner step"), then
    exporting check-ins with a night, and fitting the sleep-pressure constants once mornings of ratings exist.
    (Research B, C)
-9. **Data safety**: a checksum file per night, a catalog, an encrypted restic backup to the `архив` drive and a
-   monthly restore test (does not change DECISIONS 37). (Research D)
+9. **Data safety**: first step **built 2026-11-18** on `feat/app-export-all` (DECISIONS 150-157): **Export data**
+   in the app copies everything it keeps (nights, sleep reports, check-ins, meditations, alpha-theta, the replay
+   check, dream answers and prompts, sound sessions) into a folder picked once (Download/EEG or Syncthing), only
+   what is new each time, with a manifest of SHA-256 checksums; the main screen says when the last export was (amber
+   after 3 days); `scripts/import_phone.py` checks every file and copies it into `_local/` without overwriting
+   anything silently. Not yet run on the phone. Encryption and restic backups: deferred by the owner (2026-11-18;
+   DECISIONS 37). Later: a catalog of nights, xz for nights older than 90 days. (Research D)
 
 ## Next tests that need the owner
 
@@ -149,6 +154,9 @@ findings are on `_local/research/2026-11-18-findings.html`.
 - **Sleep report on the phone** (one morning, about 15 minutes; `app/README.md` on `feat/app-sleep-report`,
   "Owner step"): after a recorded night press Stop and note how long the phone takes to show the time asleep,
   whether the app stays open, and whether the report looks like the night you remember.
+- **Export data, once set up** (5 minutes, `app/README.md` on `feat/app-export-all`, "Export data"): pick the folder
+  (Syncthing's or Download/EEG), Export new, then `python3 scripts/import_phone.py <folder>` on the laptop; tell the
+  assistant how long the first export took, and anything the summary called a PROBLEM.
 - **First dream catcher nap** (about 20-45 min, `app/README.md` on `feat/app-dream-catcher`, "Owner step"): record
   both prompts and set the volume; 3 rounds, Wake me; tell the assistant whether the questions came half-asleep,
   too early or too late, whether the prompts' volume and the dim screen were right, whether answers were cut off or
@@ -161,8 +169,8 @@ findings are on `_local/research/2026-11-18-findings.html`.
 - Clear the GitHub billing lock, so GitHub builds the app on every change (the laptop can build it too).
 - Morning check-in eyes-closed phase: keep 2 minutes or make it 3 (research D).
 - Order a spare magnetic charging cable for the headband (order by about 28 November; see the parts report).
-- Backups: an encrypted restic backup of the recordings to the `архив` drive needs a password you keep (a password
-  manager or paper); say where it should live and the assistant sets it up. Today the recordings exist in one copy.
+- Backups: encryption and restic are deferred (owner, 2026-11-18). Since Export data (DECISIONS 150-157) the phone's
+  data reaches the laptop, but the laptop's `_local/` is still one copy on one drive.
 
 ## Ideas for later (after the wishes above are built)
 
