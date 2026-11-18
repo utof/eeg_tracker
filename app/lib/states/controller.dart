@@ -9,6 +9,10 @@
 // "fall asleep" keeps its EEG, as a normal recording in `files/recordings` with the events as markers, so it joins
 // that night (and may start the night recording when the sound has stopped, like the dream catcher's sleep ending).
 //
+// With the phone locked the session goes on: a [SessionKeeper] (the phone's foreground service, DECISIONS rows
+// 190-193) is held from Start until the headband is let go and, for "fall asleep, then the night", until the night
+// recording has started, so the app is never without a service in between.
+//
 // Time: seconds after lights off are the larger of the samples received (holes held at their length) and the clock,
 // so a test can stream a session in a fraction of a second, and a headband out of range does not stop the timers.
 import 'dart:async';
@@ -26,6 +30,7 @@ import '../meditation/controller.dart' show gapPauseS, gapSamples;
 import '../recorder/chunk_writer.dart';
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
+import '../session_keeper.dart';
 import '../sound/state_sound.dart';
 import 'presets.dart';
 import 'readout.dart';
@@ -60,6 +65,7 @@ class StatesController extends ChangeNotifier {
     this.store,
     this.recordingsDir,
     this.startNight,
+    this.keeper,
     this.timing = const StatesTiming(),
     DateTime Function()? clock,
   }) : _makeSound = sound,
@@ -76,6 +82,9 @@ class StatesController extends ChangeNotifier {
 
   /// Starts the night recording once the headband is free; null when it started, else why not.
   Future<String?> Function()? startNight;
+
+  /// Keeps the session alive with the phone locked (null: nothing does, the screen must stay on).
+  final SessionKeeper? keeper;
   final StatesTiming timing;
   final DateTime Function() _now;
 
@@ -93,6 +102,9 @@ class StatesController extends ChangeNotifier {
   Map<String, double?> contact = const {};
   String? saveNote;
   bool noData = false;
+
+  /// The phone may be locked: the keeper holds this session.
+  bool canLock = false;
 
   /// The session that just ended.
   SoundSession? last;
@@ -166,9 +178,11 @@ class StatesController extends ChangeNotifier {
     _reset();
     this.plan = plan;
     this.thenNight = thenNight && useHeadband && plan.state == SoundState.asleep;
+    headband = useHeadband ? HeadbandUse.used : why;
+    _set(useHeadband ? SoundStage.connecting : SoundStage.starting, useHeadband ? 'Looking for the headband.' : '');
+    await _keep(plan, useHeadband);
+    if (_ended) return; // stopped meanwhile
     if (!useHeadband) return _soundOnly(why, '');
-    headband = HeadbandUse.used;
-    _set(SoundStage.connecting, 'Looking for the headband.');
     final link = BandLink(finder: finder, timing: timing.link, onBatch: _onBatch, onEvent: _onLinkEvent, clock: _now);
     _link = link;
     try {
@@ -196,6 +210,25 @@ class StatesController extends ChangeNotifier {
     } catch (e) {
       await _fail('Could not start: $e');
     }
+  }
+
+  /// Asks the keeper to hold this session, so the phone can be locked; Stop on its notification ends the session.
+  Future<void> _keep(SoundPlan plan, bool useHeadband) async {
+    final k = keeper;
+    if (k == null) return;
+    k.onStop = () => unawaited(stop());
+    try {
+      canLock = await k.hold(KeepSpec(title: plan.preset.name, text: 'Sound session · ${plan.line}', headband: useHeadband));
+    } catch (_) {
+      canLock = false;
+    }
+    _notify();
+  }
+
+  Future<void> _letGo() async {
+    try {
+      await keeper?.release();
+    } catch (_) {}
   }
 
   /// Starts the sound now, without the rest of the quiet minute.
@@ -253,6 +286,7 @@ class StatesController extends ChangeNotifier {
     noData = false;
     last = null;
     headband = HeadbandUse.soundOnly;
+    canLock = false;
   }
 
   Future<void> _soundOnly(String why, String note) async {
@@ -475,6 +509,7 @@ class StatesController extends ChangeNotifier {
     if (lightsOff == null) {
       // stopped while connecting: nothing to keep
       await _link?.close();
+      await _letGo();
       _set(SoundStage.setup, '');
       return;
     }
@@ -500,6 +535,7 @@ class StatesController extends ChangeNotifier {
         night = 'did not start: $e';
       }
     }
+    await _letGo(); // only now: the night recorder's own service (if any) is already up
     final s = _session(endS, why, night: night);
     _save(s);
     last = s;
@@ -580,6 +616,7 @@ class StatesController extends ChangeNotifier {
     _closeWriter();
     await _link?.close();
     await _sound?.stop(seconds: 0.2);
+    await _letGo();
     if (!stoppedByUser) _set(SoundStage.failed, why);
   }
 

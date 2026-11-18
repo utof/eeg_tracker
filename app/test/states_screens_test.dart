@@ -113,6 +113,13 @@ final Map<String, StatesViewModel> states = {
     driftState: DriftState.asleep,
     stopWhy: StopWhy.asleep,
   ),
+  'face_can_lock': StatesViewModel(
+    stage: SoundStage.playing,
+    plan: _asleep,
+    headbandUse: HeadbandUse.nightRecording,
+    secondsLeft: 2500,
+    screenNote: 'You can lock the phone. The sound goes on.',
+  ),
   'face_sound_only': StatesViewModel(
     stage: SoundStage.playing,
     plan: SoundPlan.of(SoundState.focus),
@@ -139,6 +146,7 @@ StatesView view(
   VoidCallback? onStart,
   VoidCallback? onSkip,
   VoidCallback? onListen,
+  ValueChanged<bool>? onScreen,
 }) => StatesView(
   model: m,
   onState: onState ?? (_) {},
@@ -147,6 +155,7 @@ StatesView view(
   onMinutes: (_) {},
   onHeadband: (_) {},
   onThenNight: (_) {},
+  onScreen: onScreen,
   onListen: onListen ?? () {},
   onStart: onStart ?? () {},
   onStop: () {},
@@ -272,5 +281,18 @@ void main() {
     expect(find.byType(FilledButton), findsNothing);
     await tester.tap(find.text('Start the sound now'));
     expect(skipped, isTrue);
+
+    // the phone can be locked: said on the face; "Screen" on the setup page reaches its callback
+    await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: view(states['face_can_lock']!)));
+    expect(find.text('You can lock the phone. The sound goes on.'), findsOneWidget);
+    bool? staysOn;
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: view(states['first']!, onScreen: (v) => staysOn = v)));
+    await tester.scrollUntilVisible(find.text('Stays on'), 200);
+    await tester.ensureVisible(find.text('Stays on'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Lock the phone or let the screen turn off'), findsOneWidget);
+    await tester.tap(find.text('Stays on'));
+    expect(staysOn, isTrue);
   });
 }

@@ -15,6 +15,7 @@ import '../meditation/controller.dart';
 import '../meditation/store.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
+import '../session_keeper.dart';
 import '../sound/alpha_theta_sound.dart';
 import '../sound/soloud_sound.dart';
 import '../training/check.dart';
@@ -49,6 +50,7 @@ class _AlphaThetaScreenState extends State<AlphaThetaScreen> {
   int _minutes = AtDose.shortMin;
   bool _nightRunning = false;
   bool _screenOn = false;
+  final SessionKeeper _keeper = PhoneSessionKeeper();
   String _message = '';
   Stage _lastStage = Stage.setup;
 
@@ -127,10 +129,17 @@ class _AlphaThetaScreenState extends State<AlphaThetaScreen> {
     _save();
   }
 
+  /// As for meditation: screen kept on, and the session survives a phone you lock yourself (DECISIONS row 194).
   void _screen({required bool on}) {
     if (_screenOn == on) return;
     _screenOn = on;
     unawaited(Phone.keepScreenOn(on: on).catchError((Object _) {}));
+    _keeper.onStop = () => unawaited(_c.stop());
+    unawaited(
+      on
+          ? _keeper.hold(const KeepSpec(title: 'Alpha-theta', text: 'Session running', headband: true))
+          : _keeper.release(),
+    );
   }
 
   @override
@@ -235,6 +244,7 @@ class _AlphaThetaScreenState extends State<AlphaThetaScreen> {
       await Phone.openSettings('bluetooth');
       return;
     }
+    if (phone.sdkInt >= 33) await FlutterForegroundTask.requestNotificationPermission();
     _loadCheck();
     setState(() => _page = _Page.session);
     await _c.start(Duration(minutes: _minutes), kind: SessionKind.alphaTheta);

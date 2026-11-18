@@ -1,10 +1,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Foreground service of type connectedDevice ONLY. Never dataSync: it stops after 6 h a day on
-         Android 15+ (docs/research/android-overnight-ble-xiaomi.md section 1, DECISIONS row 2). -->
+    <!-- The night recorder's foreground service is of type connectedDevice ONLY. Never dataSync: it stops after
+         6 h a day on Android 15+ (docs/research/android-overnight-ble-xiaomi.md section 1, DECISIONS row 2). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- Sound sessions with the phone locked (SessionService, DECISIONS rows 190-196): playing sound, and the
+         dream catcher's microphone. Android 14 wants one permission per service type. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
@@ -25,7 +29,8 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- The dream catcher records your spoken answers and your own prompts (asked when first needed; DECISIONS
-         row 112). Only while its screen is open: no microphone service type, nothing in the background. -->
+         row 112). Only during a session started from its open screen; with the phone locked the session
+         service (type microphone) keeps it, DECISIONS row 195. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
@@ -66,6 +71,14 @@
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
             android:foregroundServiceType="connectedDevice"
+            android:exported="false" />
+
+        <!-- Keeps a sound session alive with the phone locked (SessionService.kt). Started with the types the
+             session needs; ends with the session, and with the app when it is swiped away. -->
+        <service
+            android:name=".SessionService"
+            android:foregroundServiceType="mediaPlayback|connectedDevice|microphone"
+            android:stopWithTask="true"
             android:exported="false" />
 
         <!-- Don't delete the meta-data below.

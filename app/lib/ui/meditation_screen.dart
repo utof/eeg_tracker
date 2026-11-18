@@ -12,6 +12,7 @@ import '../meditation/controller.dart';
 import '../meditation/store.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
+import '../session_keeper.dart';
 import '../sound/soloud_sound.dart';
 import '../training/check_store.dart';
 import '../training/control.dart';
@@ -34,6 +35,7 @@ class _MeditationScreenState extends State<MeditationScreen> {
   int _minutes = 10;
   bool _nightRunning = false;
   bool _screenOn = false;
+  final SessionKeeper _keeper = PhoneSessionKeeper();
   Stage _lastStage = Stage.setup;
   String? _recordings;
   String? _checkPreview;
@@ -96,10 +98,18 @@ class _MeditationScreenState extends State<MeditationScreen> {
     setState(() {});
   }
 
+  /// A session: the screen is kept on, and a foreground service keeps the session going if you lock the phone
+  /// yourself (session_keeper.dart, DECISIONS row 194); Stop on its notification ends the session.
   void _screen({required bool on}) {
     if (_screenOn == on) return;
     _screenOn = on;
     unawaited(Phone.keepScreenOn(on: on).catchError((Object _) {}));
+    _keeper.onStop = () => unawaited(_c.stop());
+    unawaited(
+      on
+          ? _keeper.hold(const KeepSpec(title: 'Meditation', text: 'Session running', headband: true))
+          : _keeper.release(),
+    );
   }
 
   @override
@@ -125,6 +135,8 @@ class _MeditationScreenState extends State<MeditationScreen> {
       await Phone.openSettings('bluetooth');
       return;
     }
+    // the session's notification carries Stop for a locked phone
+    if (phone.sdkInt >= 33) await FlutterForegroundTask.requestNotificationPermission();
     _loadCheck();
     await _c.start(Duration(minutes: _minutes));
   }

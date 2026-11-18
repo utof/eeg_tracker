@@ -204,7 +204,7 @@ class DreamView extends StatelessWidget {
           ),
           const _Note(
             Icons.dark_mode_outlined,
-            'The screen stays on but goes black and dim. Keep the app open: locking the phone can stop the session.',
+            'The screen goes black and dim. You can lock the phone: the session goes on. Do not swipe the app away.',
           ),
           const _Note(
             Icons.mic_none_outlined,

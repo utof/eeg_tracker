@@ -193,6 +193,25 @@ class SoundStore {
     tmp.renameSync(f.path);
   }
 
+  File get _settings => File('${dir.path}/settings.json');
+
+  /// Your choice "Screen: Stays on" (default: the phone can be locked during a session, DECISIONS row 193).
+  bool get screenStaysOn {
+    try {
+      final j = jsonDecode(_settings.readAsStringSync());
+      return j is Map && j['screenStaysOn'] == true;
+    } on FormatException {
+      return false;
+    } on FileSystemException {
+      return false;
+    }
+  }
+
+  set screenStaysOn(bool v) {
+    dir.createSync(recursive: true);
+    _settings.writeAsStringSync(jsonEncode({'screenStaysOn': v}), flush: true);
+  }
+
   /// Every readable session, newest first; damaged or foreign files are skipped.
   List<SoundSession> list() {
     if (!dir.existsSync()) return const [];

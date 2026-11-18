@@ -43,6 +43,8 @@ class StatesViewModel {
     this.contact = const {},
     this.noData = false,
     this.notes = const [],
+    this.screenStaysOn = false,
+    this.screenNote = '',
     this.last,
     this.justEnded = false,
     this.earlier = const [],
@@ -76,6 +78,12 @@ class StatesViewModel {
   final String headbandUse;
   final Map<String, double?> contact;
   final bool noData;
+
+  /// "Screen: Stays on" was chosen (default: the phone can be locked during a session).
+  final bool screenStaysOn;
+
+  /// One line on the session face about locking the phone ('' for none).
+  final String screenNote;
 
   /// Plain sentences in amber (a file could not be saved).
   final List<String> notes;
@@ -192,6 +200,7 @@ class StatesView extends StatelessWidget {
     required this.onMinutes,
     required this.onHeadband,
     required this.onThenNight,
+    this.onScreen,
     required this.onListen,
     required this.onStart,
     required this.onStop,
@@ -207,6 +216,9 @@ class StatesView extends StatelessWidget {
   final ValueChanged<int> onMinutes;
   final ValueChanged<bool> onHeadband;
   final ValueChanged<bool> onThenNight;
+
+  /// "Screen": true = stays on.
+  final ValueChanged<bool>? onScreen;
   final VoidCallback onListen;
   final VoidCallback onStart;
   final VoidCallback onStop;
@@ -288,6 +300,15 @@ class StatesView extends StatelessWidget {
               _segments<bool>(context, const [(true, 'Record the night'), (false, 'Let the headband go')], m.thenNight, onThenNight),
             ],
           ],
+          const SectionHeading('Screen'),
+          _segments<bool>(context, const [(false, 'Can lock'), (true, 'Stays on')], m.screenStaysOn, onScreen ?? (_) {}),
+          const SizedBox(height: 12),
+          Text(
+            m.screenStaysOn
+                ? 'The screen stays on and black during the session (dim with eyes closed).'
+                : 'Lock the phone or let the screen turn off: the sound goes on. Stop is also on the lock screen.',
+            style: muted,
+          ),
           const SectionHeading('Before you start'),
           const _Note(Icons.volume_down_outlined, 'Keep the volume low: set it with Listen. Never while driving.'),
           const _Note(
@@ -296,8 +317,8 @@ class StatesView extends StatelessWidget {
           ),
           const _Note(
             Icons.dark_mode_outlined,
-            'During the session the screen stays on and goes black (dim with eyes closed). Keep the app open: locking '
-            'the phone can stop the sound.',
+            'During the session the screen goes black (dim with eyes closed). Do not swipe the app away: that ends '
+            'the session.',
           ),
           _Note(
             Icons.info_outline,
@@ -510,6 +531,7 @@ class StatesView extends StatelessWidget {
                 ),
               ],
               const Spacer(flex: 4),
+              if (m.screenNote.isNotEmpty) ...[Text(m.screenNote, style: small), const SizedBox(height: 16)],
               if (m.stage == SoundStage.quiet) ...[
                 Center(
                   child: TextButton(
