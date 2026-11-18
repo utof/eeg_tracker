@@ -322,6 +322,10 @@ void main() {
     expect(pendingExport(files), (files: 18, bytes: storedFiles(files).fold(0, (s, f) => s + f.bytes), lastComplete: null));
     await export();
     expect(pendingExport(files), (files: 0, bytes: 0, lastComplete: now));
+    ExportStore(files).chooseFolder('content://tree/one', 'Download/EEG');
+    final sum = summarizeExport(files);
+    expect((sum.phoneFiles, sum.pendingFiles, sum.folderLabel), (18, 18, 'Download/EEG'));
+    expect(sum.phoneBytes, sum.pendingBytes);
   });
 }
 

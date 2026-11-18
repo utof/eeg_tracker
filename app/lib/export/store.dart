@@ -211,6 +211,32 @@ List<StoredFile> newOrChanged(List<StoredFile> stored, ExportState s) => [
 
 typedef Pending = ({int files, int bytes, DateTime? lastComplete});
 
+/// What the export page shows before an export: the phone's files, what is new, the folder.
+typedef ExportSummary = ({
+  int phoneFiles,
+  int phoneBytes,
+  int pendingFiles,
+  int pendingBytes,
+  DateTime? lastComplete,
+  String? folder,
+  String? folderLabel,
+});
+
+ExportSummary summarizeExport(Directory filesDir) {
+  final s = ExportStore(filesDir).load();
+  final stored = storedFiles(filesDir);
+  final todo = newOrChanged(stored, s);
+  return (
+    phoneFiles: stored.length,
+    phoneBytes: stored.fold(0, (n, f) => n + f.bytes),
+    pendingFiles: todo.length,
+    pendingBytes: todo.fold(0, (n, f) => n + f.bytes),
+    lastComplete: s.lastComplete,
+    folder: s.folder,
+    folderLabel: s.folderLabel,
+  );
+}
+
 /// What the next "Export new" would copy, and when the last complete export was. Reads only file sizes and times.
 Pending pendingExport(Directory filesDir) {
   final s = ExportStore(filesDir).load();

@@ -48,7 +48,7 @@ SleepReport _night(DateTime start, double hours, {double? jaw}) {
         'quality': '',
         'night': tally((jaw * asleep / 60).round()),
         'asleep': {...tally((jaw * asleep / 60).round()), 'jaw_per_hour': jaw, 'moves_per_hour': 12.0},
-        'hours': const [],
+        'hours': const <Object?>[],
       },
     'night_of': '${start.year}-${start.month}-${start.day}',
     'scored': true,

@@ -92,6 +92,9 @@ primary action is pinned at the bottom, full width, 64 dp. The sleep report is i
 note, the chart, the periods, jaw and movement with
 the night hour by hour, past nights. The morning check-in is one page per step with the steps as state marks
 at the top; trends is a day log (today's entry, sleep pressure, the last 14 days, earlier days, the forecast).
+Between nights a "Your data" section (after Headband) says what the app keeps and when it last left the phone, with
+Export data and Export a night. Export data is its own page: status word, what is new as two readouts, the copy
+strip, the route (this phone, the folder, the laptop) as numbered log rows, Export everything, and Export new pinned.
 
 ## Elevation & Depth
 
@@ -135,6 +138,12 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   tabular figures, the Signal lane's marks as a bar whose full width is 60 recorded minutes, then Jaw and Moves
   right-aligned; the swatches and one muted sentence under it. Past nights add "jaw N an hour".
 - **Phone checks:** icon, one plain sentence, right-aligned text buttons that open the exact setting.
+- **Export line** (Your data): an icon and one sentence, muted ("Last export yesterday; 3 new files since"), or
+  `caution` amber with a warning icon once something new has been only on the phone for 3 days, or nothing was ever
+  exported. Never colour alone: the sentence says what is at risk.
+- **Copy strip** (Export data): sixteen of the watch strip's own cells (track, 6 dp, a wider gap every four), filling
+  from the left with `saved` by the share of the phone's data that has reached the export folder; while copying,
+  the cell in progress is outlined green like the half hour in progress. A muted sentence under it gives both sizes.
 - **Buttons:** one filled button per screen: Start night on the night screen, Start on the meditation screen, and on
   each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before
   stopping, except in alpha-theta, where stopping must be instant. Session faces (dream catcher, sound for states)

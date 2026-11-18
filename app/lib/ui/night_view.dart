@@ -51,6 +51,7 @@ class NightViewModel {
     this.contactOhms = const {},
     this.checks = const [],
     this.nightsOnPhone = 0,
+    this.exportLine,
     this.sleep,
     this.dreamLine,
   });
@@ -78,8 +79,12 @@ class NightViewModel {
   final Map<String, double?> contactOhms;
   final List<PhoneCheck> checks;
 
-  /// Finished nights kept in the app's private folder (Export copies one out).
+  /// Finished nights kept in the app's private folder (Export a night copies one out).
   final int nightsOnPhone;
+
+  /// When the last export was and what is only on this phone since (lib/export/store.dart `exportLine`); null
+  /// when there is nothing to export. [warn] from 3 days with something new, or never exported.
+  final ({String text, bool warn})? exportLine;
 
   /// The Sleep section, shown between nights.
   final SleepSummary? sleep;
@@ -96,6 +101,7 @@ class NightView extends StatelessWidget {
     required this.onStop,
     required this.onFix,
     this.onExport,
+    this.onExportData,
     this.onMeditate,
     this.onDream,
     this.onSound,
@@ -109,6 +115,7 @@ class NightView extends StatelessWidget {
   final VoidCallback onStop;
   final void Function(FixAction action) onFix;
   final VoidCallback? onExport;
+  final VoidCallback? onExportData;
   final VoidCallback? onMeditate;
   final VoidCallback? onDream;
   final VoidCallback? onSound;
@@ -145,10 +152,10 @@ class NightView extends StatelessWidget {
           const SectionHeading('Phone'),
           PhoneChecksList(checks: m.checks, onFix: onFix),
           if (!m.running) ...headband,
-          // A night being recorded is not finished, so Export waits for Stop.
-          if (!m.running && m.nightsOnPhone > 0) ...[
-            const SectionHeading('Recordings'),
-            _Recordings(nights: m.nightsOnPhone, onExport: onExport),
+          // A night being recorded is not finished, so Export waits for Stop (DECISIONS rows 56, 150).
+          if (!m.running && (m.nightsOnPhone > 0 || m.exportLine != null)) ...[
+            const SectionHeading('Your data'),
+            _YourData(nights: m.nightsOnPhone, line: m.exportLine, onExportData: onExportData, onExport: onExport),
           ],
           // The headband connects to one thing at a time, so meditation waits for the night to end.
           if (!m.running) ...[const SectionHeading('Meditation'), _Meditation(onMeditate: onMeditate)],
@@ -372,28 +379,64 @@ class _Headband extends StatelessWidget {
   static String _signalWord(int dbm) => dbm >= -70 ? 'strong' : (dbm >= -85 ? 'fair' : 'weak');
 }
 
-class _Recordings extends StatelessWidget {
-  const _Recordings({required this.nights, required this.onExport});
+/// What the app keeps, when it last left the phone (amber, with a mark and words, once it gets old), Export data
+/// (everything new, its own page) and Export a night (one night into a folder of its own).
+class _YourData extends StatelessWidget {
+  const _YourData({required this.nights, required this.line, required this.onExportData, required this.onExport});
   final int nights;
+  final ({String text, bool warn})? line;
+  final VoidCallback? onExportData;
   final VoidCallback? onExport;
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    final muted = text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4);
+    final l = line;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '${nights == 1 ? '1 night' : '$nights nights'} on this phone, kept inside the app where other apps '
-          'cannot read them.',
-          style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
+          nights == 0
+              ? 'Kept inside the app, where other apps cannot read it.'
+              : '${nights == 1 ? '1 night' : '$nights nights'} and everything else on this phone, kept inside the app '
+                    'where other apps cannot read them.',
+          style: muted,
         ),
+        if (l != null) ...[
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: Icon(
+                  l.warn ? Icons.warning_amber_rounded : Icons.history,
+                  size: 22,
+                  color: l.warn ? Night.caution : Night.inkMuted,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(l.text, style: l.warn ? muted?.copyWith(color: Night.caution) : muted),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 16),
         OutlinedButton.icon(
-          onPressed: onExport,
+          onPressed: onExportData,
           icon: const Icon(Icons.drive_folder_upload_outlined),
-          label: const Text('Export a night'),
+          label: const Text('Export data'),
         ),
+        if (nights > 0) ...[
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: onExport,
+            icon: const Icon(Icons.nightlight_outlined),
+            label: const Text('Export a night'),
+          ),
+        ],
       ],
     );
   }

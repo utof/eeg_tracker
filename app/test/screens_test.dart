@@ -111,6 +111,16 @@ final Map<String, NightViewModel> states = {
     contactOhms: const {'O1': 4.2e5, 'O2': 6.1e5, 'T3': 1.8e6, 'T4': 3.4e6},
     checks: const [],
     nightsOnPhone: 3,
+    exportLine: (text: 'Last export 4 days ago: 37 new files (210\u00a0MB) are only on this phone.', warn: true),
+  ),
+  'morning_exported': NightViewModel(
+    title: 'Ready',
+    sentence: 'Last night is saved. Put the headband on to start a new one.',
+    tone: Tone.calm,
+    running: false,
+    checks: const [],
+    nightsOnPhone: 3,
+    exportLine: (text: 'Last export yesterday; 3 new files (2.4\u00a0MB) since.', warn: false),
   ),
 };
 
@@ -133,7 +143,7 @@ void main() {
               theme: nightTheme(),
               home: RepaintBoundary(
                 key: key,
-                child: NightView(model: e.value, onStart: () {}, onStop: () {}, onFix: (_) {}, onExport: () {}),
+                child: NightView(model: e.value, onStart: () {}, onStop: () {}, onFix: (_) {}, onExport: () {}, onExportData: () {}),
               ),
             ),
           ),

@@ -1,12 +1,14 @@
 // The app's one screen: start and stop the night, see that it is being recorded, fix phone settings.
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import '../dream/store.dart';
+import '../export/store.dart';
 import '../phone.dart';
 import '../morning/store.dart';
 import '../recorder/headband.dart';
@@ -18,6 +20,7 @@ import '../sleep/report.dart';
 import '../sleep/scorer.dart';
 import 'dream_screen.dart';
 import 'dream_view.dart' show clock;
+import 'export_screen.dart';
 import 'meditation_screen.dart';
 import 'morning_screen.dart';
 import 'morning_section.dart';
@@ -149,6 +152,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   SleepScoring? _scoring;
   String? _dreamLine;
   String? _checkedInAt;
+  Pending? _pending;
 
   @override
   void initState() {
@@ -256,6 +260,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     // while a dream catcher session writes its recording.
     if (!running && !dreamSessionRunning && !soundSessionRunning) unawaited(_scoring?.run());
     final dreamLine = dir == null ? null : _lastDream(dir);
+    final pending = dir == null || running ? null : await _pendingExport(dir);
     if (!mounted) return;
     setState(() {
       _nights = nights;
@@ -267,7 +272,18 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       _dir = dir;
       _dreamLine = dreamLine;
       _checkedInAt = checkedInAt;
+      _pending = pending;
     });
+  }
+
+  /// What the next export would copy (sizes and times only), read off the screen's thread.
+  static Future<Pending?> _pendingExport(String dir) async {
+    final files = Directory(dir).parent.path;
+    try {
+      return await Isolate.run(() => pendingExport(Directory(files)));
+    } catch (_) {
+      return null;
+    }
   }
 
   /// The dream catcher's newest session in a line, when it is under a day old.
@@ -385,6 +401,13 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Export data: everything new, from its own page, only between nights (DECISIONS rows 150-156).
+  Future<void> _exportData() async {
+    if (_running) return;
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ExportScreen()));
+    unawaited(_refresh());
+  }
+
   /// Meditation owns the headband while it runs, so it starts only between nights (DECISIONS row 75).
   Future<void> _meditate() async {
     if (_running) return;
@@ -477,6 +500,14 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       contactOhms: s?.contactOhms ?? (showLast ? last.contactOhms : const {}),
       checks: phoneChecks(phone: _phone, nearbyAllowed: _nearby, xiaomiDone: _xiaomiDone),
       nightsOnPhone: _nights.length,
+      exportLine: _running || _pending == null
+          ? null
+          : exportLine(
+              lastComplete: _pending!.lastComplete,
+              pendingFiles: _pending!.files,
+              pendingBytes: _pending!.bytes,
+              now: DateTime.now(),
+            ),
       sleep: _running ? null : _sleepSummary(),
       dreamLine: _dreamLine,
     );
@@ -492,6 +523,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onStop: _stop,
       onFix: _fix,
       onExport: _export,
+      onExportData: _exportData,
       onMeditate: _meditate,
       onDream: _dream,
       onSound: _sound,
