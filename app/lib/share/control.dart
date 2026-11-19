@@ -8,10 +8,14 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'isolate.dart';
+import 'link.dart';
 import 'protocol.dart';
 
 /// What the main screen's "Your data" section shows.
 typedef ShareLine = ({bool on, String text, bool warn, String? address});
+
+/// How a pairing ended: the laptop, or why not.
+typedef PairOutcome = ({PairedLaptop? laptop, LinkFailure? failure});
 
 class ShareControl extends ChangeNotifier {
   ShareControl({
@@ -86,6 +90,52 @@ class ShareControl extends ChangeNotifier {
 
   Future<void> newToken() => _serial(() async {
     _config = _config.withNewToken();
+    await save(_config);
+    await _apply();
+  });
+
+  /// Pairs with the laptop of [link] (DECISIONS rows 530-539), after the owner tapped Connect. The handshake first
+  /// (the laptop proves the one-time code before this phone's token leaves it); only when it worked is sharing
+  /// switched on, if it was off, and the laptop remembered, so it is told where this phone is from then on. A
+  /// failure changes nothing but a token made for the occasion.
+  Future<PairOutcome> pair(PairLink link, {LinkClient? client}) {
+    final done = Completer<PairOutcome>();
+    unawaited(
+      _serial(() async {
+        try {
+          var c = await load();
+          if (c.token.length < tokenLength) {
+            c = c.withNewToken(); // the laptop needs the token the server will have
+            await save(c);
+            _config = c;
+          }
+          final answer = await (client ?? LinkClient()).handshake(
+            host: link.host,
+            port: link.port,
+            via: 'code',
+            secret: link.code,
+            sharePort: c.port,
+            token: c.token,
+          );
+          final nowMs = _now().millisecondsSinceEpoch;
+          final laptop = PairedLaptop(host: link.host, port: link.port, key: answer.key!, name: answer.name, pairedAtMs: nowMs);
+          _config = (c.activeAt(nowMs) ? c : c.switchedOn(nowMs)).withLaptop(laptop);
+          await save(_config);
+          await _apply();
+          done.complete((laptop: laptop, failure: null));
+        } on LinkError catch (e) {
+          done.complete((laptop: null, failure: e.why));
+        } catch (_) {
+          done.complete((laptop: null, failure: LinkFailure.bad));
+        }
+      }),
+    );
+    return done.future;
+  }
+
+  /// Forgets the paired laptop: it is told nothing more (its own copy of the token stops working at New code).
+  Future<void> forgetLaptop() => _serial(() async {
+    _config = (await load()).withLaptop(null);
     await save(_config);
     await _apply();
   });

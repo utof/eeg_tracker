@@ -9,6 +9,7 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import '../recorder/chunk_writer.dart';
+import 'link.dart';
 import 'protocol.dart';
 import 'server.dart';
 
@@ -28,11 +29,12 @@ List<Object?> shareIsolateArgs(SendPort toHost, String filesDir, ShareConfig c) 
   c.token,
   c.port,
   c.offAtMs,
+  c.laptop?.toJson(), // the paired laptop, told where this phone is (link.dart)
 ];
 
 /// The server isolate. Messages in: `['b', stem, first, t, Float32List]` a batch, `['s', map]` the status,
 /// `['m', id, t, i]` a marker's answer (t null = not recording), `['x']` stop. Messages out: `['port', SendPort]`,
-/// `['up', addresses, port]`, `['marker', id, text]`, `['down', why]`.
+/// `['up', addresses, port]`, `['marker', id, text]`, `['log', line]` (the paired laptop), `['down', why]`.
 @pragma('vm:entry-point')
 Future<void> shareIsolateMain(List<Object?> args) async {
   final toHost = args[0]! as SendPort;
@@ -52,6 +54,7 @@ Future<void> shareIsolateMain(List<Object?> args) async {
   );
   Timer? addressTimer;
   Timer? offTimer;
+  LaptopAnnouncer? announcer;
   var closing = false;
 
   /// The bind in flight: [end] waits for it, so a socket it opens is closed too (a killed isolate keeps its
@@ -63,6 +66,7 @@ Future<void> shareIsolateMain(List<Object?> args) async {
     closing = true;
     addressTimer?.cancel();
     offTimer?.cancel();
+    announcer?.stop();
     try {
       await binding?.timeout(const Duration(seconds: 3));
     } catch (_) {}
@@ -121,6 +125,15 @@ Future<void> shareIsolateMain(List<Object?> args) async {
     }
   }
   if (closing) return; // stopped while binding: end() closed what was bound
+  final laptop = PairedLaptop.fromJson(args.length > 5 ? args[5] : null);
+  if (laptop != null) {
+    announcer = LaptopAnnouncer(
+      laptop: laptop,
+      sharePort: server.boundPort,
+      token: args[2]! as String,
+      onLine: (line) => toHost.send(['log', 'sharing on Wi-Fi: $line']),
+    )..start();
+  }
   final left = (args[4]! as int) - DateTime.now().millisecondsSinceEpoch;
   offTimer = Timer(Duration(milliseconds: left < 0 ? 0 : left), () => unawaited(end('time is up')));
   addressTimer = Timer.periodic(_addressCheck, (_) async {
@@ -268,6 +281,8 @@ class ShareHost {
             r = null;
           }
           _port?.send(['m', m[1], r?.t, r?.i]);
+        case 'log':
+          onLog(m[1] as String);
         case 'down':
           _end(m[1] == 'stopped' ? 'sharing on Wi-Fi off' : 'sharing on Wi-Fi off: ${m[1]}');
         default:

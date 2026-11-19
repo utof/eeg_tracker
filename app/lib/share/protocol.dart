@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'link.dart';
+
 /// The laptop recorder's port (scripts/record_night.py --port), so the laptop commands look the same.
 const int sharePort = 8765;
 
@@ -25,7 +27,14 @@ String newToken([Random? random]) {
 
 /// The saved setting. Off by default; the token is made at the first switch-on and kept until "New token".
 class ShareConfig {
-  const ShareConfig({this.on = false, this.token = '', this.port = sharePort, this.offAtMs = 0, this.awakeUntilMs = 0});
+  const ShareConfig({
+    this.on = false,
+    this.token = '',
+    this.port = sharePort,
+    this.offAtMs = 0,
+    this.awakeUntilMs = 0,
+    this.laptop,
+  });
 
   final bool on;
   final String token;
@@ -37,6 +46,9 @@ class ShareConfig {
   /// Unix ms until which the app keeps the screen on while it serves between nights.
   final int awakeUntilMs;
 
+  /// The laptop this phone is paired with (link.dart, DECISIONS rows 530-539): told where the phone is while on.
+  final PairedLaptop? laptop;
+
   /// On, with a token, and not past its time.
   bool activeAt(int nowMs) => on && token.length >= tokenLength && nowMs < offAtMs;
 
@@ -46,18 +58,29 @@ class ShareConfig {
     port: port,
     offAtMs: nowMs + shareMaxOn.inMilliseconds,
     awakeUntilMs: nowMs + shareAfterStop.inMilliseconds,
+    laptop: laptop,
   );
 
-  ShareConfig switchedOff() => ShareConfig(token: token, port: port);
+  ShareConfig switchedOff() => ShareConfig(token: token, port: port, laptop: laptop);
 
-  ShareConfig withNewToken({Random? random}) =>
-      ShareConfig(on: on, token: newToken(random), port: port, offAtMs: offAtMs, awakeUntilMs: awakeUntilMs);
+  ShareConfig withNewToken({Random? random}) => ShareConfig(
+    on: on,
+    token: newToken(random),
+    port: port,
+    offAtMs: offAtMs,
+    awakeUntilMs: awakeUntilMs,
+    laptop: laptop,
+  );
+
+  /// Paired with [to], or with no laptop when null.
+  ShareConfig withLaptop(PairedLaptop? to) =>
+      ShareConfig(on: on, token: token, port: port, offAtMs: offAtMs, awakeUntilMs: awakeUntilMs, laptop: to);
 
   /// Stop was pressed: on for [shareAfterStop] more at most.
   ShareConfig afterStop(int nowMs) {
     if (!on) return this;
     final end = nowMs + shareAfterStop.inMilliseconds;
-    return ShareConfig(on: true, token: token, port: port, offAtMs: min(offAtMs, end), awakeUntilMs: end);
+    return ShareConfig(on: true, token: token, port: port, offAtMs: min(offAtMs, end), awakeUntilMs: end, laptop: laptop);
   }
 
   Map<String, Object?> toJson() => {
@@ -66,6 +89,7 @@ class ShareConfig {
     'port': port,
     'off_at_ms': offAtMs,
     'awake_until_ms': awakeUntilMs,
+    'laptop': laptop?.toJson(),
   };
 
   static ShareConfig fromJson(Object? j) {
@@ -77,6 +101,7 @@ class ShareConfig {
       port: p is int && p > 1023 && p < 65536 ? p : sharePort,
       offAtMs: o is int ? o : 0,
       awakeUntilMs: a is int ? a : 0,
+      laptop: PairedLaptop.fromJson(j['laptop']),
     );
   }
 

@@ -47,6 +47,7 @@ import 'own_ble_screen.dart' show phoneWifiAddress;
 import 'night_strip.dart';
 import 'night_view.dart';
 import 'phone_checks.dart';
+import 'pair_dialog.dart';
 import 'share_sheet.dart';
 import 'sleep_report_screen.dart';
 import 'sleep_scoring.dart';
@@ -226,7 +227,10 @@ const String _xiaomiDoneKey = 'xiaomiChecked';
 }
 
 class NightScreen extends StatefulWidget {
-  const NightScreen({super.key});
+  const NightScreen({super.key, this.links});
+
+  /// Where a laptop's pair link arrives (pair_dialog.dart); null = the app's channel.
+  final PairInbox? links;
 
   @override
   State<NightScreen> createState() => _NightScreenState();
@@ -269,6 +273,10 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     keepScreenOn: (on) => Phone.keepScreenOn(on: on),
   )..addListener(_onScoring);
 
+  /// Pairing with a laptop by one scan (DECISIONS rows 530-539): its QR code opens the app with a pair link.
+  late final PairInbox _links = widget.links ?? ChannelPairInbox();
+  bool _pairing = false;
+
   bool get _front => ModalRoute.of(context)?.isCurrent ?? true;
 
   String? get _filesDir => _dir == null ? null : Directory(_dir!).parent.path;
@@ -288,11 +296,27 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       if (_ticks % 2 == 0 && (_running || _clockState.endMs != null)) unawaited(_refreshAlarm());
     });
     unawaited(_refresh());
+    _links.onOpen = () => unawaited(_takeLink());
+    WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_takeLink()));
+  }
+
+  Future<void> _takeLink() async {
+    if (_pairing) return;
+    _pairing = true;
+    try {
+      final raw = await _links.take();
+      if (raw != null && mounted) await confirmPairing(context, raw, (link) => _share.pair(link));
+    } catch (_) {
+      // no channel (tests, a desktop harness): nothing to open
+    } finally {
+      _pairing = false;
+    }
   }
 
   @override
   void dispose() {
     _scoring?.removeListener(_onScoring);
+    _links.onOpen = null;
     _share.dispose();
     _clock?.cancel();
     FlutterForegroundTask.removeTaskDataCallback(_onData);
@@ -719,8 +743,10 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
             token: _share.config.token,
             until: DateTime.fromMillisecondsSinceEpoch(_share.config.offAtMs),
             night: _running,
+            laptop: _share.config.laptop,
           ),
           onNewToken: _share.newToken,
+          onForgetLaptop: _share.forgetLaptop,
         );
       },
     ),

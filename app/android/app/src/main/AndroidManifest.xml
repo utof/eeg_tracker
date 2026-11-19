@@ -97,6 +97,24 @@
             </intent-filter>
         </activity>
 
+        <!-- Pairing with a laptop by one scan (DECISIONS rows 530-539): the laptop's QR code page opens
+             eegtracker://pair?... This window-less activity hands the link to the app and brings the app's own task
+             forward like the launcher icon (PairLinkActivity.kt); the app asks before it sends anything. -->
+        <activity
+            android:name=".PairLinkActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="eegtracker" android:host="pair" />
+            </intent-filter>
+        </activity>
+
         <!-- flutter_foreground_task's service. The name must stay exactly this (plugin README). -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
