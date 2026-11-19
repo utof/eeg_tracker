@@ -97,11 +97,12 @@ def main(argv: list[str]) -> None:
     lrlr(y, 15.0, uv=40.0)
     lrlr(y, 30.0, uv=40.0, every_s=0.5)
     double_clench(y, 50.0, uv=30.0)
-    cases.append(case("light sleep: small LRLRs for a calibrated look size, a hole, and a double clench", y, m, 60.0, 20.0))
+    name = "light sleep: small LRLRs for a calibrated look size, a hole, and a double clench"
+    cases.append(case(name, y, m, 60.0, 20.0))
     del x
 
     out.write_text(json.dumps({"version": 1, "fs": FS, "scale": mdf.SCALE, "cases": cases}, separators=(",", ":")))
-    print(out, out.stat().st_size // 1024, "KB;", [(c["name"][:20], len(c["moves"]), c["signals"], c["clenches"]) for c in cases])
+    print(out, out.stat().st_size // 1024, "KB;", [(c["name"][:20], c["signals"], c["clenches"]) for c in cases])
 
 
 if __name__ == "__main__":

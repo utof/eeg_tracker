@@ -17,8 +17,8 @@ are dreaming. The app plays it only when all of these hold (planning values, `ru
   - at most one cue every 30 s, 10 in a dream-sleep period, 30 a night.
 The first cue is at the loudness you just heard in the evening practice; each cue is 1 dB louder, up to +6 dB. The
 drift-off detector saying awake, or 3 seconds of movement, within 30 s after a cue, or an awake epoch read later for
-those 30 s, is an arousal: 3 dB quieter and 5 minutes without cues; after 3 arousals no more cues that night. A period ends after 2 epochs in a
-row read as something other than dream sleep.
+those 30 s, is an arousal: 3 dB quieter and 5 minutes without cues; after 3 arousals no more cues that night. A
+period ends after 2 epochs in a row read as something other than dream sleep.
 
 usage (from the repo root):
   uv run --project analysis python analysis/lucid_cues.py cases app/test/fixtures/lucid_cases.json
@@ -278,7 +278,7 @@ def cmd_cases(a: argparse.Namespace) -> None:
     for case in json.loads(Path(a.cases).read_text())["cases"]:
         got = run_case(case)
         exp = case["expect"]
-        ok = got["cues"] == exp["cues"] and got["arousals"] == exp["arousals"] and got["stops"] == exp.get("stops", got["stops"])
+        ok = (got["cues"], got["arousals"]) == (exp["cues"], exp["arousals"]) and got["stops"] == exp.get("stops", got["stops"])
         bad += not ok
         print(("ok  " if ok else "FAIL") + f" {case['name']}" + ("" if ok else f": got {got}"))
     sys.exit(1 if bad else 0)
@@ -378,7 +378,8 @@ def cmd_replay(a: argparse.Namespace) -> None:
         "night": a.bdf.name,
         "lights_off": clock(start, lights_off),
         "cues_from": clock(start, cues_from),
-        "rules": {"min_conf": MIN_CONF, "eye_recent_s": EYE_RECENT_S, "back_quiet_uv": BACK_QUIET_UV, "still_s": STILL_S,
+        "rules": {"min_conf": MIN_CONF, "eye_recent_s": EYE_RECENT_S, "back_quiet_uv": BACK_QUIET_UV,
+                  "still_s": STILL_S,
                   "jaw_still_s": JAW_STILL_S, "arousal_moves": AROUSAL_MOVES,
                   "spacing_s": SPACING_S, "per_period": PER_PERIOD, "per_night": PER_NIGHT},
         "cues": len(cues),

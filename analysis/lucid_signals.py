@@ -31,8 +31,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eeg_detectors as det  # noqa: E402
 import hands_free as hf  # noqa: E402
@@ -147,7 +145,8 @@ def cmd_night(a: argparse.Namespace) -> None:
             s = stage_at(e.at * FS)
             by[s] = by.get(s, 0) + 1
         asleep = sum(v for s, v in by.items() if s not in ("W", "gap"))
-        rep["double_clench"][f"{cx:g}x"] = {"by_stage": by, "per_hour_asleep": round(asleep / asleep_h, 2) if asleep_h else None}
+        rep["double_clench"][f"{cx:g}x"] = {"by_stage": by,
+                                             "per_hour_asleep": round(asleep / asleep_h, 2) if asleep_h else None}
     text = json.dumps(rep, indent=1)
     if a.json:
         Path(a.json).write_text(text)
