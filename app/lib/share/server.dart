@@ -11,8 +11,8 @@
 //   the laptop's own jobs (/sleep-report, /morning-report, /hypnogram.png): 503, as the page server answers
 //   while the recorder is away
 //
-// Every request needs the token and a client on the local network. Nothing here writes, renames or deletes a
-// file. Plain dart:io with no Flutter import: it runs in an isolate of its own (isolate.dart), and in tests.
+// Every request needs the token and a client inside the phone's Wi-Fi network, or the phone itself (DECISIONS row
+// 562). Nothing here writes, renames or deletes a file. Plain dart:io with no Flutter import: it runs in an isolate of its own (isolate.dart), and in tests.
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
@@ -90,7 +90,8 @@ class ShareServer {
   final Duration keepalive;
   final DateTime Function() _now;
 
-  final Map<String, HttpServer> _servers = {};
+  HttpServer? _server;
+  List<LanNet> _lan = const [];
   final List<_Reader> _readers = [];
   final Map<String, ({int bytes, int modifiedMs, String sha256})> _hashes = {};
 
@@ -106,32 +107,25 @@ class ShareServer {
   String _contactKey = '';
   double? _contactT;
 
-  int get boundPort => _servers.isEmpty ? port : _servers.values.first.port;
-  List<String> get addresses => _servers.keys.toList();
+  int get boundPort => _server?.port ?? port;
   int get readers => _readers.length;
 
-  /// Listens on [addresses] and on the phone itself (for `adb forward`). Throws when nothing could be bound.
-  Future<void> listenOn(List<InternetAddress> addresses) async {
-    final want = <String, InternetAddress>{
-      for (final a in [...addresses, InternetAddress.loopbackIPv4]) a.address: a,
-    };
-    for (final gone in _servers.keys.where((k) => !want.containsKey(k)).toList()) {
-      await _servers.remove(gone)?.close(force: true);
-    }
-    Object? failure;
-    for (final e in want.entries) {
-      if (_servers.containsKey(e.key)) continue;
-      try {
-        final s = await HttpServer.bind(e.value, port, shared: false);
-        s.idleTimeout = const Duration(seconds: 60);
-        s.defaultResponseHeaders.clear();
-        s.listen(_handle, onError: (Object _) {});
-        _servers[e.key] = s;
-      } catch (err) {
-        failure = err;
-      }
-    }
-    if (_servers.isEmpty) throw failure ?? StateError('no address to listen on');
+  /// The phone's Wi-Fi addresses, for the screen; empty while none is known.
+  List<String> get addresses => [for (final n in _lan) n.address.address];
+
+  /// The Wi-Fi networks clients may come from (DECISIONS row 562), set again at every look at the phone's address.
+  set lan(List<LanNet> nets) => _lan = List.unmodifiable(nets);
+
+  /// Listens on every IPv4 address of the phone (DECISIONS row 562): Wi-Fi, the phone itself for `adb forward`, and
+  /// mobile data and a VPN too, which [isServedClient] turns away. So the server does not depend on finding the
+  /// Wi-Fi address, and a new lease needs no new socket. Throws when the port is taken.
+  Future<void> listen() async {
+    if (_server != null) return;
+    final s = await HttpServer.bind(InternetAddress.anyIPv4, port, shared: false);
+    s.idleTimeout = const Duration(seconds: 60);
+    s.defaultResponseHeaders.clear();
+    s.listen(_handle, onError: (Object _) {});
+    _server = s;
   }
 
   Future<void> close() async {
@@ -139,10 +133,9 @@ class ShareServer {
       r.closed = true;
       r.wake();
     }
-    for (final s in _servers.values.toList()) {
-      await s.close(force: true);
-    }
-    _servers.clear();
+    final s = _server;
+    _server = null;
+    await s?.close(force: true);
   }
 
   // ---- live data in ------------------------------------------------------------------------------------------
@@ -254,7 +247,7 @@ class ShareServer {
     try {
       res.headers.set('Cache-Control', 'no-store');
       final client = clientOf != null ? clientOf!(req) : req.connectionInfo?.remoteAddress;
-      if (client == null || !isAllowedClient(client)) {
+      if (client == null || !isServedClient(client, _lan)) {
         return await _json(res, 403, {'error': 'only the local network may connect'});
       }
       if (!_authorized(req)) return await _json(res, 401, {'error': 'token missing or wrong'});

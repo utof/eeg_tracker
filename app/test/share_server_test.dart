@@ -35,7 +35,7 @@ void main() {
         return markerAnswer;
       },
     );
-    await server.listenOn(const []);
+    await server.listen();
   }
 
   setUp(() async {
@@ -107,12 +107,51 @@ void main() {
     });
 
     test('a client that is not on the local network is refused, token or not', () async {
+      server.lan = parseLanNets(['192.168.1.5/24']);
       clientAddress = InternetAddress('8.8.8.8');
       expect((await ask('/state')).code, 403);
       clientAddress = InternetAddress('2001:db8::1');
       expect((await ask('/files')).code, 403);
       clientAddress = InternetAddress('192.168.1.40');
       expect((await ask('/state')).code, 200);
+      // private, but not this Wi-Fi: the VPN's other end, mobile data's carrier network (DECISIONS row 562)
+      for (final a in ['10.10.10.2', '10.43.0.1']) {
+        clientAddress = InternetAddress(a);
+        expect((await ask('/state')).code, 403, reason: a);
+      }
+      server.lan = const [];
+      clientAddress = InternetAddress('192.168.1.40');
+      expect((await ask('/state')).code, 403, reason: 'no Wi-Fi network known: the phone itself only');
+      clientAddress = InternetAddress('127.0.0.1');
+      expect((await ask('/state')).code, 200);
+    });
+
+    test('it listens on every address: a real client on this machine\'s own network is let in only inside the '
+        'Wi-Fi network', () async {
+      expect(server.addresses, isEmpty);
+      final own = [
+        for (final i in await NetworkInterface.list(type: InternetAddressType.IPv4))
+          for (final a in i.addresses)
+            if (isPrivateV4(a)) a,
+      ];
+      if (own.isEmpty) {
+        markTestSkipped('this machine has no private IPv4 address');
+        return;
+      }
+      final a = own.first;
+      final at = Uri.parse('http://${a.address}:${server.boundPort}/state');
+      Future<int> code() async {
+        final req = await client.getUrl(at);
+        req.headers.set('Authorization', 'Bearer $token');
+        final res = await req.close();
+        await res.drain<void>();
+        return res.statusCode;
+      }
+
+      expect(await code(), 403); // reached, but no Wi-Fi network is known yet
+      server.lan = [(address: a, prefix: a.prefixLength)];
+      expect(await code(), 200);
+      expect(server.addresses, [a.address]);
     });
 
     test('which addresses are local', () {

@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'export/exporter.dart';
 import 'recorder/battery.dart';
 import 'recorder/headband.dart';
+import 'share/protocol.dart' show WifiNets;
 
 const MethodChannel _channel = MethodChannel('eeg_tracker/phone');
 
@@ -96,6 +97,18 @@ class Phone {
   /// Share on Wi-Fi during a night: holds (or lets go of) a Wi-Fi lock, so Wi-Fi keeps answering with the screen
   /// off (PhoneChannel.kt). Works from the recorder's engine too.
   static Future<void> wifiLock({required bool on}) => _channel.invokeMethod<void>('wifiLock', {'on': on});
+
+  /// This phone's IPv4 addresses on Wi-Fi with their prefix (`192.168.1.5/24`), as Android itself sees its networks
+  /// (VPNs and mobile data left out), and a note of what each source returned (PhoneChannel.kt). Works from the
+  /// recorder's engine too.
+  static Future<WifiNets> wifiNets() async {
+    final r = await _channel.invokeMapMethod<Object?, Object?>('wifiNets');
+    final nets = r?['nets'], note = r?['note'];
+    return (
+      nets: nets is List ? [for (final n in nets) if (n is String) n] : const <String>[],
+      note: note is String ? note : 'no answer',
+    );
+  }
 
   /// Schedules the foreground service to start again in [delayMs], then ends this process.
   static Future<void> restartProcess(int delayMs) =>

@@ -1549,6 +1549,11 @@ Good to know:
 - If the phone's address changes (the router gave it a new one), the main screen and the sheet show the new one
   within a minute; restart the two laptop commands with it. A fixed address for the phone in the router avoids this.
 - Without Wi-Fi but with a cable: `adb forward tcp:8765 tcp:8765`, then use `http://127.0.0.1:8765` as the address.
+  When the sheet says the address is **not found**, it shows this way with the commands already on `127.0.0.1`.
+- The address comes from Android's own list of networks (a VPN app or mobile data on at the same time does not hide
+  it), with the phone's interface list as a fallback; the phone answers only devices on its Wi-Fi network and the
+  cable, never mobile data or a VPN (DECISIONS rows 560-564). If the address stays "not found" while the phone is on
+  Wi-Fi, `adb logcat -d -s eeg_tracker flutter` shows what each source returned.
 - Export data stays the full, checked hand-over (and the only one that works without Wi-Fi). Files the laptop
   already mirrored are found "already here" by `import_phone.py`.
 

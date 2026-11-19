@@ -278,6 +278,7 @@ class RecorderTaskHandler extends TaskHandler {
         _wifiShare = on;
         return _wifi();
       },
+      wifi: Phone.wifiNets,
     );
     final r = _recorder;
     if (r != null) host.setLive(r.status.toMap(nowMs: DateTime.now().millisecondsSinceEpoch));

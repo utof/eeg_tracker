@@ -11,7 +11,7 @@ import 'package:flutter/services.dart';
 
 import '../headband/diy/settings.dart';
 import '../headband/finder.dart' show loadDiyBoard, loadOwnBle;
-import '../share/protocol.dart' show lanAddresses;
+import '../share/protocol.dart' show lanAddresses, parseLanNets;
 import '../headband/own/controller.dart';
 import '../headband/own/settings.dart';
 import '../headband/own/universal_transport.dart';
@@ -22,8 +22,13 @@ import 'diy_board_view.dart' show DiyPageModel;
 import 'nearby.dart';
 import 'own_ble_view.dart';
 
-/// This phone's Wi-Fi address now (the board's UDP_HOST), or null when it has none.
+/// This phone's Wi-Fi address now (the board's UDP_HOST), or null when it has none: Android's own answer first,
+/// Dart's interface list when Android has none (DECISIONS row 561).
 Future<String?> phoneWifiAddress() async {
+  try {
+    final mine = parseLanNets((await Phone.wifiNets().timeout(const Duration(seconds: 3))).nets);
+    if (mine.isNotEmpty) return mine.first.address.address;
+  } catch (_) {}
   try {
     final found = lanAddresses(await NetworkInterface.list(type: InternetAddressType.IPv4));
     return found.isEmpty ? null : found.first.address;

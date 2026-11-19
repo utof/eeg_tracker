@@ -58,7 +58,7 @@ class ShareRow extends StatelessWidget {
 class ShareSheetModel {
   const ShareSheetModel({required this.address, required this.port, required this.token, required this.until, required this.night});
 
-  /// `192.168.1.23`; null while the phone has no Wi-Fi address.
+  /// `192.168.1.23`; null while no Wi-Fi address is known (the commands then use the cable: [cableCommand]).
   final String? address;
   final int port;
   final String token;
@@ -69,7 +69,10 @@ class ShareSheetModel {
   /// A night is recording (the recorder serves, screen off or on); else the app serves while it is open.
   final bool night;
 
-  String get hostPort => '${address ?? '<phone address>'}:$port';
+  String get hostPort => '${address ?? '127.0.0.1'}:$port';
+
+  /// Over a USB cable the laptop reaches the phone itself at 127.0.0.1 (DECISIONS row 563).
+  String get cableCommand => 'adb forward tcp:$port tcp:$port';
   String get pagesCommand => 'python3 scripts/page_server.py --recorder http://$hostPort --token $token';
   String get pullCommand => 'python3 scripts/pull_phone.py http://$hostPort --token $token';
 }
@@ -101,7 +104,7 @@ class ShareSheet extends StatelessWidget {
           const Divider(),
           _Line(
             'Address',
-            address == null ? 'no Wi-Fi' : m.hostPort,
+            address == null ? 'not found' : m.hostPort,
             color: address == null ? Night.caution : Night.ink,
             copy: address == null ? null : 'http://${m.hostPort}',
           ),
@@ -113,7 +116,8 @@ class ShareSheet extends StatelessWidget {
           const SizedBox(height: 14),
           Text(
             address == null
-                ? 'Join your home Wi-Fi: the address appears here within a minute.'
+                ? 'No Wi-Fi address found. Join your home Wi-Fi: it appears here within a minute. A USB cable works '
+                      'without it (below).'
                 : m.night
                 ? 'It keeps answering with the screen off while the night records, and for 15 minutes after Stop.'
                 : 'Between nights it answers only while this app is open on the screen.',
@@ -136,6 +140,12 @@ class ShareSheet extends StatelessWidget {
           const SizedBox(height: 20),
           Text('On the laptop', style: text.titleMedium?.copyWith(fontWeight: FontWeight.w500)),
           const SizedBox(height: 10),
+          if (address == null) ...[
+            Text('Phone on a USB cable, first:', style: muted),
+            const SizedBox(height: 4),
+            SelectableText(m.cableCommand, style: text.bodyMedium?.copyWith(height: 1.4)),
+            const SizedBox(height: 14),
+          ],
           Text('The live pages:', style: muted),
           const SizedBox(height: 4),
           SelectableText(m.pagesCommand, style: text.bodyMedium?.copyWith(height: 1.4)),
