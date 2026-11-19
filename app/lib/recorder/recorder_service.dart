@@ -6,7 +6,13 @@ import 'dart:io';
 
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
+import '../alarm/bell.dart';
+import '../alarm/live_alarm.dart';
+import '../alarm/record.dart';
+import '../alarm/rule.dart';
 import '../phone.dart';
+import '../sleep/live_stager.dart';
+import '../sleep/onnx_runs.dart';
 import 'brainbit.dart';
 import 'headband.dart';
 import 'night_recorder.dart';
@@ -15,6 +21,7 @@ import 'status.dart';
 const int _serviceId = 4711;
 const String _nightKey = 'night';
 const String _dirKey = 'recordingsDir';
+const String _alarmKey = 'alarmPlan';
 
 /// Messages from the screen to the recorder.
 const String stopCommand = 'stop';
@@ -22,6 +29,9 @@ const String statusCommand = 'status';
 
 /// The night screen's Lights off (live_drift.dart): a marker in the recording, the drift-off detector from here.
 const String lightsOffCommand = 'lightsOff';
+
+/// The night screen's Alarm off: the smart alarm's live model stops (the screen takes the phone's alarm away).
+const String alarmOffCommand = 'alarmOff';
 
 /// Sent by the recorder once its files are closed after [stopCommand].
 const Map<String, Object> stoppedMessage = {'kind': 'stopped'};
@@ -48,18 +58,42 @@ void initRecorderService() {
   );
 }
 
-/// Starts the service. [recordingsDir] is remembered as a fallback for the recorder isolate.
-Future<ServiceRequestResult> startRecorderService(String? recordingsDir) async {
+/// Starts the service. [recordingsDir] is remembered as a fallback for the recorder isolate; [alarm] is tonight's
+/// smart alarm (the screen sets the phone's alarm itself, before this). [callback] is for smoke tests only.
+Future<ServiceRequestResult> startRecorderService(
+  String? recordingsDir, {
+  AlarmPlan? alarm,
+  Function callback = recorderEntryPoint,
+}) async {
   if (recordingsDir != null) await FlutterForegroundTask.saveData(key: _dirKey, value: recordingsDir);
   if (await FlutterForegroundTask.isRunningService) return const ServiceRequestSuccess();
+  if (alarm == null) {
+    await FlutterForegroundTask.removeData(key: _alarmKey);
+  } else {
+    await FlutterForegroundTask.saveData(key: _alarmKey, value: jsonEncode(alarm.toJson()));
+  }
   return FlutterForegroundTask.startService(
     serviceId: _serviceId,
     serviceTypes: [ForegroundServiceTypes.connectedDevice],
     notificationTitle: 'EEG Tracker',
     notificationText: 'Looking for the headband',
-    callback: recorderEntryPoint,
+    callback: callback,
   );
 }
+
+/// The smart alarm's live model in the recorder's isolate: AnySleep's runs on ONNX (the plugin is registered in this
+/// engine too), the early ring through the phone's alarm, the record beside the recordings.
+AlarmWatch Function(AlarmPlan plan) smartAlarmFor(String recordingsDir) => (plan) => smartAlarm(recordingsDir, plan);
+
+LiveAlarm smartAlarm(String recordingsDir, AlarmPlan plan) => LiveAlarm(
+  plan: plan,
+  model: () => RunsLiveModel(
+    open: (run) => OnnxStageRun.open(run, modelsDir: modelsDirFor(recordingsDir)),
+    closeRun: (run) => (run as OnnxStageRun).close(),
+  ),
+  bell: ChannelAlarmBell(),
+  store: AlarmStore(alarmsDirFor(recordingsDir)),
+);
 
 Future<NightState> loadNight() async => _PrefsNightStore().load();
 
@@ -67,6 +101,13 @@ Future<NightState> loadNight() async => _PrefsNightStore().load();
 void recorderEntryPoint() => FlutterForegroundTask.setTaskHandler(RecorderTaskHandler());
 
 class RecorderTaskHandler extends TaskHandler {
+  RecorderTaskHandler({this.finder, this.alarm = smartAlarmFor});
+
+  /// Only for smoke tests (a replayed headband); null: the BrainBit.
+  final HeadbandFinder Function()? finder;
+
+  /// The smart alarm's live model for the recordings folder (a smoke test watches its own).
+  final AlarmWatch Function(AlarmPlan plan) Function(String recordingsDir) alarm;
   NightRecorder? _recorder;
   BrainBitFinder? _finder;
   Phase? _shownPhase;
@@ -76,8 +117,14 @@ class RecorderTaskHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     final dir = await _recordingsDir();
-    final finder = BrainBitFinder();
-    _finder = finder;
+    final HeadbandFinder finder;
+    if (this.finder != null) {
+      finder = this.finder!();
+    } else {
+      final b = BrainBitFinder();
+      _finder = b;
+      finder = b;
+    }
     final recorder = NightRecorder(
       finder: finder,
       dir: Directory(dir),
@@ -85,6 +132,8 @@ class RecorderTaskHandler extends TaskHandler {
       probe: ChannelPhoneProbe(),
       onStatus: _onStatus,
       onStuck: _restartProcess,
+      alarmPlan: await _alarmPlan(),
+      alarm: alarm(dir),
     );
     _recorder = recorder;
     unawaited(recorder.run(restartedBySystem: starter == TaskStarter.system));
@@ -104,6 +153,12 @@ class RecorderTaskHandler extends TaskHandler {
       final r = _recorder;
       if (r != null) {
         r.lightsOff();
+        _send(r.status);
+      }
+    } else if (data == alarmOffCommand) {
+      final r = _recorder;
+      if (r != null) {
+        r.alarmOff();
         _send(r.status);
       }
     }
@@ -143,6 +198,15 @@ class RecorderTaskHandler extends TaskHandler {
       await Phone.restartProcess(5000).timeout(const Duration(seconds: 5));
     } catch (_) {}
     exit(3); // reached only if the native call could not end the process
+  }
+
+  static Future<AlarmPlan?> _alarmPlan() async {
+    try {
+      final raw = await FlutterForegroundTask.getData<String>(key: _alarmKey);
+      return raw == null ? null : AlarmPlan.fromJson(jsonDecode(raw));
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<String> _recordingsDir() async {

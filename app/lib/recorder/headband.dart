@@ -125,6 +125,10 @@ class NightState {
     this.phoneBattery = const BatteryTrack(),
     this.packets = const PacketCounts(),
     this.lightsOffMs,
+    this.alarmEndMs,
+    this.alarmWindowMin,
+    this.alarmScoring = false,
+    this.alarmOff = false,
   });
 
   final bool active;
@@ -156,6 +160,18 @@ class NightState {
   /// When Lights off was last tapped tonight (unix ms); null until then (DECISIONS 180).
   final int? lightsOffMs;
 
+  /// Tonight's smart alarm (alarm/rule.dart `AlarmPlan`): wake by [alarmEndMs] (unix ms), at the earliest
+  /// [alarmWindowMin] minutes before; null without one (DECISIONS 230-236).
+  final int? alarmEndMs;
+  final int? alarmWindowMin;
+
+  /// The alarm's live sleep model was running when this was saved: a process that finds it set did not end
+  /// cleanly while the model ran, so the model stays off for the rest of the night (the phone's alarm stays).
+  final bool alarmScoring;
+
+  /// The alarm's live model is done for tonight (it woke you, the window ended, it was switched off, or Alarm off).
+  final bool alarmOff;
+
   NightState copyWith({
     bool? active,
     int? startMs,
@@ -170,6 +186,10 @@ class NightState {
     BatteryTrack? phoneBattery,
     PacketCounts? packets,
     int? lightsOffMs,
+    int? alarmEndMs,
+    int? alarmWindowMin,
+    bool? alarmScoring,
+    bool? alarmOff,
   }) => NightState(
     active: active ?? this.active,
     startMs: startMs ?? this.startMs,
@@ -184,6 +204,10 @@ class NightState {
     phoneBattery: phoneBattery ?? this.phoneBattery,
     packets: packets ?? this.packets,
     lightsOffMs: lightsOffMs ?? this.lightsOffMs,
+    alarmEndMs: alarmEndMs ?? this.alarmEndMs,
+    alarmWindowMin: alarmWindowMin ?? this.alarmWindowMin,
+    alarmScoring: alarmScoring ?? this.alarmScoring,
+    alarmOff: alarmOff ?? this.alarmOff,
   );
 
   Map<String, Object?> toJson() => {
@@ -204,6 +228,10 @@ class NightState {
     'phoneBattery': phoneBattery.toJson(),
     'packets': packets.toJson(),
     'lightsOffMs': lightsOffMs,
+    'alarmEndMs': alarmEndMs,
+    'alarmWindowMin': alarmWindowMin,
+    'alarmScoring': alarmScoring,
+    'alarmOff': alarmOff,
   };
 
   static NightState fromJson(Object? j) {
@@ -229,6 +257,10 @@ class NightState {
       phoneBattery: BatteryTrack.fromJson(j['phoneBattery']),
       packets: PacketCounts.fromJson(j['packets']),
       lightsOffMs: (j['lightsOffMs'] as num?)?.toInt(),
+      alarmEndMs: (j['alarmEndMs'] as num?)?.toInt(),
+      alarmWindowMin: (j['alarmWindowMin'] as num?)?.toInt(),
+      alarmScoring: j['alarmScoring'] == true,
+      alarmOff: j['alarmOff'] == true,
     );
   }
 }
