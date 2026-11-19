@@ -7,7 +7,7 @@ import 'dart:typed_data';
 
 import 'package:eeg_tracker/sleep/live_prep.dart';
 import 'package:eeg_tracker/sleep/live_stager.dart';
-import 'package:eeg_tracker/sleep/model.dart' show StageRun;
+import 'package:eeg_tracker/sleep/model.dart' show SkipSums, StageRun;
 import 'package:flutter_test/flutter_test.dart';
 
 /// Gives each epoch the stage [script] says (as logits 4 apart), and advances [clock] by [costMs] per call.
@@ -232,6 +232,12 @@ class _ConstRun implements StageRun {
   final int run;
 
   @override
-  Future<Float32List> logits(Float32List x, int epochs) async =>
-      Float32List.fromList([for (var e = 0; e < epochs; e++) for (var k = 0; k < 5; k++) k == run - 1 ? 1.0 : 0.0]);
+  Future<Float32List> logits(Float32List x, int epochs, {Float32List? means}) async {
+    expect(means, isNull); // the live window is weighed by its own averages, as analysis/live_stager.py
+    return Float32List.fromList([for (var e = 0; e < epochs; e++) for (var k = 0; k < 5; k++) k == run - 1 ? 1.0 : 0.0]);
+  }
+
+  @override
+  Future<SkipSums> sums(Float32List x, int epochs, {required int from, required int to}) =>
+      throw UnimplementedError('the live scorer makes one pass');
 }

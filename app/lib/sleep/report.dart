@@ -303,9 +303,11 @@ class NightReportStore {
 }
 
 /// night_files.py `is_stale`: no report, another version, written before `drift_off` existed, a file gone or shrunk,
-/// or 10+ minutes of new samples.
-bool isStale(Map<String, int> files, SleepReport? report, {int newDataMinutes = 10}) {
+/// or 10+ minutes of new samples. With [model] (the scorer's), also a scored night whose report names another
+/// model: since 2026-11-19 (two passes, DECISIONS row 263) the phone's older reports are scored again once.
+bool isStale(Map<String, int> files, SleepReport? report, {int newDataMinutes = 10, String? model}) {
   if (report == null || report.json['version'] != reportVersion || !report.json.containsKey('drift_off')) return true;
+  if (model != null && report.json['scored'] == true && report.json['model'] != model) return true;
   final done = report.inputs;
   if (done.keys.any((f) => !files.containsKey(f)) || done.entries.any((e) => files[e.key]! < e.value)) return true;
   final newBytes = files.entries.fold(0, (s, e) => s + e.value - (done[e.key] ?? 0));

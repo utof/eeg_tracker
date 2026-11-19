@@ -83,7 +83,7 @@ class SleepScorer {
     final stuck = blocked();
     return [
       for (final n in nightsIn(recordingsDir).reversed)
-        if (n.recordings.isNotEmpty && !stuck.containsKey(n.name) && isStale(inputsOf(n), store.read(n.name))) n,
+        if (n.recordings.isNotEmpty && !stuck.containsKey(n.name) && isStale(inputsOf(n), store.read(n.name), model: model)) n,
     ];
   }
 

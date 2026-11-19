@@ -133,9 +133,10 @@ def sessions(threads: int = 4, runs=(1, 2, 3)):
 
 
 def run_probs(sess, x: np.ndarray) -> np.ndarray:
-    """Per run softmax, (runs, epochs, 5), for a scaled window x (samples, 4)."""
+    """Per run softmax, (runs, epochs, 5), for a scaled window x (samples, 4), weighed by its own averages."""
+    import two_pass
     inp = np.ascontiguousarray(x, dtype=np.float32)[None]
-    return np.stack([softmax(s.run(None, {"eeg": inp})[0][0].astype(np.float64)) for s in sess])
+    return np.stack([softmax(s.run(["logits"], two_pass.feeds(inp))[0][0].astype(np.float64)) for s in sess])
 
 
 def load_night(rec_dir: Path, night: str) -> tuple[float, np.ndarray, np.ndarray]:
