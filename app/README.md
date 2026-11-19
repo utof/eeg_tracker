@@ -389,7 +389,9 @@ Nothing of this has run on a phone yet, and HyperOS may hold notifications back.
 
 1. Trends, Sharp hours, switch on, allow notifications. Check the waking hours (Change if needed).
 2. On a Xiaomi: Settings, Apps, EEG Tracker: **Autostart** on and **Battery saver: No restrictions** (the recorder
-   needs the same). Without them the questions can come late or not at all.
+   needs the same). Without them the questions can come late or not at all. If the phone stops the app (a force
+   stop, or HyperOS clearing it), Android drops its alarms: the questions pause until you next open the app, which
+   arms them again.
 3. Answer what comes for two days. Then open the page: under the switch it says how many of the last days' questions
    arrived. If it shows an amber "Only N of M questions reached you", tap its Autostart and Battery buttons and tell
    the assistant the numbers.
