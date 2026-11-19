@@ -432,8 +432,8 @@ class _MemoryTaskScreenState extends State<MemoryTaskScreen> {
         numbers: (
           closeEvening: closeCount(s, s.evening),
           closeMorning: closeCount(s, _taps),
-          mmEvening: toMm(s, meanError(s, s.evening)),
-          mmMorning: toMm(s, meanError(s, _taps)),
+          distEvening: meanError(s, s.evening),
+          distMorning: meanError(s, _taps),
         ),
       ),
     );

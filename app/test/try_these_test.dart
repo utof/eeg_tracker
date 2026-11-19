@@ -412,7 +412,7 @@ void main() {
         Directory('${files.path}/sound-states/plans/2026-11-20-120000-asleep').createSync(recursive: true); // no plan saved
         put('settings.json', jsonEncode({'replayCheck': false}));
         put('lucid/mornings/2026-11-20-070000.json', jsonEncode({'night': '2026-11-20-070000'}));
-        put('memory_cues/mornings/2026-11-20-003000.json', jsonEncode({'version': 1, 'session': 'x', 'taps': {}}));
+        put('memory_cues/mornings/2026-11-20-003000.json', jsonEncode({'version': 1, 'session': 'x', 'taps': <String, Object?>{}}));
         board('2026-11-21-200000', 9.9); // under the card's 10 minutes
         put('study-review/log.jsonl', '${jsonEncode({'version': 1, 'at': '2026-11-20T21:40:00+03:00', 'kind': 'evening', 'studied': true})}\n');
         expect(seenByApp(files, seenChecks.keys.toSet()), isEmpty);

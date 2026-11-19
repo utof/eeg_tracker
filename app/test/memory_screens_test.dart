@@ -210,8 +210,8 @@ final Map<String, TaskViewModel> faces = {
     numbers: (
       closeEvening: closeCount(_s, _s.evening),
       closeMorning: closeCount(_s, _morningTaps),
-      mmEvening: toMm(_s, meanError(_s, _s.evening)),
-      mmMorning: toMm(_s, meanError(_s, _morningTaps)),
+      distEvening: meanError(_s, _s.evening),
+      distMorning: meanError(_s, _morningTaps),
     ),
   ),
 };

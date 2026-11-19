@@ -259,8 +259,9 @@ int closeCount(MemorySession s, Map<String, BoardPoint> taps) => s.items.where((
   return t != null && isClose(i, t);
 }).length;
 
-/// Board widths in millimetres on the screen the session was learned on (a dp is 1/160 inch).
-double toMm(MemorySession s, double boardWidths) => boardWidths * s.boardDp * 25.4 / 160;
+/// Board widths as a percent of the board's width, one decimal (the unit the page shows; no millimetres: nothing on the
+/// phone measures the screen's real size).
+String boardPercent(double boardWidths) => '${(boardWidths * 100).toStringAsFixed(1)} %';
 
 /// The learning rounds: every object once in a random order, then each round only the objects not yet placed close,
 /// at most [TaskRule.learnRounds] rounds.

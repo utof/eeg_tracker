@@ -114,9 +114,10 @@ class MemoryView extends StatelessWidget {
           LogValueRow(label: 'Tonight', value: _tonightValue()),
           LogValueRow(label: 'This morning', value: _morningValue()),
           LogValueRow(label: 'Night of the test', value: '${m.nextIndex + 1} of ${MemoryTest.maxNights}'),
+          LogValueRow(label: 'Bell loudness', value: m.levels == null ? 'not set' : '${_pct(m.levels![0])} of media'),
           LogValueRow(
-            label: 'Loudness',
-            value: m.levels == null ? 'not set' : 'bell ${_pct(m.levels![0])}, knock ${_pct(m.levels![1])}',
+            label: 'Knock loudness',
+            value: m.levels == null ? 'not set' : '${_pct(m.levels![1])} of media',
             last: true,
           ),
           if (last != null) ...[const SectionHeading('Last night'), _lastNight(context, last)],
@@ -296,9 +297,10 @@ class MemoryView extends StatelessWidget {
       rows.addAll([
         LogValueRow(label: 'Placed close', value: '$ce, then $cm of ${TaskRule.objects}'),
         LogValueRow(
-          label: 'Distance, on average',
+          label: 'Distance on average, % of the board',
           value:
-              '${toMm(s, meanError(s, s.evening)).toStringAsFixed(1)}, then ${toMm(s, meanError(s, mo.taps)).toStringAsFixed(1)} mm',
+              '${boardPercent(meanError(s, s.evening)).replaceAll(' %', '')}, then '
+              '${boardPercent(meanError(s, mo.taps)).replaceAll(' %', '')}',
           last: true,
         ),
       ]);
@@ -316,7 +318,7 @@ class MemoryView extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           r.off != null
-              ? 'The cues were off: ${r.off}'
+              ? 'That night the cues were switched off early; the night\'s log says why.'
               : 'Cue moments are the same on silent nights, so they do not tell whether a sound played. "Then" is this '
                     'morning against last evening: forgetting overnight is normal.',
           style: muted,
@@ -399,9 +401,10 @@ class MemoryResultsView extends StatelessWidget {
         const SizedBox(height: 8),
         if (p != null)
           Text(
-            'On ${p.live} nights with sound the other half drifted ${pts(p.diff)} % of the board\'s width more than the '
-            'half whose sound played (p = ${p.p < 0.001 ? '< 0.001' : p.p.toStringAsFixed(p.p < 0.01 ? 3 : 2)}, '
-            '${p.exact ? 'every' : '${p.orders}'} way the coins could have fallen). Tested.',
+            'On ${p.live} ${p.live == 1 ? 'night' : 'nights'} with sound, the half whose sound played drifted '
+            '${(p.diff.abs() * 100).toStringAsFixed(1)} % of the board\'s width ${p.diff >= 0 ? 'less' : 'more'} than '
+            'the other half (p = ${p.p < 0.001 ? '< 0.001' : p.p.toStringAsFixed(p.p < 0.01 ? 3 : 2)}, '
+            '${p.exact ? 'every way' : '${p.orders} ways'} the coins could have fallen). Tested.',
             style: text.bodyLarge?.copyWith(height: 1.4),
           ),
         const SizedBox(height: 14),
@@ -412,8 +415,8 @@ class MemoryResultsView extends StatelessWidget {
         _Row3('Nights with both tests', '${r.soundNights.nights}', '${r.silentNights.nights}', last: true),
         const SizedBox(height: 12),
         Text(
-          'Also tested, no verdict: heard a sound ${_test(r.heard, percent: false)}; the other half\'s drift on sound '
-          'nights against silent ones ${_test(r.otherHalf)}. Seen together, not tested: stirs after a cue moment '
+          'Also tested, no verdict: a sound heard in the night ${_heard(r.heard)}; the other half drifted '
+          '${_other(r.otherHalf)}. Seen together, not tested: stirs after a cue moment '
           '${_share(r.arousalShare.$1)} on sound nights, ${_share(r.arousalShare.$2)} on silent ones (the same moments '
           'without sound).',
           style: muted,
@@ -429,8 +432,13 @@ class MemoryResultsView extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Text(
-              '${r.unanswered} of ${r.shown.length} nights miss a test and are left out. '
-              '${r.hidden > 0 ? '${r.hidden} newer nights wait for the next set of 12.' : ''}',
+              [
+                if (r.unanswered > 0)
+                  '${r.unanswered} of ${r.shown.length} nights ${r.unanswered == 1 ? 'misses' : 'miss'} a test and '
+                      '${r.unanswered == 1 ? 'is' : 'are'} left out.',
+                if (r.hidden > 0)
+                  '${r.hidden} newer ${r.hidden == 1 ? 'night waits' : 'nights wait'} for the next set of 12.',
+              ].join(' '),
               style: muted,
             ),
           ),
@@ -440,11 +448,19 @@ class MemoryResultsView extends StatelessWidget {
 
   static String _share(double? v) => v == null ? '-' : '${(v * 100).round()} %';
 
-  static String _test(PermutationResult? t, {bool percent = true}) {
-    if (t == null) return '(not enough nights)';
-    final d = percent ? '${(t.diff * 100).toStringAsFixed(1)} % of the width' : '${(t.diff * 100).round()} points';
-    return '($d, p = ${t.p.toStringAsFixed(2)})';
-  }
+  static String _p(PermutationResult t) => 'p = ${t.p.toStringAsFixed(2)}';
+
+  /// Mornings with a sound heard, sound nights against silent ones, in percentage points of mornings.
+  static String _heard(PermutationResult? t) => t == null
+      ? '(not enough nights)'
+      : 'on ${(t.diff.abs() * 100).round()} % ${t.diff >= 0 ? 'more' : 'fewer'} mornings after nights with sound '
+            '(${_p(t)})';
+
+  /// The other half's drift, sound nights against silent ones.
+  static String _other(PermutationResult? t) => t == null
+      ? '(not enough nights)'
+      : '${(t.diff.abs() * 100).toStringAsFixed(1)} % of the width ${t.diff >= 0 ? 'more' : 'less'} on nights with sound '
+            'than on silent ones (${_p(t)})';
 }
 
 class _Row3 extends StatelessWidget {

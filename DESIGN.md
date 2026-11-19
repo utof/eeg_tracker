@@ -120,6 +120,15 @@ lane and log rows), The test (the night cells and the sealed answer, later the t
 not use it and the switch; the due action pinned (Start practice, Save answers, Turn on). The evening practice is its
 own page: the loudness on the ground with I hear it and Stop pinned (3 : 2), then the words and the eyes-closed cues on
 a true-black face with one dim counter.
+Memory cues (from Settings, the row under Study reminders; the assistant's proposal; a section on the night screen
+between nights once switched on) is one page: a muted sentence saying whose idea it is and how weak the evidence, the
+status word, the switch row, Tonight / This morning / Night of the test / Bell and Knock loudness as label-left /
+value-right rows, Last night (the drift map, then its log rows), The test (the night cells, sealed until night 12, later the tested
+table), How it works, Who should not use it; the due action pinned (Turn on, Start the evening task, Start the morning
+test; nothing when tonight is ready). The evening task and the morning test are pages of their own: the task cells at
+the top, the object to place and one instruction line beside it, the board under them, Stop outlined and pinned; the
+intro as numbered log rows with Start pinned; the loudness on the ground with I hear it and Stop pinned (3 : 2); the
+morning's question as the choice column, then the result: an Evening / Morning table and the drift map, Done pinned.
 Try these (from its section on the night screen) is one page in the order of a first week: the tally ("4 of 20 tried",
 "1 skipped" muted at the right) over the try ledger, one muted sentence, then the stops under hairline headings by when
 (Tonight, then the morning; Another night; Sessions, when you have time; Over the next weeks; When the headband is
@@ -267,6 +276,18 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   draw): faint `rule` outline ahead (sealed), `saved` when answered, `track` when not, a `ground` dot for a lucid
   morning, the next night outlined green while the cues are on; once the results open, a short `ink` bar under each
   night that had sound. The legend says it in words.
+- **Board** (memory cues): a `track` field, 6 dp corners, 1 : 1.25, as wide as the column while its height fits, with
+  faint `rule` hairlines in a 4 x 5 grid as a spatial reference; objects are ink Material icons at a tenth of its
+  width. While learning, the answer shows the object at its place in a faint `ink-muted` ring (just outside the icon)
+  with a hairline from the ring to an ink dot where you tapped; clipped to its corners. No colour tells the two halves
+  apart, anywhere.
+- **Drift map** (memory cues, last night and the morning result): the board with every object at its place in its
+  faint ring, an `ink-muted` hairline from the ring to where it was put this morning and an ink dot there (none when it
+  was put inside the ring); distances are said as % of the board's width, never millimetres; one muted line says it in
+  words.
+- **Task cells** (memory cues): the watch strip's own cells, one per object, two rows of 16 with a wider gap every 8,
+  filling `saved` from the left as objects are seen, learned or placed, the current one outlined green; a muted label
+  (Seen, Learned, Placed) left and the count right above them.
 - **Choice column** (lucid dreams' morning): every morning question's answers as a vertical segmented column, full
   width, 52 dp rows, 16 dp corners, the Questions styling otherwise (one shape for the whole form; answers never wrap).
 - **Try ledger** (Try these): one of the watch strip's own cells per stop, ten to a row with a wider gap after five:
