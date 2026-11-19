@@ -93,6 +93,32 @@ void main() {
     c.dispose();
   });
 
+  test('the session file is rewritten every minute, from the quiet minute on (a killed app keeps the session so far)', () async {
+    var mono = Duration.zero;
+    final band = DriftBand((_) => 1)..paused = true; // the quiet minute waits: nothing streams yet
+    final c = StatesController(
+      finder: OneFinder(band),
+      sound: SilentStateSound.new,
+      store: store,
+      timing: fast,
+      monotonic: () => mono,
+    );
+    await c.start(SoundPlan.of(SoundState.relax));
+    expect(c.stage, SoundStage.quiet);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(store.list().single.end, SoundEnd.running, reason: 'a file from the quiet minute on');
+    expect(store.list().single.soundStartS, isNull);
+    mono += const Duration(seconds: 130); // the quiet minute gives up at 120 s and the sound starts
+    await until(c, () => c.stage == SoundStage.playing);
+    mono += const Duration(seconds: 70);
+    await until(c, () => (store.list().single.endS) >= 199);
+    final s = store.list().single;
+    expect((s.end, s.soundStartS), (SoundEnd.running, 130));
+    expect(s.events.map((e) => e.text), ['quiet minute (eyes closed)', 'sound on: Ocean, no beat']);
+    await c.stop();
+    c.dispose();
+  });
+
   test("a session of a fair test's day keeps the test's tag; the next session has none", () async {
     var now = DateTime(2026, 11, 20, 10);
     final sound = SilentStateSound();

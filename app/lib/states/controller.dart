@@ -56,11 +56,15 @@ class StatesTiming {
     this.noDataAfter = const Duration(seconds: 2),
     this.quietCleanS = 60,
     this.quietMaxS = 120,
+    this.saveEvery = const Duration(seconds: 60),
   });
 
   final LinkTiming link;
   final Duration tick;
   final Duration noDataAfter;
+
+  /// The session file is rewritten this often from lights off (so a killed app keeps the session so far).
+  final Duration saveEvery;
 
   /// The quiet minute ends once it has this many clean seconds, or after [quietMaxS] whatever it has.
   final int quietCleanS;
@@ -187,6 +191,7 @@ class StatesController extends ChangeNotifier {
   TrialTag? _trial;
   Timer? _ticker;
   int _ticks = 0;
+  Duration? _lastSave;
   DateTime? _lastArrival;
   int? _lastPack;
   bool _gapPending = false;
@@ -312,6 +317,7 @@ class StatesController extends ChangeNotifier {
     _events.clear();
     _trial = null;
     _ticks = 0;
+    _lastSave = null;
     _lastArrival = null;
     _lastPack = null;
     _gapPending = false;
@@ -562,6 +568,8 @@ class StatesController extends ChangeNotifier {
     final last = _link?.lastData;
     noData = _link != null && last != null && _now().difference(last) > timing.noDataAfter;
     _check();
+    final saved = _lastSave;
+    if (!_ended && (saved == null || _clock.now - saved >= timing.saveEvery)) _saveRunning();
     _notify();
   }
 
@@ -636,8 +644,12 @@ class StatesController extends ChangeNotifier {
     );
   }
 
-  /// The session so far, written when the sound starts, so a session cut short by the phone still leaves a file.
-  void _saveRunning() => _save(_session(_t(), SoundEnd.running));
+  /// The session so far, written at lights off, when the sound starts and every [StatesTiming.saveEvery], so a
+  /// session cut short by the phone still leaves a file with its sound time and events.
+  void _saveRunning() {
+    _lastSave = _clock.now;
+    _save(_session(_t(), SoundEnd.running));
+  }
 
   void _save(SoundSession s) {
     final st = store;
