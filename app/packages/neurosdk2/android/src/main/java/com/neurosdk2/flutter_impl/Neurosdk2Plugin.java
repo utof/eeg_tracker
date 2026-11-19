@@ -5,7 +5,9 @@ import static com.neurosdk2.Utils.*;
 
 import androidx.annotation.NonNull;
 
+import com.neurosdk2.LaneMessenger;
 import com.neurosdk2.PigeonMessages;
+import com.neurosdk2.SdkLane;
 import com.neurosdk2.ScannerHolder;
 import com.neurosdk2.SensorHolder;
 
@@ -38,7 +40,8 @@ public class Neurosdk2Plugin implements FlutterPlugin, PigeonMessages.NeuroApi {
 
     @Override
     public void onAttachedToEngine(@NonNull FlutterPluginBinding flutterPluginBinding) {
-        PigeonMessages.NeuroApi.setUp(flutterPluginBinding.getBinaryMessenger(), this);
+        // eeg_tracker change (VENDORED.md): the API's calls run on the SDK lane, not on Android's main thread.
+        PigeonMessages.NeuroApi.setUp(new LaneMessenger(flutterPluginBinding.getBinaryMessenger(), SdkLane.shared()), this);
         eventHolder = new EventHolder();
         eventHolder.activate(flutterPluginBinding);
         _threadService = Executors.newCachedThreadPool();
