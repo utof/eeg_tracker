@@ -135,7 +135,11 @@ def _recording_nights(local: Path, phone: set[str], folder: str = "recordings", 
         rows[key], stems[key] = row, [r.path.stem for r in n.recs]
     for p in packed.raw_files(where):
         t = nf.stamp_time(p)
-        if t is not None and packed.size(p) < nf.REC_BYTES:
+        try:
+            empty = packed.size(p) < nf.REC_BYTES
+        except OSError:  # a packed file whose end cannot be read: unreadable() names it
+            continue
+        if t is not None and empty:
             near = [d for d, r in rows.items() if r["start"] <= t < r["end"] + nf.CHAIN_GAP_S]
             if near:
                 stems[max(near)].append(p.stem)
@@ -161,6 +165,21 @@ def _add_phone_reports(local: Path, rows: dict[str, dict]) -> None:
                        minutes_missing=float(t.get("missing_min") or 0))
         rows[date]["report"] = _numbers(rep, "phone")
         _add(local, rows[date], f"phone/nights/{p.name}", "derived")
+
+
+def unreadable(local: Path) -> list[str]:
+    """Packed raw files whose length cannot be read (their end is damaged): no night can take them, so they are named
+    as damaged on every run."""
+    out = []
+    for folder in ("recordings", DIY, "phone/mornings"):
+        for p in packed.raw_files(local / folder):
+            d = packed.on_disk(p)
+            if d is not None and packed.is_packed(d):
+                try:
+                    packed.size(d)
+                except OSError:
+                    out.append(d.relative_to(local).as_posix())
+    return out
 
 
 def nights_on(local: Path) -> list[dict]:
@@ -304,6 +323,7 @@ def build(local: Path, previous: dict | None, check: bool, now: datetime) -> tup
     gone = {f["path"]: f for f in (previous or {}).get("missing", [])}
     events: list[tuple[str, str, str]] = []
     rows = nights_on(local)
+    events += [("damaged", rel, "?") for rel in unreadable(local)]
     for row in rows:
         files = []
         for rel, kind in sorted(set(row.pop("paths"))):

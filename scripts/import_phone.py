@@ -265,6 +265,14 @@ def copy_checked(src: Path, tmp: Path | None, e: Entry) -> bool:
     return ok
 
 
+def _holds(dst: Path, size: int, digest: str, index: Index) -> bool:
+    """Whether the laptop's copy holds these bytes; a packed copy that does not unpack holds nothing."""
+    try:
+        return size_of(dst) == size and index.sha(dst) == digest
+    except OSError:
+        return False
+
+
 def unpack_checked(src: Path, tmp: Path | None, e: Entry) -> bool:
     """For the phone's packed form: checks [src] against the manifest (the gzip file's size and SHA-256), unpacks it
     into [tmp] (or only checks it when tmp is None) and checks what came out against `original`."""
@@ -318,7 +326,7 @@ def run(folder: Path, dest: Path, *, dry_run: bool = False, rehash: bool = False
         path, size, digest = e.lands  # a packed phone file lands unpacked, under the plain name
         dst, src = target_for(dest, path), root.joinpath(*e.path.parts)
         have = on_laptop(dst)  # the laptop's copy, plain or packed after a day
-        if have is not None and size_of(dst) == size and index.sha(dst) == digest:
+        if have is not None and _holds(dst, size, digest, index):
             rep.same.append(e)
             continue
         if have is not None and e.modified_ms <= have.stat().st_mtime_ns // 1_000_000:

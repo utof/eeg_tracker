@@ -359,6 +359,18 @@ def test_a_packed_file_that_holds_other_bytes_is_a_problem(local: Path) -> None:
     assert code == 1 and f"PROBLEM: changed: recordings/{f.name}.xz" in text, text
 
 
+def test_a_packed_file_whose_end_is_damaged_is_named_on_every_run(local: Path) -> None:  # noqa: F811
+    f = next(p for p in packed.raw_files(local / "recordings") if p.stat().st_size >= packed.MIN_BYTES)
+    packed.pack(f)
+    assert catalog_run(local)[0] == 0
+    x = packed.packed_path(f)
+    x.write_bytes(x.read_bytes()[:-30])  # its index and footer are gone
+    for _ in range(2):
+        code, text = catalog_run(local)
+        assert code == 1 and f"PROBLEM: damaged: recordings/{x.name}" in text, text
+    assert nf.recordings(local / "recordings") and f not in [r.path for r in nf.recordings(local / "recordings")]
+
+
 # ---- the phone's packed files on the laptop -------------------------------------------------------------------------
 
 def phone_packed(body: bytes) -> bytes:

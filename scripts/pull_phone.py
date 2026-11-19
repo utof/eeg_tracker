@@ -304,8 +304,12 @@ def _pull_packed(phone: Phone, e: Listed, dest: Path, index: ip.Index, state: St
         else:
             rep.damaged.append(key)
         return
-    have_bytes = ip.size_of(dst)
-    if have_bytes == size and index.sha(dst) == digest:
+    try:
+        have_bytes = ip.size_of(dst)
+        same = have_bytes == size and index.sha(dst) == digest
+    except OSError:  # a packed copy that does not unpack holds nothing
+        have_bytes, same = -1, False
+    if same:
         if key in state.partial:
             rep.checked.append(key)
         else:
