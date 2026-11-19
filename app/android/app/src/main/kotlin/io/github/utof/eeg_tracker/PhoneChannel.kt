@@ -9,6 +9,9 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
@@ -54,11 +57,57 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
                     restartProcess(call.argument<Number>("delayMs")?.toInt() ?: 5000)
                     result.success(null)
                 }
+                "playCue" -> result.success(
+                    playCue(call.argument<String>("path") ?: "", call.argument<Number>("gain")?.toFloat() ?: 0f),
+                )
+                "mediaVolume" -> result.success(mediaVolume())
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {
             result.error("phone", e.message, null)
         }
+    }
+
+    /**
+     * Plays a short sound file once on the media stream at [gain] (0-1 of the media volume) and releases the player
+     * when it ends: the lucid dream cue (lucid/bell.dart), from the screen's engine in the evening practice and from
+     * the recorder service's engine at night, so both are the same sound at the same loudness. False when the file is
+     * missing or the player refused it.
+     */
+    private fun playCue(path: String, gain: Float): Boolean {
+        if (path.isEmpty() || !File(path).isFile) return false
+        val g = gain.coerceIn(0f, 1f)
+        val mp = MediaPlayer()
+        return try {
+            mp.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build(),
+            )
+            mp.setDataSource(path)
+            mp.setVolume(g, g)
+            mp.setOnCompletionListener { it.release() }
+            mp.setOnErrorListener { p, _, _ ->
+                p.release()
+                true
+            }
+            mp.prepare()
+            mp.start()
+            true
+        } catch (e: Exception) {
+            mp.release()
+            false
+        }
+    }
+
+    /** The media stream's volume step and its largest step (the cue plays as a share of it). */
+    private fun mediaVolume(): Map<String, Any?> {
+        val am = context.getSystemService(AudioManager::class.java)
+        return mapOf(
+            "volume" to am?.getStreamVolume(AudioManager.STREAM_MUSIC),
+            "max" to am?.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
+        )
     }
 
     /** The app's private folder (filesDir/recordings): other apps cannot read it, Android encrypts it. */

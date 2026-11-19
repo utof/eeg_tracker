@@ -56,8 +56,8 @@ class RuleCue {
 class CueRule {
   CueRule({required this.cuesFrom});
 
-  /// The second (on this rule's clock) from which cues may play.
-  final int cuesFrom;
+  /// The second (on this rule's clock) from which cues may play (moves with a later Lights off).
+  int cuesFrom;
 
   (int, String, double)? _newest, _prev;
   int? _lastN3, _lastBurst, _lastMoved, _lastJaw;
@@ -205,6 +205,9 @@ class EyeBursts implements DetectorTap {
     }
     return burst;
   }
+
+  /// Samples received.
+  int get samples => _n;
 
   /// Keeps the night's memory flat (the live watch does not need the list).
   void trim() => quiet.clear();

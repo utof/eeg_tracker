@@ -9,6 +9,10 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../phone.dart';
 import 'brainbit.dart';
 import '../handsfree/store.dart' show nightGestures;
+import '../lucid/bell.dart' show ChannelCueBell;
+import '../lucid/live_cues.dart' show lucidCuesFor;
+import '../sleep/live_stager.dart' show RunsLiveModel;
+import '../sleep/onnx_runs.dart';
 import 'headband.dart';
 import 'live_drift.dart';
 import 'night_recorder.dart';
@@ -89,6 +93,15 @@ class RecorderTaskHandler extends TaskHandler {
       onStuck: _restartProcess,
       // the owner's hands-free double clench, read when the detector starts (DECISIONS 247)
       watch: () => LiveDrift(handsFree: nightGestures(Directory(dir).parent)),
+      // lucid dream cues when they are on: AnySleep on ONNX in this engine, the phone's media player (DECISIONS 303)
+      cues: lucidCuesFor(
+        dir,
+        model: () => RunsLiveModel(
+          open: (run) => OnnxStageRun.open(run, modelsDir: modelsDirFor(dir)),
+          closeRun: (run) => (run as OnnxStageRun).close(),
+        ),
+        bell: ChannelCueBell(),
+      ),
     );
     _recorder = recorder;
     unawaited(recorder.run(restartedBySystem: starter == TaskStarter.system));
