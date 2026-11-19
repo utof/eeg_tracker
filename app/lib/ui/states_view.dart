@@ -13,11 +13,14 @@ import '../states/presets.dart';
 import '../states/readout.dart' show ReadSummary;
 import '../states/store.dart';
 import '../states/timers.dart' show StopWhy;
+import '../states/trial.dart';
+import '../states/weeks.dart' show StateComparison;
 import 'dream_view.dart' show ClipRow, clock, faceGround, faceInk, faceMuted;
 import 'form_parts.dart' show ChoiceQuestion;
 import 'meditation_view.dart' show MarkShape, StateMark;
 import 'parts.dart';
 import 'sound_score.dart';
+import 'states_weeks_view.dart';
 import 'theme.dart';
 
 class StatesViewModel {
@@ -48,6 +51,10 @@ class StatesViewModel {
     this.last,
     this.justEnded = false,
     this.earlier = const [],
+    this.comparison,
+    this.test,
+    this.testResults,
+    this.soundLocked = false,
   });
 
   final SoundStage stage;
@@ -92,6 +99,16 @@ class StatesViewModel {
   final SoundSession? last;
   final bool justEnded;
   final List<SoundSession> earlier;
+
+  /// The chosen state's sounds over the weeks (null: not loaded).
+  final StateComparison? comparison;
+
+  /// The chosen state's fair test under way, or its latest once the answer is open; and that answer.
+  final TrialState? test;
+  final TrialResults? testResults;
+
+  /// Today is a day of the chosen state's fair test: its sound and length are drawn, not chosen.
+  final bool soundLocked;
 
   bool get face => stage.index >= SoundStage.connecting.index && stage.index <= SoundStage.ending.index;
   bool get measuring => headbandUse == HeadbandUse.used;
@@ -207,6 +224,8 @@ class StatesView extends StatelessWidget {
     required this.onSkip,
     required this.onRate,
     required this.onInfo,
+    this.onPlanTest,
+    this.onStopTest,
   });
 
   final StatesViewModel model;
@@ -225,6 +244,10 @@ class StatesView extends StatelessWidget {
   final VoidCallback onSkip;
   final ValueChanged<int> onRate;
   final VoidCallback onInfo;
+
+  /// The fair test: open its setup; stop the one under way.
+  final VoidCallback? onPlanTest;
+  final VoidCallback? onStopTest;
 
   @override
   Widget build(BuildContext context) => model.face ? _face(context) : _page(context);
@@ -263,11 +286,20 @@ class StatesView extends StatelessWidget {
           const SizedBox(height: 12),
           Text(m.preset.why, style: muted),
           const SectionHeading('Sound'),
-          _chips<Bed>(context, [for (final b in Bed.values) (b, bedNames[b]!)], m.plan.bed, onBed, disabled: {if (m.plan.beat == Beat.none) Bed.none}),
+          if (m.soundLocked && m.test != null) ...[
+            Text(
+              'Drawn for day ${m.test!.todayIndex + 1} of your fair test. The sound and the length stay as they are today.',
+              style: text.bodyLarge?.copyWith(height: 1.4),
+            ),
+            const SizedBox(height: 14),
+          ],
+          soundChips<Bed>(context, [for (final b in Bed.values) (b, bedNames[b]!)], m.plan.bed, onBed,
+              disabled: {if (m.plan.beat == Beat.none) Bed.none}, locked: m.soundLocked),
           const SizedBox(height: 18),
           Text('Beat', style: text.bodyLarge?.copyWith(color: Night.inkMuted)),
           const SizedBox(height: 8),
-          _chips<Beat>(context, [for (final b in Beat.values) (b, beatNames[b]!)], m.plan.beat, onBeat, disabled: {if (m.plan.bed == Bed.none) Beat.none}),
+          soundChips<Beat>(context, [for (final b in Beat.values) (b, beatNames[b]!)], m.plan.beat, onBeat,
+              disabled: {if (m.plan.bed == Bed.none) Beat.none}, locked: m.soundLocked),
           const SizedBox(height: 12),
           Text(beatWhy[m.plan.beat]!, style: muted),
           const SizedBox(height: 8),
@@ -280,7 +312,7 @@ class StatesView extends StatelessWidget {
             onPlay: onListen,
           ),
           const SectionHeading('Length'),
-          _segments<int>(context, [for (final v in m.preset.minutes) (v, '$v min')], m.plan.minutes, onMinutes),
+          soundSegments<int>(context, [for (final v in m.preset.minutes) (v, '$v min')], m.plan.minutes, onMinutes, locked: m.soundLocked),
           const SectionHeading('Headband'),
           if (m.nightRunning)
             Text('The headband is recording the night, so the sound plays by its timer alone.', style: muted)
@@ -327,6 +359,10 @@ class StatesView extends StatelessWidget {
             onTap: onInfo,
           ),
           if (last != null && !m.justEnded) ..._result(context, last, heading: 'Last session'),
+          if (m.comparison != null) ...[
+            SoundLedger(comparison: m.comparison!),
+            FairTest(state: m.plan.state, test: m.test, results: m.testResults, onPlan: onPlanTest, onStop: onStopTest),
+          ],
           if (m.earlier.isNotEmpty) ...[
             const SectionHeading('Earlier sessions'),
             for (final (i, s) in m.earlier.indexed) _earlierRow(context, s, last: i == m.earlier.length - 1),
@@ -407,43 +443,11 @@ class StatesView extends StatelessWidget {
     ];
   }
 
-  Widget _chips<T extends Object>(BuildContext context, List<(T, String)> items, T value, ValueChanged<T> on, {Set<T> disabled = const {}}) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        for (final (v, label) in items)
-          ChoiceChip(
-            label: Text(label),
-            selected: v == value,
-            showCheckmark: false,
-            onSelected: disabled.contains(v) ? null : (_) => on(v),
-            materialTapTargetSize: MaterialTapTargetSize.padded,
-            selectedColor: Night.surfaceHigh,
-            backgroundColor: Night.ground,
-            side: BorderSide(color: v == value ? Night.inkMuted : Night.rule),
-            labelStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(color: v == value ? Night.ink : Night.inkMuted),
-          ),
-      ],
-    );
-  }
+  Widget _chips<T extends Object>(BuildContext context, List<(T, String)> items, T value, ValueChanged<T> on, {Set<T> disabled = const {}}) =>
+      soundChips<T>(context, items, value, on, disabled: disabled);
 
-  Widget _segments<T extends Object>(BuildContext context, List<(T, String)> choices, T value, ValueChanged<T> on) => SizedBox(
-    width: double.infinity,
-    child: SegmentedButton<T>(
-      segments: [for (final (v, l) in choices) ButtonSegment(value: v, label: Text(l))],
-      selected: {value},
-      showSelectedIcon: false,
-      onSelectionChanged: (s) => on(s.first),
-      style: SegmentedButton.styleFrom(
-        minimumSize: const Size.fromHeight(52),
-        selectedBackgroundColor: Night.surfaceHigh,
-        selectedForegroundColor: Night.ink,
-        foregroundColor: Night.inkMuted,
-        side: const BorderSide(color: Night.rule),
-      ),
-    ),
-  );
+  Widget _segments<T extends Object>(BuildContext context, List<(T, String)> choices, T value, ValueChanged<T> on) =>
+      soundSegments<T>(context, choices, value, on);
 
   Widget _earlierRow(BuildContext context, SoundSession s, {required bool last}) {
     final text = Theme.of(context).textTheme;
@@ -580,6 +584,69 @@ class StatesView extends StatelessWidget {
     }
     return parts.join(' ');
   }
+}
+
+/// The page's chips (state, bed, beat). [locked]: drawn for a fair test's day, so none can be picked; the chosen
+/// one keeps its look.
+Widget soundChips<T extends Object>(
+  BuildContext context,
+  List<(T, String)> items,
+  T value,
+  ValueChanged<T> on, {
+  Set<T> disabled = const {},
+  bool locked = false,
+}) {
+  return Wrap(
+    spacing: 8,
+    runSpacing: 8,
+    children: [
+      for (final (v, label) in items)
+        ChoiceChip(
+          label: Text(label),
+          selected: v == value,
+          showCheckmark: false,
+          onSelected: locked || disabled.contains(v) ? null : (_) => on(v),
+          materialTapTargetSize: MaterialTapTargetSize.padded,
+          selectedColor: Night.surfaceHigh,
+          disabledColor: locked && v == value ? Night.surfaceHigh : null,
+          backgroundColor: Night.ground,
+          side: BorderSide(color: v == value ? Night.inkMuted : Night.rule),
+          labelStyle: locked && v == value
+              ? WidgetStateTextStyle.resolveWith((_) => Theme.of(context).textTheme.bodyLarge!.copyWith(color: Night.ink))
+              : Theme.of(context).textTheme.bodyLarge?.copyWith(color: v == value ? Night.ink : Night.inkMuted),
+        ),
+    ],
+  );
+}
+
+/// The page's segmented rows (length, headband, screen). [locked]: as for [soundChips].
+Widget soundSegments<T extends Object>(BuildContext context, List<(T, String)> choices, T value, ValueChanged<T> on, {bool locked = false}) =>
+    SizedBox(
+      width: double.infinity,
+      child: SegmentedButton<T>(
+        segments: [for (final (v, l) in choices) ButtonSegment(value: v, label: Text(l))],
+        selected: {value},
+        showSelectedIcon: false,
+        onSelectionChanged: locked ? null : (s) => on(s.first),
+        style: _segmentStyle(locked),
+      ),
+    );
+
+ButtonStyle _segmentStyle(bool locked) {
+  final base = SegmentedButton.styleFrom(
+    minimumSize: const Size.fromHeight(52),
+    selectedBackgroundColor: Night.surfaceHigh,
+    selectedForegroundColor: Night.ink,
+    foregroundColor: Night.inkMuted,
+    side: const BorderSide(color: Night.rule),
+  );
+  if (!locked) return base;
+  // drawn, not chosen: the drawn segment keeps its look, the others fade like any disabled control
+  bool on(Set<WidgetState> s) => s.contains(WidgetState.selected);
+  return base.copyWith(
+    backgroundColor: WidgetStateProperty.resolveWith((s) => on(s) ? Night.surfaceHigh : Colors.transparent),
+    foregroundColor: WidgetStateProperty.resolveWith((s) => on(s) ? Night.ink : Night.inkMuted.withValues(alpha: 0.45)),
+  );
 }
 
 class _Note extends StatelessWidget {

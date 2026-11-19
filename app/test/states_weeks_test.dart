@@ -161,7 +161,7 @@ void main() {
       expect(row.high, closeTo(10.75, 1e-9));
     });
 
-    test('rows: the most used sound first, sessions newest last do not matter; a tie by name', () {
+    test('rows: the most played sound first; a tie by name', () {
       final list = [
         sess(t0, SoundState.relax, bed: Bed.rain, summary: sum()),
         sess(t0.add(const Duration(days: 1)), SoundState.relax, summary: sum()),
@@ -179,7 +179,7 @@ void main() {
       expect(compareSounds(SoundState.relax, [back]).rows.single.values, [1.3]);
     });
 
-    test('the words: a value, the middle half, and "not enough yet" with the count', () {
+    test('the words: a value, the middle half, and "not enough yet" with the count toward 14', () {
       final m = stateMeasures[SoundState.asleep]!;
       expect(m.show(18.4), '18 min');
       expect(stateMeasures[SoundState.relax]!.show(1.123), '+12 %');
@@ -189,14 +189,14 @@ void main() {
         sess(t0, SoundState.asleep, end: SoundEnd.asleep, drift: const {'baselineS': 70, 'onsetS': 600}),
         sess(t0.add(const Duration(days: 1)), SoundState.asleep, headband: HeadbandUse.soundOnly),
       ]).rows.single;
-      expect(rowDetail(m, few), '2 sessions, 1 with a number: not enough yet (1 of 14)');
+      expect(rowDetail(m, few), '2 sessions, 1 with a number: not enough yet');
       final many = compareSounds(SoundState.asleep, [
         for (var i = 1; i <= 14; i++)
           sess(t0.add(Duration(days: i)), SoundState.asleep, end: SoundEnd.asleep, drift: {'baselineS': 70, 'onsetS': i * 60}),
       ]).rows.single;
       expect(rowDetail(m, many), 'Half of 14 sessions between 4 and 11 min');
       expect(rowValue(m, many), '8 min');
-      expect(rowValue(m, few), 'not enough yet');
+      expect(rowValue(m, few), '1 of 14');
     });
   });
 }

@@ -334,16 +334,16 @@ StateComparison compareSounds(SoundState state, Iterable<SoundSession> sessions,
 
 String _sessions(int n) => n == 1 ? '1 session' : '$n sessions';
 
-/// A row's value: the median, or "not enough yet".
-String rowValue(StateMeasure m, SoundRow r) => r.enough ? m.show(r.median!) : 'not enough yet';
+/// A row's value: the median, or the count toward [WeeksRule.minSessions] ("5 of 14").
+String rowValue(StateMeasure m, SoundRow r) => r.enough ? m.show(r.median!) : '${r.values.length} of ${WeeksRule.minSessions}';
 
-/// A row's second line: "Half of 14 sessions between 4 and 11 min", or "2 sessions, 1 with a number: not enough yet
-/// (1 of 14)".
+/// A row's second line: "Half of 14 sessions between 4 and 11 min", or "2 sessions, 1 with a number: not enough
+/// yet".
 String rowDetail(StateMeasure m, SoundRow r) {
   final n = r.values.length, without = r.played - n;
   if (!r.enough) {
     final have = without == 0 ? '${_sessions(n)} with a number' : '${_sessions(r.played)}, ${n == 0 ? 'none' : '$n'} with a number';
-    return '$have: not enough yet ($n of ${WeeksRule.minSessions})';
+    return '$have: not enough yet';
   }
   final more = without == 0 ? '' : '; $without more without a number';
   return 'Half of ${_sessions(n)} ${m.between(r.low!, r.high!)}$more';

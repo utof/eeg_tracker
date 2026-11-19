@@ -82,6 +82,12 @@ class TrialStore {
   /// The test of [state] still under way (waiting, running or waiting for its last number), if any.
   TrialState? active(SoundState state, DateTime now) => all(now).where((s) => s.plan.state == state && !s.open).firstOrNull;
 
+  /// The test the page shows for [state]: the one under way, else the latest (its answer stays until a new test).
+  TrialState? shownFor(SoundState state, DateTime now) {
+    final mine = all(now).where((s) => s.plan.state == state);
+    return mine.where((s) => !s.open).firstOrNull ?? mine.firstOrNull;
+  }
+
   /// Draws the order and freezes the plan: the sealed file first, then the plan with the order's hash and its own.
   /// Day 1 is the day after [now]. One test per state at a time: throws a StateError when one is still under way,
   /// an ArgumentError for two equal sounds, a sound that plays nothing, a length the state does not offer or a

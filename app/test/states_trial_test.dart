@@ -123,6 +123,17 @@ void main() {
       expect(store.active(SoundState.asleep, onDay('2026-12-19', hour: 9)), isNull, reason: 'the slot is free again');
     });
 
+    test('the page shows a state\'s test under way, else its latest answer; other states keep their own', () {
+      expect(store.shownFor(SoundState.asleep, made), isNull);
+      final first = start();
+      store.stop(first.plan.id, onDay('2026-11-22', hour: 10));
+      final later = DateTime(2026, 11, 22, 11);
+      expect(store.shownFor(SoundState.asleep, later)!.phase, ExpPhase.stopped, reason: 'its answer stays until a new test');
+      final second = store.create(state: SoundState.asleep, a: pinkNone, b: pinkPulsed, minutes: 30, weeks: 4, now: later);
+      expect(store.shownFor(SoundState.asleep, later)!.plan.id, second.plan.id);
+      expect(store.shownFor(SoundState.relax, later), isNull);
+    });
+
     test('Stop keeps the days that are over, opens the answer marked as stopped and frees the slot', () {
       final s = start();
       final at = onDay('2026-11-30', hour: 10);
