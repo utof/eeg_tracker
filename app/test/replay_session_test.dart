@@ -135,4 +135,49 @@ void main() {
     expect(seen, {Arm.live, Arm.replay}, reason: 'a block of 4 holds both');
     expect(cs.reveal(), isNull, reason: 'locked until 12');
   }, timeout: const Timeout(Duration(minutes: 3)));
+
+  test('the session that completes a set of 12 is in the replay check\'s test of the silent minutes at once', () async {
+    final root = Directory.systemTemp.createTempSync('check');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final store = MeditationStore(Directory('${root.path}/meditations'));
+    final cs = CheckStore(root, SessionKind.meditation);
+    Future<MeditationController> run(int seed) async {
+      final c = MeditationController(
+        finder: Finder([DemoBand(DemoSignal(seed))]),
+        sound: SilentSound.new,
+        store: store,
+        checkStore: cs,
+        timing: fast,
+        clock: () => DateTime.now().add(Duration(minutes: 10 * seed)),
+      );
+      await c.start(const Duration(minutes: 1));
+      await until(c, () => c.stage == Stage.report || c.stage == Stage.rating, max: const Duration(seconds: 40));
+      return c;
+    }
+
+    for (var i = 0; i < CheckRule.donorsFirst; i++) {
+      (await run(i + 1)).dispose();
+    }
+    cs.freeze(DateTime.now());
+    final arms = cs.sealed!.arms;
+    for (var i = 0; i < CheckRule.revealEvery - 1; i++) {
+      cs.add(CheckRecord(
+        index: i,
+        stem: 'made-up-$i',
+        start: DateTime(2026, 11, 1).add(Duration(days: i)),
+        arm: arms[i],
+        runS: 60,
+        outcome: 0.1,
+        silent: arms[i] == Arm.live ? 0.3 : 0.1,
+        excludedShare: 0.1,
+        asleepS: 0,
+      ));
+    }
+    final c = await run(30);
+    expect(cs.records, hasLength(CheckRule.revealEvery));
+    expect(cs.records.last.silent, c.report!.silent!.alpha);
+    expect(c.learning!.tested, isNotNull);
+    expect(c.learning!.lines, contains(startsWith('Tested by the replay check (sessions 1-12)')));
+    c.dispose();
+  }, timeout: const Timeout(Duration(minutes: 2)));
 }

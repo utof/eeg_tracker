@@ -736,9 +736,9 @@ class MeditationController extends ChangeNotifier {
       }
     }
     comparison = compareWithEarlier(summary, earlier).line;
-    if (kind == SessionKind.meditation) learning = learningVerdict([...earlier, summary], tested: _silentTest());
     report = summary;
-    _keepCheckRecord(summary, stem);
+    _keepCheckRecord(summary, stem); // first, so a set it completes is in the replay check's test below
+    if (kind == SessionKind.meditation) learning = learningVerdict([...earlier, summary], tested: _silentTest());
     _set(kind == SessionKind.alphaTheta || asksGuess ? Stage.rating : Stage.report, '');
   }
 
