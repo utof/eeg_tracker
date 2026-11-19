@@ -25,11 +25,13 @@ void main() {
   late OwnHeadband band;
   late List<String> notes;
 
+  late OwnFinder finder;
+
   /// A headband object reached directly; its notes go to [notes]. Its tries take 200 ms while the headband is away.
   Future<void> connect({Duration healFor = const Duration(seconds: 3)}) async {
     hb = FakeHeadband();
     slow = SlowConnect(hb, whileAway: _ms * 200);
-    final finder = OwnFinder(
+    finder = OwnFinder(
       transport: slow,
       settings: const OwnBleSettings(address: fakeAddress, name: 'BB Black'),
       timing: OwnTiming(
@@ -101,5 +103,34 @@ void main() {
     final line = notes.firstWhere((l) => l.startsWith('reconnected'));
     expect(line, isNot(contains('0.0 s away')));
     expect(line, startsWith('reconnected (try 1) after the link closed while the signal was off'));
+  });
+
+  group('one connection try at a time (a let-go object\'s try cannot be cancelled)', () {
+    /// The recorder gives a stalled run up while the object is still mending: it lets the object go (its try goes on
+    /// by itself) and reaches the same headband with a new object.
+    Future<void> replaceWhileATryRuns() async {
+      await band.startSignal();
+      await waitFor(() => hb.packets > 20);
+      hb.drop();
+      await waitFor(() => slow.inFlight == 1);
+      await band.disconnectAndDispose();
+      band = await finder.connectDirect(const BandId(name: 'BB Black', address: fakeAddress)) as OwnHeadband;
+    }
+
+    test('the headband stays away: the new object\'s try starts after the old one\'s ended', () async {
+      await connect();
+      hb.dropFor = _ms * 600;
+      await expectLater(replaceWhileATryRuns(), throwsA(anything)); // still away: the new try fails too
+      expect(slow.most, 1, reason: 'two tries for one address at once');
+    });
+
+    test('the old try connects late: the new one waits until that link is let go', () async {
+      await connect();
+      hb.dropFor = _ms * 100; // back before the old try ends
+      await replaceWhileATryRuns();
+      expect(slow.most, 1, reason: 'a try started while the old object still held a link');
+      expect(hb.link, isNotNull);
+      expect(await band.isInRange(), isTrue);
+    });
   });
 }

@@ -38,15 +38,16 @@ class SlowConnect implements BleTransport {
     tries++;
     inFlight++;
     _count();
+    final BleLink link;
     try {
       if (hb.away) await Future<void>.delayed(whileAway);
-      final link = await hb.connect(address, timeout: timeout, onLost: onLost);
-      open++;
-      _count();
-      return _CountedLink(link, this);
+      link = await hb.connect(address, timeout: timeout, onLost: onLost);
     } finally {
       inFlight--;
     }
+    open++;
+    _count();
+    return _CountedLink(link, this);
   }
 }
 
