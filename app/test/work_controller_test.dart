@@ -187,6 +187,22 @@ void main() {
     c.dispose();
   });
 
+  test('an unanswered hint goes away when the headband comes off for a break', () async {
+    final band = WorkBand(start: DateTime(2026, 11, 19, 10).millisecondsSinceEpoch / 1000);
+    final c = make(band);
+    await c.start();
+    await until(() => c.level == DrowsyLevel.alert);
+    band.mode = Mode.drowsy;
+    await until(() => c.hint != null);
+    band.mode = Mode.off;
+    await until(() => c.onBreak);
+    expect(c.hint, isNull);
+    expect(c.planner!.hints.single.answer, isNull, reason: 'not answered; the break itself marks it taken later');
+    await c.stop();
+    expect(c.planner!.hints.single.taken, isTrue);
+    c.dispose();
+  });
+
   test('the eyes-closed minute comes first with its two cues and sets the closed-eyes alpha', () async {
     final band = WorkBand(start: DateTime(2026, 11, 19, 10).millisecondsSinceEpoch / 1000)..mode = Mode.eyesClosed;
     final sound = SilentWorkSound();

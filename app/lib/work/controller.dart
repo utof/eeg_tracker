@@ -357,6 +357,11 @@ class WorkController extends ChangeNotifier {
     if (p != null && stage.index >= WorkStage.calibrating.index && stage != WorkStage.ending) {
       final h = p.tick(now, worn: worn);
       if (h != null) _showHint(h);
+      // the headband came off for a break: the hint no longer needs an answer
+      if (p.onBreak && hint != null) {
+        hint = null;
+        _rehold();
+      }
     }
     if (_savedAt == null || now.difference(_savedAt!) >= timing.saveEvery) _save(now);
     if (_heldAt != null && now.difference(_heldAt!) >= timing.holdEvery) _rehold();
