@@ -3,7 +3,8 @@
 // that went out of range, reconnect straight to the same headband after 2, 5, 10 s and then every 10 s with a scan
 // every third try, the stream restarted once if nothing arrives in 8 s, every SDK call with a deadline.
 // It hands every batch over as it arrived; finding holes in the signal is the session's job.
-// (The meditation controller still has its own copy of these rules; moving it onto this class is a later cleanup.)
+// Used by the dream catcher, sound for states, the nap coach, the hands-free calibration, and the meditation and
+// alpha-theta sessions (DECISIONS 270): the reconnect rules live here and nowhere else.
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -38,7 +39,14 @@ class LinkTiming {
 enum LinkEvent { drop, reconnectTry, reconnected, streamRestarted }
 
 class BandLink {
-  BandLink({required this.finder, this.timing = const LinkTiming(), required this.onBatch, this.onEvent, DateTime Function()? clock})
+  BandLink({
+    required this.finder,
+    this.timing = const LinkTiming(),
+    required this.onBatch,
+    this.onEvent,
+    this.onTry,
+    DateTime Function()? clock,
+  })
     : _now = clock ?? DateTime.now;
 
   final HeadbandFinder finder;
@@ -49,6 +57,10 @@ class BandLink {
 
   /// Drops, reconnect tries and restarts, with a plain line for the log.
   final void Function(LinkEvent event, String line)? onEvent;
+
+  /// Each reconnect try with its number, whether it was a scan, and whether it got a headband (for a log that
+  /// keeps these as fields); fires just before the [LinkEvent.reconnectTry] line.
+  final void Function(int tries, bool scan, bool connected)? onTry;
   final DateTime Function() _now;
 
   Headband? _band;
@@ -171,6 +183,7 @@ class BandLink {
       } catch (_) {
         band = null;
       }
+      onTry?.call(tries, scan, band != null);
       onEvent?.call(LinkEvent.reconnectTry, 'reconnect try $tries (${scan ? 'scan' : 'direct'}): ${band == null ? 'failed' : 'connected'}');
       if (band == null) continue;
       _band = band;
