@@ -71,6 +71,28 @@ void main() {
     c.dispose();
   });
 
+  test('a clock correction moves nothing: session time runs on a monotonic clock', () async {
+    var wall = DateTime(2026, 11, 18, 14);
+    var mono = Duration.zero;
+    final sound = SilentStateSound();
+    final c = StatesController(
+      finder: OneFinder(null),
+      sound: () => sound,
+      store: store,
+      timing: fast,
+      clock: () => wall,
+      monotonic: () => mono,
+    );
+    await c.start(SoundPlan.of(SoundState.relax), useHeadband: false);
+    wall = wall.add(const Duration(hours: 1)); // the phone's clock corrected an hour ahead
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(c.stage, SoundStage.playing, reason: 'no fade and no end from the wall clock');
+    expect(c.seconds, lessThan(1));
+    mono += const Duration(seconds: 581);
+    await until(c, () => c.stage == SoundStage.fading);
+    c.dispose();
+  });
+
   test("a session of a fair test's day keeps the test's tag; the next session has none", () async {
     var now = DateTime(2026, 11, 20, 10);
     final sound = SilentStateSound();

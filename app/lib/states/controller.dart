@@ -17,8 +17,9 @@
 // it back, and a look left then right marks a moment (as a double clench does when there is no sound to pause); each
 // with a soft tone, never while the drift-off detector says probably asleep.
 //
-// Time: seconds after lights off are the larger of the samples received (holes held at their length) and the clock,
-// so a test can stream a session in a fraction of a second, and a headband out of range does not stop the timers.
+// Time: seconds after lights off are the larger of the samples received (holes held at their length) and a monotonic
+// clock (session_clock.dart: a correction of the phone's clock moves nothing), so a test can stream a session in a
+// fraction of a second, and a headband out of range does not stop the timers.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -36,6 +37,7 @@ import '../meditation/controller.dart' show gapPauseS, gapSamples;
 import '../recorder/chunk_writer.dart';
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
+import '../session_clock.dart';
 import '../session_keeper.dart';
 import '../sound/gesture_tone.dart';
 import '../sound/state_sound.dart';
@@ -76,11 +78,14 @@ class StatesController extends ChangeNotifier {
     this.timing = const StatesTiming(),
     this.gestureTone,
     DateTime Function()? clock,
+    Duration Function()? monotonic,
   }) : _makeSound = sound,
-       _now = clock ?? DateTime.now;
+       _now = clock ?? DateTime.now,
+       _clock = SessionClock(wall: clock, monotonic: monotonic);
 
   final HeadbandFinder finder;
   final StateSound Function() _makeSound;
+  final SessionClock _clock;
 
   /// The hands-free confirmation tone (null: none).
   final GestureTone Function()? gestureTone;
@@ -172,6 +177,7 @@ class StatesController extends ChangeNotifier {
   DriftOff? _drift;
   HandsFree? _hands;
   DateTime? _lightsOffAt;
+  Duration? _lightsOffMono;
   int? _soundStartS;
   int? _soundStartK;
   int? _fadeFromS;
@@ -228,7 +234,7 @@ class StatesController extends ChangeNotifier {
       _feed = SpectrumFeed();
       _readout = Readout();
       if (plan.state == SoundState.asleep) _drift = DriftOff(0); // lights off: the first sample
-      _lightsOffAt = _now();
+      _lightsOff();
       await link.startSignal();
       _ticker = Timer.periodic(timing.tick, (_) => _tick());
       _event('quiet minute (${plan.preset.eyesClosed ? 'eyes closed' : 'eyes open'})');
@@ -297,6 +303,7 @@ class StatesController extends ChangeNotifier {
     _hands = null;
     paused = false;
     _lightsOffAt = null;
+    _lightsOffMono = null;
     _soundStartS = null;
     _soundStartK = null;
     _fadeFromS = null;
@@ -322,17 +329,22 @@ class StatesController extends ChangeNotifier {
 
   Future<void> _soundOnly(String why, String note) async {
     headband = why;
-    _lightsOffAt = _now();
+    _lightsOff();
     _ticker = Timer.periodic(timing.tick, (_) => _tick());
     message = note;
     await _startSound(note: note);
   }
 
+  void _lightsOff() {
+    _lightsOffAt = _now();
+    _lightsOffMono = _clock.now;
+  }
+
   double _t() {
-    final at = _lightsOffAt;
+    final at = _lightsOffMono;
     if (at == null) return 0;
     final samples = (_seen?.n ?? 0) / fs;
-    return math.max(samples, _now().difference(at).inMicroseconds / 1e6);
+    return math.max(samples, _clock.secondsSince(at));
   }
 
   // ---- the sound ----

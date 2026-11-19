@@ -302,6 +302,26 @@ void main() {
     c.dispose();
   });
 
+  test('a clock correction mid-session is not a hole in the signal: arrivals are timed on a monotonic clock', () async {
+    var wall = DateTime(2026, 11, 19, 21);
+    final band = DemoBand(DemoSignal(7)), sound = SilentSound();
+    final c = MeditationController(
+      finder: Finder([band]),
+      sound: () => sound,
+      timing: fast,
+      silentBlock: Duration.zero,
+      clock: () => wall,
+      monotonic: () => Duration.zero,
+    );
+    await c.start(const Duration(minutes: 1));
+    await until(c, () => c.stage == Stage.running);
+    wall = wall.add(const Duration(seconds: 30)); // the phone's clock corrected half a minute ahead
+    await until(c, () => c.stage == Stage.report);
+    final gaps = [for (final l in c.session!.log.lines) if (l['type'] == 'gap') l];
+    expect(gaps, isEmpty, reason: 'the signal never stopped');
+    c.dispose();
+  });
+
   test('the silent minutes: the sound stops after the length, the headband goes on, the block has its number', () async {
     final dir = Directory.systemTemp.createTempSync('meditation');
     addTearDown(() => dir.deleteSync(recursive: true));

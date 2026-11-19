@@ -393,6 +393,34 @@ void main() {
       failed.dispose();
     });
 
+    test('a clock correction does not move the wake: the nap counts on a monotonic clock', () async {
+      var wall = DateTime(2026, 11, 19, 14);
+      var mono = Duration.zero;
+      final band = DriftBand((t) => 1);
+      final c = NapController(
+        finder: OneFinder(band),
+        sound: SilentNapSound.new,
+        store: store,
+        recordingsDir: recordings,
+        scale: scaleNow,
+        timing: fast,
+        clock: () => wall,
+        monotonic: () => mono,
+      );
+      await c.start(lengthMin: 20);
+      band.paused = true;
+      final at = c.seconds;
+      wall = wall.add(const Duration(hours: 2)); // the phone's clock corrected two hours ahead
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(c.stage, NapStage.resting, reason: 'not woken by the wall clock');
+      expect(c.seconds, closeTo(at, 1));
+      mono += const Duration(minutes: 21);
+      await until(c, () => c.stage == NapStage.waking);
+      expect(c.end, NapEnd.length);
+      await c.stop();
+      c.dispose();
+    });
+
     test('Stop while the sound starts: the sound that just started is stopped too (no engine left open)', () async {
       final band = DriftBand((t) => 1);
       final sound = _GatedNapSound();

@@ -9,6 +9,8 @@
 //
 // Time: the session length counts seconds of signal after calibration (the core's sample clock), so a drop
 // pauses the countdown instead of eating the session, and a test can run a session in a fraction of a second.
+// Arrivals and pauses are timed on a monotonic clock (session_clock.dart): a correction of the phone's clock is
+// not a hole in the signal.
 //
 // Beside the feedback core, the shared detectors (app/lib/detectors) see the same samples: blinks, eye movements,
 // jaw and movement bursts, epoch quality, and the drift-off detector, whose "lights off" is the calibration's
@@ -50,6 +52,7 @@ import '../recorder/chunk_writer.dart' show Sample, fileStem;
 import '../recorder/headband.dart' show HeadbandFinder;
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
 import '../handsfree/live.dart';
+import '../session_clock.dart';
 import '../sound/audio_route.dart';
 import '../sound/feedback_sound.dart';
 import '../sound/gesture_tone.dart';
@@ -156,9 +159,13 @@ class MeditationController extends ChangeNotifier {
     this.audioRoute,
     this.routeTimeout = const Duration(seconds: 2),
     DateTime Function()? clock,
+    Duration Function()? monotonic,
   }) : _makeSound = sound,
        _makeAtSound = alphaThetaSound ?? SilentSessionSound.new,
-       _now = clock ?? DateTime.now;
+       _now = clock ?? DateTime.now,
+       _clock = SessionClock(wall: clock, monotonic: monotonic);
+
+  final SessionClock _clock;
 
   final HeadbandFinder finder;
   final FeedbackSound Function() _makeSound;
@@ -289,9 +296,9 @@ class MeditationController extends ChangeNotifier {
   int _lostSamples = 0;
   DateTime? _startedAt;
   Timer? _ticker;
-  DateTime? _lastData;
-  DateTime? _signalAt;
-  DateTime _notifiedAt = DateTime.fromMillisecondsSinceEpoch(0);
+  Duration? _lastData;
+  Duration? _signalAt;
+  Duration _notifiedAt = const Duration(days: -1);
   int? _lastPack;
   int _closedFromN = 0;
   bool _gapPending = false;
@@ -364,7 +371,7 @@ class MeditationController extends ChangeNotifier {
       calPhase = 'open';
       calSecondsLeft = Cal.openS.toInt();
       await link.startSignal();
-      _signalAt = _now();
+      _signalAt = _clock.now;
       _ticker = Timer.periodic(timing.tick, (_) => _tick());
       _set(Stage.calibrating, '');
     } on TimeoutException catch (e) {
@@ -475,11 +482,11 @@ class MeditationController extends ChangeNotifier {
     comparison = '';
   }
 
-  void _onBatch(DateTime now, List<Sample> batch) {
+  void _onBatch(DateTime _, List<Sample> batch) {
     final s = _session;
     if (s == null || _ended || batch.isEmpty) return;
-    final last = _lastData;
-    if (last != null && now.difference(last).inMicroseconds / 1e6 > gapPauseS + batch.length / fs) {
+    final now = _clock.now, last = _lastData;
+    if (last != null && (now - last).inMicroseconds / 1e6 > gapPauseS + batch.length / fs) {
       _gapPending = true;
       _lostSamples = 0; // unknown length
     }
@@ -515,7 +522,7 @@ class MeditationController extends ChangeNotifier {
       _onStep(st.r, st.control);
     }
     if (_quiet) _quiet = false;
-    if (now.difference(_notifiedAt) >= timing.tick) _notify();
+    if (now - _notifiedAt >= timing.tick) _notify();
   }
 
   /// The core's steps with the control each run step would play live.
@@ -634,8 +641,8 @@ class MeditationController extends ChangeNotifier {
 
   void _tick() {
     if (_ended) return;
-    final now = _now(), last = _lastData;
-    final quiet = now.difference(last ?? _signalAt ?? now);
+    final now = _clock.now, last = _lastData;
+    final quiet = now - (last ?? _signalAt ?? now);
     if (quiet > timing.noDataAfter) {
       if (!_quiet && _silent == null) {
         _quiet = true;
@@ -810,7 +817,7 @@ class MeditationController extends ChangeNotifier {
 
   void _notify() {
     if (_disposed) return;
-    _notifiedAt = _now();
+    _notifiedAt = _clock.now;
     notifyListeners();
   }
 

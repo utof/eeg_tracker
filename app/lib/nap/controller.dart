@@ -17,8 +17,9 @@
 // Hands-free (DECISIONS 244-246): with the owner's switch on, a double clench or a look left then right marks a
 // moment in the nap's recording, with a soft tone; never while the drift-off detector says probably asleep.
 //
-// Time: seconds after lights off are the larger of the samples received (holes held at their length) and the clock,
-// so a test can stream a nap in a fraction of a second, and a headband out of range does not stop the timer.
+// Time: seconds after lights off are the larger of the samples received (holes held at their length) and a monotonic
+// clock (session_clock.dart: a correction of the phone's clock moves nothing), so a test can stream a nap in a
+// fraction of a second, and a headband out of range does not stop the timer.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -36,6 +37,7 @@ import '../meditation/controller.dart' show gapPauseS, gapSamples;
 import '../recorder/chunk_writer.dart';
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
+import '../session_clock.dart';
 import '../session_keeper.dart';
 import '../sleep/live_stager.dart';
 import '../sound/gesture_tone.dart';
@@ -103,8 +105,12 @@ class NapController extends ChangeNotifier {
     this.gestureTone,
     this.keeper,
     DateTime Function()? clock,
+    Duration Function()? monotonic,
   }) : _makeSound = sound,
-       _now = clock ?? DateTime.now;
+       _now = clock ?? DateTime.now,
+       _clock = SessionClock(wall: clock, monotonic: monotonic);
+
+  final SessionClock _clock;
 
   final HeadbandFinder finder;
   final NapSound Function() _makeSound;
@@ -204,12 +210,13 @@ class NapController extends ChangeNotifier {
   LiveStager? _stager;
   NapRules? _rules;
   DateTime? _lightsOffAt;
+  Duration? _lightsOffMono;
   double? _wakeS, _upS;
   int _cues = 0;
   Timer? _ticker;
   int _ticks = 0;
   DateTime? _lastArrival;
-  DateTime? _lastSave;
+  Duration? _lastSave;
   int? _lastPack;
   bool _gapPending = false;
   int _lostSamples = 0;
@@ -272,7 +279,7 @@ class NapController extends ChangeNotifier {
               deadline: timing.modelDeadline,
             );
       _lightsOffAt = _now();
-      _lastSave = _lightsOffAt;
+      _lastSave = _lightsOffMono = _clock.now;
       await link.startSignal();
       _ticker = Timer.periodic(timing.tick, (_) => _tick());
       _set(NapStage.resting, '');
@@ -340,6 +347,7 @@ class NapController extends ChangeNotifier {
     _stager = null;
     _rules = null;
     _lightsOffAt = null;
+    _lightsOffMono = null;
     _wakeS = null;
     _upS = null;
     _cues = 0;
@@ -359,10 +367,10 @@ class NapController extends ChangeNotifier {
   }
 
   double _t() {
-    final at = _lightsOffAt;
+    final at = _lightsOffMono;
     if (at == null) return 0;
     final samples = (_seen?.n ?? 0) / fs;
-    return math.max(samples, _now().difference(at).inMicroseconds / 1e6);
+    return math.max(samples, _clock.secondsSince(at));
   }
 
   // ---- the EEG file ----
@@ -512,8 +520,8 @@ class NapController extends ChangeNotifier {
     }
     if (stage == NapStage.waking) _ring(t);
     final saved = _lastSave;
-    if (saved != null && _now().difference(saved) >= timing.saveEvery) {
-      _lastSave = _now();
+    if (saved != null && _clock.now - saved >= timing.saveEvery) {
+      _lastSave = _clock.now;
       _save();
     }
     _notify();

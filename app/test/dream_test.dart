@@ -543,6 +543,35 @@ void main() {
       c.dispose();
     });
 
+    test('a clock correction does not move the 45-minute cap: the session counts on a monotonic clock', () async {
+      var wall = DateTime(2026, 11, 19, 23);
+      var mono = Duration.zero;
+      final band = DriftBand((_) => 1), sound = SilentDreamSound();
+      final c = DreamController(
+        finder: OneFinder(band),
+        sound: () => sound,
+        mic: FakeMic(spoken),
+        store: store,
+        recordingsDir: recordings,
+        timing: fast,
+        random: () => 1,
+        clock: () => wall,
+        monotonic: () => mono,
+      );
+      await c.start(rounds: 4);
+      await until(c, () => c.seconds > 30);
+      band.paused = true;
+      final at = c.seconds;
+      wall = wall.add(const Duration(minutes: 46)); // the phone's clock corrected ahead
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(c.active, isTrue, reason: 'not ended by the wall clock');
+      expect(c.seconds, closeTo(at, 1));
+      mono += const Duration(minutes: 46);
+      await until(c, () => c.stage == DreamStage.done);
+      expect(c.last!.endWhy, DreamEnd.cap);
+      c.dispose();
+    });
+
     test('45 minutes after lights off the session ends even with the headband silent', () async {
       var shift = Duration.zero;
       final band = DriftBand((_) => 1), mic = FakeMic(spoken), sound = SilentDreamSound();

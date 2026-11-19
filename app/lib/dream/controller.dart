@@ -15,9 +15,9 @@
 // gesture marks a moment. Off while the drift-off detector says probably asleep, except while the question waits
 // for its answer: the question has just woken you.
 //
-// Time: seconds after lights off are the larger of the samples received (holes held at their length) and the
-// clock, so a test can stream a session in a fraction of a second, and a headband out of range does not stop the
-// timers or the 45-minute cap.
+// Time: seconds after lights off are the larger of the samples received (holes held at their length) and a monotonic
+// clock (session_clock.dart: a correction of the phone's clock moves nothing), so a test can stream a session in a
+// fraction of a second, and a headband out of range does not stop the timers or the 45-minute cap.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -34,6 +34,7 @@ import '../meditation/controller.dart' show gapPauseS, gapSamples;
 import '../recorder/chunk_writer.dart';
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
+import '../session_clock.dart';
 import '../sound/gesture_tone.dart';
 import 'audio.dart';
 import 'band_link.dart';
@@ -88,10 +89,14 @@ class DreamController extends ChangeNotifier {
     this.timing = const DreamTiming(),
     this.gestureTone,
     DateTime Function()? clock,
+    Duration Function()? monotonic,
     double Function()? random,
   }) : _makeSound = sound,
        _now = clock ?? DateTime.now,
+       _clock = SessionClock(wall: clock, monotonic: monotonic),
        _random = random ?? math.Random().nextDouble;
+
+  final SessionClock _clock;
 
   final HeadbandFinder finder;
   final DreamSound Function() _makeSound;
@@ -166,6 +171,7 @@ class DreamController extends ChangeNotifier {
   DriftOff? _drift;
   RoundPlan? _plan;
   DateTime? _lightsOffAt;
+  Duration? _lightsOffMono;
   final List<DreamRound> _rounds = [];
   Map<String, String> _prompts = const {};
   int _epochsSeen = 0;
@@ -221,6 +227,7 @@ class DreamController extends ChangeNotifier {
       _listen(_seen!);
       _drift = DriftOff(0); // lights off: the first sample
       _lightsOffAt = _now();
+      _lightsOffMono = _clock.now;
       await link.startSignal();
       _ticker = Timer.periodic(timing.tick, (_) => _tick());
       _set(DreamStage.baseline, '');
@@ -258,6 +265,7 @@ class DreamController extends ChangeNotifier {
     _hands = null;
     _plan = null;
     _lightsOffAt = null;
+    _lightsOffMono = null;
     _rounds.clear();
     _prompts = const {};
     _epochsSeen = 0;
@@ -281,10 +289,10 @@ class DreamController extends ChangeNotifier {
   }
 
   double _t() {
-    final at = _lightsOffAt;
+    final at = _lightsOffMono;
     if (at == null) return 0;
     final samples = (_seen?.n ?? 0) / fs;
-    return math.max(samples, _now().difference(at).inMicroseconds / 1e6);
+    return math.max(samples, _clock.secondsSince(at));
   }
 
   // ---- the EEG file ----
