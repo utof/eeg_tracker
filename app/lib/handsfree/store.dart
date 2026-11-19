@@ -176,3 +176,14 @@ class HandsFreeStore {
     _events.writeAsStringSync('${jsonEncode({'at': isoLocal(at), 'event': text})}\n', mode: FileMode.append, flush: true);
   }
 }
+
+/// What the night recorder uses (DECISIONS 247): the owner's calibrated settings while the switch is on and the double
+/// clench is usable, else null. Never throws: a failure here must not cost the drift-off detector.
+GestureSettings? nightGestures(Directory filesDir) {
+  try {
+    final s = HandsFreeStore(filesDir).load().active;
+    return s != null && s.clenchOn ? s : null;
+  } catch (_) {
+    return null;
+  }
+}

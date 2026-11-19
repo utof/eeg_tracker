@@ -8,11 +8,18 @@
 // samples rounded to the files' float32 and clipped like the BDF, so live and morning find the same onset when the
 // night is the recorder's own files. Lights off counts from the night's first sample until the night screen's
 // Lights off; each tap starts it again on the night's next 30 s epoch (sleep/drift.dart has the same rule).
+//
+// Hands-free (DECISIONS 247): with the owner's switch on, the same detectors also feed the gesture recogniser, and a
+// double clench while not probably asleep becomes a `hands-free: moment (double clench)` marker. Only the double
+// clench: dream sleep is full of left-right eye movements. No tone (the recorder has no sound). It runs inside this
+// class, so the recorder's guard covers it like the detector: an exception or too much time stops both.
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import '../detectors/detectors.dart';
 import '../detectors/drift_off.dart';
+import '../detectors/gestures.dart';
+import '../handsfree/live.dart';
 import '../sleep/night_signal.dart' show limitMicrovolts, minGapSeconds, roundHalfEven, sampleRate;
 import 'chunk_writer.dart';
 
@@ -49,7 +56,24 @@ abstract interface class DriftWatch {
   int get samples;
 }
 
+/// The marker a hands-free double clench writes into the night.
+const String handsFreeMoment = 'hands-free: moment (double clench)';
+
 class LiveDrift implements DriftWatch {
+  /// [handsFree]: the owner's calibrated gestures while the switch is on; only its double clench is used.
+  LiveDrift({GestureSettings? handsFree}) {
+    final hf = handsFree;
+    if (hf == null || !hf.clenchOn) return;
+    hands = HandsFree(
+      GestureSettings(clenchX: hf.clenchX, glanceUv: hf.glanceUv, leftSign: hf.leftSign, glanceOn: false),
+      onGesture: (_) => _events.add(handsFreeMoment),
+      asleep: () => driftOff?.state == DriftState.asleep,
+    )..attach(_det);
+  }
+
+  /// The hands-free double clench (null: off), for the night's closing log line.
+  HandsFree? hands;
+
   final Float32List _f32 = Float32List(4);
   final Float64List _row = Float64List(4);
   late final Detectors _det = Detectors(onSecond: _second);

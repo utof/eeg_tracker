@@ -21,6 +21,7 @@ import 'package:eeg_tracker/nap/controller.dart';
 import 'package:eeg_tracker/handsfree/store.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart' show Sample;
 import 'package:eeg_tracker/recorder/headband.dart';
+import 'package:eeg_tracker/recorder/live_drift.dart';
 import 'package:eeg_tracker/sound/feedback_sound.dart';
 import 'package:eeg_tracker/sound/gesture_tone.dart';
 import 'package:eeg_tracker/sound/state_sound.dart';
@@ -425,6 +426,57 @@ void main() {
         'hands-free: 2 gestures acted on, 0 ignored while probably asleep',
       ]);
       c.dispose();
+    });
+  });
+
+  group('the night recording', () {
+    /// The night recorder's live detector fed GestureBand batches of 125 samples, arriving as they would.
+    (LiveDrift, List<String>) night(GestureSettings? settings, List<Drawn> drawn, double seconds) {
+      final band = GestureBand(drawn), live = LiveDrift(handsFree: settings), events = <String>[];
+      final start = DateTime(2026, 11, 19, 23).millisecondsSinceEpoch;
+      for (var sent = 0; sent < seconds * fs; sent += 125) {
+        final rows = [
+          for (var i = 0; i < 125; i++)
+            () {
+              final r = band._row();
+              return (pack: (sent + i) % 2048, o1: r[0] * 1e-6, o2: r[1] * 1e-6, t3: r[2] * 1e-6, t4: r[3] * 1e-6);
+            }(),
+        ];
+        live.add(DateTime.fromMillisecondsSinceEpoch(start + (sent + 125) * 4), rows);
+        events.addAll(live.takeEvents());
+      }
+      return (live, events);
+    }
+
+    test('a double clench is a moment marker; a glance is not (dream sleep is full of them)', () {
+      final (live, events) = night(calibrated, [const DrawnClench(100), const DrawnGlance(120)], 130);
+      expect(events.where((e) => e.startsWith('hands-free')), [handsFreeMoment]);
+      expect([live.hands!.heard, live.hands!.ignoredAsleep], [1, 0]);
+    });
+
+    test('switch off, or no usable double clench: nothing listens', () {
+      expect(night(null, [const DrawnClench(100)], 110).$1.hands, isNull);
+      expect(night(const GestureSettings(clenchOn: false), [const DrawnClench(100)], 110).$1.hands, isNull);
+    });
+
+    test('the recorder reads the switch and the calibration from the app\'s folder, never throwing', () {
+      expect(nightGestures(root), isNull);
+      final s = HandsFreeStore(root)..setOn(true, DateTime(2026, 11, 19, 22));
+      expect(nightGestures(root), isNull, reason: 'not calibrated');
+      CalibrationRecord cal(GestureSettings g) => CalibrationRecord(
+        made: DateTime(2026, 11, 19, 21),
+        settings: g,
+        tries: const [],
+        clenchSeen: g.clenchOn ? 3 : 0,
+        glanceSeen: 3,
+        leftKnown: true,
+        others: 0,
+      );
+      s.saveCalibration(cal(calibrated));
+      expect(nightGestures(root)!.clenchX, 15);
+      s.saveCalibration(cal(const GestureSettings(clenchOn: false)));
+      expect(nightGestures(root), isNull, reason: 'only the glance works');
+      expect(nightGestures(Directory('${root.path}/missing')), isNull);
     });
   });
 }
