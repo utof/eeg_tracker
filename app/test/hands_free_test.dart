@@ -14,6 +14,7 @@ import 'package:eeg_tracker/dream/controller.dart';
 import 'package:eeg_tracker/dream/store.dart';
 import 'package:eeg_tracker/export/store.dart' show isExported;
 import 'package:eeg_tracker/feedback/demo.dart';
+import 'package:eeg_tracker/handsfree/calibration_controller.dart';
 import 'package:eeg_tracker/handsfree/live.dart';
 import 'package:eeg_tracker/meditation/controller.dart';
 import 'package:eeg_tracker/nap/audio.dart';
@@ -22,6 +23,7 @@ import 'package:eeg_tracker/handsfree/store.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart' show Sample;
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/live_drift.dart';
+import 'package:eeg_tracker/sound/check_in_sound.dart';
 import 'package:eeg_tracker/sound/feedback_sound.dart';
 import 'package:eeg_tracker/sound/gesture_tone.dart';
 import 'package:eeg_tracker/sound/state_sound.dart';
@@ -477,6 +479,69 @@ void main() {
       s.saveCalibration(cal(const GestureSettings(clenchOn: false)));
       expect(nightGestures(root), isNull, reason: 'only the glance works');
       expect(nightGestures(Directory('${root.path}/missing')), isNull);
+    });
+  });
+
+  group('calibration', () {
+    const calFast = CalTiming(
+      link: LinkTiming(contactFor: Duration(milliseconds: 5), settle: Duration.zero, reconnectWaits: [Duration(milliseconds: 5)]),
+      tick: Duration(milliseconds: 20),
+    );
+
+    test('six cued tries: the levels are tuned, each try is judged, and it is saved with its EEG', () async {
+      final band = GestureBand([
+        for (final at in [32, 40, 48]) DrawnClench(at + 0.8),
+        for (final at in [56, 64, 72]) DrawnGlance(at + 0.6),
+      ]);
+      final sound = SilentCheckInSound(), store = HandsFreeStore(root);
+      final c = CalibrationController(finder: OneFinder(band), sound: () => sound, store: store, timing: calFast);
+      final cued = <int>[];
+      var lanes = false;
+      c.addListener(() {
+        final t = c.tryNow;
+        if (t != null && (cued.isEmpty || cued.last != t)) cued.add(t);
+        if (c.stage == CalStage.trying && c.jaw.length == 100 && c.jaw.any((v) => v > c.clenchLine)) lanes = true;
+      });
+      expect(c.clenchLine, GestureRule.clenchX, reason: 'the planning line before any calibration');
+      await c.start();
+      await until(() => c.stage == CalStage.result, 'the result');
+      expect(cued, [0, 1, 2, 3, 4, 5]);
+      expect(sound.played, ['close', 'close', 'close', 'open', 'open', 'open', 'end']);
+      expect(lanes, isTrue, reason: 'the jaw lane showed a clench over the line');
+      final r = c.result!;
+      expect([r.clenchSeen, r.glanceSeen, r.leftKnown, r.others], [3, 3, true, 0]);
+      expect([for (final t in r.tries) t.why], List.filled(6, 'ok'));
+      expect(r.settings.clenchX, greaterThan(GestureRule.clenchX));
+      expect(c.clenchLine, r.settings.clenchX);
+      final saved = store.load().calibration!;
+      expect([saved.clenchSeen, saved.settings.leftSign], [3, 1]);
+      final eeg = Directory('${root.path}/hands-free/recordings').listSync().map((f) => f.uri.pathSegments.last).toList();
+      expect(eeg.where((n) => n.startsWith(saved.recording!)).map((n) => n.split('.').skip(1).join('.')).toSet(),
+          containsAll(['f32', 'log', 'markers.jsonl']));
+      c.dispose();
+    });
+
+    test('stopped half way: nothing is saved and no EEG is left', () async {
+      final band = GestureBand([]);
+      final store = HandsFreeStore(root);
+      final c = CalibrationController(finder: OneFinder(band), sound: SilentCheckInSound.new, store: store, timing: calFast);
+      await c.start();
+      await until(() => c.seconds > 20, '20 s');
+      expect(c.stillLeft, lessThan(12));
+      await c.stop();
+      expect(c.stage, CalStage.setup);
+      expect(store.load().calibration, isNull);
+      final eeg = Directory('${root.path}/hands-free/recordings');
+      expect(eeg.existsSync() ? eeg.listSync() : const [], isEmpty);
+      c.dispose();
+    });
+
+    test('no headband: a plain failure', () async {
+      final c = CalibrationController(finder: OneFinder(null), sound: SilentCheckInSound.new, timing: calFast);
+      await c.start();
+      expect(c.stage, CalStage.failed);
+      expect(c.message, contains('not found'));
+      c.dispose();
     });
   });
 }
