@@ -557,6 +557,7 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.study,
     readme: [TryRef('Study reminders', 'switch it on and watch the first two days')],
+    evidence: 'study-timing',
     proposal: true,
     auto: true,
   ),
