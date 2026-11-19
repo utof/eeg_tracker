@@ -250,6 +250,18 @@ void main() {
       expect(hb.connects, 1);
     });
 
+    test('Bluetooth off: said as "could not connect" with the reason, and it keeps trying', () async {
+      final hb = FakeHeadband()..bluetoothOff = true;
+      final r = recorder(own(hb, settings: const OwnBleSettings()));
+      final running = r.run(restartedBySystem: false);
+      await waitFor(() => hb.scans >= 2);
+      expect(statuses.any((s) => s.note == 'could not connect: scan failed: Bluetooth not enabled'), isTrue);
+      await r.stop();
+      await running;
+      expect(files('f32'), isEmpty);
+      expect(stuck, isEmpty);
+    });
+
     test('headband switched off: keeps looking, writes no files, stops promptly', () async {
       final hb = FakeHeadband()..awayUntil = DateTime.now().add(const Duration(hours: 1));
       final r = recorder(own(hb));

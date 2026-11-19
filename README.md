@@ -77,7 +77,9 @@ bundle the same files. After editing a note, run `python3 scripts/evidence_to_js
 Bluetooth itself (Python + bleak), so recording needs no closed library, never unpairs other Bluetooth devices and
 survives drops without restarting. Not yet tried on the real headband: run the 15-minute probe first
 (`uv run --no-project --python 3.12 --with bleak==3.1.0 python scripts/ble_probe.py`), then record with
-`DRIVER=ble scripts/record_night.sh`. See [docs/own-ble-driver.md](docs/own-ble-driver.md).
+`DRIVER=ble scripts/record_night.sh`. The phone app has the same driver behind a switch ("Headband connection" on
+the night screen: the probe, then "Use our own connection (test)"); BrainBit's SDK stays its default until the probe
+has passed. See [docs/own-ble-driver.md](docs/own-ble-driver.md).
 
 BrainBit's NeuroSDK2 core is a closed binary from BrainBit; it is not part of this repository.
 

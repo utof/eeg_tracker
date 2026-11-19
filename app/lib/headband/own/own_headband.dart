@@ -14,6 +14,8 @@
 // - no call can block for ever (each has a deadline and fails as "lost"), and none removes a bond or a device.
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../../recorder/chunk_writer.dart' show Sample;
 import '../../recorder/contact.dart' show ohmsLine;
 import '../../recorder/headband.dart';
@@ -105,13 +107,17 @@ class OwnFinder implements HeadbandFinder {
     if (drv.address != null) {
       try {
         info = await drv.connect();
-      } on HeadbandError {
+      } on HeadbandError catch (e) {
         info = null; // not there, or an address the phone cannot place without a scan
+        debugPrint('own BLE: the known address did not answer ($e); scanning by name');
       }
     }
     if (info == null) {
       try {
         await drv.scanForBand();
+      } on ScanFailed catch (e) {
+        debugPrint('own BLE: $e');
+        rethrow; // Bluetooth off or not allowed: the caller says "could not connect", not "not found"
       } on HeadbandNotFound {
         return null;
       }

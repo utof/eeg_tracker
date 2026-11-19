@@ -32,6 +32,8 @@ for a state, with an optional beat, and with the headband shows what your brain 
 - Morning check-in and trends: `lib/morning/` (the laptop's `morning_check.py` in Dart, the session, the files),
   `lib/trends/` (days, your usual, sleep pressure, the forecast gate), `lib/ui/morning_*.dart`,
   `lib/ui/trends_*.dart`; DECISIONS rows 120-129.
+- Our own headband connection (test, behind a switch): `lib/headband/` (the switch, the driver, the probe),
+  `lib/ui/own_ble_*.dart`; DECISIONS rows 210-219 and `../docs/own-ble-driver.md` (below).
 - Sound for states: `lib/states/` (presets, stop rule, readout, files, session), `lib/sound/state_synth.dart` (the
   sound, made in the app) and `lib/sound/soloud_state_sound.dart`, `lib/ui/states_*.dart` and `lib/ui/sound_score.dart`;
   DECISIONS rows 130-139.
@@ -48,8 +50,9 @@ flutter build apk --release --target-platform android-arm64
 
 `flutter test` also renders the night screen in four states, the meditation screen in eleven, the sleep report in
 eight, the replay check's and alpha-theta's pages in nineteen, the dream catcher in thirteen, the check-in, trends
-and Morning section in eighteen, sound for states in fourteen and Export data in nine to `build/screens/*.png`
-(normal and 130 % text). `test/export_test.dart` exports a fake app folder (every place the app writes) and remakes,
+and Morning section in eighteen, sound for states in fourteen, Export data in nine and Headband connection in eleven
+to `build/screens/*.png` (normal and 130 % text). `test/own_ble_*_test.dart` run our own connection on a fake
+headband: the driver, a night, sessions, the probe and its page. `test/export_test.dart` exports a fake app folder (every place the app writes) and remakes,
 with `EXPORT_FIXTURE=write`, the export the laptop importer's test reads (`test/fixtures/phone_export/`).
 `test/dream_test.dart` runs whole dream catcher sessions on a fake
 headband whose alpha fades and comes back, with a fake microphone. `test/morning_cross_check_test.dart` checks the
@@ -386,7 +389,67 @@ Nothing of this has been heard on a phone yet: not the levels, the beds, the bea
    - Did the dim black screen bother you, and did you want to lock the phone instead?
    - The session file's `stalls` (0 is right; the assistant can read it from an exported night or over USB).
 
+## Our own headband connection (test, off by default)
+
+The app can reach the headband in two ways. **BrainBit's own library** is the default. **Our own connection**
+(`lib/headband/own/`, DECISIONS rows 210-219, `docs/own-ble-driver.md`) is ours from the Bluetooth packets up: it
+mends a drop inside the same connection in seconds (the night stays in one file set), counts lost packets, never
+needs the "Bluetooth stuck, restarting" path, and can never unpair anything. It has only met a made-up headband so
+far, so it sits behind a switch.
+
+Night screen, Headband section, **Headband connection** (between nights only: the headband keeps one connection):
+
+- **Run the probe**: about 5 minutes with the headband on. The page says what to do in large type; a low tone means
+  close your eyes, two rising tones mean open them, one tone means lift the electrode it names for 4 seconds. It
+  checks the packet layout, the channel order, stop and start, the contact check, signal and contact together
+  (command 5), and whether pairing is needed. "Headband on my head" off = the headband lies on the desk: connection
+  steps only (1½ minutes), not a full pass.
+- **The result**: one sentence on top (Passed / what is missing) and one per check. The full files stay in the
+  app (`files/own-ble/probe/<time>/`, `summary.txt` first) and leave with Export data; on the laptop
+  `scripts/import_phone.py` puts them in `_local/phone/own-ble/probe/<time>/`.
+- **Use our own connection (test)**: offered after a passed probe (or with "Try anyway", which asks once more).
+  On: the night recorder and every session (meditation, alpha-theta, dream catcher, morning check-in, sound) use
+  our connection. Off: BrainBit's library, as before. The setting is read when a night or a session starts.
+- **Measure contact all night**: appears when the probe saw command 5 work; a `contact ohms` line a minute in the
+  night's `.log`.
+
+The code: `lib/headband/finder.dart` (the switch; every screen asks the same `BrainBitFinder`),
+`lib/headband/own/` (`protocol.dart` holds every constant, the unverified ones marked TO VERIFY; `driver.dart`;
+`own_headband.dart`; `probe.dart`), `lib/ui/own_ble_*.dart`. Tests run on a fake headband
+(`test/own_ble/fake_headband.dart`); `test/fixtures/own_ble_vectors.json` pins the Dart parser to the laptop's
+Python parser (make it again with `python3 app/test/fixtures/make_own_ble_vectors.py`).
+
+### Owner step: the probe on the phone, then one night with the switch on (15 minutes, then a night)
+
+1. Install the new APK. Charge the headband. Stop any night first; phone sound on (media volume about half).
+2. Night screen, scroll to Headband, **Headband connection**, **Run the probe**. Allow "Nearby devices" if asked.
+   When it says so, put the headband on and tap **Ready**. Follow the page: sit still, close your eyes at the
+   low tone, open them at the two rising tones, lift each electrode it names for 4 seconds.
+3. Read the sentence on top.
+   - **Passed**: go on to 4.
+   - **Asks for pairing**: hold the headband's button 4 s until it blinks fast, leave "Pair first" on, run it again.
+   - **Channel order not settled**: run it again and lift one electrode clearly off the skin each time.
+   - **Anything else**: do not switch. Export data, import on the laptop, and give the assistant
+     `_local/phone/own-ble/probe/<time>/summary.txt`.
+4. Turn on **Use our own connection (test)** (and **Measure contact all night** if it is offered).
+5. Record one night as usual. Once, on purpose: walk out of range for a minute and come back. The screen should go
+   back to Recording by itself within seconds.
+6. In the morning: is the sleep report there as usual? Then **Export data** and import on the laptop
+   (`python3 scripts/import_phone.py <folder>`); tell the assistant. In the night's `.log` it looks for: the line
+   `driver own Bluetooth LE ...` (the recorder's service used our connection) and its `mtu`, `headband lost` /
+   `reconnected after N s ... same files`, `lost N samples in M gaps`, and the `packets:` line at the end.
+7. If the night went wrong (no recording, many drops, an odd sleep report): turn the switch off. Nothing else
+   changes; BrainBit's library is used again from the next start.
+
+What only this test can show: every protocol guess (the probe), whether the phone reaches the headband's address
+without a scan, the packet size it gets, pairing, drops with the screen off on HyperOS, and the battery a night
+costs compared with BrainBit's library (the `phone battery summary` line of each night's `.log`).
+
 ## If the headband drops out
+
+With our own connection switched on (above) a short drop is mended inside the same recording; what follows is the
+rule for BrainBit's library, and for a headband that stays away longer than 30 s.
+
 
 The app saves what it has and reconnects by itself: first straight to the same headband (no Bluetooth scan,
 because Android blocks scans while the screen is off), after 2, 5, 10, 30 s and then every minute; every

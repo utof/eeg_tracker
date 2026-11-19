@@ -3,11 +3,11 @@
 A small Bluetooth driver of our own for the laptop (Python + bleak 3.1.0), and a recorder built on it, so night
 recordings no longer depend on BrainBit's NeuroSDK2. On Linux the SDK unpairs every Bluetooth device when it
 scans (DECISIONS 84), crashes when the headband drops out of range, cannot measure contact while streaming, and
-needs a whole new process after every drop (DECISIONS 17). The driver does none of that. The phone app keeps the
-SDK for now; a Dart port follows once the laptop driver has proved itself.
+needs a whole new process after every drop (DECISIONS 17). The driver does none of that. The phone app has the
+same driver in Dart behind a switch (the last section, "On the phone"); BrainBit's SDK stays its default.
 
-**Status (2026-11-18): built and tested on a fake headband only.** Nobody has connected it to the real BrainBit
-yet. The recorder still uses the SDK by default until the probe below has passed.
+**Status (2026-11-19): built and tested on a fake headband only, on the laptop and on the phone.** Nobody has
+connected it to the real BrainBit yet. Both recorders still use the SDK by default until the probe has passed.
 
 ## The files
 
@@ -96,3 +96,52 @@ Without a headband: `PYTHONPATH=tests/fake_bleak python3 scripts/record_ble.py -
 
 Next after a good probe: one night with `DRIVER=ble`, a check against the SDK on the same session (BlueZ may let
 both listen at once; otherwise two back-to-back recordings), then making the driver the default.
+
+## On the phone (the app, behind a switch)
+
+The app has the same driver in Dart (DECISIONS 210-219). BrainBit's SDK stays the default; the setting
+"Use our own connection (test)" is off until the probe has passed on the real headband.
+
+| File (`app/lib/`) | What it does |
+|---|---|
+| `headband/own/protocol.dart` | Every constant and byte layout, in one place, each unverified one marked TO VERIFY: the probe's result changes this file only |
+| `headband/own/driver.dart` | The driver: a port of `scripts/brainbit_ble.py`, method for method |
+| `headband/own/transport.dart`, `universal_transport.dart` | The little the driver needs from Bluetooth, and the one file that uses the plugin (`universal_ble` 3.3.0, BSD-3) |
+| `headband/own/own_headband.dart` | The driver behind the app's one headband interface, so the night recorder and every session use it as they use the SDK |
+| `headband/finder.dart` | The switch: BrainBit's SDK, or our own connection |
+| `headband/own/probe.dart`, `controller.dart`, `ui/own_ble_*.dart` | The probe and the "Headband connection" page |
+| `headband/own/settings.dart` | `files/own-ble/settings.json`: the switch, the headband last reached, the channel order the probe found |
+
+**Same parser, checked.** `app/test/fixtures/own_ble_vectors.json` is made by the Python parser from the Python fake
+headband's packets and hand-built edge cases (`python3 app/test/fixtures/make_own_ble_vectors.py`). The Dart
+parser must give exactly the same samples, counts, ohms and status (`app/test/own_ble_protocol_test.dart`), and
+`analysis/tests/test_own_ble_vectors.py` fails when the file no longer matches the Python side.
+
+**What it does differently from the SDK in the app**
+
+- **A drop is mended inside the connection**: it reconnects to the same address after 1, 2, 5, 10, 20, 30 s and the
+  night stays in one file set (the hole shows in the `.idx` times). Only when the headband has been away for 30 s
+  does the app's usual reconnect take over (a new file set, as with the SDK), still without a scan.
+- **No process restarts**: no call can block for ever, so the "Bluetooth stuck, restarting" path is never needed.
+- **Lost packets, drops and reconnects are written into the night's `.log`**, with the driver, the assumed channel
+  order and the packet size the phone got.
+- **Contact**: checked once at the start as before; with "Measure contact all night" (only offered when the probe
+  saw command 5 work) a `contact ohms` line every minute.
+- **It can never unpair anything**: the code has no such call, and a test checks that.
+
+**The probe on the phone** (night screen, Headband, "Headband connection", "Run the probe"): the same steps as
+above with written instructions and tones, about 5 minutes with the headband on (or 1½ on the desk: connection
+steps only, not a full pass). It ends with a plain verdict and one sentence per check. The result is kept in the
+app (`files/own-ble/probe/<time>/`: `summary.txt` first) and leaves with Export data; `scripts/import_phone.py`
+puts it in `_local/phone/own-ble/probe/<time>/`. If the lifts find another channel order than assumed, the app
+uses the one it found. If the headband asks for pairing, the page says how and offers "Pair first".
+
+**Only the phone and the real headband can settle**: everything marked TO VERIFY above, and for Android: whether
+the phone reaches the headband's address without a scan first, whether it gets packets of 111 bytes or more,
+whether pairing is needed, how drops behave with the screen off on HyperOS, and what a night costs the battery.
+The first thing to look at in the first night's `.log`: the `driver own Bluetooth LE ...` line (the recorder's
+service used our connection) and the `mtu` it names.
+
+**Tests without a headband**: a fake headband in Dart (`app/test/own_ble/fake_headband.dart`: drops, lost packets,
+a stalled stream, resistance, command 5, pairing) runs the driver, a whole night through the recorder, a meditation,
+the shared link of the dream catcher and the sound sessions, and the probe (`app/test/own_ble_*_test.dart`).

@@ -184,9 +184,13 @@ class FakeHeadband implements BleTransport {
     link?._lostNow();
   }
 
+  /// Bluetooth is switched off: a scan cannot even start.
+  bool bluetoothOff = false;
+
   @override
   Future<BleFound?> scan(bool Function(String name) match, Duration timeout) async {
     scans++;
+    if (bluetoothOff) throw BleError('Bluetooth not enabled');
     await Future<void>.delayed(const Duration(milliseconds: 10));
     if (link == null && !away && match(name)) {
       _scanned = true;

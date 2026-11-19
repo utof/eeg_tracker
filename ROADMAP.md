@@ -111,6 +111,11 @@ findings are on `_local/research/2026-11-18-findings.html`.
    Dart in the app. BrainBit's library stays as a fallback. (Research D; DECISIONS 68, 84)
    Status 2026-11-18: driver, recorder (`DRIVER=ble`) and probe built and tested on a fake headband, branch
    `feat/own-ble-driver` (DECISIONS 90-92, docs/own-ble-driver.md); next: the probe with the headband on.
+   Status 2026-11-19: the Dart port is in the app behind a switch, branch `feat/app-own-ble` (DECISIONS 210-219):
+   the same driver and probe, one headband interface for the night recorder and every session, BrainBit's library
+   still the default. Tested on a fake headband and started on the emulator; not yet on the real headband. Next: the
+   owner runs the probe on the phone (5 minutes, `app/README.md`, "Our own headband connection"), then one night
+   with the switch on.
 7. ~~**Dream catcher**~~ (row 20): built 2026-11-18 on `feat/app-dream-catcher` (from `feat/app-line`; DECISIONS
    110-116). Next: the owner's first try (a 20-minute nap, `app/README.md`, "Dream catcher"), then tune the voice and
    round timings from it; later speech-to-text for the answers. Then the nap preset. (Research C: a rule plus a timer

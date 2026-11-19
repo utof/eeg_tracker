@@ -29,6 +29,11 @@ class HeadbandNotFound extends HeadbandError {
   HeadbandNotFound(super.message);
 }
 
+/// The scan itself could not run (Bluetooth off, no permission, no plugin): not the same as "nothing found".
+class ScanFailed extends HeadbandNotFound {
+  ScanFailed(super.message);
+}
+
 class HeadbandLost extends HeadbandError {
   HeadbandLost(super.message);
 }
@@ -189,9 +194,9 @@ class BrainBitBle {
     try {
       dev = await transport.scan(isBrainBit, scanFor).timeout(scanFor + const Duration(seconds: 5));
     } on BleError catch (e) {
-      throw HeadbandNotFound('scan failed: $e');
+      throw ScanFailed('scan failed: $e');
     } on TimeoutException {
-      throw HeadbandNotFound('scan failed: no answer');
+      throw ScanFailed('scan failed: no answer');
     }
     if (dev == null) throw HeadbandNotFound('no BrainBit found: is it switched on?');
     address = dev.address.toUpperCase();

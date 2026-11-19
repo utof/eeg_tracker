@@ -54,6 +54,10 @@ class UniversalTransport implements BleTransport {
     try {
       await UniversalBle.connect(address, timeout: timeout);
     } catch (e) {
+      // Give up the try on Android's side too, so a connection that opens later is not left open and unowned.
+      unawaited(
+        UniversalBle.disconnect(address, timeout: const Duration(seconds: 5)).then<void>((_) {}, onError: (_) {}),
+      );
       throw BleError(_text(e));
     }
     final link = _UniversalLink(address, onLost);
