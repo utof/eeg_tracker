@@ -74,6 +74,7 @@ final Map<String, DreamViewModel> states = {
   'face_answering': const DreamViewModel(stage: DreamStage.answering, roundsDone: 1, roundNow: 2, minutes: 19),
   'face_checking': const DreamViewModel(stage: DreamStage.checking, roundsDone: 1, roundNow: 2, minutes: 20),
   'face_no_signal': const DreamViewModel(stage: DreamStage.drifting, roundsDone: 2, rounds: 3, minutes: 31, noData: true),
+  'face_keep_unlocked': const DreamViewModel(stage: DreamStage.drifting, ending: DreamEnding.sleep, minutes: 3, keepUnlocked: true),
 };
 
 DreamView _view(DreamViewModel m, {ValueChanged<bool>? onDrifting, VoidCallback? onLightsOff, ValueChanged<int>? onRounds}) => DreamView(
@@ -154,5 +155,13 @@ void main() {
     expect(tester.widget<Scaffold>(find.byType(Scaffold)).backgroundColor, faceGround);
     expect(find.text('Drift off'), findsOneWidget);
     expect(find.byType(FilledButton), findsNothing);
+  });
+
+  testWidgets('the sleep ending without the background permission: the face asks to keep the phone unlocked', (tester) async {
+    await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: _view(states['face_keep_unlocked']!)));
+    expect(find.textContaining('Do not lock the phone'), findsOneWidget);
+    expect(find.textContaining('allow the app to run in the background'), findsOneWidget);
+    await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: _view(states['face_drifting']!)));
+    expect(find.textContaining('Do not lock the phone'), findsNothing);
   });
 }
