@@ -125,6 +125,12 @@ uv run --project analysis python scripts/morning_check.py _local/recordings   # 
 python3 scripts/export_events.py _local/recordings/*.morning.json             # eeg_morning_check events
 ```
 
+**Every day's numbers for utof_tracker** (the owner's life tracker), after the phone's files are on the laptop
+(`pull_phone.py` or `import_phone.py`): `python3 scripts/export_events.py --daily` writes one `eeg_day` event per day
+(every Trends number, sleep stages, what was left out and why), the nights and the check-ins into
+`_local/export/events/`; re-running adds only what changed. utof_tracker reads that folder itself. The contract:
+[docs/utof-interface.md](docs/utof-interface.md).
+
 Tests (no headband): `uv run --project analysis --with pytest pytest analysis/tests` (add `-m "not slow"` to skip
 the 2.5-minute fake-headband run) and `node --test tests/js/*.test.mjs`.
 
