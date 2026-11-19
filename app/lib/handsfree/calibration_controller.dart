@@ -102,8 +102,15 @@ class CalibrationController extends ChangeNotifier {
   /// The eye lane: eye movements of the last 10 seconds.
   List<LaneStep> eyes = const [];
 
-  /// The clench line on the jaw lane (the planning value until a calibration exists).
+  /// The clench line on the jaw lane and the glance size (the planning values until a calibration exists).
   double clenchLine = GestureRule.clenchX;
+  double glanceSize = GestureRule.glanceUv;
+
+  /// The cued try's 5 seconds are still open.
+  bool get inWindow {
+    final t = tryNow;
+    return t != null && seconds - tries[t].cue < timing.windowS;
+  }
 
   /// The result, once the six tries are done.
   GestureCalibration? result;
@@ -111,6 +118,9 @@ class CalibrationController extends ChangeNotifier {
   String? saveNote;
 
   bool get active => stage.index >= CalStage.connecting.index && stage.index <= CalStage.trying.index;
+
+  /// A headband was left out of range (the finder must not dispose its scanner then).
+  bool get leftLost => _link?.leftLost ?? false;
 
   /// The tries with their cue seconds.
   List<GestureTry> get tries => [
@@ -204,7 +214,9 @@ class CalibrationController extends ChangeNotifier {
     saveNote = null;
     contact = const {};
     message = '';
-    clenchLine = store?.load().calibration?.settings.clenchX ?? GestureRule.clenchX;
+    final before = store?.load().calibration?.settings;
+    clenchLine = before?.clenchX ?? GestureRule.clenchX;
+    glanceSize = before?.glanceUv ?? GestureRule.glanceUv;
   }
 
   // ---- the signal ----
@@ -285,6 +297,7 @@ class CalibrationController extends ChangeNotifier {
     final cal = calibrate(_inputs, tries);
     result = cal;
     clenchLine = cal.settings.clenchX;
+    glanceSize = cal.settings.glanceUv;
     _mark('hands-free calibration: double clench ${cal.clenchSeen} of 3, look left then right ${cal.glanceSeen} of 3');
     final stem = _writer?.stem;
     _closeWriter(keep: true);

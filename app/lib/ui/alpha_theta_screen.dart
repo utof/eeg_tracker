@@ -7,6 +7,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'hands_free_screen.dart' show activeGestures;
+import '../sound/gesture_tone.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import '../alphatheta/journal.dart';
@@ -42,6 +44,7 @@ class _AlphaThetaScreenState extends State<AlphaThetaScreen> {
     finder: _finder,
     sound: () => SoloudSound(),
     alphaThetaSound: SoloudAlphaThetaSound.new,
+    gestureTone: SoloudGestureTone.new,
   );
   _Page _page = _Page.loading;
   AtJournal? _journal;
@@ -247,6 +250,7 @@ class _AlphaThetaScreenState extends State<AlphaThetaScreen> {
     if (phone.sdkInt >= 33) await FlutterForegroundTask.requestNotificationPermission();
     _loadCheck();
     setState(() => _page = _Page.session);
+    _c.handsFree = await activeGestures();
     await _c.start(Duration(minutes: _minutes), kind: SessionKind.alphaTheta);
   }
 

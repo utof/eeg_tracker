@@ -24,6 +24,7 @@ import '../sleep/scorer.dart';
 import 'dream_screen.dart';
 import 'dream_view.dart' show clock;
 import 'export_screen.dart';
+import 'hands_free_screen.dart' show SettingsScreen;
 import 'lights_off_view.dart';
 import 'meditation_screen.dart';
 import 'nap_screen.dart';
@@ -477,6 +478,9 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     unawaited(_refresh());
   }
 
+  /// Settings: the hands-free switch and its calibration (DECISIONS 248); the calibration itself waits for Stop.
+  Future<void> _settings() => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
+
   Future<void> _trends() =>
       Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TrendsScreen(recordingsDir: _dir)));
 
@@ -590,6 +594,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onRetrySleep: sleep == null ? null : () => _scoring?.retry(sleep.nightOf),
       morning: MorningSection(doneAt: _checkedInAt, onCheckIn: _checkIn, onTrends: _trends, experiment: _experiment),
       onLightsOff: _lightsOff,
+      onSettings: _settings,
     );
   }
 }
