@@ -140,20 +140,29 @@ def _next_in_family(segs: list[Seg], j: int, cfg: FocusConfig) -> int | None:
     return None
 
 
-def find_sessions(segs: list[Seg], cfg: FocusConfig = FocusConfig()) -> list[Session]:
-    out: list[Session] = []; i = 0
+def runs(segs: list[Seg], cfg: FocusConfig = FocusConfig()) -> list[list[Seg]]:
+    """The segments cut into runs: a run is one family's stretches joined across short switches (switch_min) with no
+    real break; the switches in between are part of the run. Every segment is in exactly one run, in order.
+    (Also the laptop tray's work detection, scripts/laptop_work.py.)"""
+    out: list[list[Seg]] = []; i = 0
     while i < len(segs):
         j = i
         while (k := _next_in_family(segs, j, cfg)) is not None:
             j = k
-        run = segs[i:j + 1]
+        out.append(segs[i:j + 1])
+        i = j + 1
+    return out
+
+
+def find_sessions(segs: list[Seg], cfg: FocusConfig = FocusConfig()) -> list[Session]:
+    out: list[Session] = []
+    for run in runs(segs, cfg):
         active = sum(s.active_min for s in run)
         if active >= cfg.min_min and (cfg.any_app or run[0].fam in WORK_FAMILIES):
             apps: Counter = Counter()
             for s in run:
                 apps.update(s.apps)
             out.append(Session(run[0].start, run[-1].end, active, apps.most_common(1)[0][0], run[0].fam))
-        i = j + 1
     return out
 
 
