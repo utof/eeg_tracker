@@ -132,7 +132,14 @@ void main() {
     root.deleteSync(recursive: true);
   });
 
-  NightRecorder recorder(DiyFinder finder, Directory dir, {DriftWatch Function()? watch, AlarmPlan? plan, AlarmWatch Function(AlarmPlan)? alarm}) =>
+  NightRecorder recorder(
+    DiyFinder finder,
+    Directory dir, {
+    DriftWatch Function()? watch,
+    AlarmPlan? plan,
+    AlarmWatch Function(AlarmPlan)? alarm,
+    List<String> notes = const [],
+  }) =>
       NightRecorder(
         finder: finder,
         dir: dir,
@@ -143,6 +150,7 @@ void main() {
         watch: watch,
         alarmPlan: plan,
         alarm: alarm,
+        startNotes: notes,
       );
 
   List<String> stems(Directory dir) =>
@@ -182,6 +190,7 @@ void main() {
     final r = recorder(
       finder,
       dir,
+      notes: DiyNight(const DiyBoardSettings(useDiy: true), '${root.path}/files/recordings').notes,
       watch: () => drift,
       plan: AlarmPlan(endMs: now + 30 * 60000, windowMin: 30),
       alarm: (_) => alarm,
@@ -218,6 +227,10 @@ void main() {
     expect(log, isNot(contains('contact check')));
     expect(log, contains('lights off'));
     expect(drift.adds, 0);
+    // the night's own first lines come before the board's, so the log stays in time order
+    expect(log.indexOf('headband: DIY board (test)'), lessThan(log.indexOf('driver DIY board')));
+    final times = [for (final l in log.trim().split('\n')) l.substring(0, 23)];
+    expect(times, [...times]..sort());
     expect(alarm.adds, 0);
     final live = statuses.lastWhere((s) => s.board != null).board!;
     expect(live.names, ['O1', 'O2', 'Fz', 'Fp1']);

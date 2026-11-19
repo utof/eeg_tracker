@@ -498,14 +498,7 @@ class NightRecorder {
     var lost = false;
     bool isLost() => lost;
     final rangeSub = band.rangeChanges.listen((inRange) => lost = lost || !inRange);
-    // Our own connection writes its drops, reconnects and lost packets into the run's log, and says when the
-    // headband's packet numbers start again inside the run (BrainBit's SDK has no such notes).
-    final notesSub = band is BandNotes
-        ? (band as BandNotes).notes.listen((n) {
-            if (n.newStream) _packets.startRun();
-            if (n.line != null && !w.isClosed) w.log(n.line!);
-          })
-        : null;
+    StreamSubscription<BandNote>? notesSub;
     StreamSubscription<List<Sample>>? sigSub;
     var end = _End.failed;
     try {
@@ -513,6 +506,15 @@ class NightRecorder {
         w.log(line, at: t);
       }
       _notes = const [];
+      // Our own connection and the DIY board write their drops, reconnects and lost packets into the run's log (after
+      // the lines kept from before the run, so the log stays in time order), and say when the headband's packet
+      // numbers start again inside the run (BrainBit's SDK has no such notes).
+      if (band is BandNotes) {
+        notesSub = (band as BandNotes).notes.listen((n) {
+          if (n.newStream) _packets.startRun();
+          if (n.line != null && !w.isClosed) w.log(n.line!);
+        });
+      }
       for (final (t, text) in _pendingMarkers) {
         _marker(text, t);
       }
