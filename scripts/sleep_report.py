@@ -188,7 +188,7 @@ def build(night: nf.Night, a: argparse.Namespace, status: nf.Job) -> dict:
         try:  # before scoring, so its memory is free again when the model runs
             sys.path.insert(0, str(ROOT / "analysis"))
             import night_extras as nx
-            full = nx.see(uv, notes)
+            full = nx.see(uv, notes, in_place=True)  # clipped as the BDF below clips it: no second copy
             seen = nx.events(full)
             try:  # the drift-off detector from the night's lights off (night_drift.py)
                 import night_drift as nd

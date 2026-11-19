@@ -6,8 +6,11 @@ Writes <night>.sleep.json (per 30 s epoch: both models' stages, AnySleep probabi
 summary) and <night>.hypnogram.png. Epochs touching a BAD_gap / BAD_padding annotation are reported as "gap".
 Neither model was validated on dry BrainBit electrodes (DECISIONS.md row 8): the result is a first guess.
 AnySleep code and weights: github.com/dslaborg/AnySleep (MIT), fetched by scripts/get_anysleep.sh.
+A night up to 14 h goes through AnySleep (PyTorch) in one pass; a longer one is scored as the phone scores every
+night (two passes over 64-minute pieces with the app's ONNX models, analysis/two_pass.py; DECISIONS 260-264, 310),
+which gives what one pass over the whole night gives without its memory.
 """
-import argparse, importlib.util, json
+import argparse, importlib.util, json, sys
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from fractions import Fraction
@@ -16,6 +19,8 @@ from pathlib import Path
 import mne
 import numpy as np
 
+ROOT = Path(__file__).resolve().parent.parent
+MODELS = ROOT / "app" / "assets" / "models"  # the phone's AnySleep runs (scripts/export_anysleep_onnx.py)
 STAGES = ["W", "N1", "N2", "N3", "R"]
 EPOCH = 30
 ASLEEP = {"N1", "N2", "N3", "R"}
@@ -56,9 +61,21 @@ def prepare(raw: mne.io.BaseRaw) -> np.ndarray:
     return x
 
 
+ONE_PASS_EP = 14 * 120  # up to 14 h in one PyTorch pass (sleep_report peaked at 2.8 GB on a 12.8 h night here)
+ONE_PASS, TWO_PASS = "pytorch one-pass", "onnx-f16 two-pass-64min+8min"  # sleep.json `scorer`; the second as the phone
+
+
+def scorer(n_ep: int) -> str:
+    """How a night of n_ep epochs goes through AnySleep (sleep.json `scorer`)."""
+    return ONE_PASS if n_ep <= ONE_PASS_EP else TWO_PASS
+
+
 def anysleep(raw: mne.io.BaseRaw, repo: Path, n_ep: int, device: str,
-             progress: Callable[[str], None] = print) -> np.ndarray:
-    """Mean softmax of the three AnySleep runs, shape (n_ep, 5) in STAGES order."""
+             progress: Callable[[str], None] = print, models: Path = MODELS) -> np.ndarray:
+    """Mean softmax of the three AnySleep runs, shape (n_ep, 5) in STAGES order: one PyTorch pass over a night up
+    to 14 h (`repo`: AnySleep's code and weights), the phone's two passes over a longer one (`models`)."""
+    if scorer(n_ep) == TWO_PASS:
+        return phone_passes(prepare(raw)[:, : n_ep * 3840], n_ep, models, progress)
     import torch
     spec = importlib.util.spec_from_file_location("anysleep_no_hydra", repo / "examples" / "anysleep_no_hydra.py")
     assert spec and spec.loader
@@ -71,26 +88,22 @@ def anysleep(raw: mne.io.BaseRaw, repo: Path, n_ep: int, device: str,
         for run in (1, 2, 3):
             progress(f"Sleep model AnySleep, run {run} of 3")
             m = mod.AnySleep(path=str(repo / "models" / f"anysleep-run{run}.pth"), sleep_stage_frequency=1).eval().to(device)
-            p = np.empty((n_ep, len(STAGES)))
-            for w0, w1, c0, c1 in windows(n_ep):
-                y = torch.softmax(m(t[:, w0 * 3840:w1 * 3840])[0], dim=1).cpu().numpy()
-                p[c0:c1] = y[c0 - w0:c1 - w0]
-            probs.append(p)
+            probs.append(torch.softmax(m(t)[0], dim=1).cpu().numpy().astype(np.float64))  # as before: mean in float64
     return np.mean(probs, axis=0)
 
 
-ONE_PASS_EP = 14 * 120  # up to 14 h in one pass (sleep_report peaked at 2.8 GB on a 12.8 h night on this laptop)
-PIECE_EP, CONTEXT_EP = 6 * 120, 1 * 120
-
-
-def windows(n_ep: int) -> list[tuple[int, int, int, int]]:
-    """(first, end) epochs of each model input and (first, end) of the epochs kept from it. Longer nights go through
-    in 6-hour pieces with 1 hour of context on each side, so memory stays under the hub's 3500 MB cap (4-hour
-    pieces on that night: 1.9 GB, 97 % of the epochs staged the same as in one pass)."""
-    if n_ep <= ONE_PASS_EP:
-        return [(0, n_ep, 0, n_ep)]
-    return [(max(0, c0 - CONTEXT_EP), min(n_ep, c0 + PIECE_EP + CONTEXT_EP), c0, min(n_ep, c0 + PIECE_EP))
-            for c0 in range(0, n_ep, PIECE_EP)]
+def phone_passes(x: np.ndarray, n_ep: int, models: Path, progress: Callable[[str], None] = print) -> np.ndarray:
+    """The phone's scorer (analysis/two_pass.py, app/lib/sleep/model.dart) on x (4, samples at 128 Hz): per run,
+    pass 1 sums AnySleep's channel-weighting features over the night's 64-minute pieces, pass 2 scores each piece
+    with the night's averages. One run in memory at a time, about 150 MB a model call (DECISIONS 264)."""
+    if str(ROOT / "analysis") not in sys.path:
+        sys.path.insert(0, str(ROOT / "analysis"))
+    import two_pass
+    out = np.zeros((n_ep, len(STAGES)))
+    for run in (1, 2, 3):
+        progress(f"Sleep model AnySleep, run {run} of 3 (two passes, as on the phone)")
+        out += two_pass.probabilities(two_pass.sessions([models / f"anysleep-run{run}.onnx"]), x, n_ep)
+    return out / 3
 
 
 def yasa_stages(raw: mne.io.BaseRaw, n_ep: int) -> list[str]:
@@ -157,7 +170,7 @@ def score(bdf: Path, repo: Path, device: str = "cpu", progress: Callable[[str], 
     progress("Second opinion: YASA")
     other = yasa_stages(raw, n_ep)
     res = summary(stage, gap, other, p.max(1))
-    return dict(source=bdf.name, start=start.isoformat(), epoch_s=EPOCH, summary=res,
+    return dict(source=bdf.name, start=start.isoformat(), epoch_s=EPOCH, scorer=scorer(n_ep), summary=res,
                 epochs=[dict(t=(start + timedelta(seconds=i * EPOCH)).isoformat(timespec="seconds"),
                              anysleep="gap" if gap[i] else stage[i], yasa="gap" if gap[i] else other[i],
                              p=[round(float(v), 3) for v in p[i]]) for i in range(n_ep)])

@@ -97,6 +97,23 @@ def test_see_marks_held_time_missing_and_clips_like_the_bdf():
     assert seen.epochs[0].quality == "missing"  # 6 gap seconds, over 5
 
 
+def test_see_in_place_sees_the_same_without_a_copy_of_the_night():
+    """sleep_report.py clips the joined night itself (its BDF clips to the same range), so a 24-hour night does not
+    hold a second copy while the detectors run (DECISIONS 312)."""
+    n = 90 * det.FS
+    rng = np.random.default_rng(5)
+    uv = rng.normal(0, 30, (n, 4)) + 1000.0
+    uv[200:900, 1] = -460_000.0
+    notes = [(20.0, 7.0, "BAD_gap")]
+    want = nx.see(uv.copy(), notes)
+    got = nx.see(uv, notes, in_place=True)
+    assert np.array_equal(uv, np.clip(uv, -nx.LIMIT_UV, nx.LIMIT_UV)) and uv[200, 1] == -nx.LIMIT_UV  # clipped in place
+    assert got.epochs == want.epochs and got.blinks == want.blinks and got.eye_moves == want.eye_moves
+    assert got.bursts == want.bursts and got.movement == want.movement
+    for field in ("gap", "flat", "railed", "qrange", "alpha", "theta", "muscle", "sem"):
+        assert np.array_equal(getattr(got.seconds, field), getattr(want.seconds, field)), field
+
+
 def test_missing_mask_rounds_onsets_to_samples():
     m = nx.missing_mask(1000, [(123457 / 250 - 493, 0.004, "BAD_gap")])  # 0.828 s: sample 207, one sample long
     assert list(np.flatnonzero(m)) == [207]

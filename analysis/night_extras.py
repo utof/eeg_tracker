@@ -60,10 +60,12 @@ def missing_mask(n: int, notes: list[tuple[float, float, str]]) -> det.Bools:
     return miss
 
 
-def see(uv: np.ndarray, notes: list[tuple[float, float, str]]) -> det.Seen:
+def see(uv: np.ndarray, notes: list[tuple[float, float, str]], *, in_place: bool = False) -> det.Seen:
     """Every detector over a joined night: `uv` (n x 4, µV) and `notes` as `to_bdf.join` returns them, clipped to
-    the BDF's ±400 000 µV as the phone reads them."""
-    x = np.clip(np.asarray(uv, dtype=np.float64).T, -LIMIT_UV, LIMIT_UV)
+    the BDF's ±400 000 µV as the phone reads them. in_place: clip `uv` itself (float64) instead of a copy, so a
+    24-hour night is not held twice (scripts/sleep_report.py, whose BDF clips to the same range anyway)."""
+    u = np.asarray(uv, dtype=np.float64)
+    x = np.clip(u, -LIMIT_UV, LIMIT_UV, out=u if in_place else None).T
     return det.detect(x, missing_mask(x.shape[1], notes))
 
 

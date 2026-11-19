@@ -146,7 +146,12 @@ findings are on `_local/research/2026-11-18-findings.html`.
    what is new each time, with a manifest of SHA-256 checksums; the main screen says when the last export was (amber
    after 3 days); `scripts/import_phone.py` checks every file and copies it into `_local/` without overwriting
    anything silently. Not yet run on the phone. Encryption and restic backups: deferred by the owner (2026-11-18;
-   DECISIONS 37). Later: a catalog of nights, xz for nights older than 90 days. (Research D)
+   DECISIONS 37). **Catalog of nights: built 2026-11-19** on `feat/laptop-parity-catalog` (DECISIONS 313-318):
+   `scripts/catalog.py` lists every night on the laptop (laptop and phone; hours, missing minutes, the report's
+   asleep / deep / dream minutes, check-in) with the SHA-256 of every file in `_local/catalog/`, says what grew,
+   changed or went missing since the last run, and `--check` re-hashes everything; it only reads the data. Later,
+   only once the owner approves it: xz for nights older than 90 days (the catalog's hashes are the check that a
+   compressed night comes back whole). (Research D)
 10. ~~**Nap coach**~~ (row 26, from Ideas): built 2026-11-19 on `feat/app-nap-coach` (from `feat/app-line`;
    DECISIONS 170-179) with live sleep stages on the phone. Next: the owner's first nap (the phone's speed per check,
    the wake sound). The **smart alarm** followed on 2026-11-19 (`feat/app-smart-alarm`, status row 27, DECISIONS

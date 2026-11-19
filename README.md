@@ -22,6 +22,9 @@ a build-it-yourself ADS1299 helmet ([hardware and guides](https://github.com/uto
   dates) prints every gap with its reason, lost packets, restarts by Android, both batteries, contact, the phone's
   sleep report and a plain verdict with the top three things to fix. Works on a laptop night too; plain `python3`
   skips only the signal numbers. Reads files only.
+- `scripts/catalog.py`: one table of every night on the laptop (laptop and phone nights: files, hours, missing
+  minutes, the sleep report's numbers, morning check-in) and the SHA-256 of every file, so the next run says what
+  grew, changed or went missing; `--check` re-hashes everything. Reads the data only; writes `_local/catalog/`.
 
 Next morning, join the night's files and score sleep (AnySleep + YASA; neither is validated on BrainBit yet):
 
@@ -31,6 +34,9 @@ uv run --project analysis python scripts/to_bdf.py _local/recordings/2026-11-18-
 uv run --project analysis python scripts/score_sleep.py night.bdf   # night.sleep.json + night.hypnogram.png
 python3 scripts/export_events.py night.sleep.json    # eeg_sleep_night event for utof_tracker
 ```
+
+A night over 14 hours is scored the way the phone scores every night (two passes with the app's ONNX models), so
+the laptop's and the phone's reports give the same stages.
 
 **Sleep page (automatic report).** After waking, open `http://localhost:8765/sleep.html` (the "Sleep" button on the
 check page) while the recorder runs. If there are newer recordings than the last report, it scores them by itself

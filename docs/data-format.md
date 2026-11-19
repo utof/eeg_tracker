@@ -12,6 +12,7 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 | Morning check-in on the phone | `files/mornings/<start>.morning.json` and the visit's raw `<stamp>.f32/.idx/.log/.markers.jsonl` | the phone app (`app/lib/morning/`) |
 | The phone's export folder | `<picked folder>/eeg-export/`: the app's files in their own layout, `manifest.json`, `exports.jsonl` | the phone app's Export data (`app/lib/export/`); read by `scripts/import_phone.py` |
 | The phone over Wi-Fi | `GET /files`, `GET /files/<path>` on the phone; mirrored into `_local/recordings/` and `_local/phone/`, with `_local/phone/pull-state.json` and `pulls.jsonl` | the phone app's Share on Wi-Fi (`app/lib/share/`); read by `scripts/pull_phone.py` |
+| Catalog of nights | `_local/catalog/catalog.json`, `<date>.sha256`, `catalog.txt`, `history.log` | `scripts/catalog.py` (below) |
 | Events for other apps | `<root>/events/<dev>/eeg-YYYY-MM.jsonl`, `<root>/events/<dev>/breaks-YYYY-MM.jsonl` | `scripts/export_events.py`, `scripts/break_hints.py` |
 
 ## Raw recording (BrainBit)
@@ -53,8 +54,9 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 
 ## `<night>.sleep.json`
 
-`start` (local, no zone), `epoch_s` (30), `summary` (minutes per stage, sleep onset, total sleep, agreement
-of the two models) and `epochs`: one object per 30 s with `t`, `anysleep` and `yasa` (`W N1 N2 N3 R`, or
+`start` (local, no zone), `epoch_s` (30), `scorer` (how AnySleep went over the night: `pytorch one-pass` up to
+14 hours, `onnx-f16 two-pass-64min+8min` for a longer night, as the phone scores; DECISIONS 310; absent in files from
+before 2026-11-19), `summary` (minutes per stage, sleep onset, total sleep, agreement of the two models) and `epochs`: one object per 30 s with `t`, `anysleep` and `yasa` (`W N1 N2 N3 R`, or
 `gap` when over 5 s of the epoch is filled in), and `p` (AnySleep probabilities in the order W N1 N2 N3 R).
 
 ## `<date>.report.json` (the Sleep page)
@@ -400,6 +402,22 @@ the phone is still writing, with their size) and `raw` (checked raw files, which
 `_local/phone/pulls.jsonl` has a line per pass that fetched something or found a problem. A partial copy ends where
 the phone's file ended when it was listed; readers should ignore an incomplete last record, as they do for a
 recording that is still running.
+
+## The catalog of nights (`_local/catalog/`)
+
+`scripts/catalog.py` (standard library only; DECISIONS 313-318) reads `_local/` and writes:
+
+- `catalog.json`: `format` (`eeg-tracker-catalog`), `version` 1, `made`, `local`, `nights` and `missing`. One object
+  per night, oldest first: `date` (evening date, as the sleep report names it), `source` (`laptop`, `phone` or
+  `laptop+phone`), `recordings` (runs with samples), `start` and `end` (first and last data), `hours_recorded`
+  (samples at 250 Hz), `minutes_missing` (time between them without samples), `raw` (`false` for a phone report
+  whose raw night is not on the laptop), `report` (`by` laptop or phone, `asleep_min`, `deep_min`, `dream_min`, or
+  `null`), `morning` (its check-in files), `files`, `bytes` and `file_list` (`path` from `_local/`, `bytes`,
+  `mtime_ns`, `sha256`, `kind`: `raw` for `.f32 .idx .log .markers.jsonl`, else `derived`). `missing`: raw files an
+  earlier catalog listed that are gone, with `night` and `since`.
+- `<date>.sha256`: the night's files (and its missing ones) in `sha256sum` format, so
+  `cd _local && sha256sum -c catalog/<date>.sha256` checks them without the script.
+- `catalog.txt`: the printed summary; `history.log`: one entry per run with what changed.
 
 ## Events (for utof_tracker and anything else)
 

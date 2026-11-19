@@ -14,8 +14,9 @@ pass over the whole night computes, up to float rounding. A night of up to 175 e
 
 usage (from the repo root, needs the "onnx" group):
   uv run --project analysis --group onnx python analysis/two_pass.py <night.bdf> [...] [--one-pass] [--json out.json]
-compares, for each night with its <night>.sleep.json (scripts/score_sleep.py, the laptop's one pass): the old
-1-hour pieces, the two-pass scorer, and with --one-pass the ONNX models over the whole night at once.
+compares, for each night with its <night>.sleep.json (scripts/score_sleep.py, the laptop's one pass; over 14 h the
+laptop scores with this module, DECISIONS 310): the old 1-hour pieces, the two-pass scorer, and with --one-pass the
+ONNX models over the whole night at once.
 """
 from __future__ import annotations
 
