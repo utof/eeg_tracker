@@ -1128,7 +1128,8 @@ recording is separate and unchanged.
   from another app pauses when it starts. When a call rings or another app takes the sound, meditation and
   alpha-theta go quiet with no bells, sound for states pauses, and the dream catcher asks no question, until the
   sound is back; the session file notes it. The morning check-in stops and keeps nothing. The nap asks for nothing
-  (a podcast you fall asleep to goes on) and its wake sound plays regardless.
+  (a podcast you fall asleep to goes on) and its wake sound plays regardless; nor does the work session (your music
+  while you work goes on, and a hint's chime plays over it).
 - **Fall asleep, then Record the night**: the night starts by itself on a locked phone. The first time, if the app
   is not yet allowed to run in the background, Start asks for it and that one session keeps its screen on.
 - Do not swipe the app away from Recents during a session: that ends it.
