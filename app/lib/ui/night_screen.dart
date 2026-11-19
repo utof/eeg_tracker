@@ -263,7 +263,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     final nights = dir == null || running ? const <NightFiles>[] : _listNights(dir);
     final checkedInAt = dir == null ? null : _checkedInToday(dir);
     final alarm = dir == null ? const AlarmSetup() : AlarmSetupStore.forRecordings(dir).read();
-    final clockState = await AlarmClock.state();
+    final clockState = await _safe(AlarmClock.state, const AlarmClockState({}));
     if (running) FlutterForegroundTask.sendDataToTask(statusCommand);
     if (dir != null && _scoring == null) {
       _scoring = SleepScoring(
@@ -307,7 +307,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshAlarm() async {
-    final st = await AlarmClock.state();
+    final st = await _safe(AlarmClock.state, _clockState);
     if (mounted) setState(() => _clockState = st);
   }
 
@@ -318,13 +318,13 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     if (_running) {
       final end = _status?.alarm?.endMs ?? _clockState.endMs;
       if (end == null || !await confirmAlarmOff(context, end)) return;
-      await AlarmClock.cancel();
+      await _safe(AlarmClock.cancel, _clockState);
       FlutterForegroundTask.sendDataToTask(alarmOffCommand);
       unawaited(_refreshAlarm());
       return;
     }
     if (_pendingClock) {
-      await AlarmClock.cancel();
+      await _safe(AlarmClock.cancel, _clockState);
       unawaited(_refreshAlarm());
       return;
     }
@@ -339,7 +339,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _awake() async {
-    final st = await AlarmClock.awake();
+    final st = await _safe(AlarmClock.awake, _clockState);
     if (mounted) setState(() => _clockState = st);
   }
 
@@ -354,7 +354,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   Future<AlarmPlan?> _setAlarmClock(String? dir) async {
     final plan = _alarm.planAt(DateTime.now());
     if (plan == null) {
-      if (_pendingClock) await AlarmClock.cancel();
+      if (_pendingClock) await _safe(AlarmClock.cancel, _clockState);
       return null;
     }
     try {

@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
@@ -53,6 +54,18 @@ class AlarmActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#100D0B"))
             setPadding(pad, dp(32f).toInt(), pad, pad)
+            // Android 15+ draws every app edge to edge: keep the words and the button clear of the system bars
+            setOnApplyWindowInsetsListener { v, insets ->
+                val (top, bottom) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+                    bars.top to bars.bottom
+                } else {
+                    @Suppress("DEPRECATION")
+                    insets.systemWindowInsetTop to insets.systemWindowInsetBottom
+                }
+                v.setPadding(pad, top + dp(32f).toInt(), pad, bottom + pad)
+                insets
+            }
         }
         val title = TextView(this).apply {
             text = "Time to wake up"
@@ -78,8 +91,7 @@ class AlarmActivity : Activity() {
             text = "I'm awake"
             isAllCaps = false
             setTextColor(Color.parseColor("#E8F3EC"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 36f)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#2E6B4B"))
                 cornerRadius = dp(16f)
