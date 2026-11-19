@@ -1,7 +1,6 @@
 // "When I put the headband on" (DECISIONS 600-609): the page at the owner's phone width (393 dp) with real fonts, at
 // 100 % and 130 % text, with no layout overflow (build/screens/auto_*.png for a human look); what this phone allows, in
 // words; and the flows on a fake app folder: the defaults, a change saved, other cannot start by itself, the offer.
-import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
