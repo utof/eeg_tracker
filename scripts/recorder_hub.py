@@ -1,7 +1,10 @@
-"""The recorder hub shared by both recorders: files on disk and the live HTTP routes (DECISIONS 38).
+"""The recorder hub shared by the recorders: files on disk and the live HTTP routes (DECISIONS 38).
 
-record_night.py (BrainBit's NeuroSDK2) and record_ble.py (our own Bluetooth driver, scripts/brainbit_ble.py) only
-differ in how samples reach the hub; both write the same files and answer the same routes:
+record_night.py (BrainBit's NeuroSDK2), record_ble.py (our own Bluetooth driver, scripts/brainbit_ble.py) and
+record_diy.py (the DIY ADS1299 board, scripts/diy_board.py) only differ in how samples reach the hub; all write the
+same files and answer the same routes. The DIY board's channel names and count come from its montage (a record is
+then uint32 + one float32 per channel), and its hub refuses the sleep and morning reports, which read BrainBit's
+O1 O2 T3 T4 only (DECISIONS 350-359):
 
 Files in --out, one set per recorder run (docs/data-format.md): <stamp>.f32 (records: uint32 packet number + 4
 float32 volts O1 O2 T3 T4), <stamp>.idx (one record per arriving batch: float64 unix time + uint64 index of its
@@ -12,7 +15,7 @@ GET/POST /sleep-report and /morning-report, GET /hypnogram.png, and the pages in
 Standard library only: never import numpy here (it segfaulted next to the SDK, DECISIONS 3).
 """
 import collections, json, os, queue, struct, threading, time, urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Sequence
@@ -32,22 +35,25 @@ NAMES = ("O1", "O2", "T3", "T4")
 FS = 250
 HERE = Path(__file__).parent
 
-Row = tuple[int, float, float, float, float]  # (packet number, O1, O2, T3, T4 volts): one .f32 record
+Row = tuple[float, ...]  # (packet number, then one value in volts per channel: O1 O2 T3 T4 for BrainBit): one .f32 record
 
 
 class Hub:
     """Samples in, files and live pages out. add_batch() may be called from any thread; write_pending() and
-    report() from the recorder's main loop."""
+    report() from the recorder's main loop. names and fs default to BrainBit's; reports=False answers the sleep and
+    morning report routes with an error instead of scoring these files."""
 
-    def __init__(self, out: Path) -> None:
+    def __init__(self, out: Path, names: Sequence[str] = NAMES, fs: int = FS, reports: bool = True) -> None:
         self.out = Path(out); self.out.mkdir(parents=True, exist_ok=True)
+        self.reports = reports
+        self.names: tuple[str, ...] = tuple(names); self.fs = fs; self.rec = REC  # set again by configure()
         self.nights_dir = self.out.resolve().parent / "nights"  # next to --out
         self.export_dir = self.out.resolve().parent / "export"
         self.lock = threading.Lock()
         self.buf: list[bytes] = []; self.idx: list[bytes] = []
         self.total = 0  # records written to the .f32
         self.seen = 0  # records received (index of the next sample)
-        self.ring: collections.deque = collections.deque(maxlen=FS * 5)
+        self.ring: collections.deque = collections.deque(maxlen=fs * 5)
         self.contact: dict[str, float] = {}  # last contact resistance in ohms (inf = none)
         self.contact_t: float | None = None  # when it was measured (pages wait for this to change)
         self.want_contact = threading.Event()
@@ -58,11 +64,27 @@ class Hub:
         self.stamp: str | None = None
         self.data = self.logf = self.idxf = self.markf = None
         self.server: ThreadingHTTPServer | None = None
+        self.configure(names, fs)  # BrainBit's defaults give REC, as before
 
     # ---- files ---------------------------------------------------------------------------------------------
+    def configure(self, names: Sequence[str], fs: int = FS) -> None:
+        """Channel names (the record is uint32 + one float32 each) and rate; only while no file set is open."""
+        if self.data is not None:
+            raise RuntimeError("change the channels between file sets only")
+        with self.lock:
+            self.names = tuple(names); self.fs = fs
+            self.rec = struct.Struct(f"<I{len(self.names)}f")
+            self.ring = collections.deque(maxlen=fs * 5)
+
     def open_files(self, stamp: str | None = None) -> str:
-        """Create this run's files; call once a headband is found, so runs while it is off leave no empty files."""
-        self.stamp = stamp or datetime.now().strftime("%Y-%m-%d-%H%M%S")
+        """Create this run's files; call once a headband is found, so runs while it is off leave no empty files.
+        A stamp already used in --out moves on by a second (a new set never appends to an old one)."""
+        if stamp is None:
+            t = datetime.now()
+            while (self.out / f"{t:%Y-%m-%d-%H%M%S}.f32").exists():
+                t += timedelta(seconds=1)
+            stamp = f"{t:%Y-%m-%d-%H%M%S}"
+        self.stamp = stamp
         self.data = open(self.out / f"{self.stamp}.f32", "ab")
         self.logf = open(self.out / f"{self.stamp}.log", "a")
         self.idxf = open(self.out / f"{self.stamp}.idx", "ab")
@@ -75,18 +97,22 @@ class Hub:
         if self.logf:
             self.logf.write(line + "\n"); self.logf.flush()
 
+    def log_lines(self, lines: Sequence[str]) -> None:
+        """Lines that already carry their time (noted before this file set opened) into its log, as they are."""
+        if self.logf and lines:
+            self.logf.write("".join(line + "\n" for line in lines)); self.logf.flush()
+
     def add_batch(self, rows: Sequence[Row], now: float | None = None) -> None:
         """One batch as it arrived: an .idx row, the records, the ring for /state and the live stream."""
         now = time.time() if now is None else now
         self.live["t"] = now
         with self.lock:
             self.idx.append(IDX.pack(now, self.seen)); self.seen += len(rows)
-            self.buf.extend(REC.pack(*r) for r in rows)
+            self.buf.extend(self.rec.pack(*r) for r in rows)
             self.ring.extend(r[1:] for r in rows)
             first = self.seen - len(rows)
         if self.subs:
-            self.publish(dict(i=first, t=round(now, 3), uv=[[round(r[1] * 1e6, 2), round(r[2] * 1e6, 2),
-                                                            round(r[3] * 1e6, 2), round(r[4] * 1e6, 2)] for r in rows]))
+            self.publish(dict(i=first, t=round(now, 3), uv=[[round(v * 1e6, 2) for v in r[1:]] for r in rows]))
 
     def write_pending(self) -> int:
         """Move what arrived since the last call to the files; returns the records written."""
@@ -94,7 +120,7 @@ class Hub:
             chunk, self.buf[:] = b"".join(self.buf), []
             ichunk, self.idx[:] = b"".join(self.idx), []
         self.data.write(chunk); self.idxf.write(ichunk)
-        n = len(chunk) // REC.size; self.total += n
+        n = len(chunk) // self.rec.size; self.total += n
         return n
 
     def sync(self) -> None:
@@ -111,16 +137,30 @@ class Hub:
         """Save the rest and close the samples; the log and markers stay open for the last lines (close())."""
         with self.lock:
             chunk = b"".join(self.buf); self.data.write(chunk); self.idxf.write(b"".join(self.idx))
-            self.total += len(chunk) // REC.size
+            self.total += len(chunk) // self.rec.size
         self.idxf.flush(); os.fsync(self.idxf.fileno()); self.idxf.close()
         self.data.flush(); os.fsync(self.data.fileno()); self.data.close()
-        self.log(f"total samples {self.total}, {self.total / 250 / 60:.1f} min")
+        self.log(f"total samples {self.total}, {self.total / self.fs / 60:.1f} min")
 
     def close(self) -> None:
-        if self.markf:
-            self.markf.close()
+        with self.lock:
+            if self.markf:
+                self.markf.close(); self.markf = None
         if self.logf:
             self.logf.close(); self.logf = None
+
+    def end_file_set(self) -> str | None:
+        """Close this set (the samples, then its log and markers) so the next open_files() starts a fresh one in the
+        same process; the counters start again. Returns the closed set's stamp."""
+        old = self.stamp
+        if self.data is not None:
+            self.finish()
+        self.close()
+        with self.lock:
+            self.data = self.idxf = None; self.stamp = None
+            self.buf.clear(); self.idx.clear(); self.ring.clear()
+            self.total = self.seen = self.last_total = 0
+        return old
 
     # ---- battery and the 10 s line ---------------------------------------------------------------------------
     def battery_start(self) -> None:
@@ -157,9 +197,9 @@ class Hub:
                 except queue.Full: pass  # a consumer that cannot keep up loses batches, the recording does not
 
     def add_marker(self, text: str) -> dict | None:
-        if self.markf is None:
-            return None
         with self.lock:
+            if self.markf is None:
+                return None
             m = dict(t=round(time.time(), 3), i=self.seen, text=text)
             self.markf.write(json.dumps(m) + "\n"); self.markf.flush()
         self.publish(dict(marker=text, i=m["i"], t=m["t"]))
@@ -167,16 +207,16 @@ class Hub:
 
     def state(self) -> dict:
         with self.lock:
-            rows = list(self.ring)[-FS * 4:]
+            rows = list(self.ring)[-self.fs * 4:]; names, fs = self.names, self.fs
         data = []
-        for c in range(4):
+        for c in range(len(names)):
             col = [r[c] for r in rows]; m = sum(col) / len(col) if col else 0.0
             data.append([round((v - m) * 1e6, 1) for v in col])
         last = self.contact
-        contact = {n: (None if last.get(n, float("inf")) == float("inf") else round(last[n])) for n in NAMES}
+        contact = {n: (None if last.get(n, float("inf")) == float("inf") else round(last[n])) for n in names}
         return dict(status=self.live["status"], battery=self.live.get("battery", "?"),
-                    battery_note=self.live.get("battery_note"), minutes=round(self.total / FS / 60, 1),
-                    age=round(time.time() - self.live["t"], 1), names=NAMES, fs=FS, contact=contact,
+                    battery_note=self.live.get("battery_note"), minutes=round(self.total / fs / 60, 1),
+                    age=round(time.time() - self.live["t"], 1), names=names, fs=fs, contact=contact,
                     contact_t=self.contact_t, data=data)
 
     def serve(self, port: int) -> None:
@@ -214,6 +254,9 @@ def make_handler(hub: Hub) -> type:
             request's thread only; any failure becomes {"error": ...} and never reaches the recording."""
             out, nights_dir, export_dir = hub.out, hub.nights_dir, hub.export_dir
             try:
+                if not hub.reports:
+                    raise RuntimeError(f"the sleep and morning reports read BrainBit recordings (O1 O2 T3 T4) only; "
+                                       f"this recorder's channels are {' '.join(hub.names)} (DECISIONS 350-359)")
                 if nf is None:
                     raise RuntimeError("scripts/night_files.py did not load")
                 if name == "morning-report":
@@ -241,7 +284,7 @@ def make_handler(hub: Hub) -> type:
             q: queue.Queue = queue.Queue(maxsize=200)
             with hub.subs_lock: hub.subs.append(q)
             try:
-                hello = dict(hello=True, names=NAMES, fs=FS, unit="uV", status=hub.live["status"], next_i=hub.seen)
+                hello = dict(hello=True, names=hub.names, fs=hub.fs, unit="uV", status=hub.live["status"], next_i=hub.seen)
                 self.wfile.write(f"data: {json.dumps(hello)}\n\n".encode()); self.wfile.flush()
                 while True:
                     try: line = q.get(timeout=10)

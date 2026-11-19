@@ -1,0 +1,9 @@
+{
+  "name": "DIY breadboard ADS1299-4, planned electrodes",
+  "channels": ["O1", "O2", "Fz", "Fp1"],
+  "inputs": "CH1 to CH4 = chip legs 16, 14, 12, 10, each through 4.7 kohm to its electrode",
+  "reference": "an earlobe, to SRB1 (chip leg 17) through 4.7 kohm",
+  "bias": "the other earlobe, to BIASOUT (chip leg 63) through 1 Mohm",
+  "source": "eeg_ads1299_lab: docs/BREADBOARD_S3_BRINGUP.md step 12 (reference and bias on the earlobes, one channel at O1, then four) and its breadboard guide review, finding BB-23 (CH1 O1, CH2 O2, CH3 Fz, CH4 Fp1), as of main 7aa87b2",
+  "status": "a plan, not wired yet. The bench firmware has no electrode mode: until it has one, the chip records its own test signal or shorted inputs, whatever these names say"
+}
