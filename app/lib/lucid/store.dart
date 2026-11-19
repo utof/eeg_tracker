@@ -61,7 +61,7 @@ class LucidSettings {
       level: level,
       mediaVolume: mv is int ? mv : null,
       mediaVolumeMax: mm is int ? mm : null,
-      levelSet: DateTime.tryParse('${j['levelSet']}'),
+      levelSet: DateTime.tryParse('${j['levelSet']}')?.toLocal(),
     );
   }
 }
@@ -229,7 +229,8 @@ class PracticeRecord {
 
   static PracticeRecord? fromJson(Object? j) {
     if (j is! Map) return null;
-    final s = DateTime.tryParse('${j['start']}'), e = DateTime.tryParse('${j['end']}'), c = j['cues'];
+    final s = DateTime.tryParse('${j['start']}')?.toLocal(), e = DateTime.tryParse('${j['end']}')?.toLocal();
+    final c = j['cues'];
     if (s == null || e == null || c is! int) return null;
     return PracticeRecord(start: s, end: e, cues: c, completed: j['completed'] == true);
   }
@@ -301,7 +302,7 @@ class NightSignals {
 
   static NightSignals? fromJson(Object? j) {
     if (j is! Map || j['version'] != 1) return null;
-    final m = DateTime.tryParse('${j['made']}'), s = j['signals'], w = j['sweepUv'], c = j['clenchX'];
+    final m = DateTime.tryParse('${j['made']}')?.toLocal(), s = j['signals'], w = j['sweepUv'], c = j['clenchX'];
     if (m == null || s is! List || w is! num) return null;
     return NightSignals(
       made: m,
