@@ -18,8 +18,10 @@ import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/live_drift.dart';
 import 'package:eeg_tracker/recorder/night_recorder.dart';
+import 'package:eeg_tracker/recorder/nights.dart' show nightsIn;
 import 'package:eeg_tracker/recorder/status.dart';
 import 'package:eeg_tracker/sleep/night_scorer.dart';
+import 'package:eeg_tracker/wearer/wearer.dart' show refreshWearer;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'diy/fake_board.dart';
@@ -273,6 +275,14 @@ void main() {
     final back = RecorderStatus.fromMap(statuses.last.toMap(nowMs: 0))!;
     expect(back.board?.names, ['O1', 'O2', 'Fz', 'Fp1']);
     expect(back.board?.modeText, contains('not EEG'));
+    // never scored, so never asked "Was this you?": the sleep scorer and the check read files/recordings and
+    // files/nights, and the board's night is in neither
+    final rec = '${root.path}/files/recordings';
+    expect(nightsIn(Directory(rec)), isEmpty);
+    expect(Directory('${root.path}/files/nights').existsSync(), isFalse);
+    final wearer = refreshWearer(rec, DateTime.now());
+    expect(wearer.on, isTrue);
+    expect(wearer.verdicts, isEmpty);
   });
 
   test('the lucid cues and the live sleep model they share are off before the board\'s first sample', () async {
