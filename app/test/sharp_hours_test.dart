@@ -167,7 +167,7 @@ void main() {
             (3 + (h < 12 ? 1 : 0) + (g.nextDouble() + g.nextDouble() + g.nextDouble() - 1.5) * 1.2).round().clamp(1, 5);
         final r = _days(30, [10.5, 12.5, 14.5, 16.5, 18.5], v);
         final b = sharpProfile(SharpAxis.clock, pts(r), higherBetter: true, seed: seed).best;
-        if (b != null && b.block.index == 5) {
+        if (b != null && b.blocks.length == 1 && b.blocks.single.index == 5) {
           named++;
           last = b;
         }
@@ -177,6 +177,26 @@ void main() {
       expect(last.low, lessThan(last.gap));
       expect(last.high, greaterThan(last.gap));
       expect(last.sure, greaterThanOrEqualTo(0.9));
+    });
+
+    test('a peak over two neighbouring blocks is named as one 4-hour span', () {
+      var named = 0;
+      BestTime? last;
+      for (var seed = 0; seed < 20; seed++) {
+        final g = math.Random(seed);
+        int v(int d, double h) =>
+            (3 + (h < 12 ? 1 : 0) + (g.nextDouble() + g.nextDouble() + g.nextDouble() - 1.5) * 1.2).round().clamp(1, 5);
+        // 9, 11: two morning blocks alike; 13-19 the rest
+        final r = _days(30, [9.0, 11.0, 13.0, 15.0, 17.0, 19.0], v);
+        final b = sharpProfile(SharpAxis.clock, pts(r), higherBetter: true, seed: seed).best;
+        if (b != null && b.blocks.map((x) => x.index).toSet().containsAll([4, 5])) {
+          named++;
+          last = b;
+        }
+      }
+      expect(named, greaterThanOrEqualTo(16));
+      expect(last!.blocks, hasLength(2));
+      expect(bestWords(SharpAxis.clock, last), startsWith('Sharpest 08:00 to 12:00: '));
     });
 
     test('reaction time: quicker is better, and a best time needs 5 % quicker', () {
@@ -193,7 +213,7 @@ void main() {
       ];
       final p = sharpProfile(SharpAxis.clock, pts, higherBetter: false, minPerBlock: 4);
       expect(p.best, isNotNull);
-      expect(p.best!.block.index, 5);
+      expect(p.best!.blocks.single.index, 5);
       expect(p.best!.gap, lessThan(0), reason: 'faster: a negative difference in ms');
       expect(bestWords(SharpAxis.clock, p.best!, reaction: true), startsWith('Quickest 10:00 to 12:00: '));
       expect(bestWords(SharpAxis.clock, p.best!, reaction: true), contains('% quicker than at your other times'));
@@ -201,12 +221,16 @@ void main() {
 
     test('the words', () {
       final block = SharpBlock(index: 5, n: 20, days: 18, mean: 3.9, low: 3.6, high: 4.2);
-      final b = BestTime(block: block, gap: 0.8, low: 0.4, high: 1.2, sure: 0.95);
+      final b = BestTime(blocks: [block], mean: 3.9, gap: 0.8, low: 0.4, high: 1.2, sure: 0.95);
       expect(bestWords(SharpAxis.clock, b), 'Sharpest 10:00 to 12:00: 0.8 points above your other times (probably 0.4 to 1.2).');
       expect(
-        bestWords(SharpAxis.sinceWake, BestTime(block: SharpBlock(index: 1, n: 20, days: 18, mean: 3.9, low: 3.6, high: 4.2), gap: 0.6, low: 0.1, high: 1.0, sure: 0.92)),
+        bestWords(SharpAxis.sinceWake, BestTime(blocks: const [SharpBlock(index: 1, n: 20, days: 18, mean: 3.9, low: 3.6, high: 4.2)], mean: 3.9, gap: 0.6, low: 0.1, high: 1.0, sure: 0.92)),
         'Sharpest 2 to 4 hours after waking: 0.6 points above your other times (probably 0.1 to 1.0).',
       );
+      const two = [SharpBlock(index: 1, n: 9, days: 8), SharpBlock(index: 2, n: 9, days: 8)];
+      expect(spanWords(SharpAxis.sinceWake, two), '2 to 6 hours after waking');
+      expect(spanWords(SharpAxis.pressure, two), 'sleep pressure 25 to 75');
+      expect(spanWords(SharpAxis.clock, const [SharpBlock(index: 11, n: 9, days: 8)]), '22:00 to 24:00');
     });
   });
 

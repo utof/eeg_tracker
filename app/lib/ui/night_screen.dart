@@ -23,6 +23,8 @@ import '../share/isolate.dart' show shareAddress;
 import '../sleep/onnx_runs.dart';
 import '../sleep/report.dart';
 import '../sleep/scorer.dart';
+import '../sharp/prompts.dart' show ChannelSharpPhone, rearmSharp;
+import '../sharp/store.dart' show SharpStore, sharpDirFor;
 import 'dream_screen.dart';
 import 'dream_view.dart' show clock;
 import 'export_screen.dart';
@@ -300,6 +302,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     } catch (_) {
       // a line of text is never worth breaking the night screen
     }
+    // the sharp-hours questions (DECISIONS row 283): the moments ahead, handed to the phone at every start and return
+    if (dir != null) unawaited(rearmSharp(SharpStore(sharpDirFor(dir)), ChannelSharpPhone(), DateTime.now()).catchError((Object _) {}));
     await _share.sync(night: running, filesDir: dir == null ? null : Directory(dir).parent.path, front: _front);
     if (!mounted) return;
     setState(() {

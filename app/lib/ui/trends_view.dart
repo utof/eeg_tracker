@@ -52,9 +52,21 @@ String pressureHeadline(PressureModel p, DateTime now) {
 }
 
 class TrendsView extends StatelessWidget {
-  const TrendsView({super.key, required this.model, this.onInfo, this.onExperiments, this.experimentLine});
+  const TrendsView({
+    super.key,
+    required this.model,
+    this.onInfo,
+    this.onExperiments,
+    this.experimentLine,
+    this.onSharp,
+    this.sharpLine,
+  });
   final TrendsModel model;
   final VoidCallback? onInfo;
+
+  /// Opens the sharp-hours page (the assistant's proposal, DECISIONS rows 280-289); the section shows only with it.
+  final VoidCallback? onSharp;
+  final String? sharpLine;
 
   /// Opens the self-experiments page; the section shows only with it. [experimentLine]: today's task or where the
   /// experiment stands (experiments_view.dart), null without one.
@@ -142,6 +154,12 @@ class TrendsView extends StatelessWidget {
               icon: const Icon(Icons.science_outlined),
               label: const Text('Experiments'),
             ),
+          ],
+          if (onSharp != null) ...[
+            const SectionHeading('Sharp hours'),
+            Para(sharpLine ?? '', color: Night.inkMuted, top: 0),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(onPressed: onSharp, icon: const Icon(Icons.schedule), label: const Text('Sharp hours')),
           ],
           const SectionHeading("Tomorrow's sleepiness"),
           if (m.forecast.shown) ...[

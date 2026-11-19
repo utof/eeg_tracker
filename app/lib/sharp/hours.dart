@@ -5,8 +5,9 @@
 // - Then three ways to group the answers: 2-hour blocks of clock time, of hours since your recorded wake-up, and of
 //   the sleep-pressure estimate (trends/pressure.dart). Each block: its mean and an 80 % range from resampling
 //   whole days (answers on one day resemble each other, so days, not answers, are the units drawn).
-// - A best time is named only when the same block is the best in at least 9 of 10 resamples AND it stands out by
-//   half a point (5 % for reaction time). Everything here is seen together, not tested: what you do at those hours
+// - A best time is named only when the same block beats every other block in at least 9 of 10 resamples AND it
+//   stands out by half a point (5 % for reaction time); when the best block alone does not, it is tried once more
+//   together with its better neighbour, as one 4-hour span (a real peak is often broader than 2 hours). Everything here is seen together, not tested: what you do at those hours
 //   (meetings, meals, coffee) shapes it too.
 import 'dart:math' as math;
 
@@ -40,9 +41,12 @@ class GateState {
   bool get open => day > SharpGate.days && ratings >= SharpGate.ratings;
   bool get testsOpen => open && tests >= SharpGate.tests;
 
+  /// `23 of about 60 ratings, day 9 of 21.` while collecting.
+  String get counts => '$ratings of about ${SharpGate.ratings} ratings, day ${math.min(day, SharpGate.days)} of ${SharpGate.days}.';
+
   String get words {
     if (ratings == 0) return 'Nothing rated yet.';
-    if (!open) return 'Collecting: $ratings of about ${SharpGate.ratings} ratings, day ${math.min(day, SharpGate.days)} of ${SharpGate.days}.';
+    if (!open) return 'Collecting: $counts';
     final t = tests == 0 ? 'no reaction tests' : (tests == 1 ? '1 reaction test' : '$tests reaction tests');
     return '$ratings ratings and $t over $day days.';
   }
@@ -148,13 +152,18 @@ class SharpBlock {
 }
 
 class BestTime {
-  const BestTime({required this.block, required this.gap, required this.low, required this.high, required this.sure});
-  final SharpBlock block;
+  const BestTime({required this.blocks, required this.mean, required this.gap, required this.low, required this.high, required this.sure});
 
-  /// The block's mean minus the mean of every other answer, with its 80 % range.
+  /// One block, or two neighbouring blocks taken together when a peak spans both.
+  final List<SharpBlock> blocks;
+
+  /// The answers' mean in [blocks].
+  final double mean;
+
+  /// [mean] minus the mean of every other answer, with its 80 % range.
   final double gap, low, high;
 
-  /// The share of resamples in which this block was the best.
+  /// The share of resamples in which [blocks] beat every other block.
   final double sure;
 }
 
@@ -210,11 +219,10 @@ SharpProfile sharpProfile(
   for (var b = 0; b < nb; b++) {
     if (shown[b] && (bestIx == null || better * sum[b] / n[b] > better * sum[bestIx] / n[bestIx])) bestIx = b;
   }
-  // resample whole days with replacement
+  // resample whole days with replacement; keep each draw's sums per block
   final r = math.Random(seed);
   final means = List.generate(nb, (_) => <double>[]);
-  final gaps = <double>[];
-  var wins = 0;
+  final drawn = <(List<double>, List<int>)>[];
   for (var k = 0; k < draws && days.isNotEmpty; k++) {
     final s = List.filled(nb, 0.0), c = List.filled(nb, 0);
     for (var i = 0; i < days.length; i++) {
@@ -223,17 +231,10 @@ SharpProfile sharpProfile(
         c[p.block]++;
       }
     }
-    int? top;
     for (var b = 0; b < nb; b++) {
-      if (c[b] == 0) continue;
-      means[b].add(s[b] / c[b]);
-      if (shown[b] && (top == null || better * s[b] / c[b] > better * s[top] / c[top])) top = b;
+      if (c[b] > 0) means[b].add(s[b] / c[b]);
     }
-    if (bestIx != null && c[bestIx] > 0) {
-      if (top == bestIx) wins++;
-      final rest = c.fold(0, (a, b) => a + b) - c[bestIx];
-      if (rest > 0) gaps.add(s[bestIx] / c[bestIx] - (s.fold(0.0, (a, b) => a + b) - s[bestIx]) / rest);
-    }
+    drawn.add((s, c));
   }
   final blocks = <SharpBlock>[];
   for (var b = 0; b < nb; b++) {
@@ -248,36 +249,77 @@ SharpProfile sharpProfile(
       high: shown[b] ? _q(m, 0.9) : null,
     ));
   }
-  BestTime? best;
-  if (bestIx != null && count > n[bestIx] && gaps.isNotEmpty) {
-    final restMean = (total - sum[bestIx]) / (count - n[bestIx]);
-    final gap = sum[bestIx] / n[bestIx] - restMean;
+  // the best block, then (when it does not stand out alone) the best block with its better neighbour
+  BestTime? test(Set<int> span) {
+    final ns = span.fold(0, (a, b) => a + n[b]);
+    if (ns == 0 || ns >= count) return null;
+    final mean = span.fold(0.0, (a, b) => a + sum[b]) / ns;
+    final restMean = (total - span.fold(0.0, (a, b) => a + sum[b])) / (count - ns);
+    var wins = 0;
+    final gaps = <double>[];
+    for (final (s, c) in drawn) {
+      final cs = span.fold(0, (a, b) => a + c[b]);
+      if (cs == 0) continue;
+      final ms = span.fold(0.0, (a, b) => a + s[b]) / cs;
+      var beats = true;
+      for (var b = 0; b < nb && beats; b++) {
+        if (span.contains(b) || !shown[b] || c[b] == 0) continue;
+        if (better * (s[b] / c[b]) >= better * ms) beats = false;
+      }
+      if (beats) wins++;
+      final rest = c.fold(0, (a, b) => a + b) - cs;
+      if (rest > 0) gaps.add(ms - (s.fold(0.0, (a, b) => a + b) - span.fold(0.0, (a, b) => a + s[b])) / rest);
+    }
+    final gap = mean - restMean;
     final need = higherBetter ? SharpGate.ratingGap : SharpGate.reactionShare * restMean.abs();
-    final sure = wins / draws;
+    final sure = drawn.isEmpty ? 0.0 : wins / drawn.length;
+    if (gaps.isEmpty || sure < SharpGate.sure || better * gap < need) return null;
     gaps.sort();
-    if (sure >= SharpGate.sure && better * gap >= need) {
-      best = BestTime(
-        block: blocks.firstWhere((x) => x.index == bestIx),
-        gap: gap,
-        low: _q(gaps, 0.1),
-        high: _q(gaps, 0.9),
-        sure: sure,
-      );
+    return BestTime(
+      blocks: [for (final b in blocks) if (span.contains(b.index)) b],
+      mean: mean,
+      gap: gap,
+      low: _q(gaps, 0.1),
+      high: _q(gaps, 0.9),
+      sure: sure,
+    );
+  }
+
+  BestTime? best;
+  if (bestIx != null) {
+    best = test({bestIx});
+    if (best == null) {
+      final next = [bestIx - 1, bestIx + 1].where((b) => b >= 0 && b < nb && shown[b]).toList()
+        ..sort((a, b) => (better * sum[b] / n[b]).compareTo(better * sum[a] / n[a]));
+      if (next.isNotEmpty) best = test({bestIx, next.first});
     }
   }
   return SharpProfile(axis: axis, blocks: blocks, best: best);
 }
 
+/// `10:00 to 12:00`, `08:00 to 12:00`, `2 to 6 hours after waking`, `sleep pressure 25 to 75`: one block or two
+/// neighbouring ones.
+String spanWords(SharpAxis axis, List<SharpBlock> span) {
+  final a = span.map((b) => b.index).reduce(math.min), z = span.map((b) => b.index).reduce(math.max);
+  if (a == z) return blockWords(axis, a);
+  return switch (axis) {
+    SharpAxis.clock => '${_two(a * 2)}:00 to ${_two(z * 2 + 2)}:00',
+    SharpAxis.sinceWake => z >= 8 ? '${a * 2} hours or more after waking' : '${a * 2} to ${z * 2 + 2} hours after waking',
+    SharpAxis.pressure => a == 0
+        ? 'sleep pressure under ${z * 25 + 25}'
+        : (z >= 4 ? 'sleep pressure ${a * 25} or more' : 'sleep pressure ${a * 25} to ${z * 25 + 25}'),
+  };
+}
 
 /// "Sharpest 10:00 to 12:00: 0.8 points above your other times (probably 0.4 to 1.2)." or, for reaction times,
 /// "Quickest 10:00 to 12:00: 12 % quicker than at your other times (probably 6 to 18 %)."
 String bestWords(SharpAxis axis, BestTime b, {bool reaction = false}) {
-  final where = blockWords(axis, b.block.index);
+  final where = spanWords(axis, b.blocks);
   if (!reaction) {
     return 'Sharpest $where: ${b.gap.toStringAsFixed(1)} points above your other times '
         '(probably ${b.low.toStringAsFixed(1)} to ${b.high.toStringAsFixed(1)}).';
   }
-  final rest = b.block.mean! - b.gap;
+  final rest = b.mean - b.gap;
   int pct(double g) => (-g / rest * 100).round();
   final lo = math.min(pct(b.low), pct(b.high)), hi = math.max(pct(b.low), pct(b.high));
   return 'Quickest $where: ${pct(b.gap)} % quicker than at your other times (probably $lo to $hi %).';

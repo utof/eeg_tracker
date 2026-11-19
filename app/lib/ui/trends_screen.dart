@@ -1,5 +1,5 @@
-// The trends page (ROADMAP row 10; DECISIONS rows 120-129): reads the phone's own sleep reports, check-ins and
-// practice reports and lays them out with trends_view.dart. Opened from the night screen's Morning section and
+// The trends page (ROADMAP row 10; DECISIONS rows 120-129): reads the phone's own sleep reports, check-ins,
+// practice reports and sharp-hours answers (rows 280-289) and lays them out with trends_view.dart. Opened from the night screen's Morning section and
 // from a check-in's result.
 import 'dart:async';
 
@@ -10,10 +10,13 @@ import '../morning/store.dart';
 import '../phone.dart';
 import '../sleep/report.dart';
 import '../training/control.dart' show SessionKind;
+import '../sharp/page.dart' show sharpTrendsLine;
+import '../sharp/store.dart';
 import '../trends/trends.dart';
 import 'evidence_sheet.dart';
 import 'experiments_screen.dart';
 import 'experiments_view.dart' show experimentLine;
+import 'sharp_hours_screen.dart';
 import 'trends_view.dart';
 
 /// Everything the trends need, read from the app's folders (a missing folder is simply empty).
@@ -38,7 +41,7 @@ class TrendsScreen extends StatefulWidget {
 
 class _TrendsScreenState extends State<TrendsScreen> {
   TrendsModel? _model;
-  String? _error, _dir, _experiment;
+  String? _error, _dir, _experiment, _sharp;
 
   @override
   void initState() {
@@ -51,13 +54,16 @@ class _TrendsScreenState extends State<TrendsScreen> {
       final dir = widget.recordingsDir ?? await Phone.recordingsDir();
       if (dir == null) throw StateError("the app's folder is not known");
       final now = DateTime.now();
-      final m = buildTrends(readTrendInputs(dir), now);
+      final m = buildTrends(readTrendInputs(dir), now, extra: readSharpDayNumbers(dir));
       final line = experimentLine(currentExperiment(dir, now));
+      final sharp = SharpStore(sharpDirFor(dir));
+      final sharpLine = sharpTrendsLine(sharp.settings(), sharp.ratings(), sharp.reactions(), now);
       if (!mounted) return;
       setState(() {
         _model = m;
         _dir = dir;
         _experiment = line;
+        _sharp = sharpLine;
       });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -74,6 +80,11 @@ class _TrendsScreenState extends State<TrendsScreen> {
         experimentLine: _experiment,
         onExperiments: () async {
           await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ExperimentsScreen(recordingsDir: _dir)));
+          await _load();
+        },
+        sharpLine: _sharp,
+        onSharp: () async {
+          await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SharpHoursScreen(recordingsDir: _dir)));
           await _load();
         },
       );
