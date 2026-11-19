@@ -10,6 +10,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import '../recorder/nights.dart';
+import '../recorder/packed.dart' show rawExists, rawLength;
 import 'extras.dart';
 import 'model.dart';
 import 'prep.dart';
@@ -57,9 +58,10 @@ class SleepScorer {
   final String model;
   final DateTime Function() _clock;
 
+  /// The night's `.f32` names and lengths, packed or not (a night packed after a day keeps its report).
   static Map<String, int> inputsOf(NightFiles night) => {
     for (final f in night.recordings)
-      if (f.existsSync()) f.uri.pathSegments.last: f.lengthSync(),
+      if (rawExists(f)) f.uri.pathSegments.last: rawLength(f),
   };
 
   /// Nights whose last scoring did not finish, with the reason written in the marker.

@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:eeg_tracker/export/store.dart';
+import 'package:eeg_tracker/recorder/packed.dart' show packRaw;
 import 'package:eeg_tracker/share/protocol.dart';
 import 'package:eeg_tracker/share/server.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -324,6 +325,23 @@ void main() {
       expect(row['bytes'], 40);
       expect(row['sha256'], sha256.convert(f32.readAsBytesSync()).toString());
       expect(row['modified_ms'], f32.lastModifiedSync().millisecondsSinceEpoch);
+    });
+
+    test('a recording packed after a day is listed and served as it is, naming the .f32 it holds', () async {
+      final f32 = put('recordings/2026-11-17-231200.f32', List.generate(70000, (i) => i % 7),
+          modified: now.subtract(const Duration(days: 2)));
+      final body = f32.readAsBytesSync();
+      final p = packRaw(f32);
+      final row = ((await json('/files'))['files']! as List).single as Map<String, Object?>;
+      expect(row['path'], 'recordings/2026-11-17-231200.f32.gz');
+      expect(row['bytes'], p.packedBytes);
+      expect(row['sha256'], sha256.convert(p.packed.readAsBytesSync()).toString());
+      expect(row['original'], {
+        'path': 'recordings/2026-11-17-231200.f32',
+        'bytes': body.length,
+        'sha256': sha256.convert(body).toString(),
+      });
+      expect((await ask('/files/recordings/2026-11-17-231200.f32.gz')).body, p.packed.readAsBytesSync());
     });
 
     test('a file being written is listed as growing, without a SHA-256, until it rests', () async {

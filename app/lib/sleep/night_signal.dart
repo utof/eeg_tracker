@@ -9,6 +9,7 @@ import 'dart:typed_data';
 
 import '../recorder/chunk_writer.dart' show indexBytes, recordBytes;
 import '../recorder/nights.dart' show stemTime;
+import '../recorder/packed.dart' show RawReader, openRaw, rawLength;
 
 const int sampleRate = 250;
 const List<String> channelNames = ['O1', 'O2', 'T3', 'T4'];
@@ -63,7 +64,7 @@ class NightLayout {
     final out = Float64List(samples);
     var last = double.nan;
     var pending = 0; // a gap before the first run holds that run's first value
-    RandomAccessFile? open;
+    RawReader? open;
     File? openFile;
     try {
       for (final p in parts) {
@@ -78,7 +79,7 @@ class NightLayout {
         }
         if (openFile?.path != run.file.path) {
           open?.closeSync();
-          open = run.file.openSync();
+          open = openRaw(run.file);
           openFile = run.file;
         }
         _readChannel(open!, run, c, out, p.at);
@@ -103,7 +104,7 @@ class NightLayout {
     final row = Float64List(4);
     var started = false;
     var pending = 0; // a gap before the first run holds that run's first value
-    RandomAccessFile? open;
+    RawReader? open;
     File? openFile;
     try {
       for (final p in parts) {
@@ -120,7 +121,7 @@ class NightLayout {
         }
         if (openFile?.path != run.file.path) {
           open?.closeSync();
-          open = run.file.openSync();
+          open = openRaw(run.file);
           openFile = run.file;
         }
         const chunk = 16384; // records per read
@@ -164,7 +165,7 @@ class NightLayout {
     }
   }
 
-  static void _readChannel(RandomAccessFile f, Run run, int c, Float64List out, int at) {
+  static void _readChannel(RawReader f, Run run, int c, Float64List out, int at) {
     const chunk = 16384; // records per read
     f.setPositionSync(run.first * recordBytes);
     for (var done = 0; done < run.count;) {
@@ -182,9 +183,9 @@ class NightLayout {
 }
 
 /// to_bdf.py `runs`: one file's runs of unbroken samples, from its .idx (one run at the file name's time if the
-/// index is missing or empty).
+/// index is missing or empty). [f32] by its plain name, also when it is packed (`.f32.gz`).
 List<Run> runsOf(File f32) {
-  final records = f32.existsSync() ? f32.lengthSync() ~/ recordBytes : 0;
+  final records = rawLength(f32) ~/ recordBytes;
   if (records == 0) return const [];
   final idxFile = File('${f32.path.substring(0, f32.path.length - 4)}.idx');
   final rows = <(double, int)>[];

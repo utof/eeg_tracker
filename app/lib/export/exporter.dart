@@ -143,6 +143,7 @@ Map<String, Object?> buildManifest({
         'sha256': state.files[p]!.sha256,
         'modified_ms': state.files[p]!.modifiedMs,
         'written': state.files[p]!.written,
+        if (state.files[p]!.original != null) 'original': state.files[p]!.original,
         if (!onPhone.contains(p)) 'on_phone': false,
       },
   ];
@@ -199,6 +200,7 @@ Future<ExportOutcome> runExport({
         sha256: c.sha256,
         written: written,
         recopy: !steady,
+        original: f.originalJson, // a packed recording names the .f32 it holds; the laptop unpacks and checks it
       );
       done++;
       bytes += c.bytes;
@@ -212,7 +214,7 @@ Future<ExportOutcome> runExport({
   store.save(state);
   final manifest = buildManifest(
     state: state,
-    onPhone: {for (final f in stored) f.path},
+    onPhone: {for (final f in stored) ...{f.path, f.originalPath}}, // a packed recording's .f32 is on the phone too
     at: at,
     everything: everything,
     notExported: notExported,

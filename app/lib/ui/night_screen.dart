@@ -20,6 +20,7 @@ import '../morning/store.dart';
 import '../nap/store.dart';
 import '../recorder/headband.dart';
 import '../recorder/nights.dart';
+import '../recorder/packed.dart' show packInBackground, packOldRecordings;
 import '../recorder/recorder_service.dart';
 import '../recorder/status.dart';
 import '../share/control.dart';
@@ -365,6 +366,28 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     if (mounted && running != _running) setState(() => _running = running);
   }
 
+  /// Packs the raw recordings nothing has written for a day (DECISIONS 540-549), after the sleep scorer: between
+  /// nights, one file at a time off the screen's thread. It stops before the next file as soon as a night or a session
+  /// records, the scorer runs again, the app leaves the screen or another page is in front. One run at a time.
+  static Future<void>? _packing;
+
+  void _packOld(String dir) {
+    _packing ??= packOldRecordings(Directory(dir).parent, busy: _packingMustWait, pack: packInBackground)
+        .then((run) {
+          if (run.failed.isNotEmpty) debugPrint('packing: ${run.failed.length} not packed: ${run.failed.first.$2}');
+        })
+        .whenComplete(() => _packing = null);
+  }
+
+  Future<bool> _packingMustWait() async {
+    if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? false)) return true;
+    if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) return true;
+    if (nightScoringBusy || dreamSessionRunning || soundSessionRunning || napSessionRunning || workSessionRunning) {
+      return true;
+    }
+    return FlutterForegroundTask.isRunningService;
+  }
+
   Future<void> _refresh() async {
     final phone = await _safe(Phone.snapshot, const PhoneSnapshot({}));
     final nearby = await nearbyAllowed(phone.sdkInt);
@@ -391,7 +414,11 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     }
     // Last night is scored on the phone once it has ended (DECISIONS row 97); never while a night records, nor
     // while a dream catcher session writes its recording.
-    if (!running && !dreamSessionRunning && !soundSessionRunning && !napSessionRunning) unawaited(_scoring?.run());
+    if (!running && !dreamSessionRunning && !soundSessionRunning && !napSessionRunning) {
+      final scoring = _scoring;
+      // then the recordings nothing has written for a day are packed (DECISIONS 540-549)
+      if (scoring != null && dir != null) unawaited(scoring.run().then((_) => _packOld(dir)));
+    }
     final dreamLine = dir == null ? null : _lastDream(dir);
     final napLine = dir == null ? null : _lastNap(dir);
     final lucidLine = dir == null ? null : lucidNightLine(dir);

@@ -4,10 +4,13 @@
 // docs/data-format.md), and a night never takes a recording that starts 24 hours or more after its first one.
 // The night is named after the evening date of its first recording, so a late-morning sleep lands in the same
 // night as the sleep before it. Files of a run without samples (a `.log` alone) join the night they fall in.
+// A `.f32` packed after a day (`<stamp>.f32.gz`, packed.dart) counts as the plain one: [NightFiles.recordings] keep
+// the plain name, and the readers open either form.
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'chunk_writer.dart';
+import 'packed.dart' show isPackedPath, rawLength;
 
 final RegExp _stem = RegExp(r'^(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})\.');
 
@@ -43,7 +46,8 @@ class NightFiles {
   /// Every file of the night, oldest run first.
   final List<File> files;
 
-  /// The `.f32` files with samples, oldest first: what the sleep report scores.
+  /// The `.f32` files with samples, oldest first: what the sleep report scores. By their plain names, also when
+  /// packed (open them with packed.dart's openRaw, measure them with rawLength).
   final List<File> recordings;
 
   /// Arrival of the night's last data; null without recordings.
@@ -59,7 +63,7 @@ class NightFiles {
   DateTime get end => lastData ?? start;
 
   /// File sets (one per recorder run: a new one after every drop or restart).
-  int get runs => files.where((f) => f.path.endsWith('.f32')).length;
+  int get runs => files.where((f) => f.path.endsWith('.f32') || isPackedPath(f.path)).length;
 
   int get bytes => files.fold(0, (sum, f) => sum + f.lengthSync());
 
@@ -94,8 +98,7 @@ List<NightFiles> nightsIn(Directory dir) {
   final data = <_Rec>[];
   final other = <String>[];
   for (final stem in byStem.keys) {
-    final f32 = File('${dir.path}/$stem.f32');
-    final size = f32.existsSync() ? f32.lengthSync() : 0;
+    final size = rawLength(File('${dir.path}/$stem.f32'));
     final start = stemTime('$stem.')!;
     if (size >= recordBytes) {
       data.add(_Rec(stem, start, _lastData(dir, stem, start, size)));

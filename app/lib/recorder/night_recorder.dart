@@ -34,6 +34,7 @@ import 'contact.dart';
 import 'headband.dart';
 import 'live_drift.dart';
 import 'nights.dart';
+import 'packed.dart' show rawLength;
 import 'packets.dart';
 import 'status.dart';
 import 'watch_guard.dart';
@@ -1108,8 +1109,7 @@ class NightRecorder {
   int _closedSamples() {
     final log = _lastLog;
     if (log == null) return 0;
-    final f = File('${log.path.substring(0, log.path.length - 4)}.f32');
-    return f.existsSync() ? f.lengthSync() ~/ recordBytes : 0;
+    return rawLength(File('${log.path.substring(0, log.path.length - 4)}.f32')) ~/ recordBytes; // packed or not
   }
 
   Future<void> _contactCheck(Headband band, ChunkWriter w) async {
