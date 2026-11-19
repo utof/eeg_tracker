@@ -238,6 +238,15 @@ void main() {
     }
   }
 
+  test('a session a clock limit ended says so in its report; one ended by its length or Stop does not', () {
+    MeditationSummary ended(String? end) => MeditationSummary.fromJson({..._s(DateTime(2026, 11, 19, 21)).toJson(), 'end': end})!;
+    final silent = meditationModel(stage: Stage.report, minutes: 20, report: ended(MeditationSummary.endNoSignal));
+    expect(silent.notes.join(' '), contains('no signal for 5 minutes'));
+    final limit = meditationModel(stage: Stage.report, minutes: 20, report: ended(MeditationSummary.endClock));
+    expect(limit.notes.join(' '), contains('time limit'));
+    expect(meditationModel(stage: Stage.report, minutes: 20, report: ended(null)).notes, isEmpty);
+  });
+
   test('the track keeps eyes closed twice eyes open at every length, and fills the width', () {
     for (final minutes in [5, 10, 20]) {
       final w = trackWidths(392, minutes * 60.0);

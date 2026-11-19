@@ -367,6 +367,78 @@ void main() {
     c.dispose();
   });
 
+  group('clock limits', () {
+    late Directory dir;
+    setUp(() => dir = Directory.systemTemp.createTempSync('meditation'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    test('a headband that goes silent for 5 minutes ends the session, kept with what there was', () async {
+      var mono = Duration.zero;
+      final band = DemoBand(DemoSignal(7), perTick: 25), sound = SilentSound();
+      final c = MeditationController(
+        finder: Finder([band]),
+        sound: () => sound,
+        store: MeditationStore(dir),
+        timing: fast,
+        monotonic: () => mono,
+      );
+      await c.start(const Duration(minutes: 20));
+      await until(c, () => c.runSeconds > 30);
+      band.goOutOfRange(); // the battery dies: no signal, reconnect tries find nothing
+      mono += const Duration(minutes: 4);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(c.stage, Stage.running, reason: '4 minutes without signal: still waiting');
+      mono += const Duration(minutes: 1, seconds: 1);
+      await until(c, () => c.stage == Stage.report, max: const Duration(seconds: 5));
+      expect(c.report!.end, MeditationSummary.endNoSignal);
+      expect(c.report!.complete, isFalse);
+      expect(MeditationStore(dir).list().single.end, MeditationSummary.endNoSignal);
+      expect(sound.stopped, isTrue);
+      c.dispose();
+    });
+
+    test('a session that never reaches its length ends at length + silent minutes + 20 min from Start', () async {
+      var mono = Duration.zero;
+      final band = DemoBand(DemoSignal(7), perTick: 25), sound = SilentSound();
+      final c = MeditationController(
+        finder: Finder([band]),
+        sound: () => sound,
+        store: MeditationStore(dir),
+        timing: fast,
+        monotonic: () => mono,
+      );
+      await c.start(const Duration(minutes: 20));
+      await until(c, () => c.runSeconds > 30);
+      mono += const Duration(minutes: 41);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(c.stage, Stage.running);
+      mono += const Duration(minutes: 1, seconds: 1); // 20 + 2 + 20 minutes
+      await until(c, () => c.stage == Stage.report, max: const Duration(seconds: 5));
+      expect(c.report!.end, MeditationSummary.endClock);
+      c.dispose();
+    });
+
+    test('a calibration that never gets its clean seconds ends after 10 minutes and says why', () async {
+      var mono = Duration.zero;
+      final band = DemoBand(DemoSignal(7), perTick: 1), sound = SilentSound(); // slow: still calibrating
+      final c = MeditationController(
+        finder: Finder([band]),
+        sound: () => sound,
+        store: MeditationStore(dir),
+        timing: fast,
+        monotonic: () => mono,
+      );
+      await c.start(const Duration(minutes: 5));
+      expect(c.stage, Stage.calibrating);
+      mono += const Duration(minutes: 10, seconds: 1);
+      await until(c, () => c.stage == Stage.setup, max: const Duration(seconds: 5));
+      expect(c.message, contains('calibration'));
+      expect(MeditationStore(dir).list(), isEmpty, reason: 'nothing to report');
+      expect(band.calls.last, 'disconnect');
+      c.dispose();
+    });
+  });
+
   test('the silent minutes: the sound stops after the length, the headband goes on, the block has its number', () async {
     final dir = Directory.systemTemp.createTempSync('meditation');
     addTearDown(() => dir.deleteSync(recursive: true));

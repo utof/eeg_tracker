@@ -35,6 +35,9 @@
 // Kept as it goes (DECISIONS row 463): every minute after the first 10 s with sound the summary and the log are
 // written (the summary says "running"), and at the end they are written before the slow steps (the headband's
 // release, the ring-out, the fade), so a swipe, a kill or a crash loses at most the last minute.
+// Clock limits (DECISIONS row 464), on the session clock from Start: a headband silent for 5 minutes, a calibration
+// still short of its clean seconds after 10 minutes, or the length + the silent minutes + 20 minutes end the session
+// as Stop would, with a sentence; so a dead headband cannot keep the sound, the service and the reconnects going.
 // Where the sound goes (sound/audio_route.dart, DECISIONS 424): read at the start and followed while the screen is
 // open, so the setup can warn about Bluetooth (0.25-0.5 s late); the session log keeps the route and every change,
 // and the summary whether any of it went over Bluetooth. The session goes on either way.
@@ -109,6 +112,9 @@ class MeditationTiming {
     this.rescanFor = const Duration(seconds: 10),
     this.endRingOut = const Duration(seconds: 3),
     this.saveEvery = const Duration(seconds: 60),
+    this.noSignalEnd = const Duration(minutes: 5),
+    this.calibrationLimit = const Duration(minutes: 10),
+    this.clockMargin = const Duration(minutes: 20),
   });
 
   final Duration scanFor;
@@ -139,6 +145,16 @@ class MeditationTiming {
 
   /// The session's files are rewritten this often while it runs (so a killed app keeps it up to then).
   final Duration saveEvery;
+
+  /// No signal at all for this long ends the session (the headband died or is gone).
+  final Duration noSignalEnd;
+
+  /// Still calibrating this long after Start (the clean seconds never came): the session ends.
+  final Duration calibrationLimit;
+
+  /// The session ends this long after its length with sound and its silent minutes, counted from Start (drops
+  /// pause the session's own count, which could otherwise run on for hours).
+  final Duration clockMargin;
 
   /// The shared headband link's timing: these same fields (the reconnect rules are in dream/band_link.dart).
   LinkTiming get link => LinkTiming(
@@ -656,6 +672,7 @@ class MeditationController extends ChangeNotifier {
     if (_ended) return;
     final now = _clock.now, last = _lastData;
     final quiet = now - (last ?? _signalAt ?? now);
+    if (_overTime(now - _startMono, quiet)) return;
     if (quiet > timing.noDataAfter) {
       if (!_quiet && _silent == null) {
         _quiet = true;
@@ -667,6 +684,22 @@ class MeditationController extends ChangeNotifier {
     _checkpoint();
     _notify();
   }
+
+  /// The clock limits: true when one ended the session.
+  bool _overTime(Duration since, Duration quiet) {
+    final String? why = since >= length + silentLength + timing.clockMargin
+        ? MeditationSummary.endClock
+        : stage == Stage.calibrating && since >= timing.calibrationLimit
+        ? _endCalibration
+        : quiet >= timing.noSignalEnd
+        ? MeditationSummary.endNoSignal
+        : null;
+    if (why == null) return false;
+    unawaited(_finish(complete: false, end: why));
+    return true;
+  }
+
+  static const String _endCalibration = 'calibration';
 
   /// Every [MeditationTiming.saveEvery]: the session so far, its summary saying "running" (one save at a time).
   void _checkpoint() {
@@ -727,7 +760,8 @@ class MeditationController extends ChangeNotifier {
   void _onTry(int tries, bool scan, bool connected) =>
       _session?.log.note({'event': 'reconnect try', 'try': tries, 'scan': scan, 'ok': connected});
 
-  Future<void> _finish({required bool complete}) async {
+  /// [end]: a clock limit's reason (MeditationSummary.end), null for the length or Stop.
+  Future<void> _finish({required bool complete, String? end}) async {
     if (_ended) return;
     _ended = true;
     _ticker?.cancel();
@@ -744,24 +778,35 @@ class MeditationController extends ChangeNotifier {
     sound?.bed(on: false);
     // the session is kept first: the release (up to 30 s), the ring-out and the fade (up to 10 s) come after
     final kept = s != null && t != null && start != null && t.runSeconds >= minReportS;
-    if (kept) await _keep(complete: complete, sound: sound);
+    if (kept) await _keep(complete: complete, sound: sound, end: end);
     await _release();
     if (complete) await Future<void>.delayed(timing.endRingOut);
     await sound?.stop();
     if (!kept) {
-      _set(Stage.setup, s == null ? '' : 'Stopped before the session began, so nothing was saved.');
+      _set(Stage.setup, s == null ? '' : _notKept(end));
       return;
     }
     _set(kind == SessionKind.alphaTheta || asksGuess ? Stage.rating : Stage.report, '');
   }
 
+  /// Why nothing was saved, for the setup page.
+  String _notKept(String? end) => switch (end) {
+    _endCalibration =>
+      'The calibration did not get enough clean signal in ${timing.calibrationLimit.inMinutes} minutes, so the '
+          'session ended and nothing was saved. Check the headband\'s contact, sit still and try again.',
+    MeditationSummary.endNoSignal =>
+      'The headband sent no signal for ${timing.noSignalEnd.inMinutes} minutes, so the session ended before it '
+          'began and nothing was saved.',
+    _ => 'Stopped before the session began, so nothing was saved.',
+  };
+
   /// Saves the ended session (after a checkpoint still being written) and makes its report.
-  Future<void> _keep({required bool complete, SessionSound? sound}) async {
+  Future<void> _keep({required bool complete, SessionSound? sound, String? end}) async {
     final s = _session!, t = _tracker!, start = _startedAt!;
     final st = store, stem = st?.stemFor(start) ?? fileStem(start);
-    final summary = _summary(complete: complete)!;
+    final summary = _summary(complete: complete, end: end)!;
     _seen?.finish();
-    s.log.note({'sound': sound?.info(), 'end': complete ? 'length reached' : 'stopped', 'runS': t.runSeconds});
+    s.log.note({'sound': sound?.info(), 'end': end ?? (complete ? 'length reached' : 'stopped'), 'runS': t.runSeconds});
     final h = _hands;
     if (h != null) s.log.note({'handsFree': h.summary()});
     final d = _drift, seen = _seen;
