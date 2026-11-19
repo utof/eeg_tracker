@@ -124,7 +124,7 @@ void main() {
     await c.beforeNight();
     await c.sync(night: true, filesDir: files.path);
     c.onRecorderStatus((up: true, addresses: const ['127.0.0.1'], port: 8765, note: ''));
-    expect(c.line().text, 'On, but this phone has no Wi-Fi address. Join your home Wi-Fi.');
+    expect(c.line().text, 'On, but no Wi-Fi address found. Join your home Wi-Fi, or use a USB cable: see Address and code.');
     expect(c.line().warn, isTrue);
     c.onRecorderStatus((up: false, addresses: const [], port: 8765, note: 'sharing on Wi-Fi stopped by an error: x'));
     expect(c.line().text, 'Sharing stopped by itself. Switch it off and on again.');

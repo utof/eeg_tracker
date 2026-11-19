@@ -12,6 +12,8 @@ import android.content.IntentFilter
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
@@ -21,11 +23,13 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
+import android.util.Log
 import com.pravera.flutter_foreground_task.service.RestartReceiver
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.net.Inet4Address
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -67,6 +71,10 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
             }
         }
 
+        /** The last "no Wi-Fi address" note written to logcat, so a minute's look writes it only when it changes. */
+        @Volatile
+        private var lastNoWifi: String? = null
+
         /** Where the recorder writes; only an explicit Export copies anything out (NightExport.kt). */
         fun recordingsFolder(context: Context): File = File(context.filesDir, "recordings")
     }
@@ -92,6 +100,7 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
                 )
                 "mediaVolume" -> result.success(mediaVolume())
                 "inCall" -> result.success(inCall())
+                "wifiNets" -> result.success(wifiNets())
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {
@@ -149,6 +158,68 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
     private fun inCall(): Boolean? {
         val am = context.getSystemService(AudioManager::class.java) ?: return null
         return am.mode != AudioManager.MODE_NORMAL
+    }
+
+    /**
+     * Share on Wi-Fi (lib/share/isolate.dart, DECISIONS rows 560-562): this phone's IPv4 addresses on Wi-Fi as
+     * `192.168.1.5/24`, from Android's own view of its networks. Dart's interface list found none on the owner's
+     * Xiaomi (HyperOS, Android 14) with a VPN on; ConnectivityManager knows the Wi-Fi network whatever a VPN does. A
+     * VPN's network also lists TRANSPORT_WIFI (the network under it), so TRANSPORT_VPN is left out. WifiManager's
+     * address (deprecated, no prefix) is the second source. `note` says what each source returned; when neither has
+     * an address it also goes to logcat (tag eeg_tracker), once per change.
+     */
+    private fun wifiNets(): Map<String, Any?> {
+        val nets = LinkedHashSet<String>()
+        val seen = ArrayList<String>()
+        try {
+            val cm = context.getSystemService(ConnectivityManager::class.java)
+            @Suppress("DEPRECATION")
+            val all = cm?.allNetworks ?: emptyArray()
+            if (all.isEmpty()) seen.add("no networks")
+            for (n in all) {
+                val caps = cm?.getNetworkCapabilities(n)
+                val lp = cm?.getLinkProperties(n)
+                val v4 = lp?.linkAddresses.orEmpty()
+                    .filter { it.address is Inet4Address }
+                    .map { "${it.address.hostAddress}/${it.prefixLength}" }
+                val vpn = caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+                val wifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                val kind = when {
+                    vpn -> "vpn"
+                    wifi -> "wifi"
+                    caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "cell"
+                    else -> "other"
+                }
+                seen.add("$kind ${lp?.interfaceName ?: "?"} ${if (v4.isEmpty()) "no IPv4" else v4.joinToString(" ")}")
+                if (wifi && !vpn) nets.addAll(v4)
+            }
+        } catch (e: Exception) {
+            seen.add("connectivity failed: ${e.javaClass.simpleName} ${e.message}")
+        }
+        if (nets.isEmpty()) {
+            try {
+                val wm = context.getSystemService(WifiManager::class.java)
+                @Suppress("DEPRECATION")
+                val ip = wm?.connectionInfo?.ipAddress ?: 0
+                if (ip != 0) {
+                    val a = "${ip and 0xff}.${(ip shr 8) and 0xff}.${(ip shr 16) and 0xff}.${(ip shr 24) and 0xff}"
+                    nets.add(a)
+                    seen.add("wifi manager $a")
+                } else {
+                    seen.add("wifi manager none")
+                }
+            } catch (e: Exception) {
+                seen.add("wifi manager failed: ${e.javaClass.simpleName} ${e.message}")
+            }
+        }
+        val note = seen.joinToString("; ")
+        if (nets.isEmpty()) {
+            if (note != lastNoWifi) Log.w("eeg_tracker", "share: no Wi-Fi IPv4 address from Android: $note")
+            lastNoWifi = note
+        } else {
+            lastNoWifi = null
+        }
+        return mapOf("nets" to nets.toList(), "note" to note)
     }
 
     /** The app's private folder (filesDir/recordings): other apps cannot read it, Android encrypts it. */

@@ -113,13 +113,23 @@ bool isAllowedClient(InternetAddress a) {
 /// Mobile data, VPNs and the like: never served on, whatever their address.
 final RegExp _notLan = RegExp(r'^(lo|rmnet|ccmni|pdp|ppp|tun|tap|dummy|v4-|clat|ip6|sit|wwan|ifb|gre|erspan)');
 
-/// The addresses to listen on: private IPv4 addresses of Wi-Fi-like interfaces, Wi-Fi (`wlan`) first.
-List<InternetAddress> lanAddresses(List<NetworkInterface> interfaces) {
-  final found = <(int, String, InternetAddress)>[];
+/// One local network the phone is on: its own address there and the network's prefix length (`192.168.1.5/24`).
+typedef LanNet = ({InternetAddress address, int prefix});
+
+/// Android's own view of the phone's Wi-Fi (PhoneChannel.kt `wifiNets`): `192.168.1.5/24` strings, and a note of
+/// what each of its sources returned, for the log when no address is found.
+typedef WifiNets = ({List<String> nets, String note});
+
+const WifiNets noWifiAnswer = (nets: <String>[], note: 'no answer');
+
+/// The fallback (DECISIONS row 561), from Dart's interface list: private IPv4 addresses of Wi-Fi-like interfaces,
+/// Wi-Fi (`wlan`) first.
+List<LanNet> lanNets(List<NetworkInterface> interfaces) {
+  final found = <(int, String, LanNet)>[];
   for (final i in interfaces) {
     if (_notLan.hasMatch(i.name)) continue;
     for (final a in i.addresses) {
-      if (isPrivateV4(a)) found.add((i.name.startsWith('wlan') ? 0 : 1, i.name, a));
+      if (isPrivateV4(a)) found.add((i.name.startsWith('wlan') ? 0 : 1, i.name, (address: a, prefix: _prefix(a.prefixLength))));
     }
   }
   found.sort((x, y) {
@@ -127,6 +137,79 @@ List<InternetAddress> lanAddresses(List<NetworkInterface> interfaces) {
     return c != 0 ? c : x.$2.compareTo(y.$2);
   });
   return [for (final f in found) f.$3];
+}
+
+List<InternetAddress> lanAddresses(List<NetworkInterface> interfaces) => [for (final n in lanNets(interfaces)) n.address];
+
+/// A prefix Android or the kernel gave; anything that is not 1-32 is read as the home router's usual /24.
+int _prefix(int? p) => p != null && p >= 1 && p <= 32 ? p : 24;
+
+/// Android's `192.168.1.5/24` strings (Wi-Fi networks only; PhoneChannel.kt leaves out VPNs and mobile data):
+/// private IPv4 only, each once.
+List<LanNet> parseLanNets(Iterable<Object?> raw) {
+  final out = <String, LanNet>{};
+  for (final r in raw) {
+    if (r is! String) continue;
+    final slash = r.indexOf('/');
+    final a = InternetAddress.tryParse(slash < 0 ? r : r.substring(0, slash));
+    if (a == null || !isPrivateV4(a)) continue;
+    out.putIfAbsent(a.address, () => (address: a, prefix: _prefix(slash < 0 ? null : int.tryParse(r.substring(slash + 1)))));
+  }
+  return out.values.toList();
+}
+
+/// `wlan0 192.168.1.5/24, tun0 10.10.10.1/30`: an interface list in one line, for the log.
+String describeInterfaces(List<NetworkInterface> interfaces) {
+  final parts = [
+    for (final i in interfaces)
+      for (final a in i.addresses) '${i.name} ${a.address}/${a.prefixLength}',
+  ];
+  return parts.isEmpty ? 'none' : parts.join(', ');
+}
+
+/// The Wi-Fi networks the server shows and answers on: Android's own answer when it has one, else Dart's interface
+/// list ([interfaces], or the [interfaceError] it threw). [why] is empty when one was found, else says what both
+/// sources returned.
+({List<LanNet> nets, String why}) chooseLan(WifiNets android, {List<NetworkInterface>? interfaces, Object? interfaceError}) {
+  final mine = parseLanNets(android.nets);
+  if (mine.isNotEmpty) return (nets: mine, why: '');
+  final listed = interfaces == null ? const <LanNet>[] : lanNets(interfaces);
+  if (listed.isNotEmpty) return (nets: listed, why: '');
+  final seen = interfaces != null ? describeInterfaces(interfaces) : 'failed: ${interfaceError ?? 'not looked at'}';
+  return (nets: const <LanNet>[], why: 'no Wi-Fi address found (android: ${android.note}; interfaces: $seen)');
+}
+
+/// The IPv4 address inside an IPv4-mapped IPv6 one (`::ffff:a.b.c.d`), the IPv4 address itself, or null.
+InternetAddress? _v4(InternetAddress a) {
+  if (a.type == InternetAddressType.IPv4) return a;
+  final b = a.rawAddress;
+  final mapped = b.length == 16 && b.sublist(0, 10).every((x) => x == 0) && b[10] == 0xff && b[11] == 0xff;
+  return mapped ? InternetAddress.fromRawAddress(b.sublist(12)) : null;
+}
+
+/// Whether [a] is inside [net] (both IPv4).
+bool inLan(InternetAddress a, LanNet net) {
+  final v = _v4(a), n = net.address.rawAddress;
+  if (v == null || n.length != 4) return false;
+  final b = v.rawAddress;
+  for (var bit = 0; bit < net.prefix; bit++) {
+    final mask = 0x80 >> (bit % 8);
+    if ((b[bit ~/ 8] & mask) != (n[bit ~/ 8] & mask)) return false;
+  }
+  return true;
+}
+
+/// Who the server answers (DECISIONS row 562): the phone itself (`adb forward` over the cable arrives as loopback),
+/// and a private IPv4 client inside one of the phone's Wi-Fi networks [wifi]. The server listens on every address,
+/// so a private source alone is not enough: mobile data's carrier network (`ccmni0 10.43.97.139/8` on the owner's
+/// phone) and a VPN's tunnel (`tun0 10.10.10.1/30`, whose other end is 10.10.10.2) are private ranges too. Without a
+/// known Wi-Fi network only the phone itself is answered.
+bool isServedClient(InternetAddress client, List<LanNet> wifi) {
+  if (client.isLoopback) return true;
+  final v = _v4(client);
+  if (v == null) return false;
+  if (v.isLoopback) return true;
+  return isPrivateV4(v) && wifi.any((n) => inLan(v, n));
 }
 
 /// Same length or not, the comparison takes the same time for every wrong token.

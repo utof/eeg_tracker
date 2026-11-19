@@ -7,6 +7,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../phone.dart';
 import 'isolate.dart';
 import 'protocol.dart';
 
@@ -34,7 +35,7 @@ class ShareControl extends ChangeNotifier {
   final DateTime Function() _now;
 
   static ShareHost _appHost(String filesDir, void Function(ShareStatus) onChange) =>
-      ShareHost(filesDir: filesDir, onLog: (_) {}, onChange: onChange);
+      ShareHost(filesDir: filesDir, onLog: debugPrint, onChange: onChange, wifi: Phone.wifiNets);
 
   ShareConfig _config = const ShareConfig();
   ShareStatus _status = shareDown;
@@ -174,7 +175,12 @@ class ShareControl extends ChangeNotifier {
       );
     }
     if (_status.up) {
-      return (on: true, text: 'On, but this phone has no Wi-Fi address. Join your home Wi-Fi.', warn: true, address: null);
+      return (
+        on: true,
+        text: 'On, but no Wi-Fi address found. Join your home Wi-Fi, or use a USB cable: see Address and code.',
+        warn: true,
+        address: null,
+      );
     }
     final failed = _status.note.contains('could not') || _status.note.contains('stopped');
     return (
