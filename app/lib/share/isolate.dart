@@ -48,9 +48,10 @@ List<Object?> shareIsolateArgs(SendPort toHost, String filesDir, ShareConfig c, 
 /// requests being answered, `['error', text]` an error that did not stop it, `['down', why]`.
 ///
 /// Every error inside it is caught (DECISIONS row 587): before the server listens it ends the isolate the orderly way
-/// (`['down', ...]`); after, it is reported and the server goes on answering. An uncaught error used to end the
-/// isolate at once, and a dead isolate keeps its listening socket: the port stayed taken, the laptop's connections
-/// were accepted and never answered, and no new server could listen until the app was closed.
+/// (`['down', ...]`); after, it is reported and the server goes on answering. An uncaught error (running out of memory
+/// while a long night was scored, most likely) used to end the isolate at once, and a dead isolate keeps its
+/// listening socket: the system kept accepting the laptop's connections into the socket's queue with nobody to take
+/// them, until even the phone's own connects timed out, and no new server could listen until the app was closed.
 @pragma('vm:entry-point')
 Future<void> shareIsolateMain(List<Object?> args) => guardedShare(args, serveShare);
 
@@ -68,10 +69,14 @@ Future<void> guardedShare(
       if (!ready.isCompleted) ready.complete();
     }),
     (Object e, StackTrace _) {
-      final handle = onError;
-      if (handle != null) return handle(e);
-      toHost.send(['down', 'failed: $e']); // before it listens: nothing to keep
-      if (!ready.isCompleted) ready.complete();
+      try {
+        final handle = onError;
+        if (handle != null) return handle(e);
+        toHost.send(['down', 'failed: $e']); // before it listens: nothing to keep
+        if (!ready.isCompleted) ready.complete();
+      } catch (_) {
+        // even reporting failed (out of memory): the server must still go on answering
+      }
     },
   );
   return ready.future;

@@ -452,8 +452,9 @@ stages. What you see:
 - "Scoring this night stopped before it finished" with **Try again** now appears only when the app closed three times
   in a row before the model's first step (most likely memory), or when the scoring failed with a reason; **Try
   again** goes on from the saved progress.
-- Between nights the scoring and Share on Wi-Fi run only while the app is open on screen: Android may freeze an app
-  in the background (DECISIONS row 589). Leave the app open on the main screen until the time asleep appears.
+- Between nights the scoring and Share on Wi-Fi run in the app itself, with no foreground service: if Android ever
+  freezes it in the background they wait until it is opened again (DECISIONS row 589). Leaving the app open on the
+  main screen until the time asleep appears is the safe way.
 
 The night extras come from the shared detectors (`lib/detectors/`), run over the same samples in a second background
 isolate after the model (one heavy step at a time, DECISIONS row 583): the note under the totals says how much of your sleep was read through noise; a
