@@ -98,14 +98,22 @@ RULES = [(k, re.compile(p)) for k, p in [
     ("stop_failed", r"stop failed: .*"),  # P L
     ("try", r"reconnect try (?P<n>\d+) \((?P<how>direct to [^)]*|scan)\): (?P<result>connected after|not found after|"
             r"failed after|no answer for) (?P<s>[\d.]+) s(?P<rest>.*)"),  # P
+    # P: the connection in use cannot reach the night's headband directly (the switch moved from our own connection
+    # to the SDK during the night, DECISIONS 398): the same try scans at once; its own "reconnect try" line follows
+    ("try_rescan", r"reconnect try (?P<n>\d+) \((?P<how>direct to [^)]*)\): (?P<why>.*); scanning instead"),
     ("reconnected", r"reconnected \((?P<how>direct|scan), try (?P<n>\d+)\) after a drop \((?P<why>[^)]*)\); "
                     r"previous run (?P<prev>[^,]+), last data (?P<last>[^,]+)(?:, (?P<ago>[\d.]+) s ago)?"),  # P
-    ("reconnected_same", r"reconnected after (?P<s>[\d.]+) s away \(try (?P<n>\d+)\), battery (?P<bat>\S+)%; "
-                         r"same files"),  # O
+    ("reconnected_same", r"reconnected after (?P<s>[\d.]+) s away \((?:try (?P<n>\d+)|as the signal was stopped)\), "
+                         r"battery (?P<bat>\S+)%; same files"),  # O
+    # O: the link came back without a drop this object saw (it closed while no signal ran, e.g. the contact check)
+    ("reconnected_same", r"reconnected \((?:try (?P<n>\d+)|as the signal was stopped)\) after the link closed while "
+                         r"the signal was off, battery (?P<bat>\S+)%; same files"),  # O
     ("reconnected_old", r"reconnected(?:, battery (?P<bat>\S+)%)?"),  # L (before 2026-11-18)
     ("reconnect_failed_old", r"reconnect failed: .*"),  # L
     ("lost_own", r"headband lost: (?P<err>.*?); (?:trying again in (?P<pause>[\d.]+) s \(try (?P<n>\d+)\)|"
                  r"still away after (?P<away>\d+) s, handing over to the app's reconnect)"),  # O phone
+    # O phone: lost while the run's signal was being stopped (Stop, or the recorder ending the run): no drop of its own
+    ("lost_own_stopped", r"headband lost: (?P<err>.*?); no further tries: the signal was stopped"),
     ("lost_ble", r"headband lost or not found: (?P<err>.*); trying again in (?P<pause>[\d.]+) s \(try (?P<n>\d+)\)"),
     ("own_counter", r"lost (?P<n>\d+) samples in (?P<gaps>\d+) gaps \(packet counter jumps\)"),  # O
     ("own_stall", r"no signal for (?P<s>\d+) s: sending the start command again"),  # O
@@ -136,7 +144,7 @@ RULES = [(k, re.compile(p)) for k, p in [
 HELPER_PROBLEM = re.compile(r"\bstopped(?: by an error)?: |could not")
 PHONE_ONLY = {"phone_settings", "phone_battery", "battery_summary", "try", "reconnected", "service_restart",
               "prev_exit", "direct_off", "drop", "packets", "packets_end", "stuck", "out_of_range", "answered_out",
-              "no_start", "error", "mending"}
+              "no_start", "error", "mending", "try_rescan", "lost_own_stopped"}
 LAPTOP_ONLY = {"live_page", "info", "laptop_drop", "laptop_stuck", "contact_recheck", "reconnected_old",
                "reconnect_failed_old", "lost_ble"}
 STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?) (.*)$")
@@ -454,7 +462,8 @@ def hour_of(t: float) -> float:
 
 # ---- why a break happened --------------------------------------------------------------------------------------------
 DROP_CATS = {"drop", "stuck", "android", "killed", "unknown"}
-NOTES = {"try", "answered_out", "packets_end", "battery_summary"}  # lines the app adds to a closed run's log
+# lines the app adds to a closed run's log
+NOTES = {"try", "try_rescan", "answered_out", "packets_end", "battery_summary"}
 
 
 def _tries(evs: list[Event]) -> str:

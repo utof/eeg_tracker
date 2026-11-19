@@ -181,6 +181,37 @@ def test_a_stall_reconnects_through_a_new_run(tmp_path: Path) -> None:
     assert "none through a scan" not in pnc.render(s)  # the first run's scan gave a strength
 
 
+def test_a_night_moved_to_the_sdk_scans_in_the_same_try(tmp_path: Path) -> None:
+    """Our own connection's headband, then the SDK after a restart: its direct try needs a scan, made at once."""
+    a = PhoneRun(T, seconds=200, end="stall",
+                 after=[(30, f"reconnect try 1 ({DIRECT}): the night's headband was reached through our own "
+                             "connection; BrainBit's SDK needs a scan first; scanning instead"),
+                        (36, "reconnect try 1 (scan): connected after 6.0 s")])
+    b = PhoneRun(a.last + timedelta(seconds=40), seconds=200, contact=None, night_end=True,
+                 head=[f"reconnected (scan, try 1) after a drop (no data); previous run {stem(T)}, last data "
+                       f"{a.last:%Y-%m-%dT%H:%M:%S}.000, 40.0 s ago"])
+    write_run(tmp_path, a)
+    write_run(tmp_path, b)
+    s = pnc.check(tmp_path, NIGHT, signal=False)
+    assert s["unknown"] == []
+    gap = [x for x in s["breaks"] if x.cat != "late"]
+    assert [x.text for x in gap] == ["drop (no data); 1 try (0 direct, 1 scan); back by scan, try 1"]
+    assert s["tries"] == dict(direct=0, scan=1, direct_ok=0, scan_ok=1)
+
+
+def test_a_loss_as_the_signal_stops_is_not_a_drop(tmp_path: Path) -> None:
+    """Our own connection notes a loss after Stop ended the run: the break stays the one Stop made."""
+    a = PhoneRun(T, seconds=200, end="stop", night_end=True,
+                 after=[(0.35, "headband lost: timeout; no further tries: the signal was stopped")])
+    write_run(tmp_path, a)
+    b = PhoneRun(a.last + timedelta(seconds=60), seconds=200, contact=None, night_end=True)
+    write_run(tmp_path, b)
+    s = pnc.check(tmp_path, NIGHT, signal=False)
+    assert s["unknown"] == []
+    gap = [x for x in s["breaks"] if x.cat != "late"]
+    assert [x.cat for x in gap] == ["by_hand"]
+
+
 def test_a_recorder_that_died_and_never_came_back(tmp_path: Path) -> None:
     write_run(tmp_path, PhoneRun(T, seconds=300, end="killed"))
     s = pnc.check(tmp_path, NIGHT, signal=False)
@@ -353,6 +384,10 @@ PHONE_LINES = [
     "could not save the newest data: FileSystemException: x",
     "could not save the night state: StateError; the recording goes on",
     "no data; the headband is mending the link itself (check 1)",
+    # our own connection's headband, then the SDK (the switch moved): a scan in the same try (DECISIONS 398)
+    f"reconnect try 2 ({DIRECT}): the night's headband was reached through our own connection; BrainBit's SDK needs a "
+    "scan first; scanning instead",
+    f"reconnect try 1 ({DIRECT}): unknown sensor family \"x\"; BrainBit's SDK needs a scan first; scanning instead",
 ] + [  # the night's live helpers, their markers and Share on Wi-Fi (app-line, DECISIONS 182-330)
     "drift-off detector on; lights off counts from the first sample until Lights off",
     "drift-off detector off after the restart; it starts again at Lights off",
@@ -401,6 +436,11 @@ OWN_LINES = [  # our own connection's notes (app/lib/headband/own/), in the same
     "reconnected after 3.2 s away (try 2), battery 90%; same files",
     "headband lost: timeout; trying again in 2 s (try 1)",
     "headband lost: timeout; still away after 31 s, handing over to the app's reconnect",
+    # the signal stopped while a drop was being mended (the rest of the night pipeline review, 2026-11-19)
+    "headband lost: timeout; no further tries: the signal was stopped",
+    "reconnected after 3.2 s away (as the signal was stopped), battery 90%; same files",
+    "reconnected (try 1) after the link closed while the signal was off, battery ?%; same files",
+    "reconnected (as the signal was stopped) after the link closed while the signal was off, battery 90%; same files",
     "own connection stopped unexpectedly: StateError",
     "scanning up to 30 s for a BrainBit by name",
     "the link carries 23-byte packets, the signal needs 111: packets may arrive cut short",
