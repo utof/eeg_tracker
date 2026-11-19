@@ -17,7 +17,8 @@ import 'usual.dart';
 /// Days a line shows, and how old the newest value may be to be shown as "now".
 const int lineDays = 14;
 
-/// [day]: the sharp-hours log's numbers (DECISIONS row 287), shown only once something is rated.
+/// [day]: the sharp-hours log's numbers (DECISIONS row 287) and the study reminders' recall (row 401), shown only
+/// once something is logged.
 enum TrendGroup { sleep, morning, day, practice, noted }
 
 class MeasureSpec {
@@ -175,6 +176,18 @@ final List<MeasureSpec> measureSpecs = [
     up: 'slower than usual',
     down: 'quicker than usual',
     note: 'The middle of the day\'s sharp-hours reaction tests.',
+  ),
+  MeasureSpec(
+    id: 'recall',
+    label: 'Recall of what you studied',
+    group: TrendGroup.day,
+    scale: Scale.meanRating,
+    format: (v) => '${v.toStringAsFixed(1)}\u00a0of\u00a03',
+    min: 1,
+    max: 3,
+    up: 'better than usual',
+    down: 'worse than usual',
+    note: 'The morning answer of the study reminders: 1 a little, 2 some, 3 well.',
   ),
   MeasureSpec(
     id: 'settled',

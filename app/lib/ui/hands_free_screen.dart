@@ -11,11 +11,13 @@ import '../handsfree/calibration_controller.dart';
 import '../handsfree/store.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
+import '../study/store.dart' show StudyStore, studyDirFor;
 import '../sound/check_in_sound.dart';
 import '../training/check_store.dart' show filesDirFor;
 import 'evidence_sheet.dart';
 import 'hands_free_view.dart';
 import 'nearby.dart';
+import 'study_screen.dart';
 
 /// The hands-free settings of the app's folder, or null when the folder is not known.
 Future<HandsFreeStore?> handsFreeStore() async {
@@ -41,6 +43,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   HandsFreeStore? _store;
   HandsFreeState _state = const HandsFreeState();
   bool _nightRunning = false;
+  bool? _studyOn;
   String? _error;
 
   @override
@@ -52,13 +55,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _load() async {
     final store = await handsFreeStore();
     final running = await FlutterForegroundTask.isRunningService;
+    final studyOn = await _readStudyOn();
     if (!mounted) return;
     setState(() {
+      _studyOn = studyOn;
       _store = store;
       _state = store?.load() ?? const HandsFreeState();
       _nightRunning = running;
       _error = store == null ? 'The app\'s folder is not known yet, so nothing can be saved.' : null;
     });
+  }
+
+  /// The study reminders' switch, read from their own file (null when the app's folder is not known).
+  Future<bool?> _readStudyOn() async {
+    try {
+      final dir = await Phone.recordingsDir();
+      return dir == null ? null : StudyStore(studyDirFor(dir)).settings()?.on == true;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _openStudy() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const StudyScreen()));
+    final on = await _readStudyOn();
+    if (mounted) setState(() => _studyOn = on);
   }
 
   void _set(bool on) {
@@ -101,6 +122,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     onToggle: (on) => unawaited(_toggle(on)),
     onCalibrate: () => unawaited(_calibrate()),
     onInfo: () => showEvidence(context, 'hands-free'),
+    studyOn: _studyOn,
+    onStudy: () => unawaited(_openStudy()),
   );
 }
 

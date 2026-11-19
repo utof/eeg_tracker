@@ -146,14 +146,30 @@ class SharpSettings {
   }
 }
 
-/// One planned moment: when, and whether it suggests the reaction test.
+/// What a planned moment asks. The phone's one alarm chain rings them all (SharpPrompts.kt): the sharp-hours
+/// question, and the two study reminders (lib/study/, DECISIONS rows 400-401).
+enum PromptKind {
+  sharp('sharp'),
+  studyEvening('study_evening'),
+  studyMorning('study_morning');
+
+  const PromptKind(this.wire);
+
+  /// The name the Android side knows it by.
+  final String wire;
+
+  bool get isStudy => this != sharp;
+}
+
+/// One planned moment: when, what it asks, and (sharp-hours questions) whether it suggests the reaction test.
 class PlannedPrompt {
-  const PlannedPrompt(this.at, {this.test = false});
+  const PlannedPrompt(this.at, {this.test = false, this.kind = PromptKind.sharp});
   final DateTime at;
   final bool test;
+  final PromptKind kind;
 
   @override
-  String toString() => 'PlannedPrompt($at${test ? ', test' : ''})';
+  String toString() => 'PlannedPrompt($at${test ? ', test' : ''}${kind == PromptKind.sharp ? '' : ', ${kind.name}'})';
 }
 
 /// A day's seed from the secret and the day key (SHA-256, so it does not depend on Dart's hash codes).

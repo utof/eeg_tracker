@@ -27,8 +27,8 @@ import '../sleep/onnx_runs.dart';
 import '../sleep/report.dart';
 import '../sleep/scorer.dart';
 import 'alarm_view.dart';
-import '../sharp/prompts.dart' show ChannelSharpPhone, rearmSharp;
-import '../sharp/store.dart' show SharpStore, sharpDirFor;
+import '../sharp/prompts.dart' show ChannelSharpPhone;
+import '../study/arm.dart' show rearmPrompts;
 import 'dream_screen.dart';
 import 'dream_view.dart' show clock;
 import 'evidence_sheet.dart' show showEvidence;
@@ -318,7 +318,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     }
     final unusual = dir == null || running ? null : await _unusualLine(dir);
     // the sharp-hours questions (DECISIONS row 283): the moments ahead, handed to the phone at every start and return
-    if (dir != null) unawaited(rearmSharp(SharpStore(sharpDirFor(dir)), ChannelSharpPhone(), DateTime.now()).catchError((Object _) {}));
+    if (dir != null) unawaited(rearmPrompts(dir, ChannelSharpPhone(), DateTime.now()).catchError((Object _) {}));
     await _share.sync(night: running, filesDir: dir == null ? null : Directory(dir).parent.path, front: _front);
     if (!mounted) return;
     setState(() {

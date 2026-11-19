@@ -26,6 +26,7 @@ const Map<String, SeenCheck> seenChecks = {
   'experiment': _experiment,
   'replay': _replay,
   'sharp': _sharp,
+  'study': _study,
 };
 
 /// The checks of [ids] (the cards not touched yet) that see something, in [ids]' order.
@@ -191,4 +192,14 @@ String? _sharp(Directory files) {
     if (at != null) days.add('${at.year}-${at.month}-${at.day}');
   }
   return days.length >= 2 ? 'Answers on ${days.length} days.' : null;
+}
+
+/// An evening answer and a morning answer in the study log: the card's "answer both once".
+String? _study(Directory files) {
+  var evening = false, morning = false;
+  for (final j in _lines(File('${files.path}/study-review/log.jsonl'))) {
+    if (j['kind'] == 'evening') evening = true;
+    if (j['kind'] == 'morning') morning = true;
+  }
+  return evening && morning ? 'An evening and a morning answered.' : null;
 }

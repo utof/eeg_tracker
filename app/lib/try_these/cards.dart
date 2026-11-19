@@ -31,6 +31,7 @@ enum TryOpen {
   settings,
   experiments,
   sharpHours,
+  study,
   ownBle,
 }
 
@@ -52,6 +53,7 @@ const Map<TryOpen, String> tryOpenLabels = {
   TryOpen.settings: 'Open Settings',
   TryOpen.experiments: 'Open Experiments',
   TryOpen.sharpHours: 'Open Sharp hours',
+  TryOpen.study: 'Open Study reminders',
   TryOpen.ownBle: 'Open Headband connection',
 };
 
@@ -501,6 +503,28 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.sharpHours,
     readme: [TryRef('Sharp hours', 'switch it on and watch the first two days')],
+    proposal: true,
+    auto: true,
+  ),
+  TryCard(
+    id: 'study',
+    group: TryGroup.weeks,
+    title: 'Study reminders',
+    what: 'A nudge to study in the evening and to try recalling it the next morning, with one tap to say how it went.',
+    takes: '2 minutes, then a tap twice a day',
+    steps: [
+      'Open Settings, then Study reminders. Switch it on and allow notifications. Look at the two times.',
+      'On the Xiaomi: Autostart on, and Battery saver: No restrictions for EEG Tracker.',
+      'In the evening: study something for a while, then tap the reminder and answer.',
+      'Next morning: try to recall it before looking, then tap the reminder and answer.',
+    ],
+    tell: [
+      'Did a reminder come at a bad moment (asleep, in a session)?',
+      'Was the evening time too close to bed, or too early? Did the morning one come before you were up?',
+      'How many reminders arrived in the last 7 days, as the page says?',
+    ],
+    opens: TryOpen.study,
+    readme: [TryRef('Study reminders', 'switch it on and watch the first two days')],
     proposal: true,
     auto: true,
   ),

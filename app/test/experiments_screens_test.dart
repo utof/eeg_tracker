@@ -143,7 +143,7 @@ void main() {
     testWidgets('setup, empty and with an own question, at ${(scale * 100).round()} % text', (tester) async {
       final tag = scale == 1.0 ? '' : '_text130';
       ExperimentChoice? got;
-      await _shoot(tester, ExperimentSetup(now: _made, onStart: (c) => got = c), 'experiment_setup$tag', scale: scale, height: 1900);
+      await _shoot(tester, ExperimentSetup(now: _made, onStart: (c) => got = c), 'experiment_setup$tag', scale: scale, height: 2300);
       expect(find.text('Choose a question'), findsOneWidget);
       await tester.tap(find.text('Your own'));
       await tester.pump();

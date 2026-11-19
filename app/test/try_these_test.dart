@@ -93,7 +93,7 @@ void main() {
           for (final c in tryCards)
             if (c.proposal) c.id,
         },
-        {'sharp', 'unusual', 'own-ble'},
+        {'sharp', 'study', 'unusual', 'own-ble'},
       );
     });
 
@@ -314,6 +314,11 @@ void main() {
         '${jsonEncode({'at': '2026-11-20T11:02:00+03:00', 'sharp': 4})}\n'
             '${jsonEncode({'at': '2026-11-21T15:40:00+03:00', 'sharp': 3})}\n',
       );
+      put(
+        'study-review/log.jsonl',
+        '${jsonEncode({'version': 1, 'at': '2026-11-20T21:40:00+03:00', 'kind': 'evening', 'studied': true})}\n'
+            '${jsonEncode({'version': 1, 'at': '2026-11-21T08:10:00+03:00', 'kind': 'morning', 'recall': 'some'})}\n',
+      );
       final seen = seenByApp(files, seenChecks.keys.toSet());
       expect(seen.keys.toSet(), seenChecks.keys.toSet());
       expect(seen['night'], 'A night with Lights off tapped, scored: the night of Thu 19 Nov.');
@@ -323,12 +328,13 @@ void main() {
       expect(seen['smart-alarm'], startsWith('The smart alarm rang on '));
       expect(seen['sound'], 'A Fall asleep session with the headband on Sat 21 Nov.');
       expect(seen['sharp'], 'Answers on 2 days.');
+      expect(seen['study'], 'An evening and a morning answered.');
       expect(seen['replay'], 'Switched on.');
       expect(seen['lucid'], 'Lucid dream questions answered on Sat 21 Nov.');
     });
 
     test(
-      'not yet: a night without Lights off, an unfinished export, one day of answers, sound without the headband',
+      'not yet: a night without Lights off, an unfinished export, one day of answers, an evening without a morning, sound without the headband',
       () {
         put('nights/2026-11-18.report.json', jsonEncode({'night_of': '2026-11-18', 'scored': false}));
         put('export/exports.jsonl', '${jsonEncode({'exported': '2026-11-20T09:00:00+03:00', 'complete': false})}\n');
@@ -340,6 +346,7 @@ void main() {
         put('sound-states/2026-11-20-230000.sound.json', jsonEncode({'recording': null}));
         put('settings.json', jsonEncode({'replayCheck': false}));
         put('lucid/mornings/2026-11-20-070000.json', jsonEncode({'night': '2026-11-20-070000'}));
+        put('study-review/log.jsonl', '${jsonEncode({'version': 1, 'at': '2026-11-20T21:40:00+03:00', 'kind': 'evening', 'studied': true})}\n');
         expect(seenByApp(files, seenChecks.keys.toSet()), isEmpty);
       },
     );

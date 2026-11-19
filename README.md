@@ -100,6 +100,13 @@ sessions from ActivityWatch are not part of it yet: a later laptop importer coul
 counted, never summed as hours) per 2-hour block of each 04:00-04:00 day, and write them beside the phone's imported
 `_local/phone/sharp-hours/` files for the laptop's statistics (DECISIONS row 289).
 
+**Study reminders** (phone app, the assistant's proposal, off unless switched on in Settings): a nudge to study in the
+evening, 1 to 2 hours before your usual bedtime, and to try recalling it in the morning before looking, with a one-tap
+"studied tonight?" and "how much do you recall?" kept on the phone; never during a night recording or a session. The
+evidence is one small study (grade some). Code in `app/lib/study/`, sharing the Sharp hours alarms; files in
+[docs/data-format.md](docs/data-format.md); how to use it and the owner step in [app/README.md](app/README.md)
+("Study reminders"); DECISIONS rows 400-401.
+
 **Lucid dream cues** (phone app, off unless turned on; an experiment, evidence weak): an evening practice pairs a
 soft cue with "am I dreaming?"; in the second half of the night the night recorder plays it when the live sleep
 model reads dream sleep with the eyes moving, within strict limits, and stops on any stir. In the morning three

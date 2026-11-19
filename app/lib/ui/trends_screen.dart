@@ -16,6 +16,7 @@ import '../trends/trends.dart';
 import '../unusual/card.dart';
 import '../unusual/store.dart';
 import 'evidence_sheet.dart';
+import '../study/arm.dart' show readOwnDayNumbers;
 import 'experiments_screen.dart';
 import 'experiments_view.dart' show experimentLine;
 import 'sharp_hours_screen.dart';
@@ -64,7 +65,7 @@ class _TrendsScreenState extends State<TrendsScreen> {
       if (dir == null) throw StateError("the app's folder is not known");
       final now = DateTime.now();
       final inputs = readTrendInputs(dir);
-      final m = buildTrends(inputs, now, extra: readSharpDayNumbers(dir));
+      final m = buildTrends(inputs, now, extra: readOwnDayNumbers(dir));
       final line = experimentLine(currentExperiment(dir, now));
       UnusualCard? unusual;
       String? unusualError;

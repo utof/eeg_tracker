@@ -10,6 +10,7 @@ import 'recorder/recorder_service.dart';
 import 'sharp/prompts.dart';
 import 'ui/night_screen.dart';
 import 'ui/sharp_rating_screen.dart';
+import 'ui/study_screen.dart' show StudyLogScreen;
 import 'ui/theme.dart';
 
 void main() {
@@ -44,7 +45,7 @@ class _EegTrackerAppState extends State<EegTrackerApp> {
   @override
   void initState() {
     super.initState();
-    // A tap on a sharp-hours question opens it (DECISIONS row 283): at a cold start, and while the app runs.
+    // A tap on a sharp-hours question or a study reminder opens it (DECISIONS rows 283, 401): at a cold start, and while the app runs.
     _sharp.onOpen = () => unawaited(_openQuestion());
     WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_openQuestion()));
   }
@@ -62,7 +63,11 @@ class _EegTrackerAppState extends State<EegTrackerApp> {
       final launch = await _sharp.takeLaunch();
       final nav = _navigator.currentState;
       if (launch != null && nav != null) {
-        await nav.push(MaterialPageRoute<void>(builder: (_) => SharpRatingScreen(launch: launch)));
+        await nav.push(
+          MaterialPageRoute<void>(
+            builder: (_) => launch.kind.isStudy ? StudyLogScreen(kind: launch.kind, launch: launch) : SharpRatingScreen(launch: launch),
+          ),
+        );
       }
     } catch (_) {
       // no channel (tests, a desktop harness): nothing to open

@@ -24,6 +24,7 @@ import 'morning_screen.dart';
 import 'nap_screen.dart';
 import 'own_ble_screen.dart';
 import 'sharp_hours_screen.dart';
+import 'study_screen.dart';
 import 'states_screen.dart';
 import 'training_settings_screen.dart';
 import 'trends_screen.dart';
@@ -230,6 +231,7 @@ class _TryTheseScreenState extends State<TryTheseScreen> {
       TryOpen.settings => const SettingsScreen(),
       TryOpen.experiments => ExperimentsScreen(recordingsDir: rec),
       TryOpen.sharpHours => SharpHoursScreen(recordingsDir: rec),
+      TryOpen.study => StudyScreen(recordingsDir: rec),
       TryOpen.ownBle => const OwnBleScreen(),
       TryOpen.nightScreen || TryOpen.sleepReport || TryOpen.alarm => null,
     };

@@ -76,12 +76,24 @@ String handsFreeStatus(SettingsViewModel m) {
 }
 
 class SettingsView extends StatelessWidget {
-  const SettingsView({super.key, required this.model, required this.onToggle, required this.onCalibrate, required this.onInfo});
+  const SettingsView({
+    super.key,
+    required this.model,
+    required this.onToggle,
+    required this.onCalibrate,
+    required this.onInfo,
+    this.studyOn,
+    this.onStudy,
+  });
 
   final SettingsViewModel model;
   final ValueChanged<bool> onToggle;
   final VoidCallback onCalibrate;
   final VoidCallback onInfo;
+
+  /// The study reminders' switch (null while it is not known) and the page that holds them.
+  final bool? studyOn;
+  final VoidCallback? onStudy;
 
   @override
   Widget build(BuildContext context) {
@@ -100,6 +112,22 @@ class SettingsView extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(24, 4, 24, 32),
         children: [
+          if (onStudy != null) ...[
+            ListTile(
+              onTap: onStudy,
+              contentPadding: EdgeInsets.zero,
+              title: Text('Study reminders', style: text.titleLarge),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '${studyOn == true ? 'On' : 'Off'}. The assistant\'s idea: a nudge to study in the evening and to recall it in the morning.',
+                  style: text.bodyLarge?.copyWith(color: studyOn == true ? Night.live : Night.inkMuted, height: 1.4),
+                ),
+              ),
+              trailing: const Icon(Icons.chevron_right, color: Night.inkMuted),
+            ),
+            const Divider(height: 24),
+          ],
           SwitchListTile(
             value: m.on,
             onChanged: onToggle,

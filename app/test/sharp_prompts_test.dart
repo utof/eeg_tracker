@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 class FakeSharpPhone implements SharpPhone {
   final List<List<PlannedPrompt>> armed = [];
   SharpLaunch? launch;
-  bool notifications = true;
+  bool notifications = true, studyNotifications = true;
   int channelSettings = 0;
 
   @override
@@ -24,6 +24,9 @@ class FakeSharpPhone implements SharpPhone {
 
   @override
   Future<bool> notificationsOn() async => notifications;
+
+  @override
+  Future<bool> studyNotificationsOn() async => studyNotifications;
 
   @override
   Future<void> openChannelSettings() async => channelSettings++;
@@ -70,5 +73,12 @@ void main() {
     expect(SharpLaunch.fromMap({'planned': 0}), isNull);
     expect(SharpLaunch.fromMap(null), isNull);
     expect(SharpLaunch.fromMap({'planned': '1763640000000'}), isNull);
+  });
+
+  test('a launch says what asked: a sharp question unless the Android side names a study reminder', () {
+    expect(SharpLaunch.fromMap({'planned': 1763640000000})!.kind, PromptKind.sharp);
+    expect(SharpLaunch.fromMap({'planned': 1763640000000, 'kind': 'study_evening'})!.kind, PromptKind.studyEvening);
+    expect(SharpLaunch.fromMap({'planned': 1763640000000, 'kind': 'study_morning'})!.kind, PromptKind.studyMorning);
+    expect(SharpLaunch.fromMap({'planned': 1763640000000, 'kind': 'nonsense'})!.kind, PromptKind.sharp);
   });
 }
