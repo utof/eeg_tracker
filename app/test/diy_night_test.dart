@@ -318,6 +318,40 @@ void main() {
     expect(log, isNot(contains('live sleep model')));
   });
 
+  test('storage full and a night store that cannot save end one run of the board, never its night', () async {
+    // The night pipeline review's protections (DECISIONS 390) on the board's night: its first file set's .idx is a
+    // device that is always full, and the night state can never be saved.
+    final dir = Directory('${root.path}/files/recordings-diy')..createSync(recursive: true);
+    final t0 = DateTime(2026, 11, 19, 23);
+    final sw = Stopwatch()..start();
+    Link('${dir.path}/${fileStem(t0)}.idx').createSync('/dev/full');
+    final finder = DiyFinder(link: () => link, timing: fastBoard);
+    final r = NightRecorder(
+      finder: finder,
+      dir: dir,
+      store: _BrokenStore(),
+      onStatus: statuses.add,
+      onStuck: (_) async => fail('nothing may get stuck'),
+      timing: fastNight,
+      watch: null,
+      clock: () => t0.add(sw.elapsed),
+    );
+    final run = r.run(restartedBySystem: false);
+    pump.start();
+    await waitFor(() => stems(dir).length >= 2 && r.status.phase == Phase.recording);
+    await Future<void>.delayed(_ms * 400);
+    expect(r.finished, isFalse, reason: 'an IO or store error must never end the night');
+    await r.stop();
+    await run;
+    finder.dispose();
+    final sets = stems(dir);
+    expect(File('${sets.first}.f32').lengthSync() % recordBytes, 0); // never part of a record
+    expect(records(File('${sets.last}.f32')).length, greaterThan(0));
+    expect(File('${sets.first}.log').readAsStringSync(), contains('unexpected error'));
+    final logs = [for (final s in sets) File('$s.log').readAsStringSync()].join();
+    expect(RegExp('could not save the night state').allMatches(logs), hasLength(1));
+  });
+
   test('a board restart and a new mode: three file sets, never joined', () async {
     final dir = Directory('${root.path}/files/recordings-diy');
     final finder = DiyFinder(link: () => link, timing: fastBoard);
@@ -378,4 +412,12 @@ void main() {
     expect(missing, greaterThan(0)); // the holes stay holes
     expect(q.toSet().length, q.length);
   });
+}
+
+class _BrokenStore implements NightStore {
+  @override
+  Future<NightState> load() async => throw StateError('no preferences');
+
+  @override
+  Future<void> save(NightState state) async => throw StateError('no preferences');
 }
