@@ -8,6 +8,8 @@ analyzer:
   exclude:
     - build/**
     - android/**
+    # BrainBit's plugin, copied as it came (packages/neurosdk2/VENDORED.md); not our code to lint.
+    - packages/**
 
 linter:
   rules:

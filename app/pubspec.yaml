@@ -9,8 +9,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # BrainBit's own plugin; its core is a closed binary (DECISIONS row 3). Pinned: the research note read 1.0.21.
-  neurosdk2: 1.0.21
+  # BrainBit's own plugin; its core is a closed binary (DECISIONS row 3). Version 1.0.21 (the research note read it),
+  # copied into packages/neurosdk2 (MIT) so its calls run off Android's main thread: packages/neurosdk2/VENDORED.md,
+  # DECISIONS rows 410-413.
+  neurosdk2:
+    path: packages/neurosdk2
   # Foreground service whose TaskHandler isolate owns the whole BrainBit session (DECISIONS row 2).
   flutter_foreground_task: ^11.0.3
   permission_handler: ^12.0.1
