@@ -57,6 +57,7 @@ class ChunkWriter {
   final BytesBuilder _indexBuf = BytesBuilder(copy: false);
   int _received = 0; // samples handed to [addBatch]; the next batch's first-sample index
   int _written = 0; // samples appended to the .f32 file
+  int _indexBytes = 0; // bytes appended to the .idx file
   bool _closed = false;
 
   /// Share on Wi-Fi's tap (lib/share/isolate.dart): every batch any recording buffers, with its run and the index
@@ -98,22 +99,50 @@ class ChunkWriter {
     }
   }
 
-  /// One line in the `.log`, written at once (`ISO-local-time message`).
+  /// One line in the `.log`, written at once (`ISO-local-time message`). Never throws: a line that cannot be
+  /// written (storage full) is lost, and never costs the run.
   void log(String message, {DateTime? at}) {
     if (_closed) return;
-    _log.writeStringSync('${logTime(at ?? DateTime.now())} $message\n');
+    try {
+      _log.writeStringSync('${logTime(at ?? DateTime.now())} $message\n');
+    } on FileSystemException {
+      // storage full or gone: the line is lost
+    }
   }
 
   /// Moves the buffered samples into the files (no fsync). Returns the number of samples added.
+  ///
+  /// All or nothing: a write that fails (storage full) is cut back to the last whole append in both files, so the
+  /// `.f32` never holds part of a record or samples the `.idx` does not cover, and the samples stay buffered for the
+  /// next try (or are lost at [close]); the exception is passed on.
   int append() {
     if (_closed) return 0;
     final data = _dataBuf.takeBytes();
     final index = _indexBuf.takeBytes();
-    if (data.isNotEmpty) _data.writeFromSync(data);
-    if (index.isNotEmpty) _index.writeFromSync(index);
+    try {
+      if (data.isNotEmpty) _data.writeFromSync(data);
+      if (index.isNotEmpty) _index.writeFromSync(index);
+    } catch (_) {
+      _cut(_data, _written * recordBytes);
+      _cut(_index, _indexBytes);
+      _dataBuf.add(data);
+      _indexBuf.add(index);
+      rethrow;
+    }
     final n = data.length ~/ recordBytes;
     _written += n;
+    _indexBytes += index.length;
     return n;
+  }
+
+  static void _cut(RandomAccessFile f, int length) {
+    try {
+      f
+        ..truncateSync(length)
+        ..setPositionSync(length);
+    } catch (_) {
+      // nothing more can be done for this file
+    }
   }
 
   /// [append], then flush all three files to the storage device (Dart's flush is fsync on Android/Linux).
@@ -125,13 +154,20 @@ class ChunkWriter {
     _log.flushSync();
   }
 
-  /// Saves everything and closes the files. Safe to call twice.
+  /// Saves everything and closes the files. Safe to call twice, and never throws: what cannot be saved (storage
+  /// full) is lost, and the files are closed all the same.
   void close() {
     if (_closed) return;
-    sync();
+    try {
+      sync();
+    } catch (_) {
+      // the samples still buffered are lost
+    }
     _closed = true;
-    _data.closeSync();
-    _index.closeSync();
-    _log.closeSync();
+    for (final f in [_data, _index, _log]) {
+      try {
+        f.closeSync();
+      } catch (_) {}
+    }
   }
 }

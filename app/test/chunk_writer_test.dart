@@ -118,4 +118,21 @@ print(json.dumps({"n": len(rec), "pack": rec["pack"].tolist(), "v1": rec["v"][1]
     expect(j['i'], List.generate(10, (k) => 5 * k));
     expect((j['t'] as List).first, closeTo(1789000000.0, 1e-6));
   });
+
+  test('a failed write (storage full) leaves whole records, and close never throws', () {
+    final start = DateTime(2026, 11, 19, 23);
+    Link('${dir.path}/${fileStem(start)}.idx').createSync('/dev/full');
+    final w = ChunkWriter.open(dir, start);
+    final t = DateTime.fromMillisecondsSinceEpoch(1789000000000);
+    w.addBatch(t, batch(0, 5));
+    expect(w.append, throwsA(isA<FileSystemException>()));
+    // all or nothing: no sample in the .f32 that the .idx does not cover, and the count says so
+    expect(File('${dir.path}/${w.stem}.f32').lengthSync(), 0);
+    expect(w.samplesWritten, 0);
+    w.log('a line is not worth an exception');
+    w.addBatch(t.add(const Duration(milliseconds: 20)), batch(5, 5));
+    w.close(); // sync fails inside; the files are closed anyway
+    expect(w.isClosed, isTrue);
+    expect(File('${dir.path}/${w.stem}.f32').lengthSync() % recordBytes, 0);
+  });
 }

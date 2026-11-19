@@ -146,7 +146,7 @@ class OwnFinder implements HeadbandFinder {
   void dispose() {}
 }
 
-class OwnHeadband implements Headband, BandNotes {
+class OwnHeadband implements Headband, BandNotes, MendsDrops {
   OwnHeadband(
     this._drv,
     this._info, {

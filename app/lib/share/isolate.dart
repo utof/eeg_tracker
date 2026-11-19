@@ -15,8 +15,10 @@ import 'server.dart';
 /// How often the server looks for a changed Wi-Fi address (a new lease, another network).
 const Duration _addressCheck = Duration(seconds: 60);
 
-/// The other host (the app, or the recorder) may still hold the port for a moment at a hand-over.
-const int _bindTries = 10;
+/// The other host (the app, or the recorder) may still hold the port at a hand-over: for a moment after Stop, and up
+/// to a minute when the night starts from another screen (the dream catcher's or sound's "Record the night"), since
+/// the night screen lets go of the app's server at its once-a-minute sync. So tries cover 80 s.
+const int _bindTries = 40;
 const Duration _bindWait = Duration(seconds: 2);
 
 /// What a host passes to the isolate. A plain list crosses the isolate border.
@@ -52,11 +54,18 @@ Future<void> shareIsolateMain(List<Object?> args) async {
   Timer? offTimer;
   var closing = false;
 
+  /// The bind in flight: [end] waits for it, so a socket it opens is closed too (a killed isolate keeps its
+  /// sockets open, so this isolate closes them itself before it says it is down).
+  Future<void>? binding;
+
   Future<void> end(String why) async {
     if (closing) return;
     closing = true;
     addressTimer?.cancel();
     offTimer?.cancel();
+    try {
+      await binding?.timeout(const Duration(seconds: 3));
+    } catch (_) {}
     try {
       await server.close().timeout(const Duration(seconds: 3));
     } catch (_) {}
@@ -100,7 +109,7 @@ Future<void> shareIsolateMain(List<Object?> args) async {
 
   for (var attempt = 1; ; attempt++) {
     try {
-      await listen();
+      await (binding = listen());
       break;
     } catch (e) {
       if (attempt >= _bindTries) {
@@ -111,11 +120,13 @@ Future<void> shareIsolateMain(List<Object?> args) async {
       if (closing) return;
     }
   }
+  if (closing) return; // stopped while binding: end() closed what was bound
   final left = (args[4]! as int) - DateTime.now().millisecondsSinceEpoch;
   offTimer = Timer(Duration(milliseconds: left < 0 ? 0 : left), () => unawaited(end('time is up')));
   addressTimer = Timer.periodic(_addressCheck, (_) async {
+    if (closing) return;
     try {
-      await listen();
+      await (binding = listen());
     } catch (_) {
       // no address right now (Wi-Fi off): keep looking
     }
@@ -235,6 +246,12 @@ class ShareHost {
       switch (m[0]) {
         case 'port':
           _port = m[1] as SendPort;
+          if (_stopped != null) {
+            // Stop came before the server was ready: it must still close its sockets itself (a killed isolate
+            // keeps them open, and the port with them), so it gets the stop message now.
+            _port!.send(['x']);
+            return;
+          }
           final live = _live;
           if (live != null) _port!.send(['s', live]);
         case 'up':

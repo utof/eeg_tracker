@@ -109,6 +109,11 @@ abstract class OtherBoard {
   BoardLive get board;
 }
 
+/// A headband that mends a drop by itself (our own connection, DECISIONS 213): it sends the start command again on a
+/// stall, reconnects to the same address, and says "out of range" once it gives up. The recorder does not restart its
+/// stream (that would start the mending over, every 10 s); its own no-data rule stays the backstop.
+abstract class MendsDrops {}
+
 abstract class HeadbandFinder {
   /// Fresh scan for up to [scanFor], then a new sensor object for the best headband found, which also
   /// connects. Returns null when none was seen. [onFound] fires between the scan and the connection.
