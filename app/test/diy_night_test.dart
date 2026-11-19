@@ -83,6 +83,8 @@ class SpyCues implements CueWatch {
   int adds = 0, checks = 0;
   bool closed = false;
   @override
+  String get who => 'lucid cues';
+  @override
   void add(DateTime arrival, List<Sample> rows, {bool firstOfFile = false}) => adds++;
   @override
   void check(DateTime now, {int? lightsOffMs, String? drift}) => checks++;

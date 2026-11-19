@@ -1,7 +1,8 @@
-// Lucid dream cues during the night (DECISIONS 300-303). They run in the night recorder's own isolate, like the
-// drift-off detector (recorder/live_drift.dart, DECISIONS 182): fed each batch right after the batch is buffered for
-// the files, and every call wrapped by the recorder in a guard (an exception, more than 2 % of the recorder's time
-// or the app growing by over 700 MB switches them off for the night with one log line; the recording goes on).
+// Lucid dream cues during the night (DECISIONS 300-303). The engine they share with the memory cues
+// (cues/night_cues.dart) runs them in the night recorder's own isolate, like the drift-off detector
+// (recorder/live_drift.dart, DECISIONS 182): fed each batch right after the batch is buffered for the files, and every
+// call wrapped by the recorder in a guard (an exception, more than 2 % of the recorder's time or the app growing by
+// over 700 MB switches them off for the night with one log line; the recording goes on).
 //
 // From an hour before the cue hours (the second half of the night: 4.5 h after Lights off, or the night's first
 // sample) it listens to the nap coach's live sleep model (sleep/live_stager.dart) and runs the shared detectors on the
@@ -15,61 +16,31 @@
 //
 // The night's record (store.dart `LucidNightRecord`) says while the model runs; a process that comes back and finds
 // it so did not end cleanly while the model ran, and the cues stay off for the rest of that night.
-import 'dart:async';
-import 'dart:math' as math;
-import 'dart:typed_data';
+import 'dart:io';
 
-import '../detectors/detectors.dart';
-import '../recorder/chunk_writer.dart' show Sample, unixSeconds;
+import '../cues/night_cues.dart';
+import '../detectors/detectors.dart' show Detectors;
 import '../sleep/live_stager.dart';
 import '../sleep/night_scorer.dart';
-import '../sleep/night_signal.dart' show limitMicrovolts, minGapSeconds, roundHalfEven, sampleRate;
 import 'bell.dart';
 import 'plan.dart';
 import 'rule.dart';
 import 'store.dart';
 
-/// The night recorder's view of the lucid cues, so a test can put a broken one in.
-abstract interface class CueWatch {
-  /// One batch as it arrived; [firstOfFile] for the first batch of a new file set.
-  void add(DateTime arrival, List<Sample> rows, {bool firstOfFile = false});
+export '../cues/night_cues.dart' show CueFactory, CueWatch;
 
-  /// The recorder's 10-second check: Lights off (unix ms) and the drift-off detector's state (its name; null when it
-  /// is not running).
-  void check(DateTime now, {int? lightsOffMs, String? drift});
-
-  /// Marker texts since the last call.
-  List<String> takeEvents();
-
-  /// The cues are over for tonight (the night's limit, three arousals, or switched off): the recorder lets it go.
-  bool get finished;
-
-  /// Stops the model and frees it (after any running call).
-  Future<void> close();
-}
-
-String _hm(int ms) {
-  final t = DateTime.fromMillisecondsSinceEpoch(ms);
-  return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
-}
-
-/// Makes tonight's cues when they are on, or null. Never throws past the recorder's guard: the guard catches.
-typedef CueFactory = CueWatch? Function(int nightStartMs);
-
-class LiveCues implements CueWatch, StageListener {
+class LiveCues extends NightCues {
   LiveCues._(
     this._arm,
-    this._own, {
+    this.record, {
     required this.store,
-    required this.record,
-    required this.scorer,
-    required this.bell,
-    required this.level,
+    required super.scorer,
+    required super.ownScorer,
+    required super.bell,
+    required super.level,
     required this.cuesAfter,
     required this.modelBefore,
-  }) {
-    scorer.join(this);
-  }
+  }) : super(cuesFromMs: record.cuesFromMs, phase: record.phase, running: record.running);
 
   /// Tonight's cues, or null when they are off. Reads the settings, freezes the test on its first night, and gives the
   /// night its number (a night restarted by Android keeps its record and number). [scorer]: the night's shared live
@@ -101,363 +72,98 @@ class LiveCues implements CueWatch, StageListener {
         );
     final w = LiveCues._(
       test.sealed.armOf(record.index),
-      scorer == null,
+      record,
       store: store,
-      record: record,
       scorer: scorer ?? NightScorer(model: model!, scale: scale, slow: slow),
+      ownScorer: scorer == null,
       bell: bell,
       level: settings.level,
       cuesAfter: cuesAfter,
       modelBefore: modelBefore,
     );
     if (prior == null) {
-      w._events.add(
-        'lucid cues on: night ${record.index + 1} of the test; cues from ${_hm(record.cuesFromMs)}, the sleep model '
-        'from ${_hm(record.cuesFromMs - modelBefore.inMilliseconds)}',
+      w.say(
+        'lucid cues on: night ${record.index + 1} of the test; cues from ${hourMinute(record.cuesFromMs)}, the sleep '
+        'model from ${hourMinute(record.cuesFromMs - modelBefore.inMilliseconds)}',
       );
-      if (settings.level == null) w._off('No loudness is set yet: do the evening practice first.');
+      if (settings.level == null) w.off('No loudness is set yet: do the evening practice first.');
     } else if (prior.running) {
-      w._off('The app ended while the sleep model ran, so the cues stay off tonight.');
-    } else if (prior.phase == 'done' || prior.phase == 'off') {
-      w._phase = prior.phase;
+      w.off('The app ended while the sleep model ran, so the cues stay off tonight.');
     }
-    w._save();
+    w.saveNow();
     return w;
   }
 
   final LucidStore store;
   LucidNightRecord record;
-
-  /// The live sleep model the cues listen to from the hour before the cue hours.
-  final NightScorer scorer;
-  final bool _own;
-  final CueBell bell;
   final NightArm _arm;
-  final double? level;
-  final Duration cuesAfter, modelBefore;
-
-  final List<String> _events = [];
-  late String _phase = record.phase;
-
-  /// The model listened to (kept after the cues let it go: the record's speed).
-  LiveStager? _stager;
-  CueRule? _rule;
-  Detectors? _det;
-  EyeBursts? _eyes;
-
-  /// The detectors' first sample, a whole unix second ([_ruleUnix] + [_shiftS]).
-  int? _startUnix;
-
-  /// The rule's clock: the model's first sample, so epoch e starts at [_ruleUnix] + 30 e and second k at
-  /// [_ruleUnix] + k. The same as [_startUnix] unless the smart alarm started the model earlier.
-  int _ruleUnix = 0;
-  int _shiftS = 0;
-  double _lastArrival = 0;
-  List<double>? _lastRow;
-  final Float32List _f32 = Float32List(4);
-  final Set<int> _bursts = {};
-  String? _drift;
-  int _lastK = -1, _arousalsSaid = 0;
-  final List<CueMoment> _moments = [];
-  final List<double> _confidence = [];
-  LiveMode? _modeSaid;
-  Future<void>? _closing;
-  int? _mediaVolume;
-
-  int get _modelFromMs => record.cuesFromMs - modelBefore.inMilliseconds;
-
   @override
-  bool get finished => _phase == 'done' || _phase == 'off';
+  final Duration cuesAfter;
+  final Duration modelBefore;
+  EyeBursts? _eyes;
 
   @override
   String get who => 'lucid cues';
 
-  /// From the hour before the cue hours (once begun, whatever Lights off says later) until the cues end.
   @override
-  bool needs(double t0Ms) => !finished && (_stager != null || t0Ms >= _modelFromMs);
+  int get modelFromMs => cuesFromMs - modelBefore.inMilliseconds;
 
   /// Tonight's rule, once the model runs (tests).
-  CueRule? get rule => _rule;
+  CueRule? get rule => nightRule as CueRule?;
 
   @override
-  List<String> takeEvents() {
-    if (_events.isEmpty) return const [];
-    final out = List<String>.of(_events);
-    _events.clear();
-    return out;
-  }
+  NightRule newRule(int cuesFromK) => CueRule(cuesFrom: cuesFromK);
 
   @override
-  void add(DateTime arrival, List<Sample> rows, {bool firstOfFile = false}) {
-    if (finished || rows.isEmpty) return;
-    if (_own) scorer.add(arrival, rows, firstOfFile: firstOfFile);
-    final arr = unixSeconds(arrival);
-    final t0 = arr - rows.length / sampleRate; // a batch arrives just after its last sample
-    if (_stager == null && t0 * 1000 < _modelFromMs) return;
-    final start = _startUnix;
-    if (start == null) {
-      _begin(t0, rows.first);
-      if (finished) return;
-    } else if (firstOfFile || t0 - _lastArrival > minGapSeconds) {
-      final want = roundHalfEven((t0 - start) * sampleRate);
-      final have = _eyes!.samples;
-      if (want > have) _hold(want - have);
-    }
-    _lastArrival = arr;
-    for (final r in rows) {
-      _push(_row(r), missing: false);
-    }
-  }
-
-  /// The model's hour has come: the scorer started the model on this batch, or it already ran for the smart alarm.
-  void _begin(double t0, Sample first) {
-    final s = scorer.stager, from = scorer.startUnix;
-    if (s == null || from == null) {
-      _off('The sleep model is not running tonight, so no cues tonight.');
-      return;
-    }
-    final whole = _wholeSecond(t0);
-    _startUnix = whole;
-    _ruleUnix = from;
-    _shiftS = whole - from;
-    _lastK = _shiftS - 1;
-    final rule = CueRule(cuesFrom: _cuesFromK(from));
-    _rule = rule;
-    _det = Detectors(onSecond: _second);
+  void attachDetectors(Detectors det) {
     final eyes = EyeBursts();
     _eyes = eyes;
-    _det!.tap = eyes;
-    _stager = s;
-    _phase = 'listening';
-    record = record.copyWith(running: true);
-    _events.add('lucid cues: sleep model on');
-    _save();
-    unawaited(_readVolume());
-    final lead = roundHalfEven((t0 - whole) * sampleRate);
-    final row = _row(first);
-    for (var i = 0; i < lead; i++) {
-      _push(row, missing: true);
-    }
-  }
-
-  int _cuesFromK(int ruleUnix) => (record.cuesFromMs / 1000 - ruleUnix).ceil();
-
-  Future<void> _readVolume() async {
-    try {
-      _mediaVolume = (await bell.mediaVolume())?.volume;
-      record = record.copyWith(mediaVolume: _mediaVolume);
-    } catch (_) {}
-  }
-
-  List<double> _row(Sample r) {
-    final f = _f32;
-    f[0] = r.o1;
-    f[1] = r.o2;
-    f[2] = r.t3;
-    f[3] = r.t4;
-    return [for (var c = 0; c < 4; c++) (f[c] * 1e6).clamp(-limitMicrovolts, limitMicrovolts)]; // as the BDF clips
-  }
-
-  void _hold(int n) {
-    final last = _lastRow;
-    if (last == null) return;
-    for (var i = 0; i < n; i++) {
-      _push(last, missing: true);
-    }
-  }
-
-  void _push(List<double> row, {required bool missing}) {
-    _lastRow = row;
-    final det = _det!;
-    det.push(row, missing: missing);
-    final b = _eyes!.push(row);
-    if (b != null) _bursts.add(b);
-    if (det.blinks.length + det.eyeMoves.length + det.bursts.length + det.movement.length > 256) {
-      det.blinks.clear();
-      det.eyeMoves.clear();
-      det.bursts.clear();
-      det.movement.clear();
-      _eyes!.trim();
-    }
-    if (det.epochs.length > 256) det.epochs.clear();
-  }
-
-  void _second(Second s) {
-    final rule = _rule;
-    if (rule == null || finished) return;
-    var burst = false;
-    _bursts.removeWhere((k) {
-      if (k > s.k) return false;
-      burst = true;
-      return true;
-    });
-    final jaw =
-        s.muscleOn &&
-        math.min(s.muscleX[0].isNaN ? 0.0 : s.muscleX[0], s.muscleX[1].isNaN ? 0.0 : s.muscleX[1]) >= MuscleRule.bothX;
-    final k = s.k + _shiftS; // on the rule's clock
-    _lastK = k;
-    final cue = rule.second(k, moved: s.movement, jaw: jaw, burst: burst, drift: _drift);
-    if (cue != null) _cue(cue);
-    _afterRule();
+    det.tap = eyes;
   }
 
   @override
-  void scored(LiveStage st, int epochStartMs) {
-    final rule = _rule;
-    if (rule == null || finished) return;
-    try {
-      rule.stage(st.epoch, st.stage, st.confidence, math.max(0, _lastK));
-      _confidence.add(st.confidence);
-      if (_confidence.length > 8) _confidence.removeAt(0);
-      _afterRule();
-    } catch (e) {
-      _off('The cue rule failed (${'$e'.split('\n').first}), so no more cues tonight.');
-    }
-  }
-
-  void _cue(RuleCue c) {
-    final at = (_ruleUnix + c.k) * 1000;
-    final gain = math.min(1.0, (level ?? 0) * cueGain(c.step));
-    final conf = _confidence.isEmpty ? 0.0 : _confidence.last;
-    _moments.add(CueMoment(atMs: at, step: c.step, period: c.period, confidence: conf));
-    _events.add('lucid cue ${_rule!.cues.length} (dream sleep ${conf.toStringAsFixed(2)}, +${c.step} dB)');
-    if (_arm == NightArm.cue) unawaited(_play(at, gain));
-    _save();
-  }
-
-  Future<void> _play(int atMs, double gain) async {
-    try {
-      final ok = await bell.play(store.cueWav, gain);
-      store.addPlay(atMs, record.index, ok, ok ? null : 'the phone did not play it');
-    } catch (e) {
-      try {
-        store.addPlay(atMs, record.index, false, '$e'.split('\n').first);
-      } catch (_) {}
-    }
-  }
-
-  void _afterRule() {
-    final rule = _rule!;
-    while (_arousalsSaid < rule.arousals.length) {
-      _arousalsSaid++;
-      _events.add('lucid cues: arousal after a cue; 3 dB quieter, 5 minutes without cues');
-      _save();
-    }
-    if (rule.done != null && !finished) {
-      _phase = 'done';
-      _events.add(
-        rule.done == 'per night'
-            ? 'lucid cues: done for tonight (${LucidRule.perNight} cues)'
-            : 'lucid cues: done for tonight (${LucidRule.stopAfterArousals} arousals)',
-      );
-      _save();
-      unawaited(_freeModel());
-    }
-  }
+  int? pushRow(List<double> row) => _eyes?.push(row);
 
   @override
-  void modelChanged() {
-    final s = _stager;
-    if (s == null || s.mode == _modeSaid) return;
-    _modeSaid = s.mode;
-    if (s.mode == LiveMode.light) _events.add('lucid cues: sleep model 1 run (slow phone)');
-    _save();
-  }
+  void trimRows() => _eyes?.trim();
 
   @override
-  void check(DateTime now, {int? lightsOffMs, String? drift}) {
-    _drift = drift;
-    if (finished) return;
-    if (lightsOffMs != null) {
-      final from = lightsOffMs + cuesAfter.inMilliseconds;
-      if (from != record.cuesFromMs) {
-        record = record.copyWith(cuesFromMs: from);
-        if (_startUnix != null) _rule!.cuesFrom = _cuesFromK(_ruleUnix);
-        _events.add('lucid cues from ${_hm(from)} (4.5 h after Lights off)');
-        _save();
-      }
-    }
-    final s = _stager;
-    if (s != null && s.mode == LiveMode.timer) {
-      _off('The sleep model stopped (it failed or was too slow), so no more cues tonight.');
-    }
-  }
-
-  void _off(String why) {
-    if (finished) return;
-    _phase = 'off';
-    record = record.copyWith(off: why);
-    _events.add('lucid cues off: $why');
-    _save();
-    unawaited(_freeModel());
-  }
-
-  /// Switches the cues off for the night ([why]: a sentence; the recorder's guard calls it).
-  void off(String why) => _off(why);
-
-  /// Lets the model go: the scorer frees it unless the smart alarm still uses it.
-  Future<void> _freeModel() async {
-    try {
-      await scorer.leave(this);
-    } catch (_) {}
-    if (_stager == null) return;
-    record = record.copyWith(running: false);
-    _save();
-  }
+  File? soundFor(RuleCue c) => _arm == NightArm.cue ? store.cueWav : null;
 
   @override
-  Future<void> close() => _closing ??= () async {
-    if (!finished) _phase = 'ended';
-    await _freeModel();
-    record = record.copyWith(running: false);
-    _save();
-  }();
+  void played(int atMs, File sound, bool ok, String? error) => store.addPlay(atMs, record.index, ok, error);
 
-  /// The night's record; never throws.
-  void _save() {
+  @override
+  String cueLine(int n, double confidence, int step) =>
+      'lucid cue $n (dream sleep ${confidence.toStringAsFixed(2)}, +$step dB)';
+
+  @override
+  String get arousalLine => 'lucid cues: arousal after a cue; 3 dB quieter, 5 minutes without cues';
+
+  @override
+  String doneLine(String why) => why == 'per night'
+      ? 'lucid cues: done for tonight (${LucidRule.perNight} cues)'
+      : 'lucid cues: done for tonight (${LucidRule.stopAfterArousals} arousals)';
+
+  @override
+  String lightsOffLine(int fromMs) => 'lucid cues from ${hourMinute(fromMs)} (4.5 h after Lights off)';
+
+  @override
+  void persist(CueNightState s) {
     try {
-      final rule = _rule;
-      final s = _stager, times = s?.callTimes;
-      final aroused = {
-        for (final c in rule?.cues ?? const <RuleCue>[])
-          if (c.aroused) _ruleUnix + c.k,
-      };
       record = record.copyWith(
-        phase: _phase,
-        cues: rule == null
-            ? record.cues
-            : [
-                for (final m in _moments)
-                  CueMoment(
-                    atMs: m.atMs,
-                    step: m.step,
-                    period: m.period,
-                    confidence: m.confidence,
-                    aroused: aroused.contains(m.atMs ~/ 1000),
-                  ),
-              ],
-        arousals: rule == null ? record.arousals : [for (final k in rule.arousals) (_ruleUnix + k) * 1000],
-        stops: rule == null ? record.stops : [for (final (k, why) in rule.stops) ((_ruleUnix + k) * 1000, why)],
-        model: s == null
-            ? record.model
-            : {
-                'mode': s.mode.name,
-                'calls': s.calls.length,
-                'median_ms': times?.median,
-                'max_ms': times?.max,
-                'skipped_windows': s.skipped,
-              },
-        mediaVolume: _mediaVolume,
+        phase: s.phase,
+        cuesFromMs: s.cuesFromMs,
+        cues: s.cues,
+        arousals: s.arousalsMs,
+        stops: s.stops,
+        running: s.running,
+        off: s.off,
+        model: s.model,
+        mediaVolume: s.mediaVolume,
       );
       store.saveNight(record);
     } catch (_) {}
-  }
-
-  /// `datetime.fromtimestamp(t).replace(microsecond=0)`, as the night's pass starts a night.
-  static int _wholeSecond(double t) {
-    var whole = t.floor();
-    if (roundHalfEven((t - whole) * 1e6) >= 1000000) whole += 1;
-    return whole;
   }
 }
 

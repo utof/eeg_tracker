@@ -602,6 +602,9 @@ class ThrowingCues implements CueWatch {
   bool closed = false;
 
   @override
+  String get who => 'lucid cues';
+
+  @override
   void add(DateTime arrival, List<Sample> rows, {bool firstOfFile = false}) {
     if (++batches == failAt) throw StateError('cues broke');
   }
