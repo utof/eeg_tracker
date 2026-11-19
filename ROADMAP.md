@@ -51,13 +51,15 @@ Update the status column whenever something lands.
 
 ## Status
 
+Branches named `feat/app-...` in the rows below are all combined on `feat/app-line` now.
+
 | # | Feature | Status | Where |
 |---|---|---|---|
 | 1 | Laptop recorder + live check page | working; survives Bluetooth drops (restarts itself) | `scripts/record_night.sh` |
 | 2 | Night → one BDF+ file | working | `scripts/to_bdf.py` |
 | 3 | Sleep scoring + hypnogram chart | working on test data; first real night 2026-11-18; **on the phone too** (2026-11-18, branch `feat/app-sleep-report`): AnySleep as ONNX scores each night after Stop, a sleep report screen with the chart, periods and past nights; since 2026-11-19 (branch `feat/app-two-pass-scorer`) it scores in two passes and gives the laptop's stage on every 30-s epoch of the three recorded nights (was 96.6-97.7 %); phone speed not yet measured | `scripts/score_sleep.py`; app: `lib/sleep/`, `analysis/two_pass.py`, DECISIONS 95-99, 260-264 |
 | 4 | Export to utof_tracker's event format | working; utof_tracker does not read it yet (needs the owner's OK to change it) | `scripts/export_events.py` |
-| 5 | Android recorder app (one tap, screen off all night) | code + tests done; first release APK built 2026-11-18 (30 MB, sent to the owner); phone test pending | branch `feat/android-recorder` |
+| 5 | Android recorder app (one tap, screen off all night) | code + tests done; first release APK built 2026-11-18 (30 MB, sent to the owner); the combined app on `feat/app-line` is about 52 MB (arm64); most phone tries are still pending (`app/README.md`, Try these) | branch `feat/android-recorder` (now inside `feat/app-line`) |
 | 6 | Morning check-in (eyes closed / open, ratings) + setup test | page, analysis, export and tests done; first real morning 2026-11-18; **in the phone app** (2026-11-18, branch `feat/app-morning-trends`): the same routine and the same numbers (exact on the recorded check-in), plus caffeine, alcohol and an optional reaction test; not yet run on the phone | `scripts/web/morning.html`, `scripts/morning_check.py`; app: `lib/morning/`, DECISIONS 120-129 |
 | 7 | Brain-reactive sound (alpha → calmer sound, jaw blocks) | feedback core v1 done (research A pass 2, item 1): live stream input, alpha in ~0.15 s around your own alpha peak, a target line held for 3-min blocks, at most 6 bells a minute, muscle / blink / drifting-to-sleep gates (shared `sleep-guard.js`), training and relax modes, a session log that replays exactly; tested on the demo and the fake headband. Real-head bench tests pending. The page is a stopgap: the pure modules port to the phone app | `scripts/web/sound.html`, [docs/brain-sound.md](docs/brain-sound.md) |
 | 8 | Break hints stage 0 (ActivityWatch) | code + tests done; not yet run on the owner's laptop | `scripts/break_hints.py`, docs/break-hints.md |
@@ -89,78 +91,71 @@ Update the status column whenever something lands.
 | 34 | Evening study, morning review (research round 2 proposal; **the assistant's proposal, built; off by default**): a plain reminder to study in the evening and review in the morning | **built in the phone app** (2026-11-19, branch `feat/app-study-review`; not yet run on a phone): off until switched on (Settings, Study reminders); an evening reminder 90 minutes before your usual bedtime ("Good time to learn something you want to keep") and a morning one 45 minutes after your usual wake-up ("Try to recall what you studied last night, before looking"), times from your recorded sleep (from 3 nights, else 21:00 and 08:30) and editable, kept inside your waking hours; never during a night recording or a session; "No" to "studied tonight?" skips the next morning's reminder; one tap each way ("studied tonight: yes / no", "recalled: well / some / a little") kept app-private and in Export data; Trends shows the day's recall and a ready-made self-experiment "study in the evening or in the morning" uses it (the two arms also differ in the delay, said on the page); rides the Sharp hours alarms (one list, one chain, DECISIONS 401). Evidence: one small study of evening learning and morning relearning, grade some | `app/lib/study/`, `lib/ui/study_*.dart`, `SharpPrompts.kt`, DECISIONS 400-401, app/README.md "Study reminders", `docs/evidence/study-timing.md` |
 | 35 | Work session (owner, 2026-11-19: "I wanna wear it right now so it tells me when to take a break"): the headband on while working, drowsiness live, break hints | **built in the phone app** (2026-11-19, branch `feat/app-work-session`; checked on the emulator: the page and its "i" open, without a headband it says "Headband not found", Stop while connecting goes back; not yet run on a phone or at a desk): 4 minutes of your usual work as the baseline (optional eyes-closed minute first), then alert / getting drowsy / drowsy every 30 s from the median of the last 5 minutes: eyes-open alpha at O1/O2 and still eyes (fewer blinks and glances) against the baseline, muscle, movement and noisy seconds left out, closed eyes shown apart; break hints on the laptop's rules (60 min worn then backing off, 4 a day, 45 min apart, Snooze 20, quiet 23:00-08:00) plus one when drowsiness stays up 6 minutes; a soft chime and the lock-screen card; On a break / Back or the headband off 5 min; after a break whether drowsiness went down; an optional 1-5 "how sharp" tap; a file per session; **day numbers on Trends and as self-experiment outcomes** (2026-11-19, branch `feat/app-work-trends`): per day (04:00 to 04:00, from 30 minutes of readable work time, noisy and closed-eyes time and breaks left out, sessions marked "someone else" excluded) the time worked, the share of it at getting drowsy or drowsy, the worked minutes until the first drowsy stretch, hints shown and followed by a break, breaks, and the mean "how sharp" tap, each beside yesterday and your usual, arrows from 14 days, "Seen together, not tested"; the drowsy share and the tap mean offered to the self-experiments. On the owner's recorded morning of 2026-11-18 (an hour with eyes open, then asleep at 09:15) it read alert until 08:42, getting drowsy from 08:43 and drowsy from 08:48, 8 min before the sleep model's first N1, and the drowsy hint would have come at 08:47; 2 h 10 min awake in bed earlier gave no drowsy reading and only the hourly hints; theta and slow eye power fell instead of rising, so they are logged only. Evidence: some (drowsiness); mental fatigue: weak. Next: the owner's first working day (`app/README.md`, "Work session") | `app/lib/work/` (`days.dart`: the day numbers), `app/lib/ui/work_*.dart`, `app/tool/work_check.dart`, DECISIONS 440-449 and 480-489, `docs/evidence/work-session.md` |
 
-## What comes next, in order (updated 2026-11-18 after research round 2)
+## What comes next, in order (rewritten 2026-11-19)
 
-The owner's features first (wish 16: the phone app leads). Each step names the research behind it; the full
-findings are on `_local/research/2026-11-18-findings.html`.
+**Where the code is.** Rows whose text says "branch `feat/app-...`" were built on separate branches. They are all
+combined now on `feat/app-line` (the one branch the app is built from; `main` does not have the app yet). Merging
+`feat/app-line` into `main` waits for the owner's phone tests.
 
-1. **Phone app** (battery line and packet count: done 2026-11-18): a once-a-minute phone battery line and a per-night count of missing packets in the log
-   (assistant, small); then the owner's phone test (below); then merge `feat/android-recorder`. (Research D)
-   - **Sleep report in the app** (row 3; owner: "the app is what I'm gonna be using"): built 2026-11-18 on
-     `feat/app-sleep-report` (from `feat/app-meditation`): the night prepared in Dart exactly as on the laptop,
-     AnySleep's three runs as ONNX (19.7 MB), scored after Stop, report screen (DECISIONS 95-99). Next: the
-     owner's one-night speed test (`app/README.md`, "Sleep report"); then the morning check-in in the app and
-     exporting the report with a night.
-2. ~~**Meditation feedback in the app**~~ (row 21): v1 built 2026-11-18 on `feat/app-meditation`: the core in
-   Dart, `flutter_soloud` at 48 kHz, the meditation screen and report (DECISIONS 72-77). The silent minutes, the
-   learning verdict at 8 / 12 sessions and the Bluetooth note: built 2026-11-19 on `feat/app-meditation-learning`
-   (DECISIONS 420-425). Next: the owner listens and runs a session, then 8 to the first verdict (`app/README.md`,
-   "Meditate"). (Research A, D)
-3. ~~**Shared detectors**~~ (rows 9, 18, 20, 21, 25): built 2026-11-18 on `feat/app-detectors`: blinks, eye
-   movements on T3-T4, jaw 55-120 Hz, movement, epoch quality, and the drift-off detector with a lights-off
-   baseline and both timers, in Python and Dart ([docs/detectors.md](docs/detectors.md)). The counts in the sleep
-   report: done 2026-11-18 (row 9). **Lights off: built 2026-11-19** on `feat/app-night-lightsoff` (DECISIONS
-   180-186): a Lights off button beside Stop while a night records, the detector running live in the recorder
-   (guarded, 3.3 s of work an hour on a busy laptop, the same onset as the morning on the owner's recorded night),
-   and "Falling asleep" in the morning report (detector vs sleep model, minutes after lights off) with the check
-   toward the ship rule. Next: the owner taps Lights off on 5 nights (`app/README.md`, "Lights off and falling
-   asleep"); it ships when its onset falls within 5 minutes of AnySleep's on 4 of 5 nights with Lights off (2 so far
-   on the laptop with hand-picked lights-off times; the phone counts its own from the first tapped night).
-   (Research B, C)
-4. ~~"i" evidence notes~~ (wish 14): done 2026-11-18: 15 notes in `docs/evidence/`, "i" buttons on every page;
-   the app will bundle the same files.
-5. ~~**Replayed-feedback check** (row 23), then **alpha-theta** (row 22)~~: built 2026-11-18 on
-   `feat/app-replay-alphatheta` (DECISIONS 100-107). Next: the owner listens to the stream-and-ocean sound, runs the
-   first alpha-theta sessions, and switches the check on once 4 meditations are logged; the check needs 24-36
-   sessions before it can say anything. (Research A)
-6. **Our own headband connection** (replaces BrainBit's library; owner asked 2026-11-18): the protocol is mostly
-   public (Neiry's MIT `web_sdk_neiry`); a 15-minute probe with the headband on, then a Python driver for the laptop
-   (no process restarts: reconnects in seconds, no unpairing, no crashes, contact all night if command 5 works), then
-   Dart in the app. BrainBit's library stays as a fallback. (Research D; DECISIONS 68, 84)
-   Status 2026-11-18: driver, recorder (`DRIVER=ble`) and probe built and tested on a fake headband, branch
-   `feat/own-ble-driver` (DECISIONS 90-92, docs/own-ble-driver.md); next: the probe with the headband on.
-   Status 2026-11-19: the Dart port is in the app behind a switch, branch `feat/app-own-ble` (DECISIONS 210-219):
-   the same driver and probe, one headband interface for the night recorder and every session, BrainBit's library
-   still the default. Tested on a fake headband and started on the emulator; not yet on the real headband. Next: the
-   owner runs the probe on the phone (5 minutes, `app/README.md`, "Our own headband connection"), then one night
-   with the switch on.
-7. ~~**Dream catcher**~~ (row 20): built 2026-11-18 on `feat/app-dream-catcher` (from `feat/app-line`; DECISIONS
-   110-116). Next: the owner's first try (a 20-minute nap, `app/README.md`, "Dream catcher"), then tune the voice and
-   round timings from it. Speech to text for the answers: built 2026-11-19 on `feat/app-dream-text` (DECISIONS
-   250-256); next: the owner downloads the model and reads his first answers. Then the nap preset. (Research C: a rule plus a timer
-   is the proven design)
-8. ~~**State and trends page** (row 10)~~: built 2026-11-18 on `feat/app-morning-trends` with the morning
-   check-in in the app (DECISIONS 120-129): sleep pressure from the sleep log, "your usual" and "same as yesterday"
-   next to every number, caffeine, alcohol and sleepiness taps, the forecast hidden until 60 rated days and a 5 %
-   win over "same as yesterday". Next: the owner's first phone check-ins (`app/README.md`, "Owner step"), then
-   exporting check-ins with a night, and fitting the sleep-pressure constants once mornings of ratings exist.
-   (Research B, C)
-9. **Data safety**: first step **built 2026-11-18** on `feat/app-export-all` (DECISIONS 150-157): **Export data**
-   in the app copies everything it keeps (nights, sleep reports, check-ins, meditations, alpha-theta, the replay
-   check, dream answers and prompts, sound sessions) into a folder picked once (Download/EEG or Syncthing), only
-   what is new each time, with a manifest of SHA-256 checksums; the main screen says when the last export was (amber
-   after 3 days); `scripts/import_phone.py` checks every file and copies it into `_local/` without overwriting
-   anything silently. Not yet run on the phone. Encryption and restic backups: deferred by the owner (2026-11-18;
-   DECISIONS 37). **Catalog of nights: built 2026-11-19** on `feat/laptop-parity-catalog` (DECISIONS 313-318):
-   `scripts/catalog.py` lists every night on the laptop (laptop and phone; hours, missing minutes, the report's
-   asleep / deep / dream minutes, check-in) with the SHA-256 of every file in `_local/catalog/`, says what grew,
-   changed or went missing since the last run, and `--check` re-hashes everything; it only reads the data. Later,
-   only once the owner approves it: xz for nights older than 90 days (the catalog's hashes are the check that a
-   compressed night comes back whole). (Research D)
-10. ~~**Nap coach**~~ (row 26, from Ideas): built 2026-11-19 on `feat/app-nap-coach` (from `feat/app-line`;
-   DECISIONS 170-179) with live sleep stages on the phone. Next: the owner's first nap (the phone's speed per check,
-   the wake sound). The **smart alarm** followed on 2026-11-19 (`feat/app-smart-alarm`, status row 27, DECISIONS
-   230-239): ONNX runs inside the night recorder's service (emulator smoke test). (Research C, D)
+The phone app leads (wish 16). Nothing below needs an API worker: the research is finished (findings on
+`_local/research/2026-11-18-findings.html`).
+
+### 1. Built, waiting for the owner's phone tests
+
+Open **Try these** in the app: it lists these in order, with a button to each screen, what to tell the assistant,
+and a note that leaves with Export data. The steps are the "Owner step" headings in [app/README.md](app/README.md)
+(its table of contents at the top follows the same order). Longer lists of what to report are in "Next tests that
+need the owner" below.
+
+1. **A first night** (rows 3, 9, 25): Start night, tap Lights off as you close your eyes, read the sleep report in
+   the morning (how long the phone took, the noise and jaw numbers, "Falling asleep"). Five Lights off nights decide
+   whether the drift-off detector ships (it must land within 5 minutes of the sleep model on 4 of 5).
+2. **Morning check-in and Trends** (rows 6, 10): two mornings.
+3. **Export data**, then **Share on Wi-Fi** (row 29; data safety, DECISIONS 150-157, 220-229): the first export and the
+   first night mirrored to the laptop, screen off, battery.
+4. **Work session** (row 35): one working day with the headband on.
+5. **Meditation** (row 21): the first session, then 8 for the first learning verdict.
+6. **Sound for states** (rows 17, 18), then the sessions with the phone locked, then the 4-week fair test of two sounds.
+7. **A nap** (nap coach, row 26), **a smart alarm morning** (row 27), **a dream catcher nap** and its answers as text
+   (row 20), **alpha-theta** (row 22), **hands-free** calibration (row 28).
+8. **The lucid week** (row 32; evidence weak).
+9. **Tries that take weeks**: a first self-experiment (row 14), the replay check (row 23), and the assistant's
+   proposals: Sharp hours (31), Study reminders (34), "Unusual for you" (30, silent for 28 days), "Was this you?" (33).
+10. **Our own headband connection** (DECISIONS 90-92, 210-219): the 5-minute probe on the
+    phone, then one night with the switch on; the laptop's 15-minute probe too. And **the DIY board on the phone**
+    (row 13) once the board is assembled and passes its bench steps.
+11. Not in the app: the laptop's sound bench tests, the extended setup test (blink depth, glances, clenches: it sets
+    the detectors' limits, row 9 and 25), and break hints on the owner's laptop (row 8, never run there).
+
+The first real phone test (1 hour with the screen off, the drop test) is still at the end of `app/README.md`; the
+phone's speed for scoring (rows 3, 26, 27) is unmeasured until the owner's first night and nap.
+
+### 2. Left to build
+
+Needs no owner decision, only time or data:
+
+- **Fit the sleep-pressure constants** (row 10) once there are mornings of ratings.
+- **The laptop statistics engine** (row 14): observational screens and Bayesian models, after a month of days.
+- **ActivityWatch focus sessions** as a laptop importer beside Sharp hours' files (row 31, DECISIONS 289).
+- **The DIY board on the phone**: USB (OTG) and the 8-channel chip (row 13); calibration for any electrode
+  positions (row 12) after the helmet exists.
+- **Tune from the owner's first tries**: the dream catcher's voice and timings, the smart alarm's and nap coach's
+  wake sounds, the hints' rate, the lucid cues' loudness, the drift-off detector's limits.
+
+Needs the owner's OK first:
+
+- **utof_tracker importer** for `eeg_*` events (row 11; utof_tracker does not read them yet).
+- **Packing old nights** (xz after 90 days); encryption and restic are deferred (see "Decisions waiting").
+- **Sleep-scorer upgrade** (proposal; needs the 58 GB download).
+
+Later or only if the evidence grows (the "Ideas for later" and "Proposals" tables below):
+
+- Helmet-only ideas: frontal asymmetry, a brain-typing speller, flicker games. Helmet layout and ZUNA noise repair.
+- **Sleep cues for memory** (weak; only as a sham-controlled self-test).
+- Already built from those tables: smart alarm, dream catcher, lucid cues, reaction check, self-experiments, study
+  reminders, our own headband driver, live sleep stages on the phone.
+
+Research for later: the rules for a public release (see the last table).
 
 ## Next tests that need the owner
 

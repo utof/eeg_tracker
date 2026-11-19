@@ -11,6 +11,50 @@ below). The **Smart alarm**, set just above Start night, wakes you in a window y
 night, never in deep sleep, and always by the window's end (below). **Sound** (at the bottom, also during a night) plays calm sound
 for a state, with an optional beat, and with the headband shows what your brain does (below).
 
+## Owner steps, in the order to try them
+
+Every feature below has an **Owner step** heading in its section: what to do, and what to tell the assistant. The app's
+**Try these** page (next section) walks through the same list and ticks some steps itself. A feature marked "no steps
+of its own" is covered by another one's steps. The old one-hour phone test is still at the end of this file.
+
+**Tonight and the morning**
+
+- [Lights off and falling asleep](#lights-off-and-falling-asleep): a night with Lights off, then four more (a few seconds a night)
+- [Sleep report](#sleep-report): how long the phone takes to score a night; the noise, jaw and movement numbers
+- [Morning check-in](#morning-check-in) and [Trends](#trends): the first check-ins on two mornings (about 10 minutes); the owner step is under Trends
+- [Export data](#export-data-everything-every-few-days): set it up once, then every few days
+
+**Another night**
+
+- [Smart alarm](#smart-alarm): one morning
+- [Share on Wi-Fi](#share-on-wi-fi-the-laptop-watches-and-copies-while-the-phone-records): the first night mirrored to the laptop (the first night doubles as the phone test)
+
+**Daytime sessions**
+
+- [Work session](#work-session): wear it for a working day
+- [Meditate](#meditate): one session, then eight for the first learning verdict
+- [Nap coach](#nap-coach): a 30-minute nap
+- [Sound for states](#sound-for-states): the first sound sessions, then a bedtime
+- [Sessions with the phone locked](#sessions-with-the-phone-locked): 15 minutes, then one bedtime
+- [Dream catcher](#dream-catcher): a 20-minute nap; then the answers as words
+- [Hands-free controls](#hands-free-controls-off-unless-you-switch-it-on): calibrate and try (about 10 minutes)
+
+**Tries that take weeks**
+
+- [Lucid dream cues](#lucid-dream-cues-off-unless-you-turn-them-on): a first week (evidence weak)
+- [Self-experiments](#self-experiments-does-this-habit-change-that-number-for-you): a first experiment; later a fair test of two sounds (under Sound for states)
+- [Sharp hours](#sharp-hours-the-assistants-proposal-off-unless-you-switch-it-on): switch on and watch two days
+- [Study reminders](#study-reminders-the-assistants-proposal-off-unless-you-switch-it-on): switch on and watch two days
+- [Unusual for you](#unusual-for-you-on-unless-you-switch-it-off): nothing to do for 4 weeks, then one look
+- [Was this you?](#was-this-you-on-unless-you-switch-it-off): nothing to do for about two weeks, then one look
+- [Replay check](#replay-check-off-unless-you-switch-it-on): switch on in Training settings, then just meditate (no steps of its own)
+- [Alpha-theta](#alpha-theta): read the screening and consent once; no steps of its own
+
+**When the headband and the board are ready**
+
+- [Our own headband connection](#our-own-headband-connection-test-off-by-default): the probe (5 minutes), then one night with the switch on
+- [The DIY board](#the-diy-board-test-off-by-default): only after the board passes its bench steps
+
 - Files: `<stamp>.f32/.idx/.log` in the app's private folder (other apps cannot read it), the same format as
   `scripts/record_night.py` (`docs/data-format.md`); join a night with `scripts/to_bdf.py`. Only **Export data**
   (everything the app keeps) and **Export a night** copy anything out (below; DECISIONS rows 53, 56 and 150-156).
@@ -127,11 +171,20 @@ DECISIONS rows 160-161). It found two bugs: Export data could not open (an isola
 and Android's own files were exported. What it cannot test: the headband (no Bluetooth device), real sound and
 microphone (the emulator's host audio is a dummy here), the phone's speed and Xiaomi's background rules.
 
+> **Testing the phone's arm64 release APK? Set `hw.cpu.ncore=2` first.** On an AVD with 4 cores (avdmanager's
+> default) the arm64 APK crashes at launch under Android's ARM translation, while ONNX Runtime's library loads
+> (a SIGSEGV, fault address 0x8). The same APK, and the very build that runs on the owner's phone, starts and runs
+> normally on a 2-core AVD. That crash is the emulator's, not the app's (checked 2026-11-19: the ONNX Runtime library
+> is byte-identical across the builds; only the core count differed). The x86_64 build needs no such setting.
+> Add the line to the AVD's `config.ini` (by default `~/.android/avd/eeg_smoke.avd/config.ini`) before the first boot:
+> `echo 'hw.cpu.ncore=2' >> ~/.android/avd/eeg_smoke.avd/config.ini`.
+
 ```bash
 source ~/.local/share/linsa/env.sh
 export ANDROID_SERIAL=emulator-5554        # always: another device (the phone) may be on USB
 # once: an AVD (API 36 google_apis x86_64, 3 GB RAM)
 avdmanager create avd -n eeg_smoke -k 'system-images;android-36;google_apis;x86_64' -d pixel_6
+echo 'hw.cpu.ncore=2' >> ~/.android/avd/eeg_smoke.avd/config.ini   # needed for the arm64 APK (step 7), see above
 # build while the emulator is off (memory), then boot it headless
 cd app && systemd-run --user --scope -q -p MemoryMax=4500M flutter build apk --release \
   --target-platform android-x64 -Pkotlin.compiler.execution.strategy=in-process   # R8 + AOT, as on the phone
@@ -162,10 +215,10 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    -t tool/live_bench.dart`, install, open, then `adb logcat | grep BENCH`: the time per 30-second check at 5 to 60
    minutes of window and the peak memory. Reinstall the app afterwards.
 7. **The phone's own arm64 APK** also runs on this x86_64 image through Android's ARM translation (slowly: about
-   a minute per model part), but only with `hw.cpu.ncore=2` in the AVD's `config.ini`: the translator's stand-in
+   a minute per model part), but **only with `hw.cpu.ncore=2`** in the AVD's `config.ini` (see the warning above): the translator's stand-in
    `/proc/cpuinfo` lists 2 processors, and with 4 cores in sysfs ONNX Runtime's CPU detection (cpuinfo) crashes
    while the library loads, at app start. That crash is the emulator's, not the phone's.
-7. **Sessions with the phone locked** (DECISIONS rows 190-197):
+8. **Sessions with the phone locked** (DECISIONS rows 190-197):
    `flutter build apk --debug --target-platform android-x64 -t tool/screen_off_smoke.dart`, install, grant
    `RECORD_AUDIO`, `BLUETOOTH_CONNECT` and `POST_NOTIFICATIONS` with `adb shell pm grant`, open the app, wait for
    `SMOKE sound on` in logcat, then lock: `adb shell input keyevent 26`. Expect a `SMOKE tick` line every 5 s (a
@@ -176,14 +229,14 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    `adb shell cmd media_session dispatch stop` ends the session like Stop on the lock screen (`end: stopped` in
    the newest `files/sound-states/*.sound.json`). Reinstall
    the app afterwards.
-8. **Share on Wi-Fi** (2026-11-19): switch it on in Your data, read the code from the sheet (`tool/emu.py texts`),
+9. **Share on Wi-Fi** (2026-11-19): switch it on in Your data, read the code from the sheet (`tool/emu.py texts`),
    `adb forward tcp:18765 tcp:8765`, then `curl -H "Authorization: Bearer <code>" http://127.0.0.1:18765/state`
    (401 without the code), `scripts/page_server.py --recorder http://127.0.0.1:18765 --token <code>` and
    `scripts/pull_phone.py http://127.0.0.1:18765 --token <code> --once --dest <scratch>`; Start night (the
    recorder's service serves, status `reconnecting` without a headband), Stop (the app serves again), switch off
    (the port closes). All of it passed; the emulator cannot show Wi-Fi with the screen off or the battery cost.
 
-8. **The smart alarm inside the night recorder** (DECISIONS rows 230-231): `flutter build apk --release
+10. **The smart alarm inside the night recorder** (DECISIONS rows 230-231): `flutter build apk --release
    --target-platform android-x64 -t tool/alarm_smoke.dart`, install with `-g`, put one recording into
    `files/smoke/` (adb root, the app's owner and SELinux label, as in step 1) and optionally `files/smoke/plan.json`
    (`{"mode": "night", "startInMin": 35, "windowMin": 10, "speed": 2, "skipS": 330}`), open the app, lock the phone
@@ -200,7 +253,7 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    [lucid cues, smart alarm]`, and the night's `.log` (`files/recordings/*.log`) `live sleep model on for the lucid
    cues (load 1 tonight)`, then `live sleep model: shared with the smart alarm (no second copy)`.
 
-8. **The dream catcher's speech to text** (DECISIONS rows 250-257): push a made-up session and its WAVs (the laptop
+11. **The dream catcher's speech to text** (DECISIONS rows 250-257): push a made-up session and its WAVs (the laptop
    check's TTS clips, `_local/stt/check/clips/`, never personal audio) into `files/dream-catcher/` as in step 1, open
    **Dream catcher**, tap **Download (671 MB)** under Answers as text and wait for "Speech model on this phone"; the
    answers are written out at once: `files/dream-catcher/<stamp>-r<n>.text.json` holds the text and `tookS`. Then
@@ -228,7 +281,7 @@ or make an AVD of your own elsewhere (`ANDROID_AVD_HOME=/var/tmp/<name> avdmanag
 **With the lucid dream cues** (second integration, 2026-11-19, release x86_64): the Lucid dreams page opened from
 the night screen, **Turn on** started the evening practice (the cue every 3 s, a little louder each time: "Cue 6,
 0.6 % of the media volume") and Stop kept the cues waiting for a loudness. The alarm smoke tool with the cues on
-(step 8) replayed a recorded night through the real recorder service: the cues opened the live model at 09:24, the
+(step 10) replayed a recorded night through the real recorder service: the cues opened the live model at 09:24, the
 smart alarm joined it at 09:33 (`live sleep model: shared with the smart alarm (no second copy)`), and the service
 reported `loads 1 ... used by [lucid cues, smart alarm]`: one model for both, about 0.6 s a call with 3 runs, the
 process at about 330 MB (RSS). No app errors in logcat. The speech-model download was not repeated.
@@ -1153,7 +1206,7 @@ recording is separate and unchanged.
 
 Not tried on a phone yet. On the emulator, with the screen off, the sound engine kept playing and being fed for two
 minutes, the microphone recorded real sound, and the night recording started from the locked session
-(`tool/screen_off_smoke.dart`, "Emulator smoke test" step 7).
+(`tool/screen_off_smoke.dart`, "Emulator smoke test" step 8).
 
 ### Owner step: lock the phone during a session (15 minutes, then one bedtime)
 

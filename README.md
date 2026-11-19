@@ -4,13 +4,76 @@ An open-source app for getting the most out of affordable EEG: sleep, daily brai
 brain-reactive sound and honest long-term statistics. Works first with the BrainBit Black headband, then with
 a build-it-yourself ADS1299 helmet ([hardware and guides](https://github.com/utof/eeg_ads1299_lab)), then others.
 
-**Status: day one.** So far: a decisions log, a laptop recorder for the BrainBit and first sleep scoring. Not a medical device.
+**Status (2026-11-19).** The phone app is built and tested on made-up data, a fake headband and an emulator. It is
+on branch `feat/app-line` (every app feature combined; `main` does not have it yet). A release APK is about 52 MB
+(arm64). The first builds are on the owner's phone, but most features have not had their first real try yet: the
+owner's steps are in [app/README.md](app/README.md) and in the app's **Try these** page. Not a medical device.
+
+## What it does today
+
+### On the phone (Android app, `app/`)
+
+Each line says what it does. In brackets: how well the research backs it **for this headband**
+(strong, some, weak, none; one note per feature in [docs/evidence/](docs/evidence/README.md), opened by the round
+**i** button). "Built" means the code and tests are done; the phone tries are still waiting for the owner.
+
+- **Nights and sleep stages**: one tap records the night with the screen off; after Stop the phone scores sleep
+  stages and shows a sleep report (time asleep, deep, dream, wake-ups, a chart, jaw and movement counts). The
+  stages match the laptop's on every scored epoch of the test nights. (some)
+- **Smart alarm**: wakes you at a light-sleep moment inside a window you choose, never in deep sleep, and always by
+  the window's end. (weak)
+- **Nap coach**: a nap that ends before deep sleep or at the length you pick. (some)
+- **Dream catcher**: as you drift off it asks what you are thinking, records your answer, and lets you drift again;
+  after the session the phone writes the answers out as text (Russian and English, a one-time 671 MB download). (some)
+- **Lucid dream cues**: soft sounds in dream sleep, with silent nights mixed in so the app can test whether they
+  did anything. An experiment. (weak)
+- **Morning check-in and Trends**: a 5-minute eyes-closed / eyes-open check, plus your own ratings, and your
+  numbers next to yesterday and your usual, with 14-day lines. (check-in: strong; trends: some)
+- **Work session**: headband on while you work; it shows alert / getting drowsy / drowsy, hints at a break, and keeps a
+  drowsiness trend per day. Mental fatigue itself is not measured. (some)
+- **Meditation**: sound that follows your alpha rhythm, silent minutes at the end, a report, and a learning verdict
+  after 8 sessions (checked again at 12). (weak)
+- **Alpha-theta training**: a slow eyes-closed practice with a safety checklist; "practice, not treatment". (weak)
+- **Replay check**: an off-by-default test of whether the live feedback beats a replay of an old one. (some)
+- **Sounds for states**: calm sound for falling asleep, relaxing, a break or focus; it measures whether you got
+  there, fades out when you fall asleep, and after weeks compares the sounds you used. An optional fair test draws
+  the sound by chance each day. (sounds: weak; the fair test: some)
+- **Sharp hours**: a few one-tap "how sharp are you?" questions a day, and after about 3 weeks your best times of
+  day, "seen together, not tested". Off until you switch it on. (some)
+- **Study reminders**: study in the evening, try to recall it in the morning. Off until you switch it on. (some)
+- **"Unusual for you" card**: one plain sentence when a number of yours has been outside your usual 2 days in a row;
+  silent for the first 28 days. (some)
+- **Self-experiments**: pick a question and a number; random days for 4-8 weeks; a sealed answer with a range at the
+  end, marked "tested" apart from "seen together". (some)
+- **"Was this you?"**: a soft question when someone else seems to have worn the headband, so a borrowed headband
+  does not spoil your trends. A weak check, tested only on made-up people. (weak)
+- **Hands-free controls**: a double jaw clench or a look left then right as a switch during sessions. Off by
+  default. (some)
+- **Export data**: copies everything the app keeps to a folder you pick (with a checksum list) for the laptop.
+- **Share on Wi-Fi**: the laptop watches the phone's recording live and copies its files during the night. Off by
+  default, home Wi-Fi only.
+- **Our own headband connection (test switch)**: our own Bluetooth code instead of BrainBit's library; BrainBit's
+  stays the default until the 15-minute probe has passed on the real headband.
+- **The DIY board (test)**: records the self-built ADS1299 board over Wi-Fi. The board is not assembled yet, so this
+  has only met a fake board and shows its test signal, not EEG.
+- **Try these**: one page that walks the owner through each feature's first try, in order, and ticks some by itself.
+
+### On the laptop
+
+- **Recorder** for the BrainBit (`scripts/record_night.sh`) with live check pages, **sleep report** and **morning
+  check-in** pages, a Lab Streaming Layer bridge, and **brain-reactive sound** (a bench for the phone's version).
+- **Break hints** from ActivityWatch with no headband (`scripts/break_hints.py`). (some)
+- **Tools for the phone's files**: `import_phone.py`, `phone_night_check.py`, `catalog.py`, `pull_phone.py`
+  (below).
+- **The same scoring and detectors in Python**: the phone's rules were written and checked there first (`analysis/`).
+
+## Files in this repository
 
 - [DECISIONS.md](DECISIONS.md): every choice made so far, its alternatives, and what would change it.
-- [ROADMAP.md](ROADMAP.md): the owner's wishes, what each honestly becomes, and the status of every feature.
+- [ROADMAP.md](ROADMAP.md): the owner's wishes, what each honestly becomes, the status of every feature, and what comes next.
 - [docs/data-format.md](docs/data-format.md): raw recordings, night files and the events other apps can read.
-- `app/`: the Android recorder (Flutter): one tap starts the night, files in the same format as the
-  laptop's. Unit-tested; not yet compiled to an APK or run on a phone; see [app/README.md](app/README.md).
+- [docs/evidence/](docs/evidence/README.md): one short evidence note per feature.
+- `app/`: the Android app (Flutter); owner steps, build and emulator notes in [app/README.md](app/README.md).
 - `scripts/record_night.sh`: records a BrainBit on Linux until Ctrl+C (needs BrainBit's `libneurosdk2.so`
   and libc++ in `~/.local/lib/neurosdk2`). Live check page on port 8765.
 - `scripts/break_hints.py`: soft "take a break" hints from ActivityWatch, no headband needed ([docs/break-hints.md](docs/break-hints.md)).
@@ -128,9 +191,9 @@ back-test: `analysis/validate_wearer.py`; how to use it, switch it off and the o
 **Why we believe each feature (evidence notes).** Every feature has a short note in
 [docs/evidence/](docs/evidence/README.md): what the research says, where the data supports it and where it does
 not, how the app uses it, the sources, and the libraries and models with their licences. Each carries one grade
-for this headband: strong, some, weak or none. The pages open them from a round "i" button, and the phone app will
-bundle the same files. After editing a note, run `python3 scripts/evidence_to_js.py` (it writes
-`scripts/web/evidence.js`; tests: `node --test tests/web/evidence.test.mjs`).
+for this headband: strong, some, weak or none. The pages and the phone app open them from a round "i" button (the app bundles the same files).
+After editing a note, run `python3 scripts/evidence_to_js.py` (it writes `scripts/web/evidence.js`; tests:
+`node --test tests/web/evidence.test.mjs`).
 
 **Our own headband connection (no BrainBit SDK).** `scripts/brainbit_ble.py` talks to the BrainBit Black over
 Bluetooth itself (Python + bleak), so recording needs no closed library, never unpairs other Bluetooth devices and

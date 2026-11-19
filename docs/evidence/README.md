@@ -2,11 +2,11 @@
 
 One short note per feature: what the research says, where the data supports it and where it does not, how the
 app uses it, the sources, and the libraries and models behind it. They are written for anyone who uses the app,
-not for scientists. Each feature in the pages (and later in the phone app) has a small round **i** button that
+not for scientists. Each feature in the pages (and in the phone app) has a small round **i** button that
 opens its note.
 
 These Markdown files are the single source. `python3 scripts/evidence_to_js.py` turns them into
-`scripts/web/evidence.js` for the laptop pages; the phone app will bundle these same files as assets. Edit the
+`scripts/web/evidence.js` for the laptop pages; the phone app bundles these same files as assets. Edit the
 note here, rerun the script, and commit both.
 
 ## Grades
