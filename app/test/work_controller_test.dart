@@ -20,7 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/fast_band.dart' show OneFinder, until;
 import 'support/gates.dart';
 
-enum Mode { awake, drowsy, eyesClosed, off }
+enum Mode { awake, drowsy, eyesClosed, off, stall }
 
 /// O1/O2: 10 Hz alpha; blinks every 4 s and sideways eye movements every 5 s while awake; none while drowsy; the
 /// rails when off. Each batch is one second of its own clock.
@@ -37,6 +37,11 @@ class WorkBand implements Headband {
     return (_seed / 0x7fffffff - 0.5) * 7;
   }
   Timer? _timer;
+
+  /// What mends a stall: 'restart' (the stream started again) or 'reconnect' (a new connection); null: nothing.
+  String? healOn;
+  bool _started = false;
+  final List<String> calls = [];
   final _signal = StreamController<List<Sample>>.broadcast(sync: true);
   final _resist = StreamController<Map<String, double>>.broadcast();
   final _range = StreamController<bool>.broadcast();
@@ -47,7 +52,7 @@ class WorkBand implements Headband {
     final out = <Sample>[];
     for (var k = 0; k < 250; k++, _i++) {
       final t = _i / 250;
-      if (mode == Mode.off) {
+      if (mode == Mode.off || mode == Mode.stall) {
         out.add((pack: _pack++ % 2048, o1: 0.4, o2: 0.4, t3: 0.4, t4: 0.4));
         continue;
       }
@@ -55,7 +60,7 @@ class WorkBand implements Headband {
         Mode.awake => 10.0,
         Mode.drowsy => 16.0,
         Mode.eyesClosed => 40.0,
-        Mode.off => 0.0,
+        Mode.off || Mode.stall => 0.0,
       };
       final alpha = amp * math.sin(2 * math.pi * 10 * t);
       final slow = 3 * math.sin(2 * math.pi * 3 * t);
@@ -98,16 +103,23 @@ class WorkBand implements Headband {
 
   @override
   Future<void> startSignal() async {
+    calls.add('startSignal');
+    if (_started && mode == Mode.stall && healOn == 'restart') mode = Mode.awake;
+    _started = true;
+    _timer?.cancel();
     _timer = Timer.periodic(const Duration(milliseconds: 1), (_) {
       if (!_signal.hasListener) return;
       final b = _batch();
       clockS += 1;
-      _signal.add(b);
+      if (mode != Mode.stall) _signal.add(b); // a stall: the clock goes on, nothing arrives
     });
   }
 
   @override
-  Future<void> stopSignal() async => _timer?.cancel();
+  Future<void> stopSignal() async {
+    calls.add('stopSignal');
+    _timer?.cancel();
+  }
   @override
   Future<void> startResist() async => Timer(const Duration(milliseconds: 1), () => _resist.add({'O1': 4e5, 'O2': 6e5, 'T3': 1.2e6, 'T4': 1.5e6}));
   @override
@@ -117,7 +129,21 @@ class WorkBand implements Headband {
   @override
   Future<int> battery() async => 80;
   @override
-  Future<void> disconnectAndDispose() async => _timer?.cancel();
+  Future<void> disconnectAndDispose() async {
+    calls.add('disconnect');
+    _timer?.cancel();
+    if (mode == Mode.stall && healOn == 'reconnect') mode = Mode.awake;
+  }
+}
+
+/// Finds [band] once, and reaches it again directly (a reconnect after a drop or a stall).
+class _AgainFinder implements HeadbandFinder {
+  _AgainFinder(this.band);
+  final WorkBand band;
+  @override
+  Future<Headband?> find(Duration scanFor, {void Function(String name, int rssi)? onFound}) async => band;
+  @override
+  Future<Headband> connectDirect(BandId id) async => band;
 }
 
 const fastLink = LinkTiming(scanFor: Duration(milliseconds: 50), contactFor: Duration(milliseconds: 5), settle: Duration.zero);
@@ -454,6 +480,51 @@ void main() {
     );
     expect(await noteFor((volume: 3, max: 15)), isNull, reason: '20 % of the range, as the check-in\'s soft tones');
     expect(await noteFor(null), isNull);
+  });
+
+  WorkController again(WorkBand band) => WorkController(
+    finder: _AgainFinder(band),
+    store: WorkStore(Directory('${tmp.path}/work-sessions')),
+    timing: const WorkTiming(
+      link: LinkTiming(scanFor: Duration(milliseconds: 50), contactFor: Duration(milliseconds: 5), settle: Duration.zero, reconnectWaits: [Duration(milliseconds: 5)]),
+      tick: Duration(milliseconds: 4),
+    ),
+    clock: band.now,
+  );
+
+  List<String> eventsOf(WorkController c) => [for (final e in c.sessionJson(c.startedAt!.add(const Duration(hours: 1)))['events']! as List) '${(e as Map)['event']}'];
+
+  test('a stream that stops with the headband in range is restarted, and the session goes on (review 2026-11-20, finding 1)', () async {
+    final band = WorkBand(start: DateTime(2026, 11, 20, 10).millisecondsSinceEpoch / 1000)..healOn = 'restart';
+    final c = again(band);
+    await c.start();
+    await until(() => c.level == DrowsyLevel.alert);
+    band.mode = Mode.stall;
+    await until(() => band.calls.where((x) => x == 'startSignal').length == 2);
+    await until(() => c.signal == WorkSignal.good && c.worn);
+    expect(eventsOf(c), contains(startsWith('no data for')), reason: 'the restart is in the file');
+    expect(c.onBreak, isFalse, reason: 'seconds without data are not a break');
+    await c.stop();
+    c.dispose();
+  });
+
+  test('still nothing 40 s later: the headband is let go and reached again; no break all afternoon (finding 1)', () async {
+    final band = WorkBand(start: DateTime(2026, 11, 20, 10).millisecondsSinceEpoch / 1000)..healOn = 'reconnect';
+    final c = again(band);
+    await c.start();
+    await until(() => c.level == DrowsyLevel.alert);
+    final at = band.clockS;
+    band.mode = Mode.stall;
+    await until(() => band.calls.contains('disconnect'));
+    expect(c.signal, WorkSignal.lost);
+    await until(() => band.clockS > at + 10 * 60);
+    expect(eventsOf(c), containsAllInOrder([startsWith('no data for'), contains('reconnecting'), 'reconnected']));
+    expect(c.onBreak, isFalse);
+    expect(c.planner!.breaks, isEmpty, reason: 'under a minute without data');
+    expect(c.signal, WorkSignal.good);
+    expect(c.level, DrowsyLevel.alert);
+    await c.stop();
+    c.dispose();
   });
 
   test('words: the hint lines and the after-break line', () {
