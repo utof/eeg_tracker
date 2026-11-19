@@ -94,6 +94,7 @@ class _DreamScreenState extends State<DreamScreen> {
         _c.recordingsDir = Directory(rec);
         final model = _model = SpeechModelStore(modelsDirFor(rec), parakeetV3);
         _modelReady = model.ready;
+        _downloaded = model.bytesHere; // a download stopped earlier goes on from here
         _texts = DreamTexts(store: st, open: () => _openSpeech(model), blocked: () => _c.active || _nightRunning)
           ..addListener(_changed);
       }
@@ -177,7 +178,7 @@ class _DreamScreenState extends State<DreamScreen> {
     if (_modelReady) return SpeechInfo(SpeechState.ready, total: total);
     if (_downloading) return SpeechInfo(SpeechState.downloading, bytes: _downloaded, total: total);
     if (_downloadError != null) return SpeechInfo(SpeechState.failed, bytes: _downloaded, total: total, message: _downloadError);
-    return SpeechInfo(SpeechState.absent, total: total);
+    return SpeechInfo(SpeechState.absent, bytes: _downloaded, total: total);
   }
 
   Map<String, AnswerWords> _wordsOf(DreamSession? s) {

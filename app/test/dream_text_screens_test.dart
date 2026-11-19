@@ -86,6 +86,7 @@ final Map<String, DreamViewModel> states = {
     speech: const SpeechInfo(SpeechState.ready, total: _mb),
   ),
   'no_model': DreamViewModel(stage: DreamStage.setup, latest: _s, speech: const SpeechInfo(SpeechState.absent, total: _mb)),
+  'stopped': const DreamViewModel(stage: DreamStage.setup, speech: SpeechInfo(SpeechState.absent, bytes: 312400000, total: _mb)),
   'downloading': const DreamViewModel(stage: DreamStage.setup, speech: SpeechInfo(SpeechState.downloading, bytes: 312400000, total: _mb)),
   'download_failed': const DreamViewModel(
     stage: DreamStage.setup,
@@ -195,6 +196,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.textContaining('Download ('));
     expect(downloads, 1);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(app(states['stopped']!));
+    expect(find.text('Go on (312 MB of 671 MB here)'), findsOneWidget, reason: 'a stopped download goes on from its part');
   });
 
   test('the row\'s state from the text file: working, words, yours, failed, waiting, none', () {

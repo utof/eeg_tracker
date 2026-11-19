@@ -220,7 +220,11 @@ class SpeechSection extends StatelessWidget {
     switch (i.state) {
       case SpeechState.absent:
         children.addAll([
-          OutlinedButton.icon(onPressed: onDownload, icon: const Icon(Icons.download_rounded), label: Text('Download ($size)')),
+          OutlinedButton.icon(
+            onPressed: onDownload,
+            icon: const Icon(Icons.download_rounded),
+            label: Text(i.bytes > 0 ? 'Go on (${megabytes(i.bytes)} of $size here)' : 'Download ($size)'),
+          ),
           const SizedBox(height: 6),
           Text('Use Wi-Fi: it is large.', style: muted),
         ]);

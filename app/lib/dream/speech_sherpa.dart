@@ -7,6 +7,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
@@ -183,7 +184,7 @@ List<(int, int)> _voiceParts(Float32List x, String vadPath) {
       numThreads: 1,
       debug: false,
     ),
-    bufferSizeInSeconds: 60,
+    bufferSizeInSeconds: math.max(60, x.length / speechRate + 5),
   );
   try {
     const window = 512;
