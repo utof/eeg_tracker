@@ -463,6 +463,50 @@ void main() {
       await third.close();
     });
 
+    test('a night packed after a day (rows 540-549) is read once in its packed form, then kept with its original '
+        '(row 585)', () async {
+      final f32 = put('recordings/2026-11-17-231200.f32', List.generate(70000, (i) => i % 7),
+          modified: now.subtract(const Duration(days: 2)));
+      final body = f32.readAsBytesSync();
+      final cache = File('${files.path}/cache/share-hashes.json');
+      ShareServer kept() => ShareServer(filesDir: files, token: token, port: 0, clock: () => now, hashCache: cache);
+      Future<Map<String, Object?>> rowFrom(ShareServer sv) async {
+        final req = await client.getUrl(Uri.parse('http://127.0.0.1:${sv.boundPort}/files'));
+        req.headers.set('Authorization', 'Bearer $token');
+        final res = await req.close();
+        expect(res.statusCode, 200);
+        final list = jsonDecode(await utf8.decodeStream(res)) as Map<String, Object?>;
+        return (list['files']! as List).single as Map<String, Object?>;
+      }
+
+      final plain = kept(); // the laptop copied the night while it was plain
+      await plain.listen();
+      expect((await rowFrom(plain))['sha256'], sha256.convert(body).toString());
+      expect(plain.hashed, 1);
+      await plain.close();
+
+      final p = packRaw(f32); // a day later the phone packs it between nights
+      final original = {'path': 'recordings/2026-11-17-231200.f32', 'bytes': body.length, 'sha256': sha256.convert(body).toString()};
+      final packedSha = sha256.convert(p.packed.readAsBytesSync()).toString();
+      final after = kept();
+      await after.listen();
+      var row = await rowFrom(after);
+      expect((row['path'], row['sha256']), ('recordings/2026-11-17-231200.f32.gz', packedSha));
+      expect(row['original'], original);
+      expect(after.hashed, 1, reason: 'the packed form is read once');
+      row = await rowFrom(after);
+      expect(after.hashed, 1, reason: 'listed again: not read again');
+      await after.close();
+
+      final restarted = kept(); // the app after an update
+      await restarted.listen();
+      row = await rowFrom(restarted);
+      expect(row['sha256'], packedSha);
+      expect(row['original'], original);
+      expect(restarted.hashed, 0, reason: 'nothing read again after a restart');
+      await restarted.close();
+    });
+
     test('the laptop copying is counted while the list and each file are answered', () async {
       put('recordings/2026-11-18-231200.f32', List.filled(40, 7));
       final counts = <int>[];

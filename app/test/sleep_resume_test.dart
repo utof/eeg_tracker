@@ -376,6 +376,36 @@ void main() {
       expect(scoring.reports.single.nightOf, night);
     });
 
+    test("runSoon's then (packing old nights, rows 540-549) runs once the go has ended; halt drops it", () async {
+      writeRun(recordings, start, 6);
+      final calls = <String>[];
+      final scoring = SleepScoring(
+        SleepScorer(
+          recordingsDir: recordings,
+          store: store,
+          openRun: (run) async => CountingRun(run, calls),
+          prepare: (files) async => fakeInput(start.millisecondsSinceEpoch ~/ 1000),
+          see: (files) async => null,
+        ),
+        settle: const Duration(milliseconds: 50),
+      );
+      final after = <String>[];
+      scoring.runSoon(then: () => after.add('first'));
+      scoring.runSoon(then: () => after.add('packed')); // the latest one asked replaces it
+      expect(after, isEmpty);
+      await until(() => after.isNotEmpty);
+      expect(after, ['packed']);
+      expect(calls, hasLength(callsPerNight), reason: 'after the scoring, never before it');
+      expect(scoring.busy, isFalse);
+
+      scoring.runSoon(then: () => after.add('again'));
+      scoring.halt(); // Start night before the go began
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(after, ['packed']);
+      await scoring.run();
+      expect(after, ['packed'], reason: 'a halt dropped it');
+    });
+
     test('a night recording or a session stops it; while the laptop copies it waits and says so', () async {
       writeRun(recordings, start, 6);
       final calls = <String>[];
