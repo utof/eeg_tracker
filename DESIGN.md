@@ -84,6 +84,10 @@ headings titleMedium 500; everything else bodyLarge. No monospace, no display fa
 
 ## Layout
 
+A Material 3 navigation bar at the bottom of the main screen (DECISIONS 597-598): Night, Sessions, Signal, Trends, More,
+on the ground under a hairline, the chosen tab's pill one step lighter (`rule`) with ink icon and label, the others
+ink-muted, labels always shown, no animation between tabs. The app opens on Night; the night screen's sections are
+split among Night, Sessions and More in their old order, and Night keeps its pinned bar above the tab bar.
 One scrolling column, 24 dp page margins, sections separated by a hairline and 32 dp above the heading.
 Order: status, readouts, watch strip, then Headband and Phone (Phone first before a night, Headband first
 during one). Between nights the Sleep section (last night's asleep total and a Sleep report button) comes
@@ -208,6 +212,24 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   cells in the contact cells' place (tabular titleLarge, no colour), then one muted line with the link and the lost
   samples. Between nights the block is one line and the channel names, the Sleep section says in words that the
   board's nights get no report, and the Phone section drops the Bluetooth rows.
+- **Signal page** (the Signal tab; DECISIONS 590-599): a compact state line (the state mark, the word at titleLarge, one
+  muted sentence; amber or red with words when something is wrong, its one action as a text button at the right),
+  then Head / Traces / Raw as the app's segmented row (48 dp). **Head**: the 3D head fills the top half, flat-shaded in
+  the ground's browns (no highlight brighter than `rule`'s neighbour), the cap's three guide lines in a faint brown;
+  each electrode a DESIGN mark on a dark disc (filled `live` good, ringed `caution` dot fair, `problem` ring poor,
+  `ink-muted` dash none), the reference and bias as ink-muted squares, the picked one ringed in ink; its name and ohms
+  beside it on a dark label in tabular figures; far-side sites as faint rings. Under it, scrolling: one muted hint
+  line, the legend in words with the planning limits, the picked electrode (name at titleLarge, its place muted, ohms
+  right in its mark's colour, its 5 s trace, then label-left / value-right rows: RMS, Mains, Last second, and the band
+  strip), "Electrodes" as log rows (mark, name over its place in muted body, ohms right), where the ohms come from in a
+  muted sentence, **Measure contact again** outlined, **Positions** as a text button. **Traces**: Filter and Scale as
+  segmented rows with one muted sentence on what the filter does, then per channel a header row (mark, name, ohms
+  right), a 76 dp trace (`track` ground, a `rule` zero line, an ink line with at most two points per pixel column),
+  one muted line of numbers (flags in `caution` words) with the scale at the right, and the **band strip**: one 8 dp
+  bar split by delta, theta, alpha and beta in four steps of ink (`saved`, ink-muted, ink, `rule`) with the shares in
+  words under it, never colour alone. **Raw**: Pause / Back to live outlined, a slider to look back, all channels
+  stacked on one `track` ground (name left, its own scale right), "Counters" and "Latest values" as label-left /
+  value-right rows in tabular figures.
 - **Phone checks:** icon, one plain sentence, right-aligned text buttons that open the exact setting.
 - **Export line** (Your data): an icon and one sentence, muted ("Last export yesterday; 3 new files since"), or
   `caution` amber with a warning icon once something new has been only on the phone for 3 days, or nothing was ever

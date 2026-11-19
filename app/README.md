@@ -11,6 +11,12 @@ below). The **Smart alarm**, set just above Start night, wakes you in a window y
 night, never in deep sleep, and always by the window's end (below). **Sound** (at the bottom, also during a night) plays calm sound
 for a state, with an optional beat, and with the headband shows what your brain does (below).
 
+**The bar at the bottom** (since 2026-11-20, DECISIONS 597): **Night** (the night screen: status, the strip, Sleep,
+Morning, Try these, Headband, Phone, with Start night pinned; the app opens here), **Sessions** (Meditation, Dream
+catcher, Nap coach, Lucid dreams, Work, Sound), **Signal** (the head, live traces and raw data, below), **Trends** and
+**More** (Your data: Export data, Export a night, Share on Wi-Fi; Settings; Licences). Where a section below says
+"on the main screen", look in the tab that holds it; Back on another tab returns to Night.
+
 ## Owner steps, in the order to try them
 
 Every feature below has an **Owner step** heading in its section: what to do, and what to tell the assistant. The app's
@@ -31,6 +37,7 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
 
 **Daytime sessions**
 
+- [Signal](#signal-the-head-live-traces-and-raw-data): a first look at the head, the traces and the raw data (5 minutes)
 - [Work session](#work-session): wear it for a working day
 - [Meditate](#meditate): one session, then eight for the first learning verdict
 - [Nap coach](#nap-coach): a 30-minute nap
@@ -97,6 +104,8 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
   DECISIONS rows 130-139.
 - Try these: `lib/try_these/` (the cards, the progress file, what the app sees by itself), `lib/ui/try_these_*.dart`;
   DECISIONS row 340 (below).
+- Signal tab and the bottom bar: `lib/signal/` (layouts, the 3D head's math, the live signal, the taps, the feed),
+  `lib/ui/signal_*.dart`, `lib/ui/head_view.dart`, `lib/ui/home_tabs.dart`; DECISIONS rows 590-599 (below).
 
 ## Try these
 
@@ -1129,6 +1138,50 @@ asleep is barely seen in a month.
    - Was today's sound easy to see, and did the locked chips make sense?
    - After a week: does **What works for you** count the nights (its cells toward 14)?
    - Any night the result said the detector did not see you fall asleep although you slept.
+
+## Signal (the head, live traces and raw data)
+
+The **Signal** tab shows what the electrodes see, for any number of them (DECISIONS rows 590-599). At the top one line
+says where the samples come from; under it **Head**, **Traces** and **Raw**:
+
+- **Head**: a 3D head you turn with a finger, pinch to zoom and double-tap to straighten. Each electrode is a mark in
+  its contact's colour and shape (filled good, ringed dot fair, ring poor, dash none) with its name and ohms beside it;
+  the reference and the bias are squares. Good up to 1 MΩ and fair up to 2.5 MΩ are planning limits, not measured on
+  your head. Tap an electrode (or its row) for its last 5 seconds (1-40 Hz), its RMS, the mains (50 Hz), whether the
+  last second was flat, railed or swinging, and its delta / theta / alpha / beta shares.
+- **Traces**: every channel's last 5 seconds in µV, as it came (**Raw**), **1-40 Hz** or with only the **50 Hz
+  notch**, at **Auto** or a fixed scale, each with its numbers and band strip.
+- **Raw**: all channels stacked as they came, **Pause** and slide back up to 5 minutes, the counters (samples, the
+  newest sample's time, the rate, missing and repeated packets, the night's file set) and every channel's latest value.
+
+Where the samples come from: while a night records, the night recorder's own stream (the contact is the one measured
+when the night started); while a session holds the headband, that session's stream; otherwise the tab connects by
+itself (contact first, about 6 s, then the stream), and **Measure contact again** reads it again. It never opens a
+second connection and never switches a recording headband into resistance mode. Leaving the tab lets the headband go.
+With the DIY board chosen it listens for the board's frames (no contact reading).
+
+Electrode places: the 10-10 names (O1, Fz, C3, T7, M1 ...; old T3 T4 T5 T6 too) find their places by themselves. A
+helmet's other sites: **Positions** (under the electrode list) takes one line a site, `name polar azimuth` in degrees
+(down from the top; round from the nose toward the right ear) or `name x y z` (right, front, up), and `ref` / `ground`
+lines; checked before it is saved, in `files/signal/positions.txt` (it leaves the phone with Export data).
+
+Not yet: an 8- or 16-channel board. The view works for any count (tested at 4, 8 and 16), but the BrainBit and the
+DIY board both arrive in the app's 4-channel record (DECISIONS 363).
+
+### Owner step: a first look at the signal (5 minutes)
+
+Nothing of this has run with a headband yet: not the head's speed on the phone, the traces, or the contact readings.
+
+1. Between nights, headband on and switched on. Tap **Signal** at the bottom: it looks for the headband, checks the
+   contact (keep still a few seconds), then shows the head.
+2. Turn the head with a finger, pinch, double-tap. Tap O1, then the other electrodes. Open **Traces**, try the three
+   filters; blink, clench your jaw, close your eyes for 10 s (alpha should grow at O1 / O2).
+3. Open **Raw**, tap **Pause**, slide back a minute, tap **Back to live**.
+4. Tell the assistant:
+   - Did the head turn smoothly, and were the marks and the ohms where you expected (do they match the night
+     screen's contact)?
+   - Did blinks, the jaw and closed eyes show up where you expected? Any channel always "flat" or "railed"?
+   - Any missing packets in Raw after a few minutes? Did the phone get warm?
 
 ## Work session
 
