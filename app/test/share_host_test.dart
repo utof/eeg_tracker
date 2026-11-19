@@ -46,6 +46,23 @@ Future<void> hangs(List<Object?> args) async {
   toHost.send(['up', <String>['127.0.0.1'], 8765]);
 }
 
+/// A server that finds no Wi-Fi address, and says so twice (the minute's look found the same).
+Future<void> noAddress(List<Object?> args) async {
+  final toHost = args[0]! as SendPort;
+  final inbox = ReceivePort();
+  toHost.send(['port', inbox.sendPort]);
+  const why = 'no Wi-Fi address found (android: vpn tun0 10.10.10.1/30; interfaces: failed: x)';
+  toHost.send(['up', <String>[], args[3], why]);
+  toHost.send(['up', <String>[], args[3], why]);
+  toHost.send(['up', <String>['192.168.1.5'], args[3], '']);
+  inbox.listen((m) {
+    if (m is List && m[0] == 'x') {
+      toHost.send(['down', 'stopped']);
+      inbox.close();
+    }
+  });
+}
+
 Future<int> freePort() async {
   final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
   final p = s.port;
@@ -90,7 +107,11 @@ void main() {
     timing: fast,
   );
 
-  ShareHost makeHost(NightRecorder? r, {Future<void> Function(List<Object?>)? entry}) => host = ShareHost(
+  ShareHost makeHost(
+    NightRecorder? r, {
+    Future<void> Function(List<Object?>)? entry,
+    Future<WifiNets> Function()? wifi,
+  }) => host = ShareHost(
     filesDir: files.path,
     onLog: (line) {
       log.add(line);
@@ -98,6 +119,7 @@ void main() {
     },
     onMarker: (text) => r?.addMarker(text),
     onChange: changes.add,
+    wifi: wifi,
     entry: entry ?? shareIsolateMain,
   );
 
@@ -290,6 +312,51 @@ void main() {
     final r = recorder(FakeBand('a'));
     expect(r.addMarker('x'), isNull);
     r.note('a line with no run yet'); // kept for the next run's log
+  });
+
+  test("Android's Wi-Fi address comes first; the server answers on it and the phone itself", () async {
+    // DECISIONS rows 560-562: what PhoneChannel.kt says wins over Dart's interface list (on this machine, its own).
+    final port = await freePort();
+    await makeHost(null, wifi: () async => (nets: ['192.168.77.5/24'], note: 'wifi wlan0 192.168.77.5/24')).start(config(port));
+    host!.setLive(const {});
+    await until(() => host!.status.up);
+    expect(host!.status.addresses, ['192.168.77.5']);
+    expect(shareAddress(host!.status), '192.168.77.5:$port');
+    expect(log.single, 'sharing on Wi-Fi on: 192.168.77.5 port $port');
+    expect((await ask(port, '/files')).code, 200); // 127.0.0.1: adb forward
+  });
+
+  test('Android failing to answer is not fatal: the interface list stands in', () async {
+    final port = await freePort();
+    await makeHost(null, wifi: () async => throw StateError('no channel')).start(config(port));
+    await until(() => host!.status.up);
+    expect(host!.running, isTrue);
+    expect((await ask(port, '/files')).code, 200);
+  });
+
+  test('no Wi-Fi address: what each source returned goes to the log once, and the address when it comes', () async {
+    await makeHost(null, entry: noAddress).start(config(8765));
+    await until(() => host!.status.addresses.isNotEmpty);
+    expect(log, [
+      'sharing on Wi-Fi on: no Wi-Fi address yet, port 8765',
+      'sharing on Wi-Fi: no Wi-Fi address found (android: vpn tun0 10.10.10.1/30; interfaces: failed: x)',
+      'sharing on Wi-Fi now at 192.168.1.5 port 8765',
+    ]);
+  });
+
+  test('Stop while Android is still answering: no server starts at all', () async {
+    final port = await freePort();
+    final h = makeHost(null, wifi: () async {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      return (nets: ['192.168.1.5/24'], note: '');
+    });
+    final starting = h.start(config(port));
+    await h.stop();
+    await starting;
+    expect(h.running, isFalse);
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await (await ServerSocket.bind(InternetAddress.anyIPv4, port)).close(); // the port was never taken
+    expect(log, ['sharing on Wi-Fi off']);
   });
 
   test('the notification says it is shared, and where', () {

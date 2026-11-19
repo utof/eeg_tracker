@@ -8,12 +8,17 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../recorder/chunk_writer.dart';
 import 'protocol.dart';
 import 'server.dart';
 
-/// How often the server looks for a changed Wi-Fi address (a new lease, another network).
+/// How often the phone's Wi-Fi address is looked at again (a new lease, another network).
 const Duration _addressCheck = Duration(seconds: 60);
+
+/// How long the host waits for Android's answer about the Wi-Fi address.
+const Duration _wifiWait = Duration(seconds: 3);
 
 /// The other host (the app, or the recorder) may still hold the port at a hand-over: for a moment after Stop, and up
 /// to a minute when the night starts from another screen (the dream catcher's or sound's "Record the night"), since
@@ -21,24 +26,32 @@ const Duration _addressCheck = Duration(seconds: 60);
 const int _bindTries = 40;
 const Duration _bindWait = Duration(seconds: 2);
 
-/// What a host passes to the isolate. A plain list crosses the isolate border.
-List<Object?> shareIsolateArgs(SendPort toHost, String filesDir, ShareConfig c) => [
+/// What a host passes to the isolate, with Android's first answer about the Wi-Fi address. A plain list crosses the
+/// isolate border.
+List<Object?> shareIsolateArgs(SendPort toHost, String filesDir, ShareConfig c, [WifiNets wifi = noWifiAnswer]) => [
   toHost,
   filesDir,
   c.token,
   c.port,
   c.offAtMs,
+  wifi.nets,
+  wifi.note,
 ];
 
 /// The server isolate. Messages in: `['b', stem, first, t, Float32List]` a batch, `['s', map]` the status,
-/// `['m', id, t, i]` a marker's answer (t null = not recording), `['x']` stop. Messages out: `['port', SendPort]`,
-/// `['up', addresses, port]`, `['marker', id, text]`, `['down', why]`.
+/// `['m', id, t, i]` a marker's answer (t null = not recording), `['w', nets, note]` Android's answer about the
+/// Wi-Fi address again, `['x']` stop. Messages out: `['port', SendPort]`, `['up', addresses, port, why]` (why: empty,
+/// or what each source returned when no Wi-Fi address was found), `['marker', id, text]`, `['down', why]`.
 @pragma('vm:entry-point')
 Future<void> shareIsolateMain(List<Object?> args) async {
   final toHost = args[0]! as SendPort;
   final inbox = ReceivePort();
   final waiting = <int, Completer<MarkerResult?>>{};
   var nextId = 0;
+  WifiNets android = (
+    nets: [for (final n in args.length > 5 ? args[5]! as List : const <Object?>[]) n as String],
+    note: args.length > 6 ? args[6]! as String : noWifiAnswer.note,
+  );
   final server = ShareServer(
     filesDir: Directory(args[1]! as String),
     token: args[2]! as String,
@@ -73,6 +86,48 @@ Future<void> shareIsolateMain(List<Object?> args) async {
     inbox.close();
   }
 
+  // Which Wi-Fi networks to show and answer (DECISIONS rows 560-562): Android's answer, else Dart's interface list.
+  var bound = false;
+  var shown = '';
+  Future<void> lookNow() async {
+    if (!bound || closing) return;
+    var chosen = chooseLan(android);
+    if (chosen.nets.isEmpty) {
+      try {
+        chosen = chooseLan(android, interfaces: await NetworkInterface.list(type: InternetAddressType.IPv4));
+      } catch (e) {
+        chosen = chooseLan(android, interfaceError: e);
+      }
+    }
+    if (closing) return;
+    server.lan = chosen.nets;
+    final now = '${server.addresses.join(',')} ${chosen.why}';
+    if (now == shown) return;
+    shown = now;
+    toHost.send(['up', server.addresses, server.boundPort, chosen.why]);
+  }
+
+  // One look at a time; a request during one (Android's new answer) runs one more after it.
+  Future<void>? looking;
+  var lookAgain = false;
+  Future<void> look() {
+    final busy = looking;
+    if (busy != null) {
+      lookAgain = true;
+      return busy;
+    }
+    return looking = () async {
+      try {
+        do {
+          lookAgain = false;
+          await lookNow();
+        } while (lookAgain && !closing);
+      } finally {
+        looking = null;
+      }
+    }();
+  }
+
   inbox.listen((Object? m) {
     if (m is! List || m.isEmpty) return;
     switch (m[0]) {
@@ -83,33 +138,19 @@ Future<void> shareIsolateMain(List<Object?> args) async {
       case 'm':
         final t = m[2], i = m[3];
         waiting[m[1]]?.complete(t is double && i is int ? (t: t, i: i) : null);
+      case 'w':
+        android = (nets: [for (final n in m[1] as List) n as String], note: m[2] as String);
+        unawaited(look());
       case 'x':
         unawaited(end('stopped'));
     }
   });
   toHost.send(['port', inbox.sendPort]);
 
-  Future<List<InternetAddress>> lan() async {
-    try {
-      return lanAddresses(await NetworkInterface.list(type: InternetAddressType.IPv4));
-    } catch (_) {
-      return const [];
-    }
-  }
-
-  var shown = '';
-  Future<void> listen() async {
-    await server.listenOn(await lan());
-    final now = server.addresses.join(',');
-    if (now != shown) {
-      shown = now;
-      toHost.send(['up', server.addresses, server.boundPort]);
-    }
-  }
-
   for (var attempt = 1; ; attempt++) {
     try {
-      await (binding = listen());
+      await (binding = server.listen());
+      bound = true;
       break;
     } catch (e) {
       if (attempt >= _bindTries) {
@@ -123,14 +164,9 @@ Future<void> shareIsolateMain(List<Object?> args) async {
   if (closing) return; // stopped while binding: end() closed what was bound
   final left = (args[4]! as int) - DateTime.now().millisecondsSinceEpoch;
   offTimer = Timer(Duration(milliseconds: left < 0 ? 0 : left), () => unawaited(end('time is up')));
-  addressTimer = Timer.periodic(_addressCheck, (_) async {
-    if (closing) return;
-    try {
-      await (binding = listen());
-    } catch (_) {
-      // no address right now (Wi-Fi off): keep looking
-    }
-  });
+  await look();
+  if (closing) return;
+  addressTimer = Timer.periodic(_addressCheck, (_) => unawaited(look()));
 }
 
 /// What the screen and the notification show.
@@ -146,6 +182,7 @@ class ShareHost {
     this.onMarker,
     this.onChange,
     this.wifiLock,
+    this.wifi,
     this.entry = shareIsolateMain,
   });
 
@@ -161,6 +198,11 @@ class ShareHost {
   /// Keeps Wi-Fi awake with the screen off (PhoneChannel.kt); only the night recorder passes it.
   final Future<void> Function(bool on)? wifiLock;
 
+  /// Android's own answer about the phone's Wi-Fi address (`Phone.wifiNets`, PhoneChannel.kt), asked before the
+  /// server starts and every minute; it runs here because the server's isolate has no platform channel. Null in
+  /// tests: the server then uses Dart's interface list alone.
+  final Future<WifiNets> Function()? wifi;
+
   /// Tests replace the server with one that throws.
   final Future<void> Function(List<Object?> args) entry;
 
@@ -170,6 +212,8 @@ class ShareHost {
   ShareStatus _status = shareDown;
   bool _ended = true;
   Map<Object?, Object?>? _live;
+  Timer? _wifiTimer;
+  String _why = '';
 
   ShareStatus get status => _status;
   bool get running => !_ended;
@@ -181,9 +225,12 @@ class ShareHost {
       _ended = false;
       final events = _events = ReceivePort();
       events.listen(_onEvent);
+      final wifiNow = await _askWifi();
+      if (_ended) return;
+      if (_stopped != null) return _end('sharing on Wi-Fi off'); // Stop came while Android answered: no server
       _isolate = await Isolate.spawn(
         entry,
-        shareIsolateArgs(events.sendPort, filesDir, config),
+        shareIsolateArgs(events.sendPort, filesDir, config, wifiNow),
         onError: events.sendPort,
         onExit: events.sendPort,
         errorsAreFatal: true,
@@ -191,9 +238,29 @@ class ShareHost {
       );
       ChunkWriter.onBatch = feed;
       _lock(true);
+      if (wifi != null) _wifiTimer = Timer.periodic(_addressCheck, (_) => unawaited(_sendWifi()));
     } catch (e) {
       _end('sharing on Wi-Fi could not start: $e');
     }
+  }
+
+  /// Android's answer, or what went wrong asking; never throws, never waits more than [_wifiWait].
+  Future<WifiNets> _askWifi() async {
+    final ask = wifi;
+    if (ask == null) return noWifiAnswer;
+    try {
+      return await ask().timeout(_wifiWait);
+    } catch (e) {
+      final text = '$e';
+      return (nets: const <String>[], note: 'failed: ${text.length > 120 ? text.substring(0, 120) : text}');
+    }
+  }
+
+  Future<void> _sendWifi() async {
+    final w = await _askWifi();
+    try {
+      _port?.send(['w', w.nets, w.note]);
+    } catch (_) {}
   }
 
   /// A batch from [ChunkWriter.addBatch]: copied into one small list and sent; nothing is awaited.
@@ -256,9 +323,20 @@ class ShareHost {
           if (live != null) _port!.send(['s', live]);
         case 'up':
           final addresses = [for (final a in m[1] as List) a as String];
-          final first = !_status.up;
+          final first = !_status.up, moved = addresses.join(',') != _status.addresses.join(',');
           _status = (up: true, addresses: addresses, port: m[2] as int, note: '');
-          if (first) onLog('sharing on Wi-Fi on: ${_where(_status)}');
+          if (first) {
+            onLog('sharing on Wi-Fi on: ${_where(_status)}');
+          } else if (moved) {
+            onLog('sharing on Wi-Fi now at ${_where(_status)}');
+          }
+          final why = m.length > 3 && m[3] is String ? m[3] as String : '';
+          if (why.isNotEmpty && why != _why) {
+            // what each source returned, once per change: in the night's log and in logcat (tag "flutter")
+            debugPrint('eeg_tracker share: $why');
+            onLog('sharing on Wi-Fi: ${why.length > 400 ? '${why.substring(0, 400)}...' : why}');
+          }
+          _why = why;
           onChange?.call(_status);
         case 'marker':
           MarkerResult? r;
@@ -283,6 +361,9 @@ class ShareHost {
     if (_ended) return;
     _ended = true;
     _port = null;
+    _wifiTimer?.cancel();
+    _wifiTimer = null;
+    _why = '';
     if (ChunkWriter.onBatch == feed) ChunkWriter.onBatch = null;
     try {
       _events?.close();

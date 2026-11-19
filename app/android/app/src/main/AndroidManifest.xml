@@ -52,6 +52,9 @@
          recordings and texts never leave the phone that way. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Share on Wi-Fi's address from Android's own list of networks (PhoneChannel.kt wifiNets; DECISIONS row 561):
+         reading it needs ACCESS_NETWORK_STATE, granted at install like the two above. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- The DIY board (test; DECISIONS rows 360-369) sends its frames to the phone over Wi-Fi (UDP port 9000) and the
          night recorder only listens. Android 14 starts a connectedDevice service only for an app holding one of a
          list of permissions; Bluetooth's are asked at run time, so a night with the board alone, Bluetooth never

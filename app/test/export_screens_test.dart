@@ -158,7 +158,12 @@ void main() {
     warn: false,
     address: '192.168.1.23:8765',
   );
-  const shareNoWifi = (on: true, text: 'On, but this phone has no Wi-Fi address. Join your home Wi-Fi.', warn: true, address: null);
+  const shareNoWifi = (
+    on: true,
+    text: 'On, but no Wi-Fi address found. Join your home Wi-Fi, or use a USB cable: see Address and code.',
+    warn: true,
+    address: null,
+  );
   for (final scale in [1.0, 1.3]) {
     final tag = scale == 1.0 ? '' : '_text130';
     for (final (name, line) in [('off', shareOff), ('on', shareOn), ('no_wifi', shareNoWifi)]) {
@@ -217,9 +222,12 @@ void main() {
           height: 1300,
         );
         expect(find.text('kq7m2xwp9dfh'), findsOneWidget);
-        expect(find.text(address == null ? 'no Wi-Fi' : '192.168.1.23:8765'), findsOneWidget);
+        expect(find.text(address == null ? 'not found' : '192.168.1.23:8765'), findsOneWidget);
         expect(find.byType(QrBox), address == null ? findsNothing : findsOneWidget);
-        expect(find.textContaining('scripts/pull_phone.py http://${address ?? '<phone address>'}:8765 --token kq7m2xwp9dfh'), findsOneWidget);
+        // no address known: the cable way, with commands that work after it (DECISIONS row 563)
+        expect(find.text('adb forward tcp:8765 tcp:8765'), address == null ? findsOneWidget : findsNothing);
+        expect(find.textContaining('A USB cable works without it'), address == null ? findsOneWidget : findsNothing);
+        expect(find.textContaining('scripts/pull_phone.py http://${address ?? '127.0.0.1'}:8765 --token kq7m2xwp9dfh'), findsOneWidget);
       });
     }
   }
