@@ -86,6 +86,10 @@ const List<Outcome> outcomes = [
   Outcome('dayrt', 'reaction time in the day', 'slower', 'quicker', matters: 0.05),
   // the study reminders' morning recall (DECISIONS row 401): 1 a little, 2 some, 3 well; half a step
   Outcome('recall', 'recall of what you studied', 'better', 'worse', matters: 0.5),
+  // the work sessions' day numbers (DECISIONS row 480): the next day's share of usable work time at getting drowsy
+  // or drowsy (10 percentage points) and the mean of its "how sharp" taps (half a point)
+  Outcome('workdrowsy', 'share of work time drowsy', 'higher', 'lower', matters: 10),
+  Outcome('worksharp', 'sharpness at work', 'higher', 'lower', matters: 0.5),
   Outcome('tension', 'tension', 'higher', 'lower', matters: 1),
   Outcome('jaw', 'jaw muscle bursts an hour', 'higher', 'lower', matters: 0.25, plural: true),
   Outcome('iaf', 'alpha speed', 'faster', 'slower', matters: 0.2),

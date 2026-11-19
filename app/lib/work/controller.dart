@@ -135,7 +135,7 @@ class WorkController extends ChangeNotifier {
     }
 
     for (final e in _epochs) {
-      final t = DateTime.tryParse('${e['t']}');
+      final t = DateTime.tryParse('${e['at']}');
       final i = t == null ? null : cellOf(t.add(const Duration(seconds: 30)));
       if (i == null) continue;
       out[i] = switch (levelOf(e['level'] as String?)) {
@@ -349,7 +349,7 @@ class WorkController extends ChangeNotifier {
 
   void _onEpoch(WorkEpoch e) {
     final now = _now();
-    _epochs.add({'t': now.subtract(const Duration(seconds: 30)).toIso8601String(), ...e.toJson()});
+    _epochs.add({'at': now.subtract(const Duration(seconds: 30)).toIso8601String(), ...e.toJson()});
     _planner?.epoch(e.level, eyesClosed: e.eyesClosed, window: e.window);
     if (stage == WorkStage.calibrating && (_drowsy?.calibrated ?? false)) _set(WorkStage.running, '');
     _afterBreakLine();

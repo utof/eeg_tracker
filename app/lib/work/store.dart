@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../recorder/chunk_writer.dart' show fileStem;
+import '../wearer/check.dart' show wearerAnswerIn;
 import 'breaks.dart';
 
 const int workFormatVersion = 1;
@@ -25,6 +26,7 @@ class WorkSummary {
     required this.drowsyMin,
     required this.alertMin,
     required this.hintList,
+    this.wearerAnswer,
   });
 
   final DateTime start, end;
@@ -34,6 +36,12 @@ class WorkSummary {
   /// Minutes the level read getting drowsy or drowsy, and alert.
   final double drowsyMin, alertMin;
   final List<WorkHint> hintList;
+
+  /// What the owner said about who wore it (`me`, `someone else`), or null (DECISIONS 490).
+  final String? wearerAnswer;
+
+  /// The session's file stem (`yyyy-MM-dd-HHmmss` of its start): what "Was this you?" answers are filed under.
+  String get id => fileStem(start);
 
   double get minutes => end.difference(start).inMilliseconds / 60000;
 
@@ -63,6 +71,7 @@ class WorkSummary {
       drowsyMin: n(m['getting_drowsy']) + n(m['drowsy']),
       alertMin: n(m['alert']),
       hintList: hints,
+      wearerAnswer: wearerAnswerIn(Map<String, Object?>.from(j)),
     );
   }
 }
@@ -78,6 +87,18 @@ class WorkStore {
     final path = '${dir.path}/${fileStem(start)}$workSuffix';
     final tmp = File('$path.tmp')..writeAsStringSync(const JsonEncoder.withIndent(' ').convert(session), flush: true);
     tmp.renameSync(path);
+  }
+
+  /// The decoded file of the session [id] (its file stem), or null when it is not there or cannot be read.
+  Map<String, Object?>? read(String id) {
+    try {
+      final j = jsonDecode(File('${dir.path}/$id$workSuffix').readAsStringSync());
+      return j is Map && j['kind'] == 'work_session' ? Map<String, Object?>.from(j) : null;
+    } on FormatException {
+      return null;
+    } on FileSystemException {
+      return null;
+    }
   }
 
   /// Every readable session, newest first; damaged or foreign files are skipped.

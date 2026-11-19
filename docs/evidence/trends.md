@@ -3,7 +3,8 @@
 ## What it does
 
 A page in the phone app with a few numbers per day (sleep, jaw muscle bursts in the night, morning sleepiness and
-reaction time, mood, tension, the alpha numbers, practice, coffee and alcohol), each shown next to yesterday's and your usual, plus a
+reaction time, mood, tension, the alpha numbers, practice, coffee and alcohol, and from work sessions the share of work
+time drowsy, hints and breaks), each shown next to yesterday's and your usual, plus a
 sleep-pressure curve built from your sleep log. Forecasts stay hidden until they prove useful for you.
 
 ## Evidence for this headband: some

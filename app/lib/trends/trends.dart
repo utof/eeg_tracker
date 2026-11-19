@@ -1,6 +1,7 @@
 // The trends page's content from the phone's own files (DECISIONS rows 120-129, 155, 287): one number per day per
 // measure, from the sleep reports (files/nights; jaw muscle bursts from their extras), the morning check-ins
-// (files/mornings), the sharp-hours log (files/sharp-hours) and the meditation and alpha-theta reports; each with yesterday's value ("same as yesterday"), your
+// (files/mornings), the sharp-hours log (files/sharp-hours), the work sessions (files/work-sessions, rows 480-489)
+// and the meditation and alpha-theta reports; each with yesterday's value ("same as yesterday"), your
 // usual and an arrow when the day is beyond your normal spread (usual.dart); the last 14 days as a line; sleep
 // pressure from the sleep log (pressure.dart); and the hidden forecast (forecast.dart). Plain Dart: the screen only
 // lays it out.
@@ -18,8 +19,8 @@ import 'usual.dart';
 const int lineDays = 14;
 
 /// [day]: the sharp-hours log's numbers (DECISIONS row 287) and the study reminders' recall (row 401), shown only
-/// once something is logged.
-enum TrendGroup { sleep, morning, day, practice, noted }
+/// once something is logged. [work]: the work sessions' day numbers (rows 480-489), the same.
+enum TrendGroup { sleep, morning, day, work, practice, noted }
 
 class MeasureSpec {
   const MeasureSpec({
@@ -58,11 +59,15 @@ String _hm(double minutes) {
   return t < 60 ? '$t\u00a0min' : '${t ~/ 60}\u00a0h\u00a0${(t % 60).toString().padLeft(2, '0')}\u00a0min';
 }
 
+String _n(double v, String one, String many) => v.round() == 1 ? '1\u00a0$one' : '${v.round()}\u00a0$many';
+
 String _of(double v, int top) => '${v.round()}\u00a0of\u00a0$top';
 String _count(double v, String one, String many) {
   final n = v.round();
   return n >= 5 ? '5+\u00a0$many' : (n == 1 ? '1\u00a0$one' : '$n\u00a0$many');
 }
+
+const String _together = 'Seen together, not tested.';
 
 final List<MeasureSpec> measureSpecs = [
   MeasureSpec(
@@ -190,6 +195,72 @@ final List<MeasureSpec> measureSpecs = [
     note: 'The morning answer of the study reminders: 1 a little, 2 some, 3 well.',
   ),
   MeasureSpec(
+    id: 'worktime',
+    label: 'Work with a signal',
+    group: TrendGroup.work,
+    scale: Scale.noArrows,
+    format: _hm,
+    note: 'Work-session time the level could be read: no breaks, noise or closed eyes. $_together',
+  ),
+  MeasureSpec(
+    id: 'workdrowsy',
+    label: 'Work time drowsy',
+    group: TrendGroup.work,
+    scale: Scale.plain,
+    format: (v) => '${v.round()}\u00a0%',
+    max: 100,
+    up: 'drowsier than usual',
+    down: 'less drowsy than usual',
+    note: 'The share of that time at getting drowsy or drowsy. $_together',
+  ),
+  MeasureSpec(
+    id: 'workfirst',
+    label: 'Work until first drowsy stretch',
+    group: TrendGroup.work,
+    scale: Scale.plain,
+    format: _hm,
+    up: 'later than usual',
+    down: 'sooner than usual',
+    note: 'Worked minutes until the level read getting drowsy or drowsy for 8 of 12 half minutes. Only days with '
+        'one. $_together',
+  ),
+  MeasureSpec(
+    id: 'workhints',
+    label: 'Break hints shown',
+    group: TrendGroup.work,
+    scale: Scale.noArrows,
+    format: (v) => _n(v, 'hint', 'hints'),
+    note: 'In work sessions. $_together',
+  ),
+  MeasureSpec(
+    id: 'workfollowed',
+    label: 'Hints followed by a break',
+    group: TrendGroup.work,
+    scale: Scale.noArrows,
+    format: (v) => _n(v, 'hint', 'hints'),
+    note: 'A break of 5 minutes or more within 30 minutes of the hint. $_together',
+  ),
+  MeasureSpec(
+    id: 'workbreaks',
+    label: 'Work breaks',
+    group: TrendGroup.work,
+    scale: Scale.noArrows,
+    format: (v) => _n(v, 'break', 'breaks'),
+    note: 'Of 5 minutes or more, tapped or the headband off. $_together',
+  ),
+  MeasureSpec(
+    id: 'worksharp',
+    label: 'Sharpness at work',
+    group: TrendGroup.work,
+    scale: Scale.meanRating,
+    format: (v) => '${v.toStringAsFixed(1)}\u00a0of\u00a05',
+    min: 1,
+    max: 5,
+    up: 'sharper than usual',
+    down: 'less sharp than usual',
+    note: 'The mean of your "how sharp" taps in work sessions. $_together',
+  ),
+  MeasureSpec(
     id: 'settled',
     label: 'Settled in meditation',
     group: TrendGroup.practice,
@@ -232,7 +303,7 @@ DateTime finalWake(SleepReport r) {
 }
 
 /// Day -> value per measure id. [extra]: day numbers worked out elsewhere, by measure id (the sharp-hours log's
-/// `sharp` and `dayrt`, sharp/hours.dart); ids that are not measures are ignored.
+/// `sharp` and `dayrt`, sharp/hours.dart; the work sessions' `work...`, work/days.dart); ids that are not measures are ignored.
 Map<String, Map<String, double>> dailySeries(TrendInputs inputs, {Map<String, Map<String, double>> extra = const {}}) {
   final out = {for (final m in measureSpecs) m.id: <String, double>{}};
   for (final MapEntry(key: id, value: days) in extra.entries) {

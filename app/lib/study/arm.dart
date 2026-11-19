@@ -6,6 +6,7 @@ import '../sharp/schedule.dart';
 import '../sharp/store.dart';
 import '../sleep/report.dart';
 import '../wearer/wearer.dart' show ownNightReports;
+import '../work/days.dart' show readWorkDayNumbers;
 import 'page.dart';
 import 'schedule.dart';
 import 'store.dart';
@@ -41,12 +42,13 @@ Future<void> rearmPrompts(String recordingsDir, SharpPhone phone, DateTime now) 
   );
 }
 
-/// The day numbers the Trends page and the self-experiments read from the app's own logs (sharp hours, study),
-/// by measure id.
+/// The day numbers the Trends page and the self-experiments read from the app's own logs (sharp hours, study, work
+/// sessions), by measure id.
 Map<String, Map<String, double>> readOwnDayNumbers(String recordingsDir) => {
   ...sharpDayNumbers(
     SharpStore(sharpDirFor(recordingsDir)).ratings(),
     SharpStore(sharpDirFor(recordingsDir)).reactions(),
   ),
   ...studyDayNumbers(StudyStore(studyDirFor(recordingsDir)).answers()),
+  ...readWorkDayNumbers(recordingsDir),
 };

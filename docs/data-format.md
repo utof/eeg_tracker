@@ -450,11 +450,21 @@ per-30-s numbers are enough to score a session again with other weights or lines
 | `calibrated_at_s` | seconds of signal when the baseline was complete |
 | `worn_min`, `active_min` | minutes the headband sent a usable signal outside breaks |
 | `minutes` | minutes after the baseline per level: `alert`, `getting_drowsy`, `drowsy`, `unknown` (not enough clean signal); `eyes_closed` (half minutes read as closed eyes, whole session) |
-| `epochs` | one entry per 30 s of signal: `t` (its start, from the phone's clock), `s` (its first second of signal), `clean_s` (seconds read for alpha), `muscle_s`, `movement_s`, `gap_s`, `blinks`, `eye_moves`, `events` (per 30 usable s), `alpha`, `theta`, `sem` (medians, µV²; `null` under 10 clean seconds), `eyes_closed`, `a` and `still` (log2 against the baseline: alpha, and eye stillness = log2((baseline events + 1) / (events + 1))), `t` and `s_eye` (theta and slow eye power the same way, logged only), `index` (the mean of `a` and `still`, at most 0.25 when `a` is negative), `window` (the median index of the last 10), `level` |
+| `epochs` | one entry per 30 s of signal: `at` (its start, local ISO time from the phone's clock; the first version of the file had no `at`), `s` (its first second of signal), `clean_s` (seconds read for alpha), `muscle_s`, `movement_s`, `gap_s`, `blinks`, `eye_moves`, `events` (per 30 usable s), `alpha`, `theta`, `sem` (medians, µV²; `null` under 10 clean seconds), `eyes_closed`, `a` and `still` (log2 against the baseline: alpha, and eye stillness = log2((baseline events + 1) / (events + 1))), `t` and `s_eye` (theta and slow eye power the same way, logged only), `index` (the mean of `a` and `still`, at most 0.25 when `a` is negative), `window` (the median index of the last 10), `level` |
 | `hints` | `at`, `reason` (`stretch`, `drowsy`, `eyesClosed`, `snooze`), `active_min` (worn minutes of the stretch), `threshold_min`, `level`, `answer` (`onBreak`, `snoozed`, `notNow` or `null`), `answered_at`, `taken` (a break of 5 minutes or more started within 30 minutes) |
 | `breaks` | `start`, `end`, `source` (`tapped` or `headbandOff`: no usable signal for 5 minutes, counted from when it stopped), `before` / `before_level` (the level's median just before), `after` / `after_level` (over the first 5 minutes after; `null` if never readable) |
 | `ratings` | `at`, `value` ("How sharp do you feel?", 1 Foggy to 5 Very sharp: the sharp-hours scale), `hint` (the index of the hint it answered, or `null`) |
 | `events` | `at`, `event`: the headband's drops, reconnects and stream restarts, each hint, the eyes-closed minute's outcome |
+| `wearer` | optional, as in a night's report: `answer` (`me` or `someone else`) and `at`; a session marked `someone else` is left out of the Trends numbers below. The owner sets it by hand with "Someone else wore it" on the end page or under the session in the list of earlier sessions (DECISIONS rows 490-494); "Undo" removes the object. Nothing else in the file changes |
+
+The Trends page and the self-experiments read one set of day numbers from these files (DECISIONS rows 480-489; a day
+runs 04:00 to 04:00): from each epoch its own time (`at`; files from the first version have no `at`, and their `t` is the theta number, not a time, so the time is then the session's `start` plus `s`; a file that wrote a time under `t` is read too) and `level` and `eyes_closed`;
+from the hints their `at` and `taken`, from the breaks their `start` and `end`, from the ratings their `at` and
+`value`. Work time is the epochs read as alert, getting drowsy or drowsy, outside closed eyes and breaks; a day with
+under 30 minutes of it has no number. Measure ids: `worktime` (minutes), `workdrowsy` (share of that time at getting
+drowsy or drowsy, 0-100), `workfirst` (worked minutes until the level first read getting drowsy or drowsy in 8 of 12
+epochs; only days with one), `workhints`, `workfollowed` (hints a break of 5 minutes or more followed), `workbreaks`
+(5 minutes or more) and `worksharp` (the mean tap, 1-5; only days with a tap).
 
 ### Lucid dream cues (`lucid/`)
 

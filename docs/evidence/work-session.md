@@ -63,6 +63,12 @@ recorded morning the level rose 8 minutes before the sleep model saw the owner d
   resets the hour; after it the app compares the level before it with the first 5 minutes after it.
 - With each hint an optional one-tap "How sharp do you feel?" (the sharp-hours scale, 1 Foggy to 5 Very sharp),
   kept in the session's file so a later check can ask whether the EEG agrees with you.
+- Across days (Trends, from 30 minutes of usable work time a day): the time worked with a readable signal, the share
+  of it at getting drowsy or drowsy, the worked minutes until the level first read drowsy for 8 of 12 half minutes,
+  hints shown and followed by a break, breaks of 5 minutes or more, and the mean "how sharp" tap, each beside your
+  usual and, from 14 days, an arrow beyond your normal spread. Noisy and closed-eyes time is left out. They are
+  seen together with your other numbers, not tested; the share of work time drowsy and the tap mean can also be
+  the outcome of a self-experiment (judged by the next day's number).
 - All planning values, set on one morning; your own weeks will tell.
 
 ## Sources
