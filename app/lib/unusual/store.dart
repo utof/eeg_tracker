@@ -174,8 +174,8 @@ Map<String, Object?> logLine(
 const UnusualCard offCard = UnusualCard(
   kind: CardKind.off,
   headline: 'Off.',
-  status: 'When on, it compares your sleep length and morning ratings with your usual and says when one has been '
-      'unusual on 2 days in a row. Nothing is noted while it is off.',
+  status: 'When on, it says when your sleep length, sleepiness, mood, tension or reaction time has been beyond your '
+      'usual on 2 days in a row. Nothing is noted while it is off.',
 );
 
 /// Today's card from the trends page's per-day numbers (trends.dart's dailySeries); while on, every finished day

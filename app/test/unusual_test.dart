@@ -41,8 +41,8 @@ void main() {
       expect(plain(c.headline), 'Your sleep has been 2 h shorter than usual for 2 nights.');
       expect(c.lines, isEmpty);
       expect(c.episode, day(59));
-      expect(plain(c.status!), contains('your sleep length'));
-      expect(plain(c.status!), contains('the 28 days that end a week before'));
+      expect(plain(c.status!), 'Based on your sleep length, against your usual of the 28 days that end a week before.');
+      expect(cardCaveat, contains('seen together, not tested, and not a diagnosis'));
       expect(plain(c.mainLine!), 'Unusual for you: your sleep has been 2 h shorter than usual for 2 nights.');
     });
 
@@ -72,7 +72,7 @@ void main() {
         'Your mood has been lower than usual for 2 mornings (2 of 5; usual 4 of 5).',
         'Your reaction test has been slower than usual for 2 mornings (340 ms; usual 281 ms).',
       ]);
-      expect(plain(c.status!), contains('your sleep length, sleepiness, mood and reaction test'));
+      expect(plain(c.status!), contains('your sleep length, sleepiness, mood and reaction test, each against'));
     });
 
     test('better mood or more alert is not a card (one direction counts)', () {

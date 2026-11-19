@@ -144,6 +144,11 @@ String _size(String id, double mean, double usual) => switch (id) {
   _ => '',
 };
 
+/// Under every card: the everyday causes, and what it is not (DECISIONS 12: seen together, not tested).
+const String cardCaveat =
+    'This often follows a late night, alcohol, travel, stress, hard exercise, a vaccine or the start of a cold. It '
+    'says your numbers moved, not why: seen together, not tested, and not a diagnosis.';
+
 /// "for 2 nights", or "on 2 of the last 3 nights" when the run spans a missing day.
 String _when(int run, int span, String unit) => run == span ? 'for $run $unit' : 'on $run of the last $span $unit';
 
@@ -151,11 +156,6 @@ String _join(List<String> items) =>
     items.length <= 1 ? items.join() : '${items.sublist(0, items.length - 1).join(', ')} and ${items.last}';
 
 String _lowerFirst(String s) => s.isEmpty ? s : s[0].toLowerCase() + s.substring(1);
-
-/// What the card watches and when it speaks, in one sentence.
-const String unusualRule =
-    'A card needs one of your sleep length, sleepiness, mood, tension and reaction time beyond your usual on 2 days '
-    'in a row.';
 
 /// The words for number [id] in the card of day [v]: its run's mean against the usual of its last day with a
 /// value. Null for numbers the card never words (the headband's) or without a usual.
@@ -186,7 +186,7 @@ UnusualCard unusualCard(
     return UnusualCard(
       kind: CardKind.learning,
       headline: 'Learning your usual: ${v?.validBefore ?? 0} of ${const UnusualSettings().silentDays} days.',
-      status: 'Silent until then: it only notes what it would have said. $unusualRule',
+      status: 'Silent until then: it only notes what it would have said.',
     );
   }
   if (v.phase == UnusualPhase.paused) {
@@ -233,7 +233,8 @@ UnusualCard _alert(
     lines: sentences.sublist(1),
     episode: episode,
     causes: causes[episode] ?? const {},
-    status: 'Based on your ${_join(names)}, each against your usual of the 28 days that end a week before.',
+    status: 'Based on your ${_join(names)}, ${names.length == 1 ? '' : 'each '}against your usual of the 28 days that '
+        'end a week before.',
     mainLine: 'Unusual for you: ${_lowerFirst(sentences.first)}',
   );
 }
@@ -276,8 +277,8 @@ UnusualCard _quiet(List<DayVerdict> verdicts) {
   final shown = all.where((e) => phase[e.$1] == UnusualPhase.on).length;
   final silent = all.where((e) => phase[e.$1] == UnusualPhase.silent).length;
   final record = on == null
-      ? ''
+      ? null
       : 'Since ${dayLabel(on.day)}, when it switched on: ${_cards(shown)}. In its silent first '
-            '${const UnusualSettings().silentDays} days it would have shown $silent. ';
-  return UnusualCard(kind: CardKind.quiet, headline: 'Nothing unusual for you lately.', status: '$record$unusualRule');
+            '${const UnusualSettings().silentDays} days it would have shown $silent.';
+  return UnusualCard(kind: CardKind.quiet, headline: 'Nothing unusual for you lately.', status: record);
 }
