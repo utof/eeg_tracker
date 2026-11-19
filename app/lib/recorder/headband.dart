@@ -3,6 +3,7 @@
 import 'battery.dart';
 import 'chunk_writer.dart';
 import 'packets.dart';
+import 'status.dart' show BoardLive;
 
 /// What it takes to reach the same headband again without a scan: the SDK's sensor info minus the signal
 /// strength. Plain data, kept with the night, so a restarted app process can try it too.
@@ -98,6 +99,14 @@ class BandNote {
 abstract class BandNotes {
   /// Notes made before anyone listened are kept and delivered to the first listener.
   Stream<BandNote> get notes;
+}
+
+/// A board that is not a BrainBit (the DIY ADS1299 board, headband/diy/): its own channel names, and no contact or
+/// battery reading. The night recorder skips the contact check and the battery lines for it, never feeds its samples
+/// to the drift-off detector or the smart alarm (they read BrainBit's O1 O2 T3 T4), and shows [board] on the night
+/// screen (DECISIONS rows 360-369).
+abstract class OtherBoard {
+  BoardLive get board;
 }
 
 abstract class HeadbandFinder {
