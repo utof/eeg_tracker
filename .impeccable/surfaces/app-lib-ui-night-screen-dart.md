@@ -61,3 +61,14 @@ drift-off detector thinks, in words only; a hairline sets the bar apart from the
 because it is used lying down at the moment the eyes close, where the thumb already is. Refused: a section in the
 scrolling page, a notification action, a coloured state chip. Checked as test renders at 440 dp (100 and 130 %
 text) and at the owner's 393 dp with 130 % text, which also found the watch strip 6 dp too wide (fixed).
+
+SMART ALARM (2026-11-19, DECISIONS 230-239; no question channel, the brief stood in for the owner): set where the
+night is started: one muted line with a sunrise icon above Start night under a hairline, "Smart alarm off." with Set
+alarm, or "Wakes you by 07:30 tomorrow, from 07:00 at a light moment." with Change, opening a sheet (the wake-by time
+as a big tabular figure, the window 15 / 20 / 30 / 45 min, two sentences of the rule and the safety net, Alarm off and
+Set alarm). While a night records the bar gains a second muted line under the Lights off line with Alarm off (asks
+first); the stages in words, never colours. While it rings the whole screen is the nap coach's wake face, "Time to
+wake up" and one I'm awake filling the screen; the same page is native Android over the lock screen
+(AlarmActivity.kt). Refused: a section in the scrolling page (set at bedtime, next to Start, not scrolled to); a
+clock-face dial; a stage chip in colour; a snooze button (the window already is the snooze). Checked as test renders
+(build/screens/alarm_*.png) at 440 dp with 100 and 130 % text and at the owner's 393 dp with 130 % text.

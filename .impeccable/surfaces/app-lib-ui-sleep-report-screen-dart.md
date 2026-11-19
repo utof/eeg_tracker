@@ -55,3 +55,9 @@ section with an "i" to the drift-off note: the lights-off moment as a muted lead
 model's minutes as two period-style log lines, then sentences: agreement, where lights off came from, the running
 check toward 4 of 5 nights, and "Both are guesses: this checks that they agree, not that either is right." Refused:
 a five-night progress ring, an onset mark on the chart, a trust score.
+
+WAKING UP (2026-11-19, DECISIONS 237): after Falling asleep, a heading with an "i" (the smart alarm note), a muted lead
+with the window, label-left / value-right lines (Woke you, Why, Full-night scoring, I'm awake after) and plain
+sentences: how early, whether the full-night scoring agrees with the live reading, and that both are guesses. Shown
+only for nights with an alarm. Refused: a gauge of "how good the moment was"; a mark on the chart (the chart stays
+the night's, the wake is one minute of it).

@@ -50,6 +50,9 @@ supported: studies of the sleep stage at waking disagree, and the tests of smart
   the full one, not that either is right.
 - The drowsy first stage of light sleep (N1) is poorly scored everywhere, and the alarm acts on a single
   30-second stretch, so some wake-ups will come at a moment that was not what the model said.
+- Replayed on one recorded night with 30-minute windows, it seldom woke anyone from what the full-night scoring
+  called deep sleep, but it mostly rang in the window's first minute: deep sleep is rare in the last hours of a
+  night, so a smart alarm often just wakes you earlier. A shorter window keeps more of your sleep.
 - The 10-minute wait after deep sleep is this project's own caution. No study sets that number.
 - Treat it as a pleasant way to wake up that may help a little, not as a proven fix for groggy mornings.
 

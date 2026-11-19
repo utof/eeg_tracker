@@ -149,6 +149,21 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   23:45. From then until asleep:"), two label-left / value-right lines in the periods' form (The detector, The sleep
   model; half minutes as ½), then plain sentences: agree or not, where lights off came from when it was not a tap,
   the check toward 4 of 5 nights, and "Both are guesses" in muted ink. No ring, no score.
+- **Alarm line** (night screen, pinned bar): the smart alarm in one muted bodyMedium line with a small sunrise icon and
+  one text button at its right. Before a night it sits above Start night under a hairline ("Smart alarm off." / "Wakes
+  you by 07:30 tomorrow, from 07:00 at a light moment.", **Set alarm** / **Change**); while a night records it is a
+  second line under the Lights off line ("Alarm 07:00-07:30. Watching your sleep: deep sleep 2 min ago.", **Alarm off**,
+  which asks). Words only for the stages, no colour. Its sheet (`surface-high`): the wake-by time as a tabular
+  displayMedium figure that opens the system's 24-hour time picker, the window as the app's segmented choice row
+  (selected one step lighter, `rule`), two muted sentences of the rule and the safety net, then Alarm off (outlined)
+  and Set alarm (filled) side by side.
+- **Wake face** (night screen while the alarm rings, and the native page over the lock screen): the nap coach's wake:
+  "Time to wake up" at display size, why it rang and "the night is still recording" in muted body, and one `live-fill`
+  **I'm awake** filling the rest of the screen. The only time the night screen is lit and loud on purpose.
+- **Waking up** (sleep report, after Falling asleep): a heading with an "i", a muted lead ("Smart alarm 07:00-07:30."),
+  label-left / value-right lines (Woke you as a tabular titleLarge time, Why, Full-night scoring, I'm awake after),
+  then plain sentences: how early and that the live model read it 2 minutes behind, whether the full-night scoring
+  agrees ("not deep sleep" / "the live reading was wrong this time"), and in muted ink that both are guesses.
 - **Phone checks:** icon, one plain sentence, right-aligned text buttons that open the exact setting.
 - **Export line** (Your data): an icon and one sentence, muted ("Last export yesterday; 3 new files since"), or
   `caution` amber with a warning icon once something new has been only on the phone for 3 days, or nothing was ever
@@ -180,5 +195,6 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
 - Do word every state ("Recording", "No data for 52 s") next to its colour.
 - Don't add bright fills, animation beyond the slow breathing live mark, or sounds. Exceptions: the meditation
   mode, whose feedback is sound (rain, drone, bells; DECISIONS 72-77), and the practices built the same way
-  (alpha-theta, the dream catcher, sound for states, whose product is sound); the night screen stays silent.
+  (alpha-theta, the dream catcher, sound for states, whose product is sound); the night screen stays silent until
+  the smart alarm you set rings (DECISIONS 235).
 - Don't show a number that was not measured; label planning thresholds as such.

@@ -7,7 +7,8 @@ opens the **morning check-in** and the **trends** page (below), and **Meditate**
 session whose sound follows your alpha rhythm (below); from there, **Alpha-theta** training and the **replay
 check** (both below). Also between nights, the **Dream catcher** asks what is on your mind as you drift off and
 records your answers, and the **Nap coach** wakes you before deep sleep starts or at the length you pick (both
-below). **Sound** (at the bottom, also during a night) plays calm sound
+below). The **Smart alarm**, set just above Start night, wakes you in a window you choose at a light moment of the
+night, never in deep sleep, and always by the window's end (below). **Sound** (at the bottom, also during a night) plays calm sound
 for a state, with an optional beat, and with the headband shows what your brain does (below).
 
 - Files: `<stamp>.f32/.idx/.log` in the app's private folder (other apps cannot read it), the same format as
@@ -37,6 +38,9 @@ for a state, with an optional beat, and with the headband shows what your brain 
 - Nap coach: `lib/sleep/live_prep.dart` and `live_stager.dart` (live sleep stages, reference
   `../analysis/live_stager.py`), `lib/nap/` (rules, file, session), `lib/sound/nap_sound.dart`, `lib/ui/nap_*.dart`;
   DECISIONS rows 170-179.
+- Smart alarm: `lib/alarm/` (the rule, the live model in the recorder's isolate, the phone's alarm clock, the files),
+  `lib/ui/alarm_view.dart`, `android/.../WakeAlarm.kt` and `WakeService.kt` (the alarm clock and the ringer),
+  reference `../analysis/smart_alarm.py`; DECISIONS rows 230-239.
 - Morning check-in and trends: `lib/morning/` (the laptop's `morning_check.py` in Dart, the session, the files),
   `lib/trends/` (days, your usual, sleep pressure, the forecast gate), `lib/ui/morning_*.dart`,
   `lib/ui/trends_*.dart`; DECISIONS rows 120-129.
@@ -140,6 +144,18 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    `adb shell cmd media_session dispatch stop` ends the session like Stop on the lock screen (`end: stopped` in
    the newest `files/sound-states/*.sound.json`). Reinstall
    the app afterwards.
+
+8. **The smart alarm inside the night recorder** (DECISIONS rows 230-231): `flutter build apk --release
+   --target-platform android-x64 -t tool/alarm_smoke.dart`, install with `-g`, put one recording into
+   `files/smoke/` (adb root, the app's owner and SELinux label, as in step 1) and optionally `files/smoke/plan.json`
+   (`{"mode": "night", "startInMin": 35, "windowMin": 10, "speed": 2, "skipS": 330}`), open the app, lock the phone
+   (`adb shell input keyevent 26`). The real recorder service replays the recording at 2x with the real smart alarm:
+   `adb logcat | grep -E 'SMOKE|EegWake'` shows the model's calls from inside the service's engine (time per call,
+   stage, the process's memory) every 20 s, then the early ring (`EegWake: ringing (smart)`, the notes, after 3
+   minutes `loud`); tap **I'm awake** on the page over the lock screen. With `{"mode": "killed", "endInMin": 2}` it
+   only sets the phone's alarm: `adb shell kill -9 $(adb shell pidof io.github.utof.eeg_tracker)`, lock, and the
+   alarm must still ring 2 minutes later (`EegWake: ringing (window end)`). Reinstall the app afterwards. The
+   scripts used on 2026-11-19 are kept in the lane's `_local/emu/` (not in the repository).
 
 The night of 2026-11-17 (58 recordings, 12.9 h) scored on the emulator in 99 s with a peak of 438 MB (PSS; 561 MB
 RSS) and the same stages as the laptop's ONNX check (96.6 % of epochs agree with the laptop's one-pass scoring; see
@@ -485,6 +501,57 @@ Nothing of this has run on a phone yet: not the model's speed, the wake sound's 
    - Did it wake you before deep sleep or at 30 minutes, and did you feel groggy?
    - Whether the dim screen or the headband bothered you lying down.
 3. Later, Export data: the laptop can then score the nap in full and compare it with what the phone saw live.
+
+## Smart alarm
+
+Wakes you within a window you choose, at a moment of light sleep, dream sleep or being awake, never in deep sleep;
+always by the end of the window. Off until you set it. The **i** button shows what the research says
+(`docs/evidence/smart-alarm.md`: the evidence that it beats a plain alarm is weak).
+
+1. Before Start, the line above **Start night** says "Smart alarm off." Tap **Set alarm**: set **Wake me by** (for
+   example 07:30) and how much earlier it may wake you (**15**, **20**, **30** or **45 min**; 30 first), then
+   **Set alarm**. The line then says "Wakes you by 07:30 tomorrow, from 07:00 at a light moment." The setting stays
+   for the next nights until you change it or tap **Alarm off** in the same sheet.
+2. **Start night** as always. At Start the app sets a real phone alarm at 07:30 (Android's alarm clock: the alarm
+   icon in the status bar). It rings even if the phone closes the app in the night, the sleep model is too slow or
+   fails, or the headband's signal is lost. If the phone does not allow exact alarms, its alarm volume is off, or it
+   blocks pages over the lock screen, the app says so and opens the setting.
+3. During the night the headband records as always. From 06:00 (an hour before the window) the sleep model runs in
+   the recorder and a second line in the bar says what it sees ("Alarm 07:00-07:30. Watching your sleep: deep sleep
+   2 min ago."). **Alarm off** there asks first, then nothing wakes you.
+4. Between 07:00 and 07:30 it wakes you at the first 30 seconds read as light sleep, dream sleep or awake, but not
+   within 10 minutes after deep sleep; if none comes, at 07:30. The sound: the nap coach's three soft rising notes
+   on the phone's alarm volume, a little louder every 20 seconds; after 3 minutes the phone's own alarm sound with
+   vibration. The screen comes on with a big **I'm awake** (also on the notification); it stops the sound, not the
+   recording. With no tap it gives up after 13 minutes.
+5. In the morning **Stop** the night. The sleep report's **Waking up** says when it woke you, why, what the
+   full-night scoring says about that minute, and how long until you tapped.
+
+Files, app-private, exported with everything else: `files/alarm/setup.json` (your setting),
+`files/alarms/<window end>.alarm.json` (the live model: when it ran, its stages, the wake and why, its speed),
+`files/alarms/rings.jsonl` (the phone alarm's own log: set, ring, loud, I'm awake, gave up, off). The night's
+recording gets markers (`smart alarm: sleep model on`, `smart alarm: wake, light sleep ...`). Code: `lib/alarm/`
+(rule, the model in the recorder, the phone alarm's channel, the files), `lib/ui/alarm_view.dart`,
+`android/.../WakeAlarm.kt`, `WakeService.kt`, `AlarmActivity.kt`, `AlarmReceiver.kt`; reference
+`../analysis/smart_alarm.py`; DECISIONS rows 230-239.
+
+### Owner step: the first smart alarm (one morning, 2 minutes of setup)
+
+Checked on the emulator only (the model inside the recorder, the early ring, the ring after the app was killed);
+not on the 11T, not with a head, and the volumes are guesses.
+
+1. Once: in the phone's settings for EEG Tracker, allow **Show on lock screen** and **Display pop-up windows while
+   running in the background** (HyperOS "Other permissions"), and keep **Autostart** and **No restrictions** on (as for
+   the night). Set the phone's **alarm** volume (not media) to where an alarm wakes you.
+2. Before a night: **Set alarm** for your usual time with **30 min**, then **Start night**. Check the alarm icon in
+   the status bar.
+3. In the morning, tell the assistant:
+   - Did it wake you, at what time, and did you feel groggy? Was the first note too soft or too loud?
+   - Did "I'm awake" show over the lock screen, or only in the notification?
+   - The sleep report's **Waking up** lines (the full-night scoring's word for that minute).
+   - The last lines of the night's `.log` (`smart alarm: sleep model ... s of the recorder's time`) and whether the
+     night's battery drain looked higher than usual.
+4. If it rang only at the window's end every time, or never early, Export data: the laptop can replay the night.
 
 ## Sound for states
 
