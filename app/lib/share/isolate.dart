@@ -24,6 +24,9 @@ const Duration _wifiWait = Duration(seconds: 3);
 /// to a minute when the night starts from another screen (the dream catcher's or sound's "Record the night"), since
 /// the night screen lets go of the app's server at its once-a-minute sync. So tries cover 80 s.
 const int _bindTries = 40;
+
+/// How long after its last file request the laptop still counts as copying.
+const Duration copyingQuiet = Duration(seconds: 15);
 const Duration _bindWait = Duration(seconds: 2);
 
 /// What a host passes to the isolate, with Android's first answer about the Wi-Fi address. A plain list crosses the
@@ -41,9 +44,46 @@ List<Object?> shareIsolateArgs(SendPort toHost, String filesDir, ShareConfig c, 
 /// The server isolate. Messages in: `['b', stem, first, t, Float32List]` a batch, `['s', map]` the status,
 /// `['m', id, t, i]` a marker's answer (t null = not recording), `['w', nets, note]` Android's answer about the
 /// Wi-Fi address again, `['x']` stop. Messages out: `['port', SendPort]`, `['up', addresses, port, why]` (why: empty,
-/// or what each source returned when no Wi-Fi address was found), `['marker', id, text]`, `['down', why]`.
+/// or what each source returned when no Wi-Fi address was found), `['marker', id, text]`, `['copying', n]` file
+/// requests being answered, `['error', text]` an error that did not stop it, `['down', why]`.
+///
+/// Every error inside it is caught (DECISIONS row 587): before the server listens it ends the isolate the orderly way
+/// (`['down', ...]`); after, it is reported and the server goes on answering. An uncaught error (running out of memory
+/// while a long night was scored, most likely) used to end the isolate at once, and a dead isolate keeps its
+/// listening socket: the system kept accepting the laptop's connections into the socket's queue with nobody to take
+/// them, until even the phone's own connects timed out, and no new server could listen until the app was closed.
 @pragma('vm:entry-point')
-Future<void> shareIsolateMain(List<Object?> args) async {
+Future<void> shareIsolateMain(List<Object?> args) => guardedShare(args, serveShare);
+
+/// Runs [body] (the server's setup) in a zone that catches every error, as [shareIsolateMain] says. [body] gets a
+/// setter for what to do with an error once the server listens.
+Future<void> guardedShare(
+  List<Object?> args,
+  Future<void> Function(List<Object?> args, void Function(void Function(Object e) onError) setOnError) body,
+) {
+  final toHost = args[0]! as SendPort;
+  final ready = Completer<void>();
+  void Function(Object e)? onError;
+  runZonedGuarded(
+    () => body(args, (f) => onError = f).whenComplete(() {
+      if (!ready.isCompleted) ready.complete();
+    }),
+    (Object e, StackTrace _) {
+      try {
+        final handle = onError;
+        if (handle != null) return handle(e);
+        toHost.send(['down', 'failed: $e']); // before it listens: nothing to keep
+        if (!ready.isCompleted) ready.complete();
+      } catch (_) {
+        // even reporting failed (out of memory): the server must still go on answering
+      }
+    },
+  );
+  return ready.future;
+}
+
+/// The server's setup: its messages, the bind, the off timer and the Wi-Fi look.
+Future<void> serveShare(List<Object?> args, void Function(void Function(Object e) onError) setOnError) async {
   final toHost = args[0]! as SendPort;
   final inbox = ReceivePort();
   final waiting = <int, Completer<MarkerResult?>>{};
@@ -62,6 +102,8 @@ Future<void> shareIsolateMain(List<Object?> args) async {
       toHost.send(['marker', id, text]);
       return c.future.whenComplete(() => waiting.remove(id));
     },
+    hashCache: File('${args[1]! as String}/cache/share-hashes.json'),
+    onCopying: (n) => toHost.send(['copying', n]),
   );
   Timer? addressTimer;
   Timer? offTimer;
@@ -162,6 +204,12 @@ Future<void> shareIsolateMain(List<Object?> args) async {
     }
   }
   if (closing) return; // stopped while binding: end() closed what was bound
+  var said = 0;
+  setOnError((e) {
+    if (closing || ++said > 5) return; // the first few are enough to find it
+    final text = '$e';
+    toHost.send(['error', text.length > 300 ? '${text.substring(0, 300)}...' : text]);
+  });
   final left = (args[4]! as int) - DateTime.now().millisecondsSinceEpoch;
   offTimer = Timer(Duration(milliseconds: left < 0 ? 0 : left), () => unawaited(end('time is up')));
   await look();
@@ -305,6 +353,16 @@ class ShareHost {
   }
 
   Completer<void>? _stopped;
+  int _copying = 0;
+  DateTime? _copiedAt;
+
+  /// The laptop is copying files: a file request is being answered, or one ended under [copyingQuiet] ago (the
+  /// laptop asks for the next file at once). The night's sleep scoring waits meanwhile (DECISIONS row 583).
+  bool get copying {
+    if (_ended) return false;
+    final at = _copiedAt;
+    return _copying > 0 || (at != null && DateTime.now().difference(at) < copyingQuiet);
+  }
 
   void _onEvent(Object? m) {
     try {
@@ -346,6 +404,13 @@ class ShareHost {
             r = null;
           }
           _port?.send(['m', m[1], r?.t, r?.i]);
+        case 'copying':
+          _copying = m[1] as int;
+          _copiedAt = DateTime.now();
+        case 'error':
+          // the server goes on answering; the error goes to logcat (tag "flutter") and the night's log
+          debugPrint('eeg_tracker share: an error in the server, which goes on: ${m[1]}');
+          onLog('sharing on Wi-Fi: an error in the server, which goes on: ${m[1]}');
         case 'down':
           _end(m[1] == 'stopped' ? 'sharing on Wi-Fi off' : 'sharing on Wi-Fi off: ${m[1]}');
         default:

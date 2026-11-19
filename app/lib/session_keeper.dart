@@ -80,6 +80,49 @@ class PhoneSessionKeeper implements SessionKeeper {
   /// One call at a time, in order: a release must not overtake the hold before it.
   static Future<void> _queue = Future<void>.value();
 
+  /// A session holds the keeper now (meditation, a check-in, a work session, ...): heavy work waits (the night's
+  /// sleep scoring, DECISIONS row 583). The background keep below is not a session.
+  static bool get held => _holder != null;
+
+  /// What keeps the app running between sessions for work that must go on in the background (Share on Wi-Fi between
+  /// nights, DECISIONS row 589): held whenever no session holds; a session that starts takes the notification over
+  /// and gives it back when it ends.
+  static KeepSpec? _background;
+  static void Function()? _backgroundStop;
+
+  /// The service runs for [_background] (not for a session), with these words.
+  static KeepSpec? _backgroundHeld;
+
+  /// Keeps the app running for [spec] while no session holds the keeper, so Android does not freeze it in the
+  /// background; null lets go. [onStop]: Stop tapped on its notification. Call it while the app is on screen (or
+  /// exempt from battery optimisation): Android lets only those start the service. Never throws.
+  static Future<bool> keepInBackground(KeepSpec? spec, {void Function()? onStop}) {
+    _background = spec;
+    _backgroundStop = onStop;
+    _listen();
+    if (_holder != null) return Future<bool>.value(spec != null); // the session gives it back when it ends
+    final now = _backgroundHeld;
+    if (spec == null) {
+      if (now == null) return Future<bool>.value(false);
+      _backgroundHeld = null;
+      return _next(() async {
+        if (_holder == null && _backgroundHeld == null) await _release();
+        return false;
+      });
+    }
+    if (now != null && _same(now, spec)) return Future<bool>.value(true);
+    _backgroundHeld = spec;
+    return _next(() => _hold(spec));
+  }
+
+  static bool _same(KeepSpec a, KeepSpec b) =>
+      a.title == b.title &&
+      a.text == b.text &&
+      a.headband == b.headband &&
+      a.microphone == b.microphone &&
+      a.focus == b.focus &&
+      a.button == b.button;
+
   @override
   void Function()? onStop;
 
@@ -108,50 +151,74 @@ class PhoneSessionKeeper implements SessionKeeper {
     return done.future;
   }
 
+  static void _listen() {
+    if (_listening) return;
+    _listening = true;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'stopTapped') {
+        final h = _holder;
+        if (h != null) {
+          h.onStop?.call();
+        } else if (_backgroundHeld != null) {
+          _backgroundStop?.call();
+        }
+      }
+      if (call.method == 'buttonTapped') _holder?.onButton?.call();
+      final focus = call.method == 'focus' ? _focusWords[call.arguments] : null;
+      if (focus != null) _holder?.onFocus?.call(focus);
+    });
+  }
+
+  static Future<bool> _hold(KeepSpec spec) async {
+    try {
+      final kept = await _channel.invokeListMethod<String>('hold', {
+        'title': spec.title,
+        'text': spec.text,
+        'headband': spec.headband,
+        'microphone': spec.microphone,
+        'focus': spec.focus,
+        'button': ?spec.button,
+      });
+      if (kept == null) return false;
+      return (!spec.headband || kept.contains('headband')) && (!spec.microphone || kept.contains('microphone'));
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false; // not Android, or a test without the channel
+    }
+  }
+
+  static Future<void> _release() async {
+    try {
+      await _channel.invokeMethod<void>('release');
+    } on PlatformException {
+      // nothing to release
+    } on MissingPluginException {
+      // not Android
+    }
+  }
+
   @override
   Future<bool> hold(KeepSpec spec) {
-    if (!_listening) {
-      _listening = true;
-      _channel.setMethodCallHandler((call) async {
-        if (call.method == 'stopTapped') _holder?.onStop?.call();
-        if (call.method == 'buttonTapped') _holder?.onButton?.call();
-        final focus = call.method == 'focus' ? _focusWords[call.arguments] : null;
-        if (focus != null) _holder?.onFocus?.call(focus);
-      });
-    }
+    _listen();
     _holder = this;
-    return _next(() async {
-      try {
-        final kept = await _channel.invokeListMethod<String>('hold', {
-          'title': spec.title,
-          'text': spec.text,
-          'headband': spec.headband,
-          'microphone': spec.microphone,
-          'focus': spec.focus,
-          'button': ?spec.button,
-        });
-        if (kept == null) return false;
-        return (!spec.headband || kept.contains('headband')) && (!spec.microphone || kept.contains('microphone'));
-      } on PlatformException {
-        return false;
-      } on MissingPluginException {
-        return false; // not Android, or a test without the channel
-      }
-    });
+    _backgroundHeld = null; // the session's words replace the background's
+    return _next(() => _hold(spec));
   }
 
   @override
   Future<void> release() {
     if (!identical(_holder, this)) return Future<void>.value();
     _holder = null;
+    final back = _background;
+    if (back != null) _backgroundHeld = back;
     return _next(() async {
       if (_holder != null) return; // another session took over meanwhile
-      try {
-        await _channel.invokeMethod<void>('release');
-      } on PlatformException {
-        // nothing to release
-      } on MissingPluginException {
-        // not Android
+      final bg = _backgroundHeld;
+      if (bg != null) {
+        await _hold(bg); // the background keep takes the notification back
+      } else {
+        await _release();
       }
     });
   }

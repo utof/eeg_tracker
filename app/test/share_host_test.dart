@@ -1,9 +1,11 @@
 // Share on Wi-Fi next to a recording (lib/share/isolate.dart): the server runs in its own isolate, and whatever
 // happens to it (it throws at once, it dies mid-night, it hangs) the recorder keeps every sample. Real isolates,
 // real sockets, the night recorder with the fake headband of night_recorder_test.dart.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
@@ -62,6 +64,12 @@ Future<void> noAddress(List<Object?> args) async {
     }
   });
 }
+
+/// The real server, with an error from one of its timers a moment after it listens (row 587).
+Future<void> serverWithStrayError(List<Object?> args) => guardedShare(args, (args, setOnError) async {
+  await serveShare(args, setOnError);
+  Timer(const Duration(milliseconds: 200), () => throw StateError('a stray error'));
+});
 
 Future<int> freePort() async {
   final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
@@ -144,6 +152,58 @@ void main() {
   }
 
   List<File> ext(String e) => dir.listSync().whereType<File>().where((f) => f.path.endsWith('.$e')).toList();
+
+  /// The time [path] takes to answer (any code), or null when it does not answer within [limit].
+  Future<int?> answerMs(int port, String path, {Duration limit = const Duration(seconds: 5)}) async {
+    final client = HttpClient()..connectionTimeout = limit;
+    final t = Stopwatch()..start();
+    try {
+      final req = await client.getUrl(Uri.parse('http://127.0.0.1:$port$path')).timeout(limit);
+      final res = await req.close().timeout(limit);
+      await res.drain<void>().timeout(limit);
+      return t.elapsedMilliseconds;
+    } on TimeoutException {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  test('an error inside the server does not stop it: it goes on answering and says so once (phone, 2026-11-19)', () async {
+    // On the phone the laptop's connections were accepted and never answered: an uncaught error ended the server's
+    // isolate, whose listening socket stayed open with nobody behind it.
+    final port = await freePort();
+    await makeHost(null, entry: serverWithStrayError).start(config(port));
+    await until(() => host!.status.up);
+    await until(() => log.any((l) => l.contains('a stray error')));
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect(host!.running, isTrue);
+    expect(await answerMs(port, '/'), isNotNull, reason: 'GET / (no code: 401) must answer');
+    expect((await ask(port, '/state')).code, 200);
+    expect(log.where((l) => l.contains('a stray error')), hasLength(1));
+    expect(log.where((l) => l.contains('stopped')), isEmpty);
+  });
+
+  test('/ and /state answer at once while Android never says the address and /files reads a big file', () async {
+    final port = await freePort();
+    File('${files.path}/recordings/2026-11-18-231200.f32').writeAsBytesSync(Uint8List(48 << 20)); // 48 MB
+    File('${files.path}/recordings/2026-11-18-231200.f32').setLastModifiedSync(DateTime.now().subtract(const Duration(minutes: 5)));
+    final t = Stopwatch()..start();
+    await makeHost(null, wifi: () => Completer<WifiNets>().future).start(config(port)); // the answer never comes
+    expect(t.elapsed, lessThan(const Duration(seconds: 5)), reason: 'it waits 3 s at most for Android');
+    await until(() => host!.status.up);
+    final listing = ask(port, '/files'); // works out the SHA-256 of 48 MB
+    final waits = <int?>[];
+    var listed = false;
+    unawaited(listing.whenComplete(() => listed = true));
+    while (!listed) {
+      waits.add(await answerMs(port, '/state'));
+      waits.add(await answerMs(port, '/'));
+    }
+    expect((await listing).code, 200);
+    expect(waits, isNot(contains(null)));
+    expect(waits.whereType<int>().reduce((a, b) => a > b ? a : b), lessThan(1000), reason: '$waits');
+  }, timeout: const Timeout(Duration(seconds: 60)));
 
   test('Stop right after start, before the server is ready: it still closes its socket', () async {
     // A killed isolate keeps its sockets open (until a garbage collection), so the server must close them itself.

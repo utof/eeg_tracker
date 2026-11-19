@@ -19,6 +19,7 @@ void main() {
   late ShareConfig saved;
   late List<Map<String, Object?>> sent;
   late List<bool> awake;
+  late List<String> alive;
   late ShareControl c;
   var now = DateTime(2026, 11, 22, 22, 5);
 
@@ -27,12 +28,14 @@ void main() {
     saved = const ShareConfig();
     sent = [];
     awake = [];
+    alive = [];
     now = DateTime(2026, 11, 22, 22, 5);
     c = ShareControl(
       load: () async => saved,
       save: (x) async => saved = x,
       sendToRecorder: sent.add,
       keepScreenOn: (on) async => awake.add(on),
+      keepAlive: (on, offAtMs) async => alive.add(on ? 'on until ${clockText(DateTime.fromMillisecondsSinceEpoch(offAtMs))}' : 'off'),
       clock: () => now,
       host: (dir, onChange) => ShareHost(filesDir: dir, onLog: (_) {}, onChange: onChange, entry: fakeServer),
     );
@@ -129,5 +132,27 @@ void main() {
     c.onRecorderStatus((up: false, addresses: const [], port: 8765, note: 'sharing on Wi-Fi stopped by an error: x'));
     expect(c.line().text, 'Sharing stopped by itself. Switch it off and on again.');
     expect(c.line().warn, isTrue);
+  });
+
+  test('between nights the app keeps itself running while it shares, so Android cannot freeze it (row 589)', () async {
+    await c.sync(night: false, filesDir: files.path);
+    expect(alive, isEmpty, reason: 'off by default');
+    await c.setOn(true);
+    await settle();
+    expect(alive, ['on until 10:05']);
+    await c.sync(night: false, filesDir: files.path); // the minute's sync changes nothing
+    expect(alive, ['on until 10:05']);
+    await c.beforeNight(); // the recorder's own service keeps the app running during the night
+    expect(alive.last, 'off');
+    await c.sync(night: true, filesDir: files.path);
+    expect(alive.last, 'off');
+    now = now.add(const Duration(hours: 8));
+    await c.afterStop(); // Stop: 15 more minutes for the laptop to get the end of the night, screen off or not
+    await c.sync(night: false, filesDir: files.path);
+    expect(alive.last, 'on until 06:20');
+    await c.setOn(false);
+    expect(alive.last, 'off');
+    expect(shareKeepText(DateTime(2026, 11, 23, 6, 20).millisecondsSinceEpoch),
+        'Your laptop can copy the files until 06:20. Stop turns it off.');
   });
 }
