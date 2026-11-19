@@ -48,7 +48,9 @@ night, never with a sleep lab, and no study has tested an EEG-timed nap alarm.
 ## How the app uses this
 
 - Its own screen between nights, like the dream catcher; it holds the headband while it runs, and the screen stays
-  on, black and dim. Keep the app open.
+  on, black and dim. You may lock the phone: a notification with Stop keeps the nap going. Lights off first checks
+  the phone's media volume and whether the sound goes to Bluetooth headphones, and says so: the wake sound is the
+  nap's only way to wake you.
 - Lights off starts three things: the nap's EEG recording (part of that day's sleep report later), the alpha rule
   for "fell asleep" (your first 60 eyes-closed seconds are the starting level), and the live sleep model.
 - The live sleep model: every 30 seconds, from 5 minutes in, AnySleep scores the last 60 minutes of signal
@@ -56,7 +58,8 @@ night, never with a sleep lab, and no study has tested an EEG-timed nap alarm.
   stretches of deep sleep in a row wake you: about 3 minutes into deep sleep, before it settles.
 - The length counts from Lights off and always ends the nap, so the nap works on the timer alone if the model is
   too slow (it times every check: two in a row over 15 seconds drop it to 1 of its 3 runs, then to the timer),
-  fails, or the signal is lost. The screen and the report say which.
+  does not answer within 60 seconds, fails, or the signal is lost. The screen and the report say which; a nap the
+  timer alone ran shows its stages as "not scored", and the last 2 minutes and the wake are never scored.
 - The wake sound is three soft rising notes, a little louder every 20 seconds until you tap "I'm awake" (5
   minutes at most).
 - The report: when you fell asleep, minutes of light, deep and dream sleep, why it woke you, how long you took to

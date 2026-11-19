@@ -37,7 +37,9 @@ electrodes match lab electrodes; what a day-to-day change means for your day is 
 
 - Contact check, then 2 min eyes closed, then 2 min eyes open on a dot, with soft tones at each change; then the
   ratings. Each change is marked in the recording. The phone app runs the same routine itself, between nights
-  (the main screen's Morning section), and gives the same numbers as the laptop on the same signal.
+  (the main screen's Morning section), and gives the same numbers as the laptop on the same signal. As the phases
+  count seconds of signal, a tone you do not hear leaves your eyes closed in the eyes-open phase: Start first checks
+  the media volume and Bluetooth headphones, and a phone call or another app's sound stops the check-in.
 - Only clean data counts: the signal is cut into 2-second pieces, and a piece is dropped if it swings over 150 µV,
   is flat, or is far noisier than the rest of the phase. The first 3 s and last 1 s of each phase are skipped,
   and each channel needs 20 s of clean data per phase.
