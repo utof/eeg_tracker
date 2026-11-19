@@ -13,12 +13,14 @@ headband gives none, so the inputs are the trends page's per-day numbers, and th
 - the usual is the median of the 28 days with a value that end a week before the day judged (Whoop's lagged
   baseline: a change that starts slowly does not drag the usual along), and needs 14 of them;
 - "beyond" is the trends page's arrow rule (app/lib/trends/usual.dart, DECISIONS 122): at least 2 robust spreads
-  (1.4826 x MAD) AND the measure's smallest change that matters (sleep 1 h, ratings 2 points, reaction time 10 %);
+  (1.4826 x MAD) AND the measure's smallest change that matters (sleep 1 h, ratings 2 points, reaction time 10 %,
+  the day's mean sharpness 1 point);
 - each number is judged in one direction where the research names one (sleepier, lower mood, more tense, slower)
   and both ways for sleep length and for every number from the headband's signal (two-sided tests for EEG: illness
-  can raise the alpha frequency while sleepiness lowers it);
+  can raise the alpha frequency while sleepiness lowers it); the sharp-hours day numbers (DECISIONS 380) are
+  strain one way only: less sharp, slower;
 - the headband's signal numbers (alpha speed, alpha strength, eyes-closed rise, jaw muscle bursts) are judged and
-  kept apart: the card uses the core numbers only (sleep, ratings, reaction time) unless a back-test supports them;
+  kept apart: the card uses the core numbers only (sleep, ratings, reaction time, the sharp-hours day numbers) unless a back-test supports them;
 - silent for the first 28 days with a core number (it only records what it would have said); a gap of more than
   14 days without any number starts the usual again; "feeling ill" pauses it for 14 days and keeps those days out
   of the usual (the body takes one to two weeks to settle after an illness, Levi 2026).
@@ -51,6 +53,7 @@ class Scale:
 SCALES = {
     "minutes": Scale("minutes", min_change=60),
     "rating": Scale("rating", min_change=2),
+    "mean_rating": Scale("mean_rating", min_change=1),  # the mean of a day's 1-5 ratings (trends.dart's meanRating)
     "reaction": Scale("reaction", rel_change=0.10),
     "rate": Scale("rate", rel_change=0.25),
     "log": Scale("log", log=True),
@@ -72,6 +75,8 @@ STREAMS: tuple[Stream, ...] = (
     Stream("mood", SCALES["rating"], "down", "core"),
     Stream("tension", SCALES["rating"], "up", "core"),
     Stream("reaction", SCALES["reaction"], "up", "core"),
+    Stream("sharp", SCALES["mean_rating"], "down", "core"),  # sharp hours: the day's mean rating, less sharp only
+    Stream("dayrt", SCALES["reaction"], "up", "core"),  # sharp hours: the day's reaction time, slower only
     Stream("iaf", SCALES["plain"], "both", "headband"),
     Stream("alpha", SCALES["log"], "both", "headband"),
     Stream("rise", SCALES["log"], "both", "headband"),

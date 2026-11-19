@@ -346,6 +346,7 @@ class _Stop extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(sub, style: muted),
                       if (card.proposal && !open) Text('The assistant\'s idea.', style: muted),
+                      if (card.weakEvidence && !open) Text('The evidence is weak.', style: muted),
                       if (!open && p != null && p.note.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: 4),
@@ -397,7 +398,7 @@ class _Stop extends StatelessWidget {
   }
 }
 
-/// The open stop: what it is, whose idea, the steps, the button to its screen, what to tell the assistant, the note,
+/// The open stop: what it is, whose idea, how weak the evidence is, the steps, the button to its screen, what to tell the assistant, the note,
 /// then Done (the page's one filled button) and Skip; a finished stop ends with Not done yet instead.
 class _StopBody extends StatelessWidget {
   const _StopBody({
@@ -447,6 +448,25 @@ class _StopBody extends StatelessWidget {
                 Expanded(
                   child: Text(
                     'The assistant\'s idea, not one of your wishes. Skip it if you do not want it.',
+                    style: muted,
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (card.weakEvidence) ...[
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(top: 1),
+                  child: Icon(Icons.science_outlined, size: 20, color: Night.inkMuted),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'The evidence is weak: it may do nothing for you. The i on its screen says why.',
                     style: muted,
                   ),
                 ),

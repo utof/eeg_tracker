@@ -43,23 +43,25 @@ ratings has not been tested by anyone, and no EEG number has been shown to warn 
 
 ## How the app uses this
 
-- The numbers: sleep length (from the headband's sleep model), sleepiness, mood, tension and the reaction test.
-  Sleep length counts both ways; the others only the way that means strain (sleepier, lower mood, more tense,
-  slower). Steps are not recorded by the app.
+- The numbers: sleep length (from the headband's sleep model), sleepiness, mood, tension and the reaction test,
+  and, if you use Sharp hours, the day's average sharpness and the day's reaction time from it. Sleep length counts
+  both ways; the others only the way that means strain (sleepier, lower mood, more tense, slower, less sharp).
+  A Sharp-hours day counts once it is over. Steps are not recorded by the app.
 - Your usual for this card: the middle value of the 28 days with a value that end a week before (Whoop's lagged
   window), needing 14 of them. "Outside it" is the Trends page's arrow rule: at least twice your normal day-to-day
-  spread and at least the smallest change that matters (1 hour of sleep, 2 rating points, 10 % in reaction time).
+  spread and at least the smallest change that matters (1 hour of sleep, 2 rating points, 10 % in reaction time, 1 point in the day's average sharpness).
 - A card: one number outside your usual on 2 days in a row (NightSignal's rule); one missing day in between is
   bridged. It stays until a number comes back, then says "Back in your usual range" for 3 days.
 - Silent for the first 28 days with a number: it only notes what it would have said, and later tells you how often
   that was. A break of more than 14 days starts your usual again.
 - The headband's own numbers (alpha speed, alpha strength, the eyes-closed rise, jaw muscle bursts) are judged
-  both ways and written down, but never make a card: on made-up people they almost tripled the false cards (1.9 a
-  month instead of 0.7) and no study shows they warn of anything.
-- Tested on 200 made-up people over a year each (planning values for their day-to-day wobble): 0.7 false cards a
-  month (one every 6 weeks or so); 7 in 10 would see at least one false card in their first 8 weeks. Found: a
+  both ways and written down, but never make a card: on made-up people they made 2.5 times the false cards (2.0 a
+  month instead of 0.8) and no study shows they warn of anything.
+- Tested on 200 made-up people over a year each (planning values for their day-to-day wobble): 0.8 false cards a
+  month (one every 6 weeks or so); 3 in 4 would see at least one false card in their first 8 weeks. Found: a
   cold-like week (sleep 40 minutes shorter, 2 points sleepier, mood 1 point lower) in 69 %, a week of low mood in
-  74 %, 4 nights of 2 hours less sleep in 57 %, of 1 hour less in 20 %; usually 2 days after it began. A stricter
+  74 %, 4 nights of 2 hours less sleep in 57 %, of 1 hour less in 20 %, 5 days 1 point less sharp in 41 %,
+  5 days of 15 % slower reactions in the day in 55 %; usually 2 days after it began. A stricter
   rule (2 numbers together) almost never spoke, and missed nearly everything.
 - "What might explain it?" chips (late night, alcohol, travel, stress, hard exercise, vaccine, feeling ill, not
   sure) are for your own record. "Feeling ill" pauses the card for 2 weeks and keeps those days out of your usual;

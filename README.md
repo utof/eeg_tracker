@@ -22,7 +22,7 @@ a build-it-yourself ADS1299 helmet ([hardware and guides](https://github.com/uto
   dates) prints every gap with its reason, lost packets, restarts by Android, both batteries, contact, the phone's
   sleep report and a plain verdict with the top three things to fix. Works on a laptop night too; plain `python3`
   skips only the signal numbers. Reads files only.
-- `scripts/catalog.py`: one table of every night on the laptop (laptop and phone nights: files, hours, missing
+- `scripts/catalog.py`: one table of every night on the laptop (laptop, phone and DIY-board nights: files, hours, missing
   minutes, the sleep report's numbers, morning check-in) and the SHA-256 of every file, so the next run says what
   grew, changed or went missing; `--check` re-hashes everything. Reads the data only; writes `_local/catalog/`.
 
@@ -87,7 +87,7 @@ to use it and the owner step in [app/README.md](app/README.md) ("Hands-free cont
 days it says in one plain sentence when your sleep length, sleepiness, mood, tension or reaction time has been
 outside your own usual on 2 days in a row (Stanford's NightSignal rule), never as a notification and never as a
 diagnosis. The rules: `analysis/unusual.py` (the reference) and `app/lib/unusual/detector.dart` (the phone's
-line-by-line port); the back-test on made-up people: `analysis/validate_unusual.py` (about 0.7 false cards a month);
+line-by-line port); the back-test on made-up people: `analysis/validate_unusual.py` (about 0.8 false cards a month);
 how to use it and the owner step in [app/README.md](app/README.md) ("Unusual for you").
 
 **Sharp hours** (phone app, the assistant's proposal, off unless switched on in Trends): a few one-tap "how sharp do

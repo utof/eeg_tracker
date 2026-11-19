@@ -12,6 +12,9 @@ import '../trends/days.dart';
 import 'card.dart';
 import 'detector.dart';
 
+/// The numbers that are worked out over a whole day (sharp hours' `sharp` and `dayrt`, DECISIONS row 380).
+const Set<String> dayNumberIds = {'sharp', 'dayrt'};
+
 /// The folder for the app's recordings folder.
 Directory unusualDirFor(String recordingsDir) => Directory('${Directory(recordingsDir).parent.path}/unusual');
 
@@ -46,8 +49,10 @@ class UnusualStore {
 
   /// What might explain the card that began on [episode] (ids from card.dart's [unusualCauses]); the latest
   /// choice for a card wins. "feeling ill" pauses the card (DECISIONS row 296).
-  void setCauses(String episode, Set<String> causes, DateTime now) =>
-      _event(now, 'causes', {'card': episode, 'causes': [...causes]..sort()});
+  void setCauses(String episode, Set<String> causes, DateTime now) => _event(now, 'causes', {
+    'card': episode,
+    'causes': [...causes]..sort(),
+  });
 
   /// Ends a pause today.
   void resume(DateTime now) => _event(now, 'resumed');
@@ -143,9 +148,7 @@ Map<String, Object?> logLine(
   Map<String, DayVerdict> byDay,
   DateTime now,
 ) {
-  final words = [
-    for (final id in v.onCore) ?cardSentence(id, v, series[id] ?? const {}, byDay),
-  ];
+  final words = [for (final id in v.onCore) ?cardSentence(id, v, series[id] ?? const {}, byDay)];
   return {
     'day': v.day,
     'judged': now.toIso8601String(),
@@ -174,15 +177,26 @@ Map<String, Object?> logLine(
 const UnusualCard offCard = UnusualCard(
   kind: CardKind.off,
   headline: 'Off.',
-  status: 'When on, it says when your sleep length, sleepiness, mood, tension or reaction time has been beyond your '
-      'usual on 2 days in a row. Nothing is noted while it is off.',
+  status:
+      'When on, it says when your sleep length, sleepiness, mood, tension, reaction time, or the day\'s sharpness or '
+      'reaction time from Sharp hours, has been beyond your usual on 2 days in a row. Nothing is noted while it is off.',
 );
 
 /// Today's card from the trends page's per-day numbers (trends.dart's dailySeries); while on, every finished day
 /// not yet in the back-test log is added to it.
-UnusualCard refreshUnusual(UnusualStore store, Map<String, Map<String, double>> series, DateTime now) {
+UnusualCard refreshUnusual(UnusualStore store, Map<String, Map<String, double>> allSeries, DateTime now) {
   if (!store.on) return offCard;
   final today = dayKey(now);
+  // a day number of sharp hours is a mean or a median of the day's answers: it counts once the day is over
+  final series = {
+    for (final e in allSeries.entries)
+      e.key: dayNumberIds.contains(e.key)
+          ? {
+              for (final d in e.value.entries)
+                if (d.key.compareTo(today) < 0) d.key: d.value,
+            }
+          : e.value,
+  };
   final ids = {for (final s in unusualStreams) s.id};
   final days = [
     for (final e in series.entries)

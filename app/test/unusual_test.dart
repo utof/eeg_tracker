@@ -58,6 +58,34 @@ void main() {
       expect(plain(c.headline), 'Your sleep has been 1 h 20 min shorter than usual on 2 of the last 3 nights.');
     });
 
+    test('the sharp-hours day numbers: less sharp and slower, in words, after the morning numbers', () {
+      final s = {
+        'asleep': series(60, (k) => k >= 58 ? 300 : wobble(k)),
+        'sharp': series(60, (k) => k >= 58 ? 2.4 : 3.5 + 0.1 * ((k % 3) - 1)),
+        'dayrt': series(60, (k) => k >= 58 ? 345 : 300.0 + 3 * ((k % 3) - 1)),
+      };
+      final c = cardOn(s, 59);
+      expect(
+        [for (final l in c.lines) plain(l)],
+        [
+          'You have felt less sharp than usual for 2 days (2.4 of 5; usual 3.5 of 5).',
+          'Your reaction time in the day has been slower than usual for 2 days (345 ms; usual 300 ms).',
+        ],
+      );
+      expect(
+        plain(c.status!),
+        contains('your sleep length, sharpness in the day and reaction time in the day, each against'),
+      );
+    });
+
+    test('sharper or quicker days are not strain: no card', () {
+      final s = {
+        'sharp': series(60, (k) => k >= 58 ? 4.9 : 3.5 + 0.1 * ((k % 3) - 1)),
+        'dayrt': series(60, (k) => k >= 58 ? 240 : 300.0 + 3 * ((k % 3) - 1)),
+      };
+      expect(cardOn(s, 59).kind, CardKind.quiet);
+    });
+
     test('ratings and the reaction test, in the order of the trends page, with values and the usual', () {
       final s = {
         'asleep': series(60, (k) => k >= 58 ? 560 : wobble(k)),
@@ -67,27 +95,24 @@ void main() {
       };
       final c = cardOn(s, 59);
       expect(plain(c.headline), 'Your sleep has been 2 h 20 min longer than usual for 2 nights.');
-      expect([for (final l in c.lines) plain(l)], [
-        'You have felt sleepier than usual for 2 mornings (7 of 9; usual 4 of 9).',
-        'Your mood has been lower than usual for 2 mornings (2 of 5; usual 4 of 5).',
-        'Your reaction test has been slower than usual for 2 mornings (340 ms; usual 281 ms).',
-      ]);
+      expect(
+        [for (final l in c.lines) plain(l)],
+        [
+          'You have felt sleepier than usual for 2 mornings (7 of 9; usual 4 of 9).',
+          'Your mood has been lower than usual for 2 mornings (2 of 5; usual 4 of 5).',
+          'Your reaction test has been slower than usual for 2 mornings (340 ms; usual 281 ms).',
+        ],
+      );
       expect(plain(c.status!), contains('your sleep length, sleepiness, mood and reaction test, each against'));
     });
 
     test('better mood or more alert is not a card (one direction counts)', () {
-      final s = {
-        'mood': series(60, (k) => k >= 58 ? 5 : 3),
-        'kss': series(60, (k) => k >= 58 ? 1 : 4),
-      };
+      final s = {'mood': series(60, (k) => k >= 58 ? 5 : 3), 'kss': series(60, (k) => k >= 58 ? 1 : 4)};
       expect(cardOn(s, 59).kind, CardKind.quiet);
     });
 
     test("the headband's own numbers never make a card", () {
-      final s = {
-        'asleep': series(60, wobble),
-        'iaf': series(60, (k) => k >= 58 ? 10.8 : 9.8 + 0.05 * ((k % 3) - 1)),
-      };
+      final s = {'asleep': series(60, wobble), 'iaf': series(60, (k) => k >= 58 ? 10.8 : 9.8 + 0.05 * ((k % 3) - 1))};
       final v = judgeDays(s, start, day(59));
       expect(v.last.ruleAll, isTrue);
       expect(unusualCard(v, s, day(59)).kind, CardKind.quiet);
@@ -126,8 +151,10 @@ void main() {
       expect(c.headline, 'Nothing unusual for you lately.');
       expect(
         plain(c.status!),
-        startsWith('Since ${dayLabel(day(28))}, when it switched on: 1 card. In its silent first 28 days it would '
-            'have shown 1.'),
+        startsWith(
+          'Since ${dayLabel(day(28))}, when it switched on: 1 card. In its silent first 28 days it would '
+          'have shown 1.',
+        ),
       );
     });
 
@@ -172,6 +199,21 @@ void main() {
       expect(store.on, isTrue);
       final events = File('${tmp.path}/unusual/events.jsonl').readAsLinesSync();
       expect([for (final e in events) (jsonDecode(e) as Map)['event']], ['switched off', 'switched on']);
+    });
+
+    test('a day number of sharp hours counts once its day is over: today\'s partial mean is left out', () {
+      final s = {
+        'asleep': series(60, wobble),
+        'sharp': series(60, (k) => k == 58 ? 2.4 : (k == 59 ? 1.0 : 3.5 + 0.1 * ((k % 3) - 1))),
+      };
+      // yesterday low, today's first rating low: not yet two days
+      expect(refreshUnusual(store, s, at(59)).kind, CardKind.quiet);
+      // the next day, the two finished days make the card
+      final c = refreshUnusual(store, s, at(60));
+      expect(c.kind, CardKind.alert);
+      expect(plain(c.headline), startsWith('You have felt less sharp than usual for 2 days'));
+      final d59 = logLines().firstWhere((l) => l['day'] == day(59));
+      expect(d59['numbers'], ['sharp']);
     });
 
     test('the log: one line per finished day, written once, with both ways', () {

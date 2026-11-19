@@ -4,16 +4,17 @@ day, for the Dart port's cross-check (app/test/unusual_cross_check_test.dart).
   uv run --project analysis python analysis/make_unusual_fixture.py app/test/fixtures/unusual.json
 
 Made-up numbers only (`validate_unusual.py`'s synthetic people and a few written by hand); no one's data.
-Cases: a synthetic person with a planted cold-like week; the same with the research's 2-number rule; short
-nights with "feeling ill" tapped and resumed; a long break that starts the usual again; and log-scale and rating
-edge cases with missing days. Values are written with Python's shortest round-trip form, so both sides start
-from the very same doubles.
+Cases: a synthetic person with a planted cold-like week (sharp hours' day numbers included); the same with the
+research's 2-number rule; short nights with "feeling ill" tapped and resumed; a long break that starts the usual
+again; log-scale and rating edge cases with missing days; and sharp hours' day numbers, one direction each.
+Values are written with Python's shortest round-trip form, so both sides start from the very same doubles.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,23 @@ def _edges(n: int) -> dict[str, dict[str, float]]:
     jaw = {d(k): 20.0 + (k % 4) for k in range(n)}
     jaw[d(62)] = jaw[d(63)] = 27.0
     return {"alpha": alpha, "rise": rise, "kss": kss, "reaction": reaction, "jaw": jaw}
+
+
+def _day_numbers(n: int) -> dict[str, dict[str, float]]:
+    """Sharp hours' day numbers (DECISIONS 380): a mean rating with a half-point dip (inside), a one-point dip two
+    days running (beyond), then a sharper run (a direction that never counts); a day reaction time with a 7 % rise
+    (inside), a 12 % rise bridging a missing day (beyond) and a quicker run (never)."""
+    d = lambda k: un.add_days(START, k)  # noqa: E731
+    sharp = {d(k): 3.5 + 0.1 * ((k % 3) - 1) for k in range(n)}
+    sharp[d(40)] = sharp[d(41)] = 3.0
+    sharp[d(46)] = sharp[d(47)] = 2.4
+    sharp[d(55)] = sharp[d(56)] = 4.9
+    dayrt = {d(k): 300.0 + 3.0 * ((k % 3) - 1) for k in range(0, n, 1) if k % 7 != 3}
+    dayrt[d(42)] = dayrt[d(43)] = 321.0
+    dayrt[d(50)] = dayrt[d(52)] = 340.0
+    del dayrt[d(51)]
+    dayrt[d(58)] = dayrt[d(59)] = 250.0
+    return {"sharp": sharp, "dayrt": dayrt}
 
 
 def _expected(verdicts: list[un.DayVerdict], with_streams: bool) -> list[dict[str, Any]]:
@@ -118,7 +136,8 @@ def main(argv: list[str]) -> int:
     if len(argv) != 1:
         print(__doc__)
         return 2
-    cold = vu.Change("cold-like week", 95, 7, {"asleep": -90, "kss": 3, "mood": -2, "tension": 2, "iaf": 0.6})
+    cold = vu.Change("cold-like week", 95, 7, {
+        "asleep": -90, "kss": 3, "mood": -2, "tension": 2, "iaf": 0.6, "sharp": -1.2, "dayrt": math.log(1.15)})
     person = vu.synthetic_history(7, 130, change=cold)
     day = lambda k: un.add_days(START, k)  # noqa: E731
     cases = [
@@ -131,6 +150,8 @@ def main(argv: list[str]) -> int:
         _case("a long break starts the usual again",
               _hand_nights(110, {100: 280.0, 101: 270.0}, gap=range(40, 58)), day(109)),
         _case("log scale, ratings on the edge, a bridged reaction run", _edges(70), day(69)),
+        _case("sharp hours' day numbers: less sharp and slower count, the other ways and small steps do not",
+              _day_numbers(70), day(69)),
     ]
     out = {
         "version": 1,

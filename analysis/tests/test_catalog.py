@@ -195,3 +195,75 @@ def test_the_catalog_never_loads_numpy(local: Path) -> None:
     r = subprocess.run([sys.executable, "-c", code, str(ROOT / "scripts"), str(local)], capture_output=True, text=True,
                        timeout=60)
     assert r.stdout.strip() == "False", r.stderr
+
+
+# ---- the DIY board's recordings (DECISIONS 381: their own source, away from the BrainBit nights) ----
+
+
+def write_diy(folder: Path, start: datetime, minutes: float, *, channels: int = 4, fs: int = 250, log: bool = True) -> str:
+    """A DIY board file set like record_diy.py's: <I + one f per channel records, the format line in the .log."""
+    folder.mkdir(parents=True, exist_ok=True)
+    rec = 4 + 4 * channels
+    n = int(minutes * 60 * fs)
+    s = stamp(start)
+    (folder / f"{s}.f32").write_bytes(b"\0" * n * rec)
+    rows = [(start.timestamp() + 60 * (k + 1), k * 60 * fs) for k in range(int(minutes))]
+    (folder / f"{s}.idx").write_bytes(b"".join(struct.pack("<dQ", t, i) for t, i in rows))
+    text = f"driver DIY board\nformat .f32 records <I{channels}f: board sequence number, then Ch in volts; {fs} Hz\n"
+    (folder / f"{s}.log").write_text(text if log else "recording started\n")
+    return s
+
+
+D1, D2 = datetime(2026, 11, 16, 23, 30, 0), datetime(2026, 11, 19, 23, 0, 0)  # D1 is the evening of a BrainBit night
+
+
+@pytest.fixture
+def with_diy(local: Path) -> Path:
+    diy = local / "recordings-diy"
+    write_diy(diy, D1, 30, channels=8, fs=500)  # 30 min of 8 channels at 500 Hz: 36-byte records
+    write_diy(diy, D2, 20)
+    write_diy(diy, D2 + timedelta(minutes=25), 10, log=False)  # no format line: the 4-channel 250 Hz default
+    (diy / "current-run.out").write_text("recorder output\n")
+    return local
+
+
+def test_diy_recordings_are_their_own_rows_and_never_mixed_with_the_brainbit_night_of_the_same_date(with_diy: Path) -> None:
+    code, text = run(with_diy)
+    assert code == 0, text
+    rows = load(with_diy)["nights"]
+    assert [(n["date"], n["source"]) for n in rows] == [
+        ("2026-11-16", "laptop"), ("2026-11-16", "diy"), ("2026-11-17", "phone"), ("2026-11-19", "diy"), ("2026-11-20", "phone")]
+    brain, d1, _, d2, _ = rows
+    assert (brain["recordings"], brain["hours_recorded"], brain["files"]) == (2, 2.5, 2 * 3 + 1 + 1 + 3 + 1 + 4)
+    assert all(not f["path"].startswith("recordings-diy/") for f in brain["file_list"])
+    assert (d1["id"], d1["raw"], d1["recordings"], d1["hours_recorded"], d1["minutes_missing"]) == ("2026-11-16-diy", True, 1, 0.5, 0.0)
+    assert d1["report"] is None and d1["morning"] == []
+    assert d1["bytes"] == sum(f["bytes"] for f in d1["file_list"])
+    assert next(f["bytes"] for f in d1["file_list"] if f["path"].endswith(".f32")) == 30 * 60 * 500 * 36
+    assert {f["kind"] for f in d1["file_list"]} == {"raw"}
+    # two runs of the same evening chain into one night: 20 min of the log's format, 10 min of the default
+    assert (d2["id"], d2["recordings"], d2["hours_recorded"], d2["minutes_missing"]) == ("2026-11-19-diy", 2, 0.5, 5.0)
+    assert d2["files"] == 6
+    assert "diy" in text and "2026-11-19" in text
+
+
+def test_diy_sidecars_are_apart_and_stray_diy_files_are_counted(with_diy: Path) -> None:
+    code, text = run(with_diy)
+    assert code == 0, text
+    out = with_diy / "catalog"
+    brain = (out / "2026-11-16.sha256").read_text()
+    diy = (out / "2026-11-16-diy.sha256").read_text()
+    assert "recordings-diy/" not in brain and "recordings/" in brain
+    assert diy.count("recordings-diy/") == 3 and "recordings/" not in diy.replace("recordings-diy/", "")
+    assert (out / "2026-11-19-diy.sha256").exists()
+    assert "not in any night: 5 files" in text  # the four of the BrainBit data, and the DIY recorder's output
+    assert "recordings-diy/current-run.out" in text
+
+
+def test_a_diy_raw_file_that_goes_missing_is_a_problem_named_for_its_diy_night(with_diy: Path) -> None:
+    run(with_diy)
+    (with_diy / "recordings-diy" / f"{stamp(D2)}.f32").unlink()
+    code, text = run(with_diy)
+    assert code == 1
+    assert f"missing: recordings-diy/{stamp(D2)}.f32 (night 2026-11-19-diy)" in text
+    assert [n["date"] for n in load(with_diy)["nights"] if n["source"] == "diy"] == ["2026-11-16", "2026-11-19"]

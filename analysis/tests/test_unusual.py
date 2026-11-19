@@ -166,6 +166,39 @@ def test_ratings_need_two_points() -> None:
     assert verdicts(s, n)[day(36)].on_core == ["mood"]
 
 
+def test_sharpness_in_the_day_counts_only_when_less_sharp_and_needs_one_point() -> None:
+    n = 45
+    s = {"sharp": series(n, wobble(3.5, 0.1))}
+    s["sharp"][day(35)] = s["sharp"][day(36)] = 3.0  # half a point down: inside the usual
+    assert not verdicts(s, n)[day(36)].rule_core
+    s["sharp"][day(35)] = s["sharp"][day(36)] = 2.4  # a point and more down
+    v = verdicts(s, n)[day(36)]
+    assert v.on_core == ["sharp"] and v.streams["sharp"].state == "down"
+    s["sharp"][day(35)] = s["sharp"][day(36)] = 4.8  # sharper: not strain
+    v = verdicts(s, n)[day(36)]
+    assert v.streams["sharp"].state == "up" and not v.streams["sharp"].off and not v.rule_core
+
+
+def test_reaction_time_in_the_day_counts_only_when_slower_and_needs_ten_percent() -> None:
+    n = 45
+    s = {"dayrt": series(n, wobble(300, 3))}
+    s["dayrt"][day(35)] = s["dayrt"][day(36)] = 320.0  # 7 % slower: inside
+    assert not verdicts(s, n)[day(36)].rule_core
+    s["dayrt"][day(35)] = s["dayrt"][day(36)] = 345.0
+    assert verdicts(s, n)[day(36)].on_core == ["dayrt"]
+    s["dayrt"][day(35)] = s["dayrt"][day(36)] = 250.0  # quicker: not strain
+    v = verdicts(s, n)[day(36)]
+    assert v.streams["dayrt"].state == "down" and not v.rule_core
+
+
+def test_the_day_numbers_are_core_numbers_and_make_a_day_count_toward_the_silent_start() -> None:
+    core = [s.id for s in un.STREAMS if s.group == "core"]
+    assert core == ["asleep", "kss", "mood", "tension", "reaction", "sharp", "dayrt"]
+    n = 30
+    s = {"sharp": series(n, wobble(3.5, 0.1))}
+    assert verdicts(s, n)[day(29)].valid_before == 29
+
+
 def test_two_streams_rule_when_asked() -> None:
     n = 45
     s = short_nights([35, 36]) | {"kss": series(n, lambda k: 4.0)}
@@ -278,6 +311,19 @@ def test_synthetic_histories_are_repeatable_and_on_their_scales() -> None:
     assert all(1 <= v <= 9 and v == int(v) for v in a["kss"].values())
     assert all(1 <= v <= 5 and v == int(v) for v in a["mood"].values())
     assert 0.7 * 120 < len(a["asleep"]) < 120
+    assert all(1 <= v <= 5 for v in a["sharp"].values()) and any(v != int(v) for v in a["sharp"].values())
+    assert all(v > 0 for v in a["dayrt"].values()) and 0.4 * 120 < len(a["dayrt"]) < 120
+
+
+def test_the_older_numbers_of_a_synthetic_person_do_not_move_when_the_day_numbers_are_added() -> None:
+    # the back-test's before and after must be the same people: the day numbers draw last (values from the
+    # reference before sharp hours joined)
+    a = vu.synthetic_history(seed=3, days=60)
+    assert a["asleep"][day(0)] == pytest.approx(407.280488218882)
+    assert a["asleep"][day(59)] == pytest.approx(311.01502435298437)
+    assert sum(a["asleep"].values()) == pytest.approx(19507.25090100766)
+    assert sum(a["kss"].values()) == 151.0 and sum(a["mood"].values()) == 154.0
+    assert sum(a["jaw"].values()) == pytest.approx(973.4233130433554)
 
 
 def test_a_planted_change_shifts_only_its_days() -> None:
@@ -298,6 +344,9 @@ def test_back_test_nightsignal_rule_stays_under_a_card_a_month_and_finds_planted
     assert ch["low mood (mood -2, tension +1.5; 7 days)"]["core"]["found"] >= 0.7
     assert ch["short sleep (2 h, 4 nights)"]["core"]["found"] >= 0.5
     # a change in the headband's numbers alone never reaches the card, but the with-headband rule sees it
+    # numbers the planted changes do not touch only add false cards; planted day numbers are found
+    assert ch["less sharp (-1 point, 5 days)"]["core"]["found"] >= 0.5
+    assert ch["slower in the day (+15 %, 5 days)"]["core"]["found"] >= 0.3
     eeg = ch["headband only (alpha speed +0.5 Hz, alpha strength x1.6; 5 days)"]
     assert eeg["core"]["found"] == 0.0
     assert eeg["all"]["found"] >= 0.5

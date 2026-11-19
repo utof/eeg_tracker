@@ -425,8 +425,8 @@ Nothing of this has run on the phone yet; the numbers were checked against the l
 ## Unusual for you (on unless you switch it off)
 
 The assistant's proposal from the research, not one of your own wishes: switch it off with the switch beside its
-heading on the Trends page, and nothing more is noted. It compares your sleep length, sleepiness, mood, tension and
-reaction time with your own usual (the middle of the 28 days with a number that end a week before). When one of
+heading on the Trends page, and nothing more is noted. It compares your sleep length, sleepiness, mood, tension,
+reaction time and, if you use Sharp hours, the day's average sharpness and reaction time with your own usual (the middle of the 28 days with a number that end a week before). When one of
 them has been well outside it on 2 days in a row, the Trends page leads with one sentence, such as "Your sleep has
 been 2 h shorter than usual for 2 nights", and the main screen's Morning section shows the same line. It says your
 numbers moved, not why: it often follows a late night, alcohol, travel, stress, hard exercise, a vaccine or the
@@ -435,8 +435,8 @@ start of a cold, and it is never a diagnosis (DECISIONS rows 290-299; the **i** 
 
 - **Silent for the first 28 days with a number**: "Learning your usual: N of 28 days". Meanwhile it only notes what
   it would have said; afterwards it tells you how often that was.
-- **No notifications**, and nothing while a night records. Sleep length counts both ways; the ratings and the
-  reaction test only the way that means strain. The headband's own numbers (alpha, the eyes-closed rise, jaw
+- **No notifications**, and nothing while a night records. Sleep length counts both ways; the ratings, the
+  reaction tests and the Sharp-hours day numbers only the way that means strain (less sharp, slower). The headband's own numbers (alpha, the eyes-closed rise, jaw
   bursts) are noted but never make a card: no study shows they warn of anything.
 - Under a card, **What might explain it?** chips are for your own record. **Feeling ill** pauses the card for two
   weeks and keeps those days out of your usual (**Resume now** ends it). "Back in your usual range" follows a card
