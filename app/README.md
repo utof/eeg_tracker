@@ -164,7 +164,12 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    minutes `loud`); tap **I'm awake** on the page over the lock screen. With `{"mode": "killed", "endInMin": 2}` it
    only sets the phone's alarm: `adb shell kill -9 $(adb shell pidof io.github.utof.eeg_tracker)`, lock, and the
    alarm must still ring 2 minutes later (`EegWake: ringing (window end)`). Reinstall the app afterwards. The
-   scripts used on 2026-11-19 are kept in the lane's `_local/emu/` (not in the repository).
+   scripts used on 2026-11-19 are kept in the lane's `_local/emu/` (not in the repository). With the lucid cues too
+   (DECISIONS 330: one live sleep model for both): add `"lucidAfterMin": 3, "lucidModelBeforeMin": 2` and a later
+   window (`"startInMin": 70`, `"speed": 1`); the tool switches the cues on with a made-up loudness, their model
+   starts a minute in and the alarm's ten minutes in. `adb logcat | grep 'SMOKE scorer'` then says `loads 1 ... used by
+   [lucid cues, smart alarm]`, and the night's `.log` (`files/recordings/*.log`) `live sleep model on for the lucid
+   cues (load 1 tonight)`, then `live sleep model: shared with the smart alarm (no second copy)`.
 
 8. **The dream catcher's speech to text** (DECISIONS rows 250-257): push a made-up session and its WAVs (the laptop
    check's TTS clips, `_local/stt/check/clips/`, never personal audio) into `files/dream-catcher/` as in step 1, open
@@ -190,6 +195,14 @@ word, and the night scored again afterwards with the same stages, both ONNX Runt
 hours switched on armed its questions beside the smart alarm's alarm clock, and a rating from its page was saved. The
 emulator refuses to boot ("not enough disk space") when the disk that holds the AVD is nearly full: free space there,
 or make an AVD of your own elsewhere (`ANDROID_AVD_HOME=/var/tmp/<name> avdmanager create avd ...`).
+
+**With the lucid dream cues** (second integration, 2026-11-19, release x86_64): the Lucid dreams page opened from
+the night screen, **Turn on** started the evening practice (the cue every 3 s, a little louder each time: "Cue 6,
+0.6 % of the media volume") and Stop kept the cues waiting for a loudness. The alarm smoke tool with the cues on
+(step 8) replayed a recorded night through the real recorder service: the cues opened the live model at 09:24, the
+smart alarm joined it at 09:33 (`live sleep model: shared with the smart alarm (no second copy)`), and the service
+reported `loads 1 ... used by [lucid cues, smart alarm]`: one model for both, about 0.6 s a call with 3 runs, the
+process at about 330 MB (RSS). No app errors in logcat. The speech-model download was not repeated.
 
 ## Meditate
 
