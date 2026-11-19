@@ -19,11 +19,11 @@ const int earlierDays = 7;
 
 String _plural(int n, String one, String many) => n == 1 ? '1 $one' : '$n $many';
 
-/// The measures with no value in 14 days, lower case, for "Nothing yet for ...". The sharp-hours numbers are left
-/// out: the log is a proposal that is off until switched on, so its absence is not news.
+/// The measures with no value in 14 days, lower case, for "Nothing yet for ...". The sharp-hours and work-session
+/// numbers are left out: they exist only once the owner uses the log or the session, so their absence is not news.
 List<String> missingMeasures(TrendsModel m) => [
   for (final r in m.rows)
-    if (!r.hasData && r.spec.group != TrendGroup.day) r.spec.label.toLowerCase(),
+    if (!r.hasData && r.spec.group != TrendGroup.day && r.spec.group != TrendGroup.work) r.spec.label.toLowerCase(),
 ];
 
 /// The page's first lines: what exists, and while it matters, when "usual" and arrows begin.

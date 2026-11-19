@@ -326,6 +326,7 @@ ExpResults analyse(Outcome outcome, List<ExpDay> days, List<bool> order) {
     'asleep' => (d.roundToDouble(), 'min'),
     'reaction' || 'dayrt' => (d.roundToDouble(), 'ms'),
     'iaf' => ((d * 100).round() / 100, 'Hz'),
+    'workdrowsy' => (d.roundToDouble(), 'percentage\u00a0points'),
     'jaw' => ((d * 10).round() / 10, 'an hour'),
     _ => ((d * 10).round() / 10, 'points'),
   };
@@ -334,7 +335,7 @@ ExpResults analyse(Outcome outcome, List<ExpDay> days, List<bool> order) {
 String _digits(Outcome o, double n) {
   final a = n.abs();
   if (o.id == 'iaf') return a.toStringAsFixed(2);
-  if (o.logScale || o.id == 'asleep' || o.id == 'reaction' || o.id == 'dayrt') return a.round().toString();
+  if (o.logScale || o.id == 'asleep' || o.id == 'reaction' || o.id == 'dayrt' || o.id == 'workdrowsy') return a.round().toString();
   return a.toStringAsFixed(1);
 }
 

@@ -454,6 +454,17 @@ per-30-s numbers are enough to score a session again with other weights or lines
 | `breaks` | `start`, `end`, `source` (`tapped` or `headbandOff`: no usable signal for 5 minutes, counted from when it stopped), `before` / `before_level` (the level's median just before), `after` / `after_level` (over the first 5 minutes after; `null` if never readable) |
 | `ratings` | `at`, `value` ("How sharp do you feel?", 1 Foggy to 5 Very sharp: the sharp-hours scale), `hint` (the index of the hint it answered, or `null`) |
 | `events` | `at`, `event`: the headband's drops, reconnects and stream restarts, each hint, the eyes-closed minute's outcome |
+| `wearer` | optional, as in a night's report: `answer` (`me` or `someone else`) and `at`; a session marked `someone else` is left out of the Trends numbers below |
+
+The Trends page and the self-experiments read one set of day numbers from these files (DECISIONS rows 480-489; a day
+runs 04:00 to 04:00): from each epoch its own time (`at` or, when that is a time, `t`; the first version of the file
+wrote the theta number under `t`, so the time is then the session's `start` plus `s`) and `level` and `eyes_closed`;
+from the hints their `at` and `taken`, from the breaks their `start` and `end`, from the ratings their `at` and
+`value`. Work time is the epochs read as alert, getting drowsy or drowsy, outside closed eyes and breaks; a day with
+under 30 minutes of it has no number. Measure ids: `worktime` (minutes), `workdrowsy` (share of that time at getting
+drowsy or drowsy, 0-100), `workfirst` (worked minutes until the level first read getting drowsy or drowsy in 8 of 12
+epochs; only days with one), `workhints`, `workfollowed` (hints a break of 5 minutes or more followed), `workbreaks`
+(5 minutes or more) and `worksharp` (the mean tap, 1-5; only days with a tap).
 
 ### Lucid dream cues (`lucid/`)
 
