@@ -1,7 +1,8 @@
 // The nap coach (ROADMAP "Nap coach", DECISIONS rows 173-177): pick a length, tap Lights off, sleep; it wakes you
 // before deep sleep starts or at the length, then shows how the nap went. Holds the headband from this screen, only
 // between nights; during the nap the screen stays on, black, at the lowest brightness, without the system bars; at the
-// wake the brightness comes back. The live sleep model is AnySleep on ONNX (sleep/live_stager.dart); while last
+// wake the brightness comes back. If you lock the phone yourself, a foreground service keeps the nap and its wake cue
+// going (session_keeper.dart, DECISIONS row 460), with Stop on the lock screen. The live sleep model is AnySleep on ONNX (sleep/live_stager.dart); while last
 // night's scoring runs, its checks wait (memory). Layout in nap_view.dart.
 import 'dart:async';
 import 'dart:io';
@@ -17,6 +18,7 @@ import '../nap/rules.dart';
 import '../nap/store.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
+import '../session_keeper.dart';
 import '../sleep/live_stager.dart';
 import '../sleep/onnx_runs.dart';
 import '../sound/nap_sound.dart';
@@ -44,6 +46,7 @@ class _NapScreenState extends State<NapScreen> {
     sound: () => _audio,
     mayRunModel: () => !nightScoringBusy,
     gestureTone: SoloudGestureTone.new,
+    keeper: PhoneSessionKeeper(), // a locked phone must not freeze the nap (DECISIONS row 460)
   );
   int _length = NapRule.defaultMin;
   bool _nightRunning = false;

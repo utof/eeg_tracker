@@ -10,6 +10,10 @@
 // always ends the nap, so it works on the timer alone when the model is too slow or the signal is lost, and the
 // screen says so. The night recorder's service is never touched (row 177).
 //
+// With the phone locked the nap goes on: a [SessionKeeper] (the phone's foreground service, DECISIONS rows 190-195 and
+// 460) is held from Lights off until the nap is saved; Stop on its notification is "I'm awake" (or ends the nap
+// before the wake). The screen still stays on by itself, as before.
+//
 // Hands-free (DECISIONS 244-246): with the owner's switch on, a double clench or a look left then right marks a
 // moment in the nap's recording, with a soft tone; never while the drift-off detector says probably asleep.
 //
@@ -32,6 +36,7 @@ import '../meditation/controller.dart' show gapPauseS, gapSamples;
 import '../recorder/chunk_writer.dart';
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
+import '../session_keeper.dart';
 import '../sleep/live_stager.dart';
 import '../sound/gesture_tone.dart';
 import '../sleep/periods.dart' show gapStage;
@@ -96,12 +101,16 @@ class NapController extends ChangeNotifier {
     this.scale = scaleInBackground,
     this.timing = const NapTiming(),
     this.gestureTone,
+    this.keeper,
     DateTime Function()? clock,
   }) : _makeSound = sound,
        _now = clock ?? DateTime.now;
 
   final HeadbandFinder finder;
   final NapSound Function() _makeSound;
+
+  /// Keeps the nap alive with the phone locked (null: nothing does; the screen stays on as before).
+  final SessionKeeper? keeper;
 
   /// The hands-free confirmation tone (null: none).
   final GestureTone Function()? gestureTone;
@@ -215,6 +224,8 @@ class NapController extends ChangeNotifier {
     _reset();
     this.lengthMin = lengthMin;
     _set(NapStage.connecting, 'Looking for the headband.');
+    await _keep(lengthMin);
+    if (_ended) return; // stopped meanwhile
     final link = BandLink(finder: finder, timing: timing.link, onBatch: _onBatch, onEvent: _onLinkEvent, clock: _now);
     _link = link;
     try {
@@ -272,6 +283,26 @@ class NapController extends ChangeNotifier {
     } catch (e) {
       await _fail('Could not start: $e');
     }
+  }
+
+  /// Asks the keeper to hold the nap, so a locked phone does not freeze it; Stop on its notification is "I'm awake".
+  Future<void> _keep(int lengthMin) async {
+    final k = keeper;
+    if (k == null) return;
+    k.onStop = () => unawaited(awake());
+    final by = _now().add(Duration(minutes: lengthMin));
+    String two(int v) => v.toString().padLeft(2, '0');
+    try {
+      await k.hold(KeepSpec(title: 'Nap', text: 'Wakes you by ${two(by.hour)}:${two(by.minute)}', headband: true));
+    } catch (_) {
+      // the screen stays on as before
+    }
+  }
+
+  Future<void> _letGo() async {
+    try {
+      await keeper?.release();
+    } catch (_) {}
   }
 
   /// "I'm awake" while the cue plays; before the wake it ends the nap as stopped.
@@ -527,6 +558,7 @@ class NapController extends ChangeNotifier {
       // stopped while connecting: nothing to keep
       await _release();
       await _sound?.stop();
+      await _letGo();
       _set(NapStage.setup, '');
       return;
     }
@@ -541,6 +573,7 @@ class NapController extends ChangeNotifier {
     last = _save(endS: endS, why: why);
     await _release();
     await _sound?.stop();
+    await _letGo();
     _set(NapStage.done, '');
     unawaited(_stager?.close()); // after a running call, which may never end: nothing waits for it
   }
@@ -613,6 +646,7 @@ class NapController extends ChangeNotifier {
     await _release();
     await _sound?.stop();
     unawaited(_stager?.close());
+    await _letGo();
     if (!stoppedByUser) _set(NapStage.failed, why);
   }
 

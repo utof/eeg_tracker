@@ -12,6 +12,7 @@ import 'experiments_screen.dart' show currentExperiment;
 import 'experiments_view.dart' show experimentLine;
 import '../recorder/brainbit.dart';
 import '../recorder/contact.dart';
+import '../session_keeper.dart';
 import '../sound/check_in_sound.dart';
 import '../trends/days.dart';
 import '../trends/trends.dart';
@@ -63,7 +64,11 @@ class MorningScreen extends StatefulWidget {
 
 class _MorningScreenState extends State<MorningScreen> {
   final BrainBitFinder _finder = BrainBitFinder();
-  late final MorningController _c = MorningController(finder: _finder, sound: SoloudCheckInSound.new);
+  late final MorningController _c = MorningController(
+    finder: _finder,
+    sound: SoloudCheckInSound.new,
+    keeper: PhoneSessionKeeper(), // a locked phone must not freeze the recording part (DECISIONS row 460)
+  );
   String? _recordings;
   String? _doneAt, _experiment;
   bool _nightRunning = false;

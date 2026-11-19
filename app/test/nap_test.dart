@@ -13,6 +13,7 @@ import 'package:eeg_tracker/nap/rules.dart';
 import 'package:eeg_tracker/nap/store.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart' show recordBytes;
 import 'package:eeg_tracker/recorder/nights.dart';
+import 'package:eeg_tracker/session_keeper.dart';
 import 'package:eeg_tracker/sleep/live_stager.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -349,6 +350,49 @@ void main() {
       c.dispose();
     });
 
+    test('Lights off holds the session service until the nap is saved; its Stop is "I\'m awake"', () async {
+      final band = DriftBand((t) => 1);
+      final sound = SilentNapSound();
+      String? atRelease;
+      final keeper = _WatchKeeper(() => atRelease = store.list().singleOrNull?.end?.name);
+      final c = NapController(
+        finder: OneFinder(band),
+        sound: () => sound,
+        store: store,
+        recordingsDir: recordings,
+        scale: scaleNow,
+        timing: fast,
+        keeper: keeper,
+        clock: () => DateTime(2026, 11, 19, 14, 30),
+      );
+      await c.start(lengthMin: 20);
+      expect(keeper.held, isTrue, reason: 'a locked phone must not freeze the nap: the wake cue depends on it');
+      expect((keeper.spec!.title, keeper.spec!.text, keeper.spec!.headband), ('Nap', 'Wakes you by 14:50', true));
+      await until(c, () => c.stage == NapStage.waking);
+      keeper.onStop!(); // Stop on the lock screen while the cue plays: "I'm awake"
+      await until(c, () => c.stage == NapStage.done);
+      expect(c.last!.upS, isNotNull);
+      expect(keeper.log, ['hold', 'release']);
+      expect(atRelease, NapEnd.length.name, reason: 'released only after the final record');
+      c.dispose();
+    });
+
+    test('Stop on the notification before the wake ends the nap; a failed start lets the service go', () async {
+      final keeper = FakeSessionKeeper();
+      final c = NapController(finder: OneFinder(DriftBand((t) => 1)), sound: SilentNapSound.new, store: store, timing: fast, keeper: keeper);
+      await c.start(lengthMin: 20);
+      keeper.onStop!();
+      await until(c, () => c.stage == NapStage.done);
+      expect((c.last!.end, keeper.held), (NapEnd.stopped, false));
+      final none = FakeSessionKeeper();
+      final failed = NapController(finder: OneFinder(null), sound: SilentNapSound.new, store: store, timing: fast, keeper: none);
+      await failed.start();
+      expect(failed.stage, NapStage.failed);
+      expect(none.log, ['hold', 'release']);
+      c.dispose();
+      failed.dispose();
+    });
+
     test('Stop while the sound starts: the sound that just started is stopped too (no engine left open)', () async {
       final band = DriftBand((t) => 1);
       final sound = _GatedNapSound();
@@ -388,5 +432,17 @@ class _GatedNapSound extends SilentNapSound {
     asked = true;
     await gate.future;
     await super.start();
+  }
+}
+
+/// A keeper that looks at the files when it is let go.
+class _WatchKeeper extends FakeSessionKeeper {
+  _WatchKeeper(this.onRelease);
+  final void Function() onRelease;
+
+  @override
+  Future<void> release() async {
+    if (held) onRelease();
+    await super.release();
   }
 }
