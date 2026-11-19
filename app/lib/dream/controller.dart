@@ -183,11 +183,17 @@ class DreamController extends ChangeNotifier {
   bool _ended = false;
   bool _disposed = false;
 
+  /// The number of the latest start: a start that Stop or a newer start overtook touches nothing of the session
+  /// (DECISIONS 450).
+  int _run = 0;
+  bool _live(int run) => run == _run && !_ended;
+
   /// Lights off: connects, checks contact, starts the sound and the EEG file, then the baseline and the rounds.
   /// Errors end in [DreamStage.failed].
   Future<void> start({int rounds = 4, DreamEnding ending = DreamEnding.wake}) async {
     if (active) return;
     _reset();
+    final run = ++_run;
     this.rounds = rounds;
     this.ending = ending;
     _set(DreamStage.connecting, 'Looking for the headband.');
@@ -195,20 +201,24 @@ class DreamController extends ChangeNotifier {
     _link = link;
     try {
       if (!await link.connect(onFound: (name) => _set(DreamStage.connecting, 'Found $name. Connecting.'))) {
-        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?');
+        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?', run);
       }
-      if (_ended) return await link.close();
+      if (!_live(run)) return await link.close();
       _set(DreamStage.contact, 'Checking contact. Lie still for a few seconds.');
-      contact = await link.contact();
-      if (_ended) return await link.close();
+      final ohms = await link.contact();
+      if (!_live(run)) return await link.close();
+      contact = ohms;
       final sound = _makeSound();
       try {
         await sound.start();
       } catch (e) {
-        return await _fail('The sound did not start ($e), so the questions could not be heard.');
+        return await _fail('The sound did not start ($e), so the questions could not be heard.', run);
+      }
+      if (!_live(run)) {
+        await sound.stop();
+        return await link.close();
       }
       _sound = sound;
-      if (_ended) return await _release();
       final st = store;
       _prompts = {for (final k in PromptKind.values) k.name: st?.promptPath(k) == null ? 'tone' : 'own'};
       final earlier = st?.list() ?? const <DreamSession>[];
@@ -219,14 +229,18 @@ class DreamController extends ChangeNotifier {
       _drift = DriftOff(0); // lights off: the first sample
       _lightsOffAt = _now();
       await link.startSignal();
+      if (!_live(run)) return await link.close(); // Stop came while the stream started
       _ticker = Timer.periodic(timing.tick, (_) => _tick());
       _set(DreamStage.baseline, '');
       _mark('dream catcher: lights off; rounds $rounds, ending ${ending.name}, round 1 timer ${_plan!.firstTimerS} s');
       unawaited(_play(PromptKind.theme)); // the theme to drift off with
     } on TimeoutException catch (e) {
-      await _fail('The headband did not answer (${e.message ?? 'timeout'}). Switch it off and on, then try again.');
+      await _fail(
+        'The headband did not answer (${e.message ?? 'timeout'}). Switch it off and on, then try again.',
+        run,
+      );
     } catch (e) {
-      await _fail('Could not start: $e');
+      await _fail('Could not start: $e', run);
     }
   }
 
@@ -653,7 +667,9 @@ class DreamController extends ChangeNotifier {
     await _link?.close();
   }
 
-  Future<void> _fail(String why) async {
+  /// [run]: the start that failed; one that Stop or a newer start overtook changes nothing (its headband was let go).
+  Future<void> _fail(String why, int run) async {
+    if (run != _run) return;
     final stoppedByUser = _ended;
     _ended = true;
     _ticker?.cancel();

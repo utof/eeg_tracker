@@ -20,6 +20,7 @@ import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/sound/feedback_sound.dart';
 import 'package:eeg_tracker/training/control.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'support/gates.dart';
 
 /// Streams the demo signal (in volts, as the SDK gives it) far faster than real time: [perTick] samples
 /// every millisecond. Eyes open for the first 30 s (the calibration's instruction), then closed.
@@ -508,5 +509,63 @@ void main() {
     expect(c.stage, Stage.failed);
     expect(c.message, contains('not found'));
     c.dispose();
+  });
+
+  group('Stop and Start in the middle of a start (review 2026-11-19, findings 1 and 9)', () {
+    test('Stop, then Start again while the first search runs: the first search ending fails nothing', () async {
+      final finder = GateFinder(), band = DemoBand(DemoSignal(3));
+      final c = MeditationController(finder: finder, sound: SilentSound.new, timing: fast);
+      final first = c.start(const Duration(minutes: 5));
+      await until(c, () => finder.finds.length == 1);
+      await c.stop();
+      final second = c.start(const Duration(minutes: 5));
+      await until(c, () => finder.finds.length == 2);
+      finder.finds[1].complete(band);
+      await until(c, () => c.stage == Stage.calibrating);
+      finder.finds[0].complete(null); // the first search ends: "not found"
+      await first;
+      await second;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(c.stage, Stage.calibrating, reason: c.message);
+      expect(band.calls, isNot(contains('disconnect')));
+      await c.stop();
+      expect(band.calls, contains('disconnect'));
+      c.dispose();
+    });
+
+    test('the first search finding the headband late: that headband is let go, the new session goes on', () async {
+      final finder = GateFinder(), late = DemoBand(DemoSignal(3), label: 'late'), band = DemoBand(DemoSignal(3));
+      final c = MeditationController(finder: finder, sound: SilentSound.new, timing: fast);
+      final first = c.start(const Duration(minutes: 5));
+      await until(c, () => finder.finds.length == 1);
+      await c.stop();
+      unawaited(c.start(const Duration(minutes: 5)));
+      await until(c, () => finder.finds.length == 2);
+      finder.finds[1].complete(band);
+      await until(c, () => c.stage == Stage.calibrating);
+      finder.finds[0].complete(late);
+      await first;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect((c.stage, c.message), (Stage.calibrating, ''));
+      expect(late.calls, ['disconnect']);
+      await c.stop();
+      c.dispose();
+    });
+
+    test('Stop while the stream is being started: the session stays stopped and the headband is let go', () async {
+      final inner = DemoBand(DemoSignal(3)), band = SlowStart(inner);
+      final c = MeditationController(finder: Finder([band]), sound: SilentSound.new, timing: fast);
+      final started = c.start(const Duration(minutes: 5));
+      await until(c, () => band.asked);
+      await c.stop();
+      expect(c.stage, Stage.setup);
+      band.gate.complete();
+      await started;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(c.stage, Stage.setup);
+      expect(c.active, isFalse);
+      expect(inner.calls, contains('disconnect'));
+      c.dispose();
+    });
   });
 }

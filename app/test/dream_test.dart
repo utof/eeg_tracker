@@ -20,6 +20,8 @@ import 'package:eeg_tracker/recorder/nights.dart';
 import 'package:eeg_tracker/sound/synth.dart' show wav16;
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/gates.dart';
+
 /// Streams an eyes-closed synthetic signal (no blinks, no jaw) far faster than real time: [perTick] samples every
 /// millisecond. [gain] sets the alpha's size at each second of signal (1 = the baseline's, 0.3 = faded).
 class DriftBand implements Headband {
@@ -559,6 +561,57 @@ void main() {
       expect(none.message, contains('not found'));
       c.dispose();
       none.dispose();
+    });
+
+    test('Stop, then Start again while the first search runs: the first search ending touches nothing', () async {
+      final finder = GateFinder(), band = DriftBand((_) => 1, perTick: 5);
+      final c = DreamController(
+        finder: finder,
+        sound: SilentDreamSound.new,
+        mic: FakeMic(spoken),
+        store: store,
+        recordingsDir: recordings,
+        timing: fast,
+        random: () => 0.5,
+      );
+      final first = c.start();
+      await until(c, () => finder.finds.length == 1);
+      await c.stop();
+      final second = c.start();
+      await until(c, () => finder.finds.length == 2);
+      finder.finds[1].complete(band);
+      await until(c, () => c.stage == DreamStage.baseline);
+      finder.finds[0].complete(null); // the first search ends: "not found"
+      await first;
+      await second;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(c.stage, DreamStage.baseline, reason: c.message);
+      await c.stop();
+      expect(store.list(), hasLength(1), reason: 'the second session is kept');
+      c.dispose();
+    });
+
+    test('Stop while the stream is being started: the session ends and stays ended', () async {
+      final inner = DriftBand((_) => 1, perTick: 5), band = SlowStart(inner);
+      final c = DreamController(
+        finder: OneFinder(band),
+        sound: SilentDreamSound.new,
+        mic: FakeMic(spoken),
+        store: store,
+        recordingsDir: recordings,
+        timing: fast,
+        random: () => 0.5,
+      );
+      final started = c.start();
+      await until(c, () => band.asked);
+      await c.stop();
+      band.gate.complete();
+      await started;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(c.stage, DreamStage.done);
+      expect(c.active, isFalse);
+      expect(inner.calls, contains('disconnect'));
+      c.dispose();
     });
   });
 }

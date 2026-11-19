@@ -18,6 +18,7 @@ import 'package:eeg_tracker/states/timers.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'dream_test.dart' show DriftBand, OneFinder;
+import 'support/gates.dart';
 
 const fast = StatesTiming(
   link: LinkTiming(contactFor: Duration(milliseconds: 5), settle: Duration.zero, reconnectWaits: [Duration(milliseconds: 5)]),
@@ -281,6 +282,55 @@ void main() {
     expect(c.message, contains('sound did not start'));
     expect(band.calls, contains('disconnect'));
     c.dispose();
+  });
+
+  group('Stop and Start in the middle of a start (review 2026-11-19, findings 1 and 9)', () {
+    test('Stop, then Start again while the first search runs: the first search ending touches nothing', () async {
+      final finder = GateFinder(), band = DriftBand((t) => 1, perTick: 5);
+      var sounds = 0;
+      final c = StatesController(
+        finder: finder,
+        sound: () {
+          sounds++;
+          return SilentStateSound();
+        },
+        store: store,
+        timing: fast,
+      );
+      final first = c.start(SoundPlan.of(SoundState.relax));
+      await until(c, () => finder.finds.length == 1);
+      await c.stop();
+      final second = c.start(SoundPlan.of(SoundState.relax));
+      await until(c, () => finder.finds.length == 2);
+      finder.finds[1].complete(band);
+      await until(c, () => c.stage == SoundStage.quiet);
+      finder.finds[0].complete(null); // the first search ends: "not found"
+      await first;
+      await second;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect((c.stage, c.headband, sounds), (SoundStage.quiet, HeadbandUse.used, 0), reason: 'no sound-only session inside it');
+      c.skipQuiet();
+      await until(c, () => c.stage == SoundStage.playing);
+      await c.stop();
+      expect(c.stage, SoundStage.done);
+      expect(store.list().single.headband, HeadbandUse.used);
+      c.dispose();
+    });
+
+    test('Stop while the stream is being started: the session ends and stays ended', () async {
+      final inner = DriftBand((t) => 1, perTick: 5), band = SlowStart(inner);
+      final c = StatesController(finder: OneFinder(band), sound: SilentStateSound.new, store: store, timing: fast);
+      final started = c.start(SoundPlan.of(SoundState.relax));
+      await until(c, () => band.asked);
+      await c.stop();
+      band.gate.complete();
+      await started;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(c.stage, SoundStage.done);
+      expect(c.active, isFalse);
+      expect(inner.calls, contains('disconnect'));
+      c.dispose();
+    });
   });
 }
 

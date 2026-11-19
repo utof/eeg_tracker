@@ -190,6 +190,11 @@ class StatesController extends ChangeNotifier {
   bool _ended = false;
   bool _disposed = false;
 
+  /// The number of the latest start: a start that Stop or a newer start overtook touches nothing of the session
+  /// (DECISIONS 450).
+  int _run = 0;
+  bool _live(int run) => run == _run && !_ended;
+
   /// Starts a session of [plan]. [useHeadband]: connect and measure (falls back to the sound alone if the headband is
   /// not found); [why]: the [HeadbandUse] when the headband is not used; [trial]: the fair test this session is
   /// played for (saved with it). Errors end in [SoundStage.failed].
@@ -202,26 +207,28 @@ class StatesController extends ChangeNotifier {
   }) async {
     if (active) return;
     _reset();
+    final run = ++_run;
     this.plan = plan;
     _trial = trial;
     this.thenNight = thenNight && useHeadband && plan.state == SoundState.asleep;
     headband = useHeadband ? HeadbandUse.used : why;
     _set(useHeadband ? SoundStage.connecting : SoundStage.starting, useHeadband ? 'Looking for the headband.' : '');
-    await _keep(plan, useHeadband);
-    if (_ended) return; // stopped meanwhile
+    await _keep(plan, useHeadband, run);
+    if (!_live(run)) return; // stopped meanwhile
     if (!useHeadband) return _soundOnly(why, '');
     final link = BandLink(finder: finder, timing: timing.link, onBatch: _onBatch, onEvent: _onLinkEvent, clock: _now);
     _link = link;
     try {
       if (!await link.connect(onFound: (name) => _set(SoundStage.connecting, 'Found $name. Connecting.'))) {
+        if (!_live(run)) return;
         _link = null;
-        if (_ended) return;
         return await _soundOnly(HeadbandUse.notFound, 'Headband not found, so the sound plays by its timer alone.');
       }
-      if (_ended) return await link.close();
+      if (!_live(run)) return await link.close();
       _set(SoundStage.contact, 'Checking contact. Keep still for a few seconds.');
-      contact = await link.contact();
-      if (_ended) return await link.close();
+      final ohms = await link.contact();
+      if (!_live(run)) return await link.close();
+      contact = ohms;
       if (plan.state == SoundState.asleep) _openWriter(link.name);
       _seen = Detectors(onSecond: _onSecond);
       _listen(_seen!);
@@ -230,26 +237,33 @@ class StatesController extends ChangeNotifier {
       if (plan.state == SoundState.asleep) _drift = DriftOff(0); // lights off: the first sample
       _lightsOffAt = _now();
       await link.startSignal();
+      if (!_live(run)) return await link.close(); // Stop came while the stream started
       _ticker = Timer.periodic(timing.tick, (_) => _tick());
       _event('quiet minute (${plan.preset.eyesClosed ? 'eyes closed' : 'eyes open'})');
       _set(SoundStage.quiet, '');
     } on TimeoutException catch (e) {
-      await _fail('The headband did not answer (${e.message ?? 'timeout'}). Switch it off and on, then try again.');
+      await _fail(
+        'The headband did not answer (${e.message ?? 'timeout'}). Switch it off and on, then try again.',
+        run,
+      );
     } catch (e) {
-      await _fail('Could not start: $e');
+      await _fail('Could not start: $e', run);
     }
   }
 
   /// Asks the keeper to hold this session, so the phone can be locked; Stop on its notification ends the session.
-  Future<void> _keep(SoundPlan plan, bool useHeadband) async {
+  Future<void> _keep(SoundPlan plan, bool useHeadband, int run) async {
     final k = keeper;
     if (k == null) return;
     k.onStop = () => unawaited(stop());
+    bool kept;
     try {
-      canLock = await k.hold(KeepSpec(title: plan.preset.name, text: 'Sound session · ${plan.line}', headband: useHeadband));
+      kept = await k.hold(KeepSpec(title: plan.preset.name, text: 'Sound session · ${plan.line}', headband: useHeadband));
     } catch (_) {
-      canLock = false;
+      kept = false;
     }
+    if (run != _run) return; // a newer start holds the service itself
+    canLock = kept;
     _notify();
   }
 
@@ -339,19 +353,20 @@ class StatesController extends ChangeNotifier {
 
   Future<void> _startSound({String note = ''}) async {
     if (_starting || _ended || _soundStartS != null) return;
+    final run = _run;
     _starting = true;
     _set(SoundStage.starting, note);
     final sound = _makeSound();
     try {
       await sound.start(plan!);
     } catch (e) {
-      return _fail('The sound did not start ($e).');
+      return _fail('The sound did not start ($e).', run);
     }
-    _sound = sound;
-    if (_ended) {
+    if (!_live(run)) {
       await sound.stop(seconds: 0.2);
       return;
     }
+    _sound = sound;
     _soundStartS = _t().floor();
     _soundStartK = (_seen?.n ?? 0) ~/ fs;
     _event('sound on: ${plan!.line}');
@@ -666,7 +681,9 @@ class StatesController extends ChangeNotifier {
     }
   }
 
-  Future<void> _fail(String why) async {
+  /// [run]: the start that failed; one that Stop or a newer start overtook changes nothing (its headband was let go).
+  Future<void> _fail(String why, int run) async {
+    if (run != _run) return;
     final stoppedByUser = _ended;
     _ended = true;
     _ticker?.cancel();
