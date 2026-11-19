@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 
 import '../detectors/drift_off.dart' show DriftState;
 import '../sleep/drift.dart';
+import 'alarm_view.dart' show AlarmLine;
 import 'theme.dart';
 
 String _clock(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
@@ -41,9 +42,15 @@ class NightActions extends StatelessWidget {
     required this.busy,
     required this.onLightsOff,
     required this.onStop,
+    this.alarmLine,
+    this.onAlarmOff,
   });
 
   final String? line;
+
+  /// The smart alarm's line (alarm_view.dart), with Alarm off while it can still ring.
+  final String? alarmLine;
+  final VoidCallback? onAlarmOff;
 
   /// Lights off was tapped tonight: the button turns quiet ("Lights off again").
   final bool tapped;
@@ -70,6 +77,12 @@ class NightActions extends StatelessWidget {
         const SizedBox(height: 12),
         if (line != null) ...[
           Text(line!, style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.35, fontFeatures: tabular)),
+          const SizedBox(height: 10),
+        ],
+        if (alarmLine != null) ...[
+          onAlarmOff == null
+              ? Text(alarmLine!, style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.35, fontFeatures: tabular))
+              : AlarmLine(line: alarmLine!, action: 'Alarm off', onAction: busy ? null : onAlarmOff),
           const SizedBox(height: 10),
         ],
         Row(

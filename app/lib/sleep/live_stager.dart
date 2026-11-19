@@ -85,6 +85,7 @@ class LiveStager {
     this.mayRun,
     this.onStage,
     this.onChange,
+    this.fallback = 'the timer alone ends the nap',
     int Function()? clockMs,
   }) : prep = prep ?? LivePrep(),
        _ms = clockMs ?? _wallMs;
@@ -104,6 +105,9 @@ class LiveStager {
 
   /// The mode changed (with [why]).
   final void Function()? onChange;
+
+  /// What takes over when the model stops, for [why] ("the timer alone ends the nap").
+  final String fallback;
   final int Function() _ms;
 
   static final Stopwatch _wall = Stopwatch()..start();
@@ -195,7 +199,7 @@ class LiveStager {
     } catch (e) {
       if (_closed) return;
       mode = LiveMode.timer;
-      why = 'The sleep model stopped ($e), so the timer alone ends the nap.';
+      why = 'The sleep model stopped ($e), so $fallback.';
       onChange?.call();
     }
   }
@@ -215,7 +219,7 @@ class LiveStager {
       why = 'Two checks in a row took over ${slow.inSeconds} s (the last $s s) with the full model, so it now uses 1 of its 3 runs.';
     } else {
       mode = LiveMode.timer;
-      why = 'The sleep model is too slow on this phone (two checks over ${slow.inSeconds} s, the last $s s), so the timer alone ends the nap.';
+      why = 'The sleep model is too slow on this phone (two checks over ${slow.inSeconds} s, the last $s s), so $fallback.';
     }
     onChange?.call();
   }

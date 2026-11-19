@@ -11,12 +11,16 @@
 //   app process is restarted (the phone's version of "exit and let record_night.sh start a fresh one");
 // - the data is saved before every risky SDK call;
 // - the drift-off detector runs on the batches in this isolate (live_drift.dart, DECISIONS 180-184), always behind the
-//   files and inside a guard: an exception, or more than its share of time, switches it off with one log line.
+//   files and inside a guard: an exception, or more than its share of time, switches it off with one log line;
+// - so does the smart alarm's live sleep model (alarm/live_alarm.dart, DECISIONS 230-236), only from an hour before
+//   its window, with a memory limit too; the phone's own alarm at the window's end never depends on it.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import '../alarm/live_alarm.dart';
+import '../alarm/rule.dart';
 import 'battery.dart';
 import 'chunk_writer.dart';
 import 'contact.dart';
@@ -54,6 +58,9 @@ class RecorderTiming {
     this.packetLogEvery = const Duration(minutes: 10),
     this.driftBudget = 0.02,
     this.driftBudgetAfter = const Duration(minutes: 10),
+    this.alarmBudget = 0.02,
+    this.alarmBudgetAfter = const Duration(minutes: 10),
+    this.alarmMemoryMb = 700,
   });
 
   /// Buffered samples go to the files and a status goes to the screen this often.
@@ -100,6 +107,13 @@ class RecorderTiming {
   /// checked from [driftBudgetAfter] on (on the laptop it takes about 0.03 %).
   final double driftBudget;
   final Duration driftBudgetAfter;
+
+  /// The smart alarm's live model is switched off once it has taken more than this share of this isolate's time
+  /// (its own thread's model calls are not counted: they do not hold the recorder up), checked from
+  /// [alarmBudgetAfter] on, or once the process has grown by more than [alarmMemoryMb] since the model started.
+  final double alarmBudget;
+  final Duration alarmBudgetAfter;
+  final int alarmMemoryMb;
 }
 
 /// An SDK call passed its deadline. Never swallowed by the ordinary error handling.
@@ -124,8 +138,12 @@ class NightRecorder {
     this.probe,
     this.timing = const RecorderTiming(),
     this.watch = LiveDrift.new,
+    this.alarmPlan,
+    this.alarm,
+    int Function()? rss,
     DateTime Function()? clock,
-  }) : _now = clock ?? DateTime.now;
+  }) : _now = clock ?? DateTime.now,
+       _rss = rss ?? _processRss;
 
   final HeadbandFinder finder;
   final Directory dir;
@@ -139,7 +157,17 @@ class NightRecorder {
 
   /// Makes the live drift-off detector; null: none.
   final DriftWatch Function()? watch;
+
+  /// Tonight's smart alarm, for a new night (a restarted one keeps the plan saved with it); null: none.
+  final AlarmPlan? alarmPlan;
+
+  /// Makes the smart alarm's live model for a plan, an hour before its window; null: none (the phone's alarm alone).
+  final AlarmWatch Function(AlarmPlan plan)? alarm;
   final DateTime Function() _now;
+
+  /// The process's resident memory in bytes (the alarm's memory limit).
+  final int Function() _rss;
+  static int _processRss() => ProcessInfo.currentRss;
 
   RecorderStatus _status = const RecorderStatus();
   NightState _night = const NightState();
@@ -184,6 +212,14 @@ class NightRecorder {
 
   /// Markers given before tonight's first file set opened, with their times.
   List<(DateTime, String)> _pendingMarkers = const [];
+
+  /// The smart alarm's live model while it runs ([_alarmTime] its time in this isolate, [_alarmWall] since it
+  /// started, [_alarmRss0] the process's memory then); [_alarmLast] what it showed when it finished.
+  AlarmWatch? _alarm;
+  bool _alarmMade = false;
+  final Stopwatch _alarmTime = Stopwatch(), _alarmWall = Stopwatch();
+  int _alarmRss0 = 0;
+  AlarmLive? _alarmLast;
 
   RecorderStatus get status => _status;
   bool get _stopping => _stopSignal.isCompleted;
@@ -231,6 +267,14 @@ class NightRecorder {
     _endNight = endNight;
     if (!_stopSignal.isCompleted) _stopSignal.complete();
     _set(_status.copyWith(phase: Phase.stopping, note: 'stopping'));
+    final a = _alarm;
+    _alarm = null;
+    if (a != null) {
+      // stopped before the model finished: a restart may start it again (the plan stays)
+      _alarmLast = a.live;
+      _night = _night.copyWith(alarmScoring: false);
+      await _closeAlarm(a).timeout(const Duration(seconds: 5), onTimeout: () {});
+    }
     await _done.future.timeout(timing.stopTimeout, onTimeout: () {});
     _writer?.close();
     await _save();
@@ -250,15 +294,40 @@ class NightRecorder {
         notes.add('the previous process ended during a direct connection; scans only for the rest of the night');
       }
       if (watch != null) notes.add('drift-off detector off after the restart; it starts again at Lights off');
+      final plan = _plan;
+      if (plan != null && prior.alarmScoring && !prior.alarmOff) {
+        _night = _night.copyWith(alarmScoring: false, alarmOff: true);
+        notes.add(
+          'smart alarm: the app process ended while the sleep model ran, so the model stays off tonight; '
+          'the phone\'s alarm still rings at ${_hm(plan.endMs)}',
+        );
+      }
       final t = _now();
       _notes = [for (final n in notes) (t, n)];
       _lastLog = _newestLog(prior.startMs);
       final stem = _lastLog?.uri.pathSegments.last.replaceFirst(RegExp(r'\.log$'), '');
       if (prior.band != null) _drop = (lastDataMs: null, stem: stem, why: 'app process restarted');
     } else {
-      _night = NightState(active: true, startMs: _now().millisecondsSinceEpoch);
+      final plan = alarmPlan;
+      _night = NightState(
+        active: true,
+        startMs: _now().millisecondsSinceEpoch,
+        alarmEndMs: plan?.endMs,
+        alarmWindowMin: plan?.windowMin,
+      );
       _startDrift();
-      if (_drift != null) _notes = [(_now(), 'drift-off detector on; lights off counts from the first sample until Lights off'), ..._notes];
+      final t = _now();
+      // the drift-off line first, then any line _startDrift kept (hands-free), then the smart alarm's
+      _notes = [
+        if (_drift != null) (t, 'drift-off detector on; lights off counts from the first sample until Lights off'),
+        ..._notes,
+        if (plan != null)
+          (
+            t,
+            'smart alarm set: wake by ${_hm(plan.endMs)}, window from ${_hm(plan.startMs)}; the sleep model starts at '
+                '${_hm(plan.scoreFromMs)}${alarm == null ? ' (not in this build: the phone\'s alarm alone)' : ''}',
+          ),
+      ];
     }
     _packets = PacketAccount(_night.packets);
     _packetsLoggedMs = _now().millisecondsSinceEpoch;
@@ -272,7 +341,7 @@ class NightRecorder {
         contactOhms: _night.contactOhms,
         slots: Map.of(_slots),
         note: restartedBySystem && prior.active ? 'restarted by Android; reconnecting' : 'looking for the headband',
-      ).withDrift(lightsOffMs: _night.lightsOffMs),
+      ).withDrift(lightsOffMs: _night.lightsOffMs).withAlarm(_alarmStatus()),
     );
   }
 
@@ -515,6 +584,15 @@ class NightRecorder {
         }
       });
     }
+    if (_alarm == null && !_alarmMade) _startAlarm(t);
+    if (_alarm != null) {
+      _alarmGuarded((a) {
+        a.add(t, rows, firstOfFile: firstOfFile);
+        for (final text in a.takeEvents()) {
+          _marker(text, t);
+        }
+      });
+    }
   }
 
   /// The night screen's Lights off: a marker in the recording, kept in the saved night, and the drift-off detector
@@ -527,7 +605,7 @@ class NightRecorder {
     _marker(lightsOffMarker, at);
     if (_drift == null && !_driftUsed) _startDrift();
     _guarded((d) => d.lightsOff(at));
-    _set(_withDrift(_status));
+    _set(_withAlarm(_withDrift(_status)));
   }
 
   void _startDrift() {
@@ -588,6 +666,160 @@ class NightRecorder {
   RecorderStatus _withDrift(RecorderStatus s) {
     final live = _drift?.live;
     return s.withDrift(drift: live?.state, lightsOffMs: _night.lightsOffMs, onsetMs: live?.onsetMs);
+  }
+
+  /// Tonight's alarm plan, from the saved night.
+  AlarmPlan? get _plan {
+    final end = _night.alarmEndMs, w = _night.alarmWindowMin;
+    if (end == null || w == null) return null;
+    try {
+      return AlarmPlan(endMs: end, windowMin: w);
+    } on ArgumentError {
+      return null;
+    }
+  }
+
+  /// Starts the smart alarm's live model once the hour before its window has come (once a process).
+  void _startAlarm(DateTime now) {
+    final plan = _plan, make = alarm;
+    if (plan == null || make == null || _night.alarmOff) return;
+    final ms = now.millisecondsSinceEpoch;
+    if (ms < plan.scoreFromMs || ms >= plan.endMs) return;
+    _alarmMade = true;
+    try {
+      _alarm = make(plan);
+      _alarmTime.reset();
+      _alarmWall
+        ..reset()
+        ..start();
+      _alarmRss0 = _rss();
+      _night = _night.copyWith(alarmScoring: true);
+      unawaited(_save().catchError((Object _) {})); // a crash from here on keeps the model off after the restart
+    } catch (e) {
+      _night = _night.copyWith(alarmOff: true);
+      _logLine('smart alarm: the sleep model could not start: ${_short(e)}; the phone\'s alarm rings at ${_hm(plan.endMs)}');
+    }
+  }
+
+  /// Every call into the alarm's live model goes through here: any exception switches it off for the night with one
+  /// log line; the recording and the phone's alarm never notice.
+  void _alarmGuarded(void Function(AlarmWatch a) call) {
+    final a = _alarm;
+    if (a == null) return;
+    _alarmTime.start();
+    try {
+      call(a);
+    } catch (e) {
+      _alarmStop(_short(e));
+    } finally {
+      _alarmTime.stop();
+    }
+    final still = _alarm;
+    if (still != null && still.finished) _alarmFinished(still);
+  }
+
+  /// The model is done (it woke you, the window ended, or it gave up by itself).
+  void _alarmFinished(AlarmWatch a) {
+    _alarmLast = a.live;
+    _alarm = null;
+    _alarmWall.stop();
+    _night = _night.copyWith(alarmScoring: false, alarmOff: true);
+    unawaited(_save().catchError((Object _) {}));
+    unawaited(_closeAlarm(a));
+  }
+
+  void _alarmStop(String why) {
+    final a = _alarm;
+    final plan = _plan;
+    _alarm = null;
+    _alarmWall.stop();
+    _night = _night.copyWith(alarmScoring: false, alarmOff: true);
+    _alarmLast = AlarmLive(phase: AlarmPhase.off, note: 'The sleep model was switched off ($why).');
+    unawaited(_save().catchError((Object _) {}));
+    _logLine(
+      'smart alarm stopped: $why; the phone\'s alarm still rings at ${plan == null ? 'the window\'s end' : _hm(plan.endMs)}; '
+      'the recording goes on',
+    );
+    if (a != null) unawaited(_closeAlarm(a));
+  }
+
+  Future<void> _closeAlarm(AlarmWatch a) async {
+    try {
+      await a.close();
+    } catch (_) {}
+  }
+
+  /// The 10-second check: the window's end, the model's own state, and its time and memory limits.
+  void _checkAlarm() {
+    if (_alarm == null) return;
+    final t = _now();
+    _alarmGuarded((a) {
+      a.check(t);
+      for (final text in a.takeEvents()) {
+        _marker(text, t);
+      }
+    });
+    if (_alarm == null) return;
+    if (_alarmWall.elapsed >= timing.alarmBudgetAfter) {
+      final share = _alarmTime.elapsedMicroseconds / max(1, _alarmWall.elapsedMicroseconds);
+      if (share > timing.alarmBudget) {
+        _alarmStop(
+          'it took ${(share * 100).toStringAsFixed(1)} % of the recorder\'s time '
+          '(over ${(timing.alarmBudget * 100).toStringAsFixed(1)} %)',
+        );
+        return;
+      }
+    }
+    final grown = (_rss() - _alarmRss0) ~/ (1 << 20);
+    if (grown > timing.alarmMemoryMb) _alarmStop('the app grew by $grown MB (over ${timing.alarmMemoryMb} MB)');
+  }
+
+  /// The night screen's Alarm off: the live model stops; the screen takes the phone's alarm away itself.
+  void alarmOff() {
+    if (_plan == null || _alarmLast?.note == 'Turned off.') return;
+    final a = _alarm;
+    _alarm = null;
+    _alarmWall.stop();
+    _night = _night.copyWith(alarmScoring: false, alarmOff: true);
+    _alarmLast = const AlarmLive(phase: AlarmPhase.off, note: 'Turned off.');
+    unawaited(_save().catchError((Object _) {}));
+    _marker('smart alarm: turned off', _now());
+    if (a != null) unawaited(_closeAlarm(a));
+    _set(_withAlarm(_status));
+  }
+
+  AlarmStatus? _alarmStatus() {
+    final plan = _plan;
+    if (plan == null) return null;
+    final live = _alarm?.live ?? _alarmLast;
+    final phase = live?.phase ?? (_night.alarmOff ? AlarmPhase.off : AlarmPhase.waiting);
+    final wake = live?.wake;
+    return AlarmStatus(
+      endMs: plan.endMs,
+      windowMin: plan.windowMin,
+      phase: phase.name,
+      stage: live?.stage,
+      wakeMs: wake?.atMs,
+      why: wake == null ? null : alarmWhyName(wake.why),
+      note: live?.note ??
+          (phase == AlarmPhase.off && live == null
+              ? (alarm == null ? 'Not in this build.' : 'The sleep model stopped earlier tonight.')
+              : null),
+    );
+  }
+
+  RecorderStatus _withAlarm(RecorderStatus s) => s.withAlarm(_alarmStatus());
+
+  /// A line in the open file set's `.log`, else beside the last closed one, else kept for the next.
+  void _logLine(String line) {
+    final w = _writer;
+    try {
+      if (w != null && !w.isClosed) {
+        w.log(line);
+      } else {
+        _note(line);
+      }
+    } catch (_) {}
   }
 
   /// A marker (`.markers.jsonl`, an annotation in the night's BDF) and a `.log` line: in the open file set, else beside
@@ -677,7 +909,7 @@ class NightRecorder {
     while (true) {
       await _pause(timing.tick);
       w.append();
-      _set(_withDrift(_status));
+      _set(_withAlarm(_withDrift(_status)));
       if (_stopping) return _End.stopped;
       if (lost()) {
         w.log('headband out of range; saving');
@@ -686,6 +918,7 @@ class NightRecorder {
       if (++ticks % timing.ticksPerCheck != 0) continue;
       w.sync();
       _checkDriftBudget();
+      _checkAlarm();
       await _save();
       final got = w.samplesReceived - lastTotal;
       lastTotal = w.samplesReceived;
@@ -800,16 +1033,7 @@ class NightRecorder {
 
   /// A line for the night's log from outside the loop (Share on Wi-Fi going on or off): into the open run's
   /// `.log`, else as [_note]. Never throws.
-  void note(String message) {
-    try {
-      final w = _writer;
-      if (w != null && !w.isClosed) {
-        w.log(message);
-      } else {
-        _note(message);
-      }
-    } catch (_) {}
-  }
+  void note(String message) => _logLine(message);
 
   /// A line for the night's log between runs, with its own time: into the last closed run's `.log`, or,
   /// before tonight has one, kept for the next run's `.log`.
@@ -919,6 +1143,12 @@ class NightRecorder {
     }
     _note('end of night, ${_packets.counts.logLine()}');
     _note(_night.phoneBattery.summaryLine());
+    if (_alarmMade) {
+      _note(
+        'smart alarm: sleep model ${(_alarmTime.elapsedMicroseconds / 1e6).toStringAsFixed(2)} s of the recorder\'s time '
+        'over ${(_alarmWall.elapsedMicroseconds / 6e7).toStringAsFixed(1)} min',
+      );
+    }
     if (_driftUsed) {
       final hours = _driftSamples / sampleRateHz / 3600;
       final work = _driftTime.elapsedMicroseconds / 1e6;
@@ -971,6 +1201,11 @@ class NightRecorder {
 }
 
 const Object _stopMarker = Object();
+
+String _hm(int ms) {
+  final t = DateTime.fromMillisecondsSinceEpoch(ms);
+  return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+}
 
 String _short(Object e) {
   final s = e.toString().replaceAll('\n', ' ');

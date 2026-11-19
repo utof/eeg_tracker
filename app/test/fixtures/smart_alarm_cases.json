@@ -1,0 +1,19 @@
+{
+ "about": "Hand-worked cases of the smart alarm's rule (DECISIONS 230-232), read by app/test/alarm_rule_test.dart and analysis/tests/test_smart_alarm.py. stages: one character per live epoch from epoch 0 (W 1 2 3 R, '-' lost); the stage of epoch e is handed out at max(e + 1 + behind, 10) * 30 s (the live scorer's first call comes once 10 epochs are in, read 4 behind); window: [start, end) in seconds on the same clock. expect: the wake (epoch read, why, seconds); a window-end wake has no epoch.",
+ "behind": 4,
+ "min_epochs": 10,
+ "cases": [
+  {"name": "light sleep inside the window wakes at once", "window": [600, 1800], "stages": "2222222222222222222222222222222222222222", "expect": {"epoch": 15, "why": "light", "at_s": 600}},
+  {"name": "N1 counts as light sleep", "window": [600, 1800], "stages": "1111111111111111111111111111111111111111", "expect": {"epoch": 15, "why": "light", "at_s": 600}},
+  {"name": "deep sleep all through: the window's end", "window": [600, 1200], "stages": "333333333333333333333333333333333333333333333333333333333333", "expect": {"epoch": null, "why": "window end", "at_s": 1200}},
+  {"name": "not within 10 minutes after a deep epoch", "window": [600, 3000], "stages": "33333333333333333333222222222222222222222222222222222222222222222222222222222222", "expect": {"epoch": 40, "why": "light", "at_s": 1350}},
+  {"name": "dream sleep wakes, after the deep guard", "window": [900, 1800], "stages": "3333333333333333333333333RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR", "expect": {"epoch": 45, "why": "dream", "at_s": 1500}},
+  {"name": "awake counts; lost epochs never wake", "window": [600, 1800], "stages": "---------------WWWWWWWWWWWWWWWWWWWWWWWWW", "expect": {"epoch": 15, "why": "awake", "at_s": 600}},
+  {"name": "only lost epochs: the window's end", "window": [600, 1800], "stages": "------------------------------------------------------------------", "expect": {"epoch": null, "why": "window end", "at_s": 1800}},
+  {"name": "light sleep before the window does not wake", "window": [1200, 2400], "stages": "22222222222222222222222222222222222222222222222222222222222222222222222222222222", "expect": {"epoch": 35, "why": "light", "at_s": 1200}},
+  {"name": "deep sleep in the hour before the window still guards", "window": [900, 2400], "stages": "222222222222222233222222222222222222222222222222222222222222222222", "expect": {"epoch": 38, "why": "light", "at_s": 1290}},
+  {"name": "deep sleep when the window opens: no wake inside it", "window": [600, 1500], "stages": "222223333333333333333333333333333333333333333333333333", "expect": {"epoch": null, "why": "window end", "at_s": 1500}},
+  {"name": "light sleep allowed only at the window's end: the end wins", "window": [600, 1200], "stages": "333333333333333222222222222222222222222222222222222222", "expect": {"epoch": null, "why": "window end", "at_s": 1200}},
+  {"name": "a deep epoch inside the window restarts the guard", "window": [600, 3000], "stages": "3333333333333332333322222222222222222222222222222222222222222222222222", "expect": {"epoch": 40, "why": "light", "at_s": 1350}}
+ ]
+}

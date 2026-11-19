@@ -25,6 +25,7 @@ class RecorderStatus {
     this.drift,
     this.lightsOffMs,
     this.driftOnsetMs,
+    this.alarm,
   });
 
   final Phase phase;
@@ -67,6 +68,9 @@ class RecorderStatus {
   /// The detector's first "probably asleep" onset since lights off (unix ms).
   final int? driftOnsetMs;
 
+  /// Tonight's smart alarm (alarm/live_alarm.dart); null without one.
+  final AlarmStatus? alarm;
+
   double get minutesRecorded => nightSamples / sampleRateHz / 60;
 
   Contact contactOf(String channel) => classifyOhms(contactOhms[channel]);
@@ -99,6 +103,26 @@ class RecorderStatus {
     drift: drift,
     lightsOffMs: lightsOffMs,
     driftOnsetMs: driftOnsetMs,
+    alarm: alarm,
+  );
+
+  /// The same status with the smart alarm replaced (null: none).
+  RecorderStatus withAlarm(AlarmStatus? alarm) => RecorderStatus(
+    phase: phase,
+    nightStartMs: nightStartMs,
+    nightSamples: nightSamples,
+    lastDataMs: lastDataMs,
+    rssi: rssi,
+    battery: battery,
+    contactOhms: contactOhms,
+    runs: runs,
+    note: note,
+    slots: slots,
+    sentMs: sentMs,
+    drift: drift,
+    lightsOffMs: lightsOffMs,
+    driftOnsetMs: driftOnsetMs,
+    alarm: alarm,
   );
 
   /// The same status with the drift-off fields replaced (null clears them).
@@ -117,6 +141,7 @@ class RecorderStatus {
     drift: drift,
     lightsOffMs: lightsOffMs,
     driftOnsetMs: onsetMs,
+    alarm: alarm,
   );
 
   Map<String, Object?> toMap({required int nowMs}) => {
@@ -138,6 +163,7 @@ class RecorderStatus {
     'drift': drift?.name,
     'lightsOffMs': lightsOffMs,
     'driftOnsetMs': driftOnsetMs,
+    'alarm': alarm?.toMap(),
   };
 
   /// Parses a message from the recorder; returns null for anything else.
@@ -169,6 +195,52 @@ class RecorderStatus {
       drift: DriftState.values.where((d) => d.name == data['drift']).firstOrNull,
       lightsOffMs: _int(data['lightsOffMs']),
       driftOnsetMs: _int(data['driftOnsetMs']),
+      alarm: AlarmStatus.fromMap(data['alarm']),
+    );
+  }
+}
+
+/// The smart alarm as the screen sees it: the window, what the live model does, and the wake.
+class AlarmStatus {
+  const AlarmStatus({required this.endMs, required this.windowMin, required this.phase, this.stage, this.wakeMs, this.why, this.note});
+
+  /// Wake by (unix ms), and the window's minutes before it.
+  final int endMs;
+  final int windowMin;
+
+  /// `waiting`, `scoring`, `woke`, `ended`, `off` (alarm/live_alarm.dart `AlarmPhase`).
+  final String phase;
+
+  /// The newest live stage, 2 minutes behind (W N1 N2 N3 R gap).
+  final String? stage;
+
+  /// When the rule woke you and why (`light`, `dream`, `awake`, `window end`).
+  final int? wakeMs;
+  final String? why;
+
+  /// Why the live model is off, in a sentence.
+  final String? note;
+
+  Map<String, Object?> toMap() => {
+    'endMs': endMs,
+    'windowMin': windowMin,
+    'phase': phase,
+    'stage': stage,
+    'wakeMs': wakeMs,
+    'why': why,
+    'note': note,
+  };
+
+  static AlarmStatus? fromMap(Object? m) {
+    if (m is! Map || m['endMs'] is! int || m['windowMin'] is! int || m['phase'] is! String) return null;
+    return AlarmStatus(
+      endMs: m['endMs'] as int,
+      windowMin: m['windowMin'] as int,
+      phase: m['phase'] as String,
+      stage: m['stage'] is String ? m['stage'] as String : null,
+      wakeMs: _int(m['wakeMs']),
+      why: m['why'] is String ? m['why'] as String : null,
+      note: m['note'] is String ? m['note'] as String : null,
     );
   }
 }

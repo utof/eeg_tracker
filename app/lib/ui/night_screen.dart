@@ -7,6 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
+import '../alarm/bell.dart';
+import '../alarm/notes.dart';
+import '../alarm/rule.dart' show AlarmPlan;
 import '../dream/store.dart';
 import '../export/store.dart';
 import '../phone.dart';
@@ -23,8 +26,10 @@ import '../share/isolate.dart' show shareAddress;
 import '../sleep/onnx_runs.dart';
 import '../sleep/report.dart';
 import '../sleep/scorer.dart';
+import 'alarm_view.dart';
 import 'dream_screen.dart';
 import 'dream_view.dart' show clock;
+import 'evidence_sheet.dart' show showEvidence;
 import 'export_screen.dart';
 import 'hands_free_screen.dart' show SettingsScreen;
 import 'lights_off_view.dart';
@@ -165,6 +170,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   String? _napLine;
   String? _checkedInAt, _experiment;
   Pending? _pending;
+  AlarmSetup _alarm = const AlarmSetup();
+  AlarmClockState _clockState = const AlarmClockState({});
 
   /// Share on Wi-Fi (DECISIONS rows 220-229): the setting, and the app's own server between nights.
   late final ShareControl _share = ShareControl(
@@ -189,6 +196,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       if (++_ticks % 5 == 0) unawaited(_refreshRunning());
       // Its time may be up, or Android may have ended the recorder: once a minute is enough.
       if (_ticks % 60 == 0) unawaited(_share.sync(night: _running, filesDir: _filesDir, front: _front));
+      // the phone's alarm: is it ringing (the wake face), was "I'm awake" tapped elsewhere
+      if (_ticks % 2 == 0 && (_running || _clockState.endMs != null)) unawaited(_refreshAlarm());
     });
     unawaited(_refresh());
   }
@@ -277,6 +286,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     final dir = _dir ?? await _safe<String?>(Phone.recordingsDir, null);
     final nights = dir == null || running ? const <NightFiles>[] : _listNights(dir);
     final checkedInAt = dir == null ? null : _checkedInToday(dir);
+    final alarm = dir == null ? const AlarmSetup() : AlarmSetupStore.forRecordings(dir).read();
+    final clockState = await _safe(AlarmClock.state, const AlarmClockState({}));
     if (running) FlutterForegroundTask.sendDataToTask(statusCommand);
     if (dir != null && _scoring == null) {
       _scoring = SleepScoring(
@@ -315,7 +326,87 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       _checkedInAt = checkedInAt;
       _experiment = experiment;
       _pending = pending;
+      _alarm = alarm;
+      _clockState = clockState;
     });
+  }
+
+  Future<void> _refreshAlarm() async {
+    final st = await _safe(AlarmClock.state, _clockState);
+    if (mounted) setState(() => _clockState = st);
+  }
+
+  /// The alarm line's button: the setup sheet between nights, Turn off for a phone alarm left from a stopped night,
+  /// Alarm off during a night (it asks first).
+  Future<void> _onAlarm() async {
+    final dir = _dir;
+    if (_running) {
+      final end = _status?.alarm?.endMs ?? _clockState.endMs;
+      if (end == null || !await confirmAlarmOff(context, end)) return;
+      await _safe(AlarmClock.cancel, _clockState);
+      FlutterForegroundTask.sendDataToTask(alarmOffCommand);
+      unawaited(_refreshAlarm());
+      return;
+    }
+    if (_pendingClock) {
+      await _safe(AlarmClock.cancel, _clockState);
+      unawaited(_refreshAlarm());
+      return;
+    }
+    final next = await showAlarmSheet(context, _alarm, onInfo: () => showEvidence(context, 'smart-alarm'));
+    if (next == null || !mounted) return;
+    setState(() => _alarm = next);
+    try {
+      if (dir != null) AlarmSetupStore.forRecordings(dir).write(next);
+    } catch (e) {
+      _say('The alarm setting could not be saved: $e');
+    }
+  }
+
+  Future<void> _awake() async {
+    final st = await _safe(AlarmClock.awake, _clockState);
+    if (mounted) setState(() => _clockState = st);
+  }
+
+  /// A phone alarm still set from a night that was stopped before it rang.
+  bool get _pendingClock {
+    final end = _clockState.endMs;
+    return !_running && end != null && end > DateTime.now().millisecondsSinceEpoch && _clockState.awakeMs == null;
+  }
+
+  /// Sets the phone's alarm for tonight (before the recorder starts, so it rings whatever happens to the recorder)
+  /// and says what on the phone could stop it; returns the plan for the recorder, or null without one.
+  Future<AlarmPlan?> _setAlarmClock(String? dir) async {
+    final plan = _alarm.planAt(DateTime.now());
+    if (plan == null) {
+      if (_pendingClock) await _safe(AlarmClock.cancel, _clockState);
+      return null;
+    }
+    try {
+      if (dir != null) await writeWakeNotes(dir);
+    } catch (_) {
+      // without the notes file the ringer uses the phone's own alarm sound
+    }
+    try {
+      final st = await AlarmClock.schedule(plan);
+      _clockState = st;
+      final at = DateTime.fromMillisecondsSinceEpoch(plan.endMs);
+      final hm = '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
+      if (!st.exact) {
+        _say('The phone does not allow exact alarms, so it may ring a few minutes after $hm. Allow "Alarms & '
+            'reminders" for EEG Tracker in the phone\'s settings.');
+        await AlarmClock.openSetting('exact');
+      } else if (st.silent) {
+        _say('The phone\'s alarm volume is off: turn it up, or the alarm at $hm will be silent.');
+      } else if (!st.fullScreen) {
+        _say('The alarm will ring, but cannot show "I\'m awake" over the lock screen: allow full-screen '
+            'notifications for EEG Tracker.');
+        await AlarmClock.openSetting('fullScreen');
+      }
+    } catch (e) {
+      _say('The phone\'s alarm could not be set ($e). Set one in the Clock app.');
+    }
+    return plan;
   }
 
   /// What the next export would copy (sizes and times only), read off the screen's thread.
@@ -391,8 +482,10 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
         // The system dialog; recording starts anyway, and the warning stays until it is allowed.
         await _safe(() => Phone.openSettings('batteryOptimization'), false);
       }
+      final dir = _dir ?? await _safe<String?>(Phone.recordingsDir, null);
+      final plan = await _setAlarmClock(dir);
       await _share.beforeNight(); // the recorder serves during the night: the app lets go of the port
-      final result = await startRecorderService(_dir ?? await _safe<String?>(Phone.recordingsDir, null));
+      final result = await startRecorderService(dir, alarm: plan);
       if (result is ServiceRequestFailure) _say('The recorder did not start: ${result.error}');
       _status = null;
       _statusAtMs = null;
@@ -413,11 +506,17 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _stop() async {
+    final end = _clockState.endMs;
+    final rings = end != null && end > DateTime.now().millisecondsSinceEpoch && _clockState.awakeMs == null;
+    final at = rings ? DateTime.fromMillisecondsSinceEpoch(end) : null;
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
         title: const Text('Stop the night?'),
-        content: const Text('Recording ends. The files are kept.'),
+        content: Text(
+          'Recording ends. The files are kept.${at == null ? '' : ' The alarm still rings at '
+              '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}.'}',
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Keep recording')),
           TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Stop')),
@@ -629,7 +728,36 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       lightsOffTapped: (s?.lightsOffMs ?? _lightsOffSentMs) != null,
       napLine: _napLine,
       share: _dir == null ? null : _share.line(),
+      alarmLine: _alarmLine(s, now),
+      alarmAction: _alarmAction(s, now),
+      ringing: _clockState.ringing ? (_clockState.reason ?? _windowEndReason()) : null,
     );
+  }
+
+  String _windowEndReason() {
+    final end = _clockState.endMs;
+    if (end == null) return 'Your alarm.';
+    final t = DateTime.fromMillisecondsSinceEpoch(end);
+    return 'The end of your window, ${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}.';
+  }
+
+  String? _alarmLine(RecorderStatus? s, int now) {
+    if (_running) return alarmNightLine(s?.alarm, nowMs: now);
+    if (_pendingClock) {
+      final t = DateTime.fromMillisecondsSinceEpoch(_clockState.endMs!);
+      return 'The phone\'s alarm still rings at ${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}.';
+    }
+    return alarmSetupLine(_alarm, DateTime.fromMillisecondsSinceEpoch(now));
+  }
+
+  String? _alarmAction(RecorderStatus? s, int now) {
+    if (_running) {
+      final a = s?.alarm;
+      final canRing = a != null && a.note != 'Turned off.' && a.phase != 'woke' && now < a.endMs + 20 * 60000;
+      return canRing ? 'Alarm off' : null;
+    }
+    if (_pendingClock) return 'Turn off';
+    return _alarm.on ? 'Change' : 'Set alarm';
   }
 
   @override
@@ -654,6 +782,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       morning: MorningSection(doneAt: _checkedInAt, onCheckIn: _checkIn, onTrends: _trends, experiment: _experiment),
       onLightsOff: _lightsOff,
       onSettings: _settings,
+      onAlarm: _onAlarm,
+      onAwake: _awake,
     );
   }
 }
