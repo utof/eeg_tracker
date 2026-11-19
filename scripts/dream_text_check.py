@@ -4,7 +4,17 @@ Makes clips with a text-to-speech voice (no personal audio: dream-like sentences
 each), once clear and once "sleepy" (slower, quiet, muffled, with room hiss and silence around it, as a 16 kHz
 answer from the phone on the pillow), plus room hiss with no voice. Then transcribes every clip with each pipeline
 and prints the word error rate per language and condition, the clips where words were invented from silence, and
-the time per second of audio. DECISIONS rows 250-259.
+the time per second of audio. DECISIONS rows 250-257; the phone runs the first pipeline in `main` (row 252).
+
+Results of 2026-11-19 (80 answers + 6 hiss clips; word errors in %, clear / sleepy):
+
+    parakeet-v3 + vad 0.25 s (the phone's)  ru 5.2 / 9.3   en 1.1 / 1.6  from hiss 0/6  0.16 s per s
+    parakeet-v3 + vad                       ru 5.2 / 12.8  en 1.1 / 0.5  from hiss 0/6  0.20 s per s
+    parakeet-v3, whole clip                 ru 4.1 / 10.5  en 0.0 / 3.2  from hiss 0/6  0.29 s per s
+    whisper-small + vad, detect             ru 9.9 / 23.8  en 0.5 / 3.2  from hiss 0/6  0.89 s per s
+    whisper-small + vad, language set       ru 9.9 / 21.5  en 0.5 / 3.2  from hiss 0/6  0.85 s per s
+    whisper-small, whole clip, detect       ru 7.0 / 14.5  en 0.5 / 3.2  from hiss 6/6  0.72 s per s
+    whisper-base + vad, detect              ru 25.6 / 46.5 en 4.2 / 4.7  from hiss 0/6  0.27 s per s
 
     # 1. the clips (Piper, GPL: a laptop-only test tool, never in the app or the lock file)
     uv run --no-project --with piper-tts==1.8.0 --with numpy python scripts/dream_text_check.py clips --models _local/stt
@@ -12,9 +22,12 @@ the time per second of audio. DECISIONS rows 250-259.
     UV_PROJECT_ENVIRONMENT=$PWD/_local/stt/venv \
         uv run --project analysis --only-group stt python scripts/dream_text_check.py check --models _local/stt
 
-`--models` holds the downloaded models (README "Dream catcher: speech to text"): `parakeet-v3/`, `whisper-small/`,
-`whisper-base/`, `vad/silero_vad.onnx` and the Piper voices under `tts/`. Clips and results go to `<models>/check/`
-(git-ignored with `_local/`).
+`--models` holds what was downloaded once (about 1.5 GB): `parakeet-v3/` (the 4 files of Hugging Face's
+csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8, the phone's model and revision: app/lib/dream/speech_model.dart),
+`whisper-small/` and `whisper-base/` (the int8 encoder, decoder and tokens of csukuangfj/sherpa-onnx-whisper-small and
+-base), `vad/silero_vad.onnx` (sherpa-onnx's `asr-models` release; also app/assets/models/) and four Piper voices from
+its `tts-models` release unpacked as `tts/<voice>.x/<voice>/` (ru_RU irina and dmitri, en_US ryan, en_GB alan, all
+medium). Clips and results go to `<models>/check/` (git-ignored with `_local/`).
 """
 
 from __future__ import annotations
@@ -317,8 +330,8 @@ def main() -> int:
     ]
     print(f"{len(clips)} clips, {sum(len(c.samples) for c in clips) / RATE:.0f} s of audio", flush=True)
     pipes = [
+        Pipeline("parakeet-v3 + vad 0.25 s (the phone's)", parakeet(m / "parakeet-v3"), True, pad_s=PAD_S),
         Pipeline("parakeet-v3 + vad", parakeet(m / "parakeet-v3"), True),
-        Pipeline("parakeet-v3 + vad 0.25 s", parakeet(m / "parakeet-v3"), True, pad_s=PAD_S),
         Pipeline("parakeet-v3, whole clip", parakeet(m / "parakeet-v3"), False),
         Pipeline("whisper-small + vad, detect", whisper(m / "whisper-small", "small"), True),
         Pipeline("whisper-small + vad, language set", whisper(m / "whisper-small", "small"), True, fixed_lang=True),

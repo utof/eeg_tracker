@@ -141,6 +141,16 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    the newest `files/sound-states/*.sound.json`). Reinstall
    the app afterwards.
 
+8. **The dream catcher's speech to text** (DECISIONS rows 250-257): push a made-up session and its WAVs (the laptop
+   check's TTS clips, `_local/stt/check/clips/`, never personal audio) into `files/dream-catcher/` as in step 1, open
+   **Dream catcher**, tap **Download (671 MB)** under Answers as text and wait for "Speech model on this phone"; the
+   answers are written out at once: `files/dream-catcher/<stamp>-r<n>.text.json` holds the text and `tookS`. Then
+   delete `files/nights/*.report.json` and bring the app back to the front: the night is scored again in the same
+   process, so both ONNX Runtimes work side by side. On 2026-11-19 (release x86_64 build): the download took about
+   100 s and passed its hash check; two Russian and one English answer came out word for word, 0.38 s per second of
+   audio (2.0-2.8 s an answer, the model already loaded), the room-hiss answer as "No words heard." in 0.2 s; the
+   night scored again afterwards; the app was back to 154 MB (PSS) once the speech isolate had ended.
+
 The night of 2026-11-17 (58 recordings, 12.9 h) scored on the emulator in 99 s with a peak of 438 MB (PSS; 561 MB
 RSS) and the same stages as the laptop's ONNX check (96.6 % of epochs agree with the laptop's one-pass scoring; see
 `assets/models/README.md`). The emulator's speed is the laptop's, not a phone's.
