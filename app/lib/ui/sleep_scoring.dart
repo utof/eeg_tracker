@@ -50,6 +50,9 @@ class SleepScoring extends ChangeNotifier {
   Timer? _soon;
   bool _halted = false;
 
+  /// What [runSoon] was asked to do once the go has ended (packing old recordings, DECISIONS 540-549).
+  void Function()? _then;
+
   bool get busy => _running != null;
 
   /// A go is asked for and starts in a moment.
@@ -72,11 +75,23 @@ class SleepScoring extends ChangeNotifier {
     return _running = _all().whenComplete(() {
       _running = null;
       nightScoringBusy = false;
+      final then = _then;
+      _then = null;
+      if (then != null) {
+        try {
+          then();
+        } catch (e) {
+          debugPrint('after sleep scoring: $e');
+        }
+      }
     });
   }
 
-  /// [run] after [settle], so the screen and Share on Wi-Fi answer first; a call while one waits or runs does nothing.
-  void runSoon() {
+  /// [run] after [settle], so the screen and Share on Wi-Fi answer first; a call while one waits or runs starts
+  /// nothing more. [then] runs once that go (or the one running) has ended; the latest call's [then] replaces an
+  /// earlier one, and [halt] drops it.
+  void runSoon({void Function()? then}) {
+    if (then != null) _then = then;
     if (_running != null || _soon != null) return;
     _soon = Timer(settle, () {
       _soon = null;
@@ -88,6 +103,7 @@ class SleepScoring extends ChangeNotifier {
   void halt() {
     _soon?.cancel();
     _soon = null;
+    _then = null;
     if (_running != null) _halted = true;
   }
 

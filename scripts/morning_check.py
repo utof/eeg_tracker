@@ -3,9 +3,9 @@
 usage: morning_check.py <folder or <stamp>.f32 ...> [--out-dir DIR]
 Run in the analysis environment:  uv run --project analysis python scripts/morning_check.py _local/recordings
 
-Reads <stamp>.f32 + .markers.jsonl (docs/data-format.md), finds the newest morning session (markers
-morning:eyes_closed:start/end, morning:eyes_open:start/end, morning:ratings {...}) and computes, for each
-back channel (O1, O2):
+Reads <stamp>.f32 (or the same packed after a day, <stamp>.f32.xz) + .markers.jsonl (docs/data-format.md), finds
+the newest morning session (markers morning:eyes_closed:start/end, morning:eyes_open:start/end, morning:ratings
+{...}) and computes, for each back channel (O1, O2):
 - alpha power (8-13 Hz, µV²) eyes closed and eyes open, from the mean spectrum of clean 2 s segments;
 - the eyes-closed rise: alpha eyes closed / alpha eyes open;
 - the individual alpha frequency ("alpha speed"): centre of gravity of the power above the 1/f line in 7-14 Hz
@@ -30,6 +30,7 @@ from scipy import signal
 
 sys.path.insert(0, str(Path(__file__).parent))
 import night_files as nf  # noqa: E402
+import packed  # noqa: E402  (a recording packed after a day, <stamp>.f32.xz, reads as the plain one)
 from to_bdf import load  # noqa: E402
 
 FS = 250
@@ -395,7 +396,7 @@ def analyse(path: Path, sess: list[dict], fs: float = FS) -> dict:
 
 
 def run(a: argparse.Namespace) -> None:
-    paths = sorted({p for x in a.inputs for p in ([*x.glob("*.f32")] if x.is_dir() else [x])})
+    paths = sorted({p for x in a.inputs for p in (packed.raw_files(x) if x.is_dir() else [packed.logical(x)])})
     if not paths:
         raise SystemExit("no .f32 recordings found")
     found = find_latest(paths, "morning")

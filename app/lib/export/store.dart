@@ -14,9 +14,15 @@
 // The index (`files/export/state.json`) holds each exported file's size, modified time and SHA-256, so an export of
 // "what is new" needs to read only new or changed files, and the manifest can list every file without reading it
 // again. Plain Dart: tested on a plain folder.
+//
+// A recording packed after a day (`<stamp>.f32.gz`, recorder/packed.dart; DECISIONS 540-549) leaves the phone as it
+// is, smaller, with its `original` (the `.f32`'s path, bytes and SHA-256, from its header) in the manifest and in the
+// share list, so the laptop unpacks and checks it. One whose `.f32` was exported before it was packed is not exported
+// again: the export folder already holds those bytes, and the manifest keeps listing the `.f32` as on the phone.
 import 'dart:convert';
 import 'dart:io';
 
+import '../recorder/packed.dart' show PackedInfo, isPackedPath, packedInfo, packedSuffix;
 import '../sleep/report.dart' show isoLocal;
 
 /// The folder an export creates inside the one the owner picked (or a Syncthing folder).
@@ -44,13 +50,23 @@ bool isExported(String path) {
 
 /// One file in the app's folder.
 class StoredFile {
-  const StoredFile(this.path, this.file, this.bytes, this.modifiedMs);
+  const StoredFile(this.path, this.file, this.bytes, this.modifiedMs, {this.packed});
 
   /// Relative to `files/`, with `/` (`recordings/2026-11-18-231200.f32`).
   final String path;
   final File file;
   final int bytes;
   final int modifiedMs;
+
+  /// For a recording packed after a day: what it holds (the `.f32`'s name, bytes, SHA-256, modified time).
+  final PackedInfo? packed;
+
+  /// The plain file a packed one holds (`recordings/2026-11-18-231200.f32`); its own path otherwise.
+  String get originalPath => packed == null ? path : path.substring(0, path.length - packedSuffix.length);
+
+  /// The share list's and the manifest's `original` of a packed file; null for any other.
+  Map<String, Object?>? get originalJson =>
+      packed == null ? null : {'path': originalPath, 'bytes': packed!.bytes, 'sha256': packed!.sha256};
 }
 
 /// Every file that leaves the phone, sorted by path. A file that vanishes while listed is skipped.
@@ -64,7 +80,7 @@ List<StoredFile> storedFiles(Directory filesDir) {
     if (!isExported(path)) continue;
     final st = e.statSync();
     if (st.type != FileSystemEntityType.file) continue;
-    out.add(StoredFile(path, e, st.size, st.modified.millisecondsSinceEpoch));
+    out.add(StoredFile(path, e, st.size, st.modified.millisecondsSinceEpoch, packed: isPackedPath(path) ? packedInfo(e) : null));
   }
   return out..sort((a, b) => a.path.compareTo(b.path));
 }
@@ -77,6 +93,7 @@ class ExportedFile {
     required this.sha256,
     required this.written,
     this.recopy = false,
+    this.original,
   });
 
   final int bytes;
@@ -91,6 +108,9 @@ class ExportedFile {
   /// It changed while it was being copied: the next export copies it again.
   final bool recopy;
 
+  /// A packed recording's `original` (path, bytes, SHA-256 of the `.f32` it holds); null for any other file.
+  final Map<String, Object?>? original;
+
   bool sameAs(StoredFile f) => !recopy && bytes == f.bytes && modifiedMs == f.modifiedMs;
 
   Map<String, Object?> toJson() => {
@@ -99,13 +119,17 @@ class ExportedFile {
     'sha256': sha256,
     'written': written,
     if (recopy) 'recopy': true,
+    if (original != null) 'original': original,
   };
 
   static ExportedFile? fromJson(Object? j) {
     if (j is! Map) return null;
-    final b = j['bytes'], m = j['modified_ms'], s = j['sha256'], w = j['written'];
+    final b = j['bytes'], m = j['modified_ms'], s = j['sha256'], w = j['written'], o = j['original'];
     if (b is! int || m is! int || s is! String || w is! String) return null;
-    return ExportedFile(bytes: b, modifiedMs: m, sha256: s, written: w, recopy: j['recopy'] == true);
+    final original = o is Map && o['path'] is String && o['bytes'] is int && o['sha256'] is String
+        ? <String, Object?>{'path': o['path'], 'bytes': o['bytes'], 'sha256': o['sha256']}
+        : null;
+    return ExportedFile(bytes: b, modifiedMs: m, sha256: s, written: w, recopy: j['recopy'] == true, original: original);
   }
 }
 
@@ -209,11 +233,20 @@ class ExportStore {
   }
 }
 
-/// The files an export of what is new would copy: new, changed, or not finished last time.
+/// The files an export of what is new would copy: new, changed, or not finished last time; not a packed recording
+/// whose `.f32` was exported before it was packed.
 List<StoredFile> newOrChanged(List<StoredFile> stored, ExportState s) => [
   for (final f in stored)
-    if (!(s.files[f.path]?.sameAs(f) ?? false)) f,
+    if (!(s.files[f.path]?.sameAs(f) ?? false) && !plainExported(f, s)) f,
 ];
+
+/// Whether [f] is a packed recording whose `.f32` (the same bytes) is already in the export folder.
+bool plainExported(StoredFile f, ExportState s) {
+  final o = f.packed;
+  if (o == null) return false;
+  final e = s.files[f.originalPath];
+  return e != null && !e.recopy && e.bytes == o.bytes && e.sha256 == o.sha256;
+}
 
 typedef Pending = ({int files, int bytes, DateTime? lastComplete});
 

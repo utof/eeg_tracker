@@ -6,7 +6,8 @@
 //   GET  /stream         server-sent events: a hello, every batch {"i","t","uv"}, every marker
 //   POST /marker         a text marker into the run's .markers.jsonl (503 while nothing records)
 //   POST /contact        503: the phone checks contact once, at the start of the night (row 52)
-//   GET  /files          every file Export data would copy: path, bytes, sha256, modified_ms
+//   GET  /files          every file Export data would copy: path, bytes, sha256, modified_ms (and a packed
+//                        recording's `original`: the .f32 it holds)
 //   GET  /files/<path>   one file, with HTTP Range (a growing night file is fetched piece by piece)
 //   the laptop's own jobs (/sleep-report, /morning-report, /hypnogram.png): 503, as the page server answers
 //   while the recorder is away
@@ -494,6 +495,8 @@ class ShareServer {
         'sha256': sha,
         'modified_ms': f.modifiedMs,
         if (growing) 'growing': true,
+        // a recording packed after a day: the .f32 it holds, so the laptop never fetches a night twice (DECISIONS 540-549)
+        if (f.originalJson != null) 'original': f.originalJson,
       });
     }
     if (hashed > before) _writeCache({for (final f in stored) f.path});

@@ -38,6 +38,7 @@ class FakePhone:
         self.requests: list[tuple[str, str, str | None]] = []  # (method, path, Range)
         self.corrupt: set[str] = set()  # paths served with a flipped byte
         self.lie: dict[str, dict] = {}  # extra list rows, as sent
+        self.originals: dict[str, dict] = {}  # a packed file's `original` (path, bytes, sha256), as the app lists it
         self.down = False
         fake = self
 
@@ -61,7 +62,8 @@ class FakePhone:
                     self._send(401, b'{"error": "token missing or wrong"}'); return
                 if self.path == "/files":
                     rows = [dict(path=p, bytes=len(b), sha256=None if p in fake.growing else sha(b),
-                                 modified_ms=fake.modified.get(p, T0), **({"growing": True} if p in fake.growing else {}))
+                                 modified_ms=fake.modified.get(p, T0), **({"growing": True} if p in fake.growing else {}),
+                                 **({"original": fake.originals[p]} if p in fake.originals else {}))
                             for p, b in sorted(fake.files.items())] + list(fake.lie.values())
                     self._send(200, json.dumps(dict(format=pp.FORMAT, version=1, files=rows)).encode()); return
                 if self.path == "/state":

@@ -126,7 +126,7 @@ def night(bdf: Path, sleep: Path) -> dict[str, Any]:
 def runs(paths: list[Path]) -> dict[str, Any]:
     out: list[dict[str, Any]] = []
     for p in paths:
-        if p.suffix != ".f32":
+        if not p.name.endswith((".f32", ".f32.xz")):
             continue
         x, miss = val.load_run(p)
         seconds = hf.inputs(x, miss)

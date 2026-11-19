@@ -26,6 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import brainbit_ble as bb  # noqa: E402
+import packed  # noqa: E402
 
 LIFT_S, REST_S = 4.0, 3.0
 WHERE = {"O1": "LEFT BACK", "O2": "RIGHT BACK", "T3": "LEFT TEMPLE", "T4": "RIGHT TEMPLE"}
@@ -217,7 +218,7 @@ def order_from(lifts: dict) -> str | None:
 
 def sdk_reference(path: Path, seconds: float = 60.0) -> dict:
     """Noise level (RMS of sample-to-sample steps, µV) per channel in the middle of an SDK recording."""
-    data = path.read_bytes(); n = len(data) // 20
+    data = packed.read_bytes(path); n = len(data) // 20  # plain, or packed after a day (.f32.xz)
     k = int(seconds * bb.FS); start = max(0, n // 2 - k // 2)
     cols: list[list[float]] = [[], [], [], []]
     for i in range(start, min(n, start + k)):

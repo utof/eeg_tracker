@@ -2,29 +2,38 @@
 
 usage: to_bdf.py <stamp>.f32 [<stamp>.f32 ...] [-o out.bdf]
 
+A recording packed after a day (<stamp>.f32.xz, scripts/packed.py) is read the same; either name may be given.
+
 One night is often several files, because the recorder restarts after a Bluetooth stall. Files are joined in
 time order. Missing time, inside a file or between files, is filled by holding the last value and marked with a
 "BAD_gap" annotation, so file time equals wall-clock time and 30 s sleep epochs line up with the clock.
 The start is moved back to a whole second (pyedflib 0.1.42 mishandles sub-second starts) and the end is padded
 to a whole second with the edge value ("BAD_padding"). Review: docs/research/bdf-plus-writing.md section 7.
 """
-import argparse, json
+import argparse, json, sys
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import pyedflib
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import packed  # noqa: E402
+
 FS = 250
 NAMES = ["O1", "O2", "T3", "T4"]
 LIM = 400_000  # µV; the headband reports +-0.4 V at the rails. int: fits the 8-char header field
 MIN_GAP_S = 0.5
 IDX_DTYPE = np.dtype([("t", "<f8"), ("i", "<u8")])
+REC_DTYPE = np.dtype([("pack", "<u4"), ("v", "<f4", 4)])
 
 
 def load(path: Path) -> tuple[np.ndarray, np.ndarray]:
-    """Samples in µV (n x 4) and the batch index (arrival time, first-sample index)."""
-    rec = np.fromfile(path, dtype=np.dtype([("pack", "<u4"), ("v", "<f4", 4)]))
+    """Samples in µV (n x 4) and the batch index (arrival time, first-sample index). [path] is the .f32, plain or
+    packed (by either name)."""
+    path = packed.logical(Path(path))
+    raw = packed.read_bytes(path)
+    rec = np.frombuffer(raw, dtype=REC_DTYPE, count=len(raw) // REC_DTYPE.itemsize)
     ip = path.with_suffix(".idx")
     idx = np.fromfile(ip, dtype=IDX_DTYPE) if ip.exists() else np.empty(0, dtype=IDX_DTYPE)
     idx = idx[idx["i"] < len(rec)]  # an index row can outlive a crash that lost its samples
@@ -33,6 +42,7 @@ def load(path: Path) -> tuple[np.ndarray, np.ndarray]:
 
 def runs(path: Path) -> list[tuple[float, np.ndarray]]:
     """Split one file into runs of unbroken samples: (wall-clock time of the first sample, µV array)."""
+    path = packed.logical(Path(path))
     uv, idx = load(path)
     if not len(uv):
         return []
@@ -68,7 +78,7 @@ def join(paths: list[Path]) -> tuple[datetime, np.ndarray, list[tuple[float, flo
             notes.append((n / FS, -1, f"overlap {(n - want) / FS:.1f}s"))
         parts.append(x); n += len(x)
     for p in paths:  # page markers (scripts/web/ pages POST /marker) become annotations at their clock time
-        mf = p.with_suffix(".markers.jsonl")
+        mf = packed.logical(Path(p)).with_suffix(".markers.jsonl")
         for line in (mf.read_text().splitlines() if mf.exists() else []):
             try: m = json.loads(line)
             except json.JSONDecodeError: continue
@@ -102,6 +112,7 @@ def main() -> None:
     ap.add_argument("files", nargs="+", type=Path)
     ap.add_argument("-o", "--out", type=Path)
     a = ap.parse_args()
+    a.files = [packed.logical(f) for f in a.files]
     dst = a.out or a.files[0].with_suffix(".bdf")
     start, uv, notes = join(a.files)
     write(dst, start, uv, notes)

@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../recorder/packed.dart' show readRaw;
 import '../sleep/report.dart' show isoLocal;
 import 'measures.dart';
 import 'pyfmt.dart';
@@ -106,7 +107,7 @@ CheckInPhases cutPhases(Map<String, Float64List> channels, Map<String, PhaseWind
   double t,
 })?
 readCheckInRecording(File f32) {
-  final bytes = f32.readAsBytesSync();
+  final bytes = readRaw(f32); // plain, or packed after a day
   final n = bytes.length ~/ 20;
   final data = ByteData.sublistView(bytes);
   final channels = {for (final ch in recordedChannels) ch: Float64List(n)};

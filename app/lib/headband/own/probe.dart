@@ -17,6 +17,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import '../../recorder/chunk_writer.dart' show fileStem, logTime, recordBytes;
+import '../../recorder/packed.dart' show isPackedPath, plainFileOf, rawLength, readRaw;
 import 'driver.dart';
 import 'protocol.dart';
 import 'settings.dart';
@@ -114,7 +115,7 @@ String? orderFrom(Map<String, Map<String, Object?>> lifts) {
 /// Noise level (RMS of sample-to-sample steps, µV) per channel in the middle of a recording made with BrainBit's
 /// SDK, for a rough check of the scale.
 Map<String, Map<String, num>> sdkReference(File f32, {double seconds = 60}) {
-  final data = ByteData.sublistView(f32.readAsBytesSync());
+  final data = ByteData.sublistView(readRaw(f32)); // plain, or packed after a day
   final n = data.lengthInBytes ~/ recordBytes;
   final k = (seconds * fs).toInt();
   final start = math.max(0, n ~/ 2 - k ~/ 2);
@@ -853,14 +854,14 @@ File? newestSdkRecording(Directory recordings, {int minSamples = 60 * fs}) {
   try {
     files = [
       for (final f in recordings.listSync().whereType<File>())
-        if (f.path.endsWith('.f32')) f,
+        if (f.path.endsWith('.f32') || isPackedPath(f.path)) plainFileOf(f),
     ]..sort((a, b) => b.path.compareTo(a.path));
   } on FileSystemException {
     return null;
   }
   for (final f in files.take(40)) {
     try {
-      if (f.lengthSync() < minSamples * recordBytes) continue;
+      if (rawLength(f) < minSamples * recordBytes) continue;
       final log = File('${f.path.substring(0, f.path.length - 4)}.log');
       if (log.existsSync() && log.readAsStringSync().contains('driver own Bluetooth')) continue;
       return f;

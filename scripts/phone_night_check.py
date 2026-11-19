@@ -22,7 +22,7 @@ The thresholds of the verdict are planning values (DECISIONS row 320), not measu
 """
 from __future__ import annotations
 
-import argparse, bisect, re, statistics, struct, sys
+import argparse, bisect, lzma, re, statistics, struct, sys, zlib
 from array import array
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -31,6 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import night_files as nf  # noqa: E402  (standard library only)
+import packed  # noqa: E402  (a recording packed after a day, <stamp>.f32.xz, reads as the plain one)
 from battery import STUCK  # noqa: E402  the headband gauge's stuck readings (0-2 %, 100 %)
 
 FS = 250
@@ -205,6 +206,7 @@ class Run:
 
     @property
     def path(self) -> Path:
+        """The .f32 by its plain name, also when it is packed (packed.open_raw opens either)."""
         return self.folder / f"{self.stem}.f32"
 
     def has(self, *kinds: str) -> bool:
@@ -245,7 +247,7 @@ def source_of(events: list[Event]) -> str:
 
 
 def load_runs(folder: Path) -> list[Run]:
-    stems = {p.stem for p in folder.glob("*.f32")} | {p.stem for p in folder.glob("*.log")}
+    stems = {p.stem for p in packed.raw_files(folder)} | {p.stem for p in folder.glob("*.log")}
     runs = []
     for stem in stems:
         start = nf.stamp_time(Path(stem))
@@ -256,7 +258,7 @@ def load_runs(folder: Path) -> list[Run]:
         except OSError:
             text = ""
         try:
-            samples = (folder / f"{stem}.f32").stat().st_size // REC
+            samples = packed.size(folder / f"{stem}.f32") // REC
         except OSError:
             samples = 0
         events, unknown = parse_log(text, stem)
@@ -392,12 +394,30 @@ def _packs(b: bytes) -> array:
     return a[0::5]
 
 
+_unpacked: dict[str, bytes] = {}
+
+
+def unpacked(run: Run) -> bytes | None:
+    """A packed run's samples, unpacked once (a packed file cannot jump to a record without unpacking up to it); None
+    for a plain one."""
+    d = packed.on_disk(run.path)
+    if d is None or not packed.is_packed(d):
+        return None
+    if str(d) not in _unpacked:
+        _unpacked[str(d)] = packed.read_bytes(d)
+    return _unpacked[str(d)]
+
+
 def pack_at(run: Run, j: int) -> int | None:
     try:
-        with open(run.path, "rb") as f:
-            f.seek(j * REC)
-            b = f.read(4)
-    except OSError:
+        data = unpacked(run)
+        if data is not None:
+            b = data[j * REC:j * REC + 4]
+        else:
+            with open(run.path, "rb") as f:
+                f.seek(j * REC)
+                b = f.read(4)
+    except (OSError, lzma.LZMAError, zlib.error, EOFError):
         return None
     return struct.unpack("<I", b)[0] if len(b) == 4 else None
 
@@ -422,7 +442,7 @@ def scan_packets(run: Run, cuts: set[int], out: Packets) -> None:
     first_batch = firsts[1] if len(firsts) > 1 and firsts[0] == 0 else None
     prev, base = None, 0
     try:
-        f = open(run.path, "rb")
+        f = packed.open_raw(run.path)
     except OSError:
         return
     with f:
@@ -670,7 +690,9 @@ def signal_numbers(runs: list[Run]) -> dict | None:
     for run in runs:
         if run.samples < FS:
             continue
-        mm = np.memmap(run.path, dtype=dt, mode="r", shape=(run.samples,))
+        data = unpacked(run)
+        mm = (np.frombuffer(data, dtype=dt, count=run.samples) if data is not None
+              else np.memmap(run.path, dtype=dt, mode="r", shape=(run.samples,)))
         for a in range(0, run.samples - FS + 1, 60 * FS):
             v = np.asarray(mm["v"][a:a + 60 * FS], dtype=np.float64) * 1e6
             whole = len(v) // FS * FS
