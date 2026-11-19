@@ -8,6 +8,7 @@ import '../detectors/detectors.dart' show EpochQuality;
 import '../recorder/nights.dart' show nightLabel;
 import '../sleep/drift.dart' show driftCheck;
 import '../sleep/report.dart';
+import 'alarm_view.dart' show WakingUp, WakingUpSection;
 import 'lights_off_view.dart';
 import 'parts.dart';
 import 'sleep_chart.dart';
@@ -40,6 +41,8 @@ class SleepReportView extends StatelessWidget {
     this.onInfo,
     this.onExtrasInfo,
     this.onDriftInfo,
+    this.alarm,
+    this.onAlarmInfo,
     this.onOpenNight,
     this.onRetry,
     this.onLicences,
@@ -65,6 +68,10 @@ class SleepReportView extends StatelessWidget {
 
   /// The "i" of the falling asleep section (the drift-off detector's note).
   final VoidCallback? onDriftInfo;
+
+  /// The smart alarm of this night ("Waking up", alarm_view.dart), and its "i".
+  final WakingUp? alarm;
+  final VoidCallback? onAlarmInfo;
   final void Function(SleepReport night)? onOpenNight;
   final VoidCallback? onRetry;
   final VoidCallback? onLicences;
@@ -177,6 +184,7 @@ class SleepReportView extends StatelessWidget {
       ],
       if (drift != null)
         FallingAsleepSection(drift: drift, check: driftCheck([r, ...others]), onInfo: onDriftInfo),
+      if (alarm != null) WakingUpSection(content: alarm!, onInfo: onAlarmInfo),
       if (x != null) ExtrasSection(extras: x, earlier: earlierJaw(r.nightOf, others), onInfo: onExtrasInfo),
     ];
   }

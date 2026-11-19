@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../recorder/contact.dart';
+import 'alarm_view.dart';
 import 'lights_off_view.dart';
 import 'night_strip.dart';
 import 'parts.dart';
@@ -58,6 +59,9 @@ class NightViewModel {
     this.lightsOffLine,
     this.lightsOffTapped = false,
     this.napLine,
+    this.alarmLine,
+    this.alarmAction,
+    this.ringing,
   });
 
   final String title;
@@ -102,6 +106,14 @@ class NightViewModel {
 
   /// The nap coach's newest nap in a line ("Last nap: 30 min, woke you before deep sleep"), if any.
   final String? napLine;
+
+  /// The smart alarm's line in the pinned bar (alarm_view.dart) and its text button: `Set alarm` / `Change` /
+  /// `Turn off` between nights, `Alarm off` during one (null: no button).
+  final String? alarmLine;
+  final String? alarmAction;
+
+  /// While the alarm rings: why it rang, for the wake face.
+  final String? ringing;
 }
 
 class NightView extends StatelessWidget {
@@ -121,6 +133,8 @@ class NightView extends StatelessWidget {
     this.onRetrySleep,
     this.morning,
     this.onLightsOff,
+    this.onAlarm,
+    this.onAwake,
   });
 
   final NightViewModel model;
@@ -142,9 +156,15 @@ class NightView extends StatelessWidget {
   /// Lights off while a night records (DECISIONS 180).
   final VoidCallback? onLightsOff;
 
+  /// The alarm line's button ([NightViewModel.alarmAction]); "I'm awake" while it rings (DECISIONS 235-236).
+  final VoidCallback? onAlarm;
+  final VoidCallback? onAwake;
+
   @override
   Widget build(BuildContext context) {
     final m = model;
+    final ringing = m.ringing;
+    if (ringing != null) return WakeFace(reason: ringing, onAwake: onAwake ?? () {});
     final sleep = m.sleep;
     final text = Theme.of(context).textTheme;
     final headband = [const SectionHeading('Headband'), _Headband(m)];
@@ -189,7 +209,7 @@ class NightView extends StatelessWidget {
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-          child: _Action(m, onStart: onStart, onStop: onStop, onLightsOff: onLightsOff),
+          child: _Action(m, onStart: onStart, onStop: onStop, onLightsOff: onLightsOff, onAlarm: onAlarm),
         ),
       ),
     );
@@ -631,11 +651,12 @@ class _Sound extends StatelessWidget {
 }
 
 class _Action extends StatelessWidget {
-  const _Action(this.m, {required this.onStart, required this.onStop, this.onLightsOff});
+  const _Action(this.m, {required this.onStart, required this.onStop, this.onLightsOff, this.onAlarm});
   final NightViewModel m;
   final VoidCallback onStart;
   final VoidCallback onStop;
   final VoidCallback? onLightsOff;
+  final VoidCallback? onAlarm;
 
   @override
   Widget build(BuildContext context) {
@@ -646,6 +667,8 @@ class _Action extends StatelessWidget {
         busy: m.busy,
         onLightsOff: onLightsOff,
         onStop: onStop,
+        alarmLine: m.alarmLine,
+        onAlarmOff: m.alarmAction == null ? null : onAlarm,
       );
     }
     if (m.running) {
@@ -655,10 +678,24 @@ class _Action extends StatelessWidget {
         label: Text(m.busy ? 'Stopping…' : 'Stop'),
       );
     }
-    return FilledButton.icon(
+    final start = FilledButton.icon(
       onPressed: m.busy ? null : onStart,
       icon: const Icon(Icons.bedtime_outlined),
       label: Text(m.busy ? 'Starting…' : 'Start night'),
+    );
+    final line = m.alarmLine;
+    if (line == null) return start;
+    // the alarm is set where the night is started, like the Lights off line above Lights off (DECISIONS 233)
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(),
+        const SizedBox(height: 4),
+        AlarmLine(line: line, action: m.alarmAction ?? 'Set alarm', onAction: m.busy ? null : onAlarm),
+        const SizedBox(height: 4),
+        start,
+      ],
     );
   }
 }
