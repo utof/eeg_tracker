@@ -291,10 +291,41 @@ class NightReportStore {
 
   File fileFor(String nightOf) => File('${dir.path}/$nightOf.report.json');
 
+  /// Reports read before, by path: kept while the file's size and times stay the same (DECISIONS row 584). Callers
+  /// never change a report in place: a changed report is a new map, written whole.
+  final Map<String, ({int bytes, int modifiedUs, int changedUs, SleepReport? report})> _known = {};
+
   /// Left while a night is being scored; still there at the next start means the app died while scoring.
   File markerFor(String nightOf) => File('${dir.path}/$nightOf.scoring');
 
-  SleepReport? read(String nightOf) => SleepReport.read(fileFor(nightOf));
+  /// The night's report, or null; read again only when its file changed since this store last read it.
+  SleepReport? read(String nightOf) {
+    final f = fileFor(nightOf);
+    final st = f.statSync();
+    if (st.type != FileSystemEntityType.file) {
+      _known.remove(f.path);
+      return null;
+    }
+    return _cached(f, st);
+  }
+
+  SleepReport? _cached(File f, FileStat st) {
+    final k = _known[f.path];
+    if (k != null &&
+        k.bytes == st.size &&
+        k.modifiedUs == st.modified.microsecondsSinceEpoch &&
+        k.changedUs == st.changed.microsecondsSinceEpoch) {
+      return k.report;
+    }
+    final r = SleepReport.read(f);
+    _known[f.path] = (
+      bytes: st.size,
+      modifiedUs: st.modified.microsecondsSinceEpoch,
+      changedUs: st.changed.microsecondsSinceEpoch,
+      report: r,
+    );
+    return r;
+  }
 
   void write(Map<String, dynamic> report) {
     dir.createSync(recursive: true);
@@ -304,8 +335,6 @@ class NightReportStore {
     tmp.renameSync(fileFor(name).path);
   }
 
-  /// Reports read before, by path: kept while the file's size and times stay the same (DECISIONS row 584).
-  final Map<String, ({int bytes, int modifiedUs, int changedUs, SleepReport? report})> _known = {};
 
   /// Every readable report, newest night first. Only reports that changed since the last call are read again.
   List<SleepReport> all() {
@@ -315,23 +344,7 @@ class NightReportStore {
     for (final f in dir.listSync().whereType<File>()) {
       if (!f.path.endsWith('.report.json')) continue;
       seen.add(f.path);
-      final st = f.statSync();
-      final k = _known[f.path];
-      SleepReport? r;
-      if (k != null &&
-          k.bytes == st.size &&
-          k.modifiedUs == st.modified.microsecondsSinceEpoch &&
-          k.changedUs == st.changed.microsecondsSinceEpoch) {
-        r = k.report;
-      } else {
-        r = SleepReport.read(f);
-        _known[f.path] = (
-          bytes: st.size,
-          modifiedUs: st.modified.microsecondsSinceEpoch,
-          changedUs: st.changed.microsecondsSinceEpoch,
-          report: r,
-        );
-      }
+      final r = _cached(f, f.statSync());
       if (r != null) out.add(r);
     }
     _known.removeWhere((path, _) => !seen.contains(path));
