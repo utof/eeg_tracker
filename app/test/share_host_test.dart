@@ -123,6 +123,23 @@ void main() {
 
   List<File> ext(String e) => dir.listSync().whereType<File>().where((f) => f.path.endsWith('.$e')).toList();
 
+  test('Stop right after start, before the server is ready: it still closes its socket', () async {
+    // A killed isolate keeps its sockets open (until a garbage collection), so the server must close them itself.
+    final port = await freePort();
+    await makeHost(null).start(config(port));
+    await host!.stop();
+    var bound = true;
+    for (var i = 0; i < 20 && bound; i++) {
+      try {
+        await (await ServerSocket.bind(InternetAddress.loopbackIPv4, port)).close();
+        bound = false;
+      } catch (_) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+    }
+    expect(bound, isFalse, reason: 'the port is still held after Stop');
+  });
+
   test('a night started from another screen: the server waits for the app to let go of the port (up to its minute)', () async {
     // The dream catcher's or sound's "Record the night" starts the recorder while the app's own server still holds
     // the port; the night screen lets go at its next sync, up to a minute later (with the phone locked, no sooner).
