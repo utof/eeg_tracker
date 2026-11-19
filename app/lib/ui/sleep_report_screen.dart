@@ -74,7 +74,7 @@ class _SleepReportScreenState extends State<SleepReportScreen> {
           MaterialPageRoute<void>(builder: (_) => SleepReportScreen(scoring: scoring, nightOf: r.nightOf)),
         ),
         onRetry: () => scoring.retry(nightOf),
-        onRescore: report != null && scoring.scorer.olderScorer(report) && !scoring.busy
+        onRescore: report != null && report.scored && scoring.scorer.olderScorer(report) && !scoring.busy
             ? () => scoring.rescore(nightOf)
             : null,
         onLicences: () => showLicensePage(context: context, applicationName: 'EEG Tracker'),

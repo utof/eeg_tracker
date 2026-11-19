@@ -259,4 +259,28 @@ void main() {
     expect(find.textContaining('through noise'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('a report from an earlier scorer offers Score again, at the bottom; while scoring it does not', (tester) async {
+    var asked = 0;
+    Widget page({String? step}) => MaterialApp(
+      theme: nightTheme(),
+      home: SleepReportView(
+        nightOf: '2026-11-17',
+        report: SleepReport(Map<String, dynamic>.of(_main.json)..['model'] = 'anysleep older pieces'),
+        scoringStep: step,
+        onRescore: () => asked++,
+      ),
+    );
+    await tester.pumpWidget(page());
+    await tester.scrollUntilVisible(find.text('Score again'), 400);
+    expect(find.textContaining('An earlier version of the app scored this night'), findsOneWidget);
+    await tester.tap(find.text('Score again'));
+    expect(asked, 1);
+    await tester.pumpWidget(const SizedBox()); // a fresh page, scrolled to the top
+    await tester.pumpWidget(page(step: 'Sleep model 40 % (run 2 of 3)'));
+    expect(find.textContaining('Scoring this night on the phone: Sleep model 40 % (run 2 of 3).'), findsOneWidget);
+    await tester.scrollUntilVisible(find.textContaining('Scored on this phone'), 400);
+    expect(find.text('Score again'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }
