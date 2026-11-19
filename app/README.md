@@ -46,6 +46,8 @@ for a state, with an optional beat, and with the headband shows what your brain 
   `lib/ui/trends_*.dart`; DECISIONS rows 120-129.
 - Our own headband connection (test, behind a switch): `lib/headband/` (the switch, the driver, the probe),
   `lib/ui/own_ble_*.dart`; DECISIONS rows 210-219 and `../docs/own-ble-driver.md` (below).
+- Was this you?: `lib/wearer/` (the rule, the files, the words; reference `../analysis/wearer_check.py`),
+  `lib/ui/wearer_view.dart`; DECISIONS rows 370-379.
 - Sound for states: `lib/states/` (presets, stop rule, readout, files, session), `lib/sound/state_synth.dart` (the
   sound, made in the app) and `lib/sound/soloud_state_sound.dart`, `lib/ui/states_*.dart` and `lib/ui/sound_score.dart`;
   DECISIONS rows 130-139.
@@ -418,6 +420,46 @@ Nothing of this has run on the phone yet, and it has never seen your numbers.
    turns it off by default.
 4. Export data as usual: the log travels with it, and after a few months the laptop can count its cards against
    your own days.
+
+## Was this you? (on unless you switch it off)
+
+The assistant's proposal from the research, not one of your own wishes: switch it off in **Settings** (the gear on the
+main screen), beside its heading, and nothing more is checked or asked. It learns roughly what your eyes-closed alpha
+looks like at the back of the head (its speed, its strength and the slope of the background signal) and asks when a
+later recording looks clearly different, so a borrowed headband does not end up in your trends (DECISIONS rows
+370-379; the **i** shows `docs/evidence/was-this-you.md`).
+
+- **Silent while it learns**: check-ins and nights apart, until 10 of a kind on 5 different days. The check-in's
+  result and the sleep report say "Learning what your brain looks like: 3 of 10 check-ins." at their end.
+- **Check-ins** use their 2 minutes with eyes closed. **Nights** use the awake minutes in the first 10 minutes after
+  you tap **Lights off**; a night without Lights off is not checked. Nights scored before this update are not part of
+  it.
+- When a recording looks clearly different, the page leads with "This doesn't look like your usual brain signal. Was
+  it you?", what differed, and two answers. **Yes, it was me** adds it to what the check knows about you;
+  **Someone else** keeps that night or check-in out of your trends, the unusual card and experiments (written into
+  its own file; nothing is deleted). **Undo** takes either back.
+- **Someone else wore it** is under every other recording too: the check notices only a clearly different signal
+  (on made-up people 2 to 4 in 10 other wearers), so when you know someone borrowed the headband, say so yourself.
+- It asked about the person's own recordings about once in 5 to 10 months of daily recordings on made-up people. A
+  moved headband, a loose electrode, alcohol, a new medicine or a short night can look different too, which is why it
+  only asks. Never a lock, a notification, a name or a health claim.
+
+Files, app-private, exported by Export data: `files/wearer/settings.json` (the switch), `events.jsonl` (switch and
+answers), `log.jsonl` (each recording's first verdict); the answer itself as `wearer` in the night's report or the
+check-in's result, the night's numbers as the report's `wearer_signal` (`docs/data-format.md`).
+
+### Owner step: nothing to do for about two weeks, then one look (1 minute)
+
+Nothing of this has run on the phone yet, and it has seen only one of your check-ins.
+
+1. Do the morning check-in as usual, and tap **Lights off** as you close your eyes at night. At the end of each
+   check-in's result and sleep report the count should climb ("Learning what your brain looks like: 4 of 10
+   check-ins."). A night that says "Not checked" tells you why (no Lights off, too little clean signal, no clear
+   alpha).
+2. If anyone else wears the headband, tap **Someone else wore it** on that recording.
+3. Once it checks, if it ever asks about a recording that was you, tap **Yes, it was me** and tell the assistant
+   what was different that day (alcohol, a short night, the headband sat differently).
+4. If it asks too often, or you never lend the headband, switch it off in Settings and say so.
 
 ## Self-experiments (does this habit change that number, for you?)
 

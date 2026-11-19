@@ -143,7 +143,8 @@ scored again once); there is no picture, BDF or second model, so `hypnogram`, `s
 and each period's `agreement` are `null`; `epoch_s` is 30 and `stages` holds one character per 30 s from
 `data_start` (`W 1 2 3 R`, `-` where over 5 s of the epoch was missing), like the `hypnogram` of
 `eeg_sleep_night`. `extras` and `extras_error` are as above (the phone runs the detectors beside the sleep model;
-a pass that fails leaves `extras` `null` and the night still scored), and so are `drift_off` and `drift_off_error`. While a night is being scored a `<date>.scoring`
+a pass that fails leaves `extras` `null` and the night still scored), and so are `drift_off` and `drift_off_error`. The phone
+adds `wearer_signal` and, once the owner answers "Was this you?", `wearer` (both below, "Was this you?"). While a night is being scored a `<date>.scoring`
 file sits beside it; if it is still there when
 no scoring runs, the last attempt stopped (its text is the error, empty if the app was killed) and the app waits
 for "Try again". Export data copies the reports out (below).
@@ -217,6 +218,7 @@ The phone app runs the morning check-in itself (DECISIONS rows 120 and 125) and 
 | `habits` | `caffeine_cups` (cups of coffee, strong tea or energy drinks the day before, 0-5, 5 = 5 or more), `caffeine_late` (any in the 8 hours before sleep; `false` with no cups), `caffeine_today` (caffeine before this check-in), `alcohol_drinks` (0-5, 5 = 5 or more) |
 | `reaction` | the 1-minute reaction test: `median_ms` (`null` with under 5 taps), `taps`, `lapses` (over 500 ms), `false_starts`, `length_s`; `null` when skipped |
 | `contact` | `{O1, O2, T3, T4}` ohms from the contact check at the start, `null` = no contact |
+| `wearer` | only once the owner answered "Was this you?": `answer` (`me` or `someone else`) and `at` (local ISO time); a check-in marked `someone else` is left out of the trends (below, "Was this you?") |
 
 A stopped check-in, or one whose headband dropped out, leaves no files. Export data copies them out (below).
 
@@ -243,7 +245,7 @@ folder). It never changes or deletes anything in the app's folder, and never run
 
 - The layout is the app's own: `recordings/` (raw nights, the recorder's format above), `nights/<date>.report.json`,
   `mornings/`, `meditations/`, `alpha-theta/` (sessions and `journal.json`), `replay-check/<kind>/` and
-  `settings.json`, `experiments/<made at>/` (self-experiments, below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers and their `<stamp>-r<n>.text.json` words, below, `prompts/`), `sound-states/`, `hands-free/` (below), `unusual/` (below), `lucid/` (below), `own-ble/`
+  `settings.json`, `experiments/<made at>/` (self-experiments, below), `wearer/` ("Was this you?", below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers and their `<stamp>-r<n>.text.json` words, below, `prompts/`), `sound-states/`, `hands-free/` (below), `unusual/` (below), `lucid/` (below), `own-ble/`
   (`settings.json`: which headband connection is in use; `probe/<stamp>/`: the probe's result, docs/own-ble-driver.md), and any folder
   a later feature adds. Left on the phone: `models/` (copies of the app's model assets), `export/` (the export's own
   index), half-written `*.tmp` files, the scorer's `*.scoring` markers, and the two files Android and a plugin keep
@@ -318,6 +320,29 @@ again from `nights/` and `mornings/` every time (the trends page's per-day numbe
 Measure ids are the trends page's: `asleep` (minutes), `kss`, `mood`, `tension`, `reaction` (ms) make the card;
 `iaf` (Hz), `alpha` (µV²), `rise`, `jaw` (bursts an hour asleep) are only logged. Nothing is written while the card
 is switched off.
+
+### Was this you? (`wearer/`)
+
+The assistant's proposal, on unless switched off in Settings (DECISIONS rows 370-379). The check is worked out again
+from the nights and check-ins each time the sleep report, a check-in's result or Settings opens, so only the switch,
+the answers' events and a log are stored here; the answers themselves are written into the recordings' own files.
+These numbers can identify a person: they stay in the app's private folder and leave only with Export data.
+
+| File | Content |
+|---|---|
+| `settings.json` | `on` (on unless switched off; missing or damaged = on), `changed` (local ISO time); written under a temporary name, then renamed |
+| `events.jsonl` | one line per change: `at`, `event`: `switched on`, `switched off`, or `answer` with `kind` (`night` or `check-in`), `id` (the night's date, or the check-in's file stem `2026-11-20-091205`) and `answer` (`me`, `someone else`, or `null` when taken back) |
+| `log.jsonl` | one line per recording the first time it was judged while the check was on, never rewritten: `judged` (local ISO time), `kind`, `id`, `state` (`unchecked`, `learning`, `like you`, `not like you`), `why` (for `unchecked`: `no lights off`, `too little clean signal`, `no alpha peak`), `have` and `days` (accepted recordings of the kind before it, and their different days), `distance` (root mean square of the z-scores; over 2.5 = not like you), `z` (per number), `profile_n`, `usual` (the profile's means), `biggest` (the number furthest away), `signal` (its three numbers: `iaf` Hz, `alpha` log10 µV², `slope`), `answer` (at that time) |
+
+In a night's report (`files/nights/<date>.report.json`), written by the phone's scorer:
+
+| Field | Meaning |
+|---|---|
+| `wearer_signal` | `null` for an unscored night or when the night pass did not run; else `version` 1, `from_s` (Lights off, seconds from `data_start`, a whole epoch; `null` without a Lights off marker), `epochs` (the 30 s epochs used: scored awake, nothing filled in, among the 20 from Lights off), `clean_s` (clean seconds, the smaller of O1 and O2), `iaf_hz`, `alpha_uv2`, `slope` (O1 and O2 combined, the morning check-in's rules), `why` (`null` when usable, else `no lights off`, `too little clean signal` (under 60 s) or `no alpha peak`). Reports scored before 2026-11-19 have no such field and are not part of the check |
+| `wearer` | only once answered: `answer` (`me` or `someone else`) and `at`; a rescored night keeps it. A night marked `someone else` is left out of the trends, the unusual card and experiments; the file is never deleted |
+
+A check-in's numbers come from its result's `back` (`iaf_hz`, `alpha_ec_uv2`, `aperiodic_slope_ec`) when both back
+channels have `clean_s_ec` of 60 s or more; its answer is the result's `wearer` (above).
 
 ### Sharp-hours log (`sharp-hours/`)
 
