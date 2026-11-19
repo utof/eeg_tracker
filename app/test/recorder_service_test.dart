@@ -127,6 +127,26 @@ void main() {
     await h.onDestroy(DateTime.now(), false);
   });
 
+  test('a wedged SDK: the native restart ends the process; Dart exits only if it is still alive 2 s later', () async {
+    // PhoneChannel.kt arms the restart alarm and answers at once; its killProcess comes 300 ms later.
+    final exits = <int>[];
+    final sw = Stopwatch()..start();
+    final ending = restartAppProcess(restart: (_) async {}, exitProcess: exits.add);
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    expect(exits, isEmpty, reason: "Dart's exit ran before the native kill had its chance");
+    await ending;
+    expect(exits, [3]);
+    expect(sw.elapsed, greaterThanOrEqualTo(const Duration(seconds: 2)));
+
+    // A native call that fails cannot end the process: Dart exits at once.
+    final failed = <int>[];
+    await restartAppProcess(
+      restart: (_) async => throw StateError('no channel'),
+      exitProcess: failed.add,
+    ).timeout(const Duration(milliseconds: 500));
+    expect(failed, [3]);
+  });
+
   test('the share switch moved on, off and on again within a second leaves one server, the last one asked', () async {
     final port = await freePort();
     final on = ShareConfig(token: token, port: port).switchedOn(DateTime.now().millisecondsSinceEpoch);
