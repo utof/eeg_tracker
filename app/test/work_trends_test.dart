@@ -19,14 +19,18 @@ import 'package:flutter_test/flutter_test.dart';
 const TrendInputs _none = (nights: [], mornings: [], sessions: []);
 const String _a = 'alert', _g = 'getting_drowsy', _d = 'drowsy', _u = 'unknown';
 
-/// A session file as the phone writes it: one epoch per 30 s from [start], with [levels] one per epoch. [closed]:
-/// epoch numbers read as closed eyes. [withTime]: false writes the first version's file (no epoch time: `t` held
-/// the theta number).
+/// A session file as the phone writes it: one epoch per 30 s from [start], with [levels] one per epoch, its time under
+/// `at`, the theta number under `t` and its seconds of signal under `s`. [closed]: epoch numbers read as closed eyes.
+/// [gapAt], [gap]: the headband away for [gap] before epoch [gapAt] (no epochs then: `at` moves on, `s` does not).
+/// [withTime]: false writes the first version's file (no `at`; `t` held the theta number).
 Map<String, Object?> session(
   DateTime start,
   List<String> levels, {
   Set<int> closed = const {},
   bool withTime = true,
+  int gapAt = -1,
+  Duration gap = Duration.zero,
+  String ended = 'stopped',
   List<Map<String, Object?>> hints = const [],
   List<Map<String, Object?>> breaks = const [],
   List<Map<String, Object?>> ratings = const [],
@@ -35,8 +39,8 @@ Map<String, Object?> session(
   'version': 1,
   'kind': 'work_session',
   'start': start.toIso8601String(),
-  'end': start.add(Duration(seconds: 30 * levels.length)).toIso8601String(),
-  'ended': 'stopped',
+  'end': start.add(Duration(seconds: 30 * levels.length) + (gapAt >= 0 ? gap : Duration.zero)).toIso8601String(),
+  'ended': ended,
   'hints': hints,
   'breaks': breaks,
   'ratings': ratings,
@@ -44,7 +48,8 @@ Map<String, Object?> session(
   'epochs': [
     for (final (i, l) in levels.indexed)
       {
-        't': withTime ? start.add(Duration(seconds: 30 * i)).toIso8601String() : -0.4,
+        if (withTime) 'at': start.add(Duration(seconds: 30 * i) + (gapAt >= 0 && i >= gapAt ? gap : Duration.zero)).toIso8601String(),
+        't': -0.4, // the theta number, as WorkEpoch writes it
         's': 30 * i,
         'eyes_closed': closed.contains(i),
         'level': l,
@@ -98,7 +103,8 @@ void main() {
       expect(n['worktime']!['2026-11-18'], closeTo(51, 1e-9), reason: '102 usable epochs: not the 8 unknown, not the breaks');
       expect(n['workdrowsy']!['2026-11-18'], closeTo(32 / 102 * 100, 1e-9));
       expect(n['workhints'], {'2026-11-18': 2.0});
-      expect(n['workfollowed'], {'2026-11-18': 1.0});
+      // the first by its `taken`; the second came 18 minutes before the Stop that ended the day (finding 7)
+      expect(n['workfollowed'], {'2026-11-18': 2.0});
       expect(n['workbreaks'], {'2026-11-18': 1.0}, reason: 'the 2-minute pause does not count: under 5 minutes');
       expect(n['worksharp'], {'2026-11-18': 3.0});
     });
@@ -184,6 +190,12 @@ void main() {
       expect(workDayNumbers([tiny])['worktime'], {'2026-11-19': 35.0}, reason: '20 minutes before 04:00 is too little');
     });
 
+    test("each half minute is placed by its own time `at`, not by its seconds of signal (they lag after a gap)", () {
+      // 02:00-03:00 on the 18th's day, the headband away 2 hours, then 05:00-06:00 on the 19th's
+      final s = session(DateTime(2026, 11, 19, 2), run(240, _a), gapAt: 120, gap: const Duration(hours: 2));
+      expect(workDayNumbers([s])['worktime'], {'2026-11-18': 60.0, '2026-11-19': 60.0}, reason: 'by `s` all would be before 04:00');
+    });
+
     test('the first file version (no time on the epochs: `t` held the theta number) is placed by its seconds', () {
       final old = session(DateTime(2026, 11, 19, 3, 0), run(240, _a), withTime: false); // 03:00-05:00
       final n = workDayNumbers([old]);
@@ -195,7 +207,7 @@ void main() {
       final epochs = (ok['epochs']! as List).cast<Map<String, Object?>>();
       final bent = {
         ...ok,
-        'epochs': [...epochs, 'junk', {'level': 5}, {'t': 'not a time', 's': null, 'level': 'alert'}],
+        'epochs': [...epochs, 'junk', {'level': 5}, {'at': 'not a time', 't': 'not a time', 's': null, 'level': 'alert'}],
         'hints': [3, {'at': 'x'}],
         'ratings': [{'at': nine.toIso8601String(), 'value': 9}],
       };
@@ -203,6 +215,30 @@ void main() {
       expect(n['worktime'], {'2026-11-18': 40.0});
       expect(n['workhints'], {'2026-11-18': 0.0});
       expect(n['worksharp'], isEmpty, reason: 'a tap outside 1-5 is not a tap');
+    });
+
+    test('a hint in the 30 minutes before a Stop, with 5 minutes or more until the next session, was followed by a break (review 2026-11-20, finding 7)', () {
+      final late = hint(nine.add(const Duration(minutes: 35))); // the session ends at 09:40
+      final one = session(nine, run(80, _a), hints: [hint(nine.add(const Duration(minutes: 5))), late]);
+      final lunch = session(DateTime(2026, 11, 18, 11), run(80, _a));
+      expect(workDayNumbers([one, lunch])['workfollowed'], {'2026-11-18': 1.0}, reason: 'only the hint just before the Stop');
+      final restart = session(DateTime(2026, 11, 18, 9, 42), run(80, _a));
+      expect(workDayNumbers([one, restart])['workfollowed'], {'2026-11-18': 0.0}, reason: 'a restart 2 minutes later is no break');
+      expect(workDayNumbers([one])['workfollowed'], {'2026-11-18': 1.0}, reason: 'the day ended after it');
+      final running = session(nine, run(80, _a), hints: [late], ended: 'running');
+      expect(workDayNumbers([running])['workfollowed'], {'2026-11-18': 0.0}, reason: 'perhaps still running: not known');
+    });
+
+    test('a drowsy stretch does not join up across a break, as the hint rule (review 2026-11-20, finding 5)', () {
+      final levels = [...run(30, _a), ...run(6, _d), ...run(20, _a), ...run(4, _d), ...run(40, _a)];
+      final split = session(nine, levels, breaks: [brk(nine.add(const Duration(minutes: 18)), 10)]);
+      expect(workDayNumbers([split])['workfirst'], isEmpty);
+      final away = session(nine, [...run(30, _a), ...run(6, _d), ...run(4, _d), ...run(40, _a)], gapAt: 36, gap: const Duration(minutes: 10));
+      expect(
+        workDayNumbers([{...away, 'breaks': [brk(nine.add(const Duration(minutes: 18)), 10)]}])['workfirst'],
+        isEmpty,
+        reason: 'out of range: no half minutes inside the break, the 12 start again after it',
+      );
     });
 
     test('several sessions in a day add up; hints and taps belong to the day of their own time', () {

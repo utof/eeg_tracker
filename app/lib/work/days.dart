@@ -8,6 +8,9 @@
 // [workDayMinMinutes] of it has no number at all: the share of such a short stretch would be a few readings, and the
 // first hint of a work day comes after 60 worn minutes. Sessions the owner marked as worn by someone else (`wearer`,
 // as nights and check-ins are marked, DECISIONS 377) are left out. Nothing here changes a file.
+// As in the session (DECISIONS 521-522): a hint in the 30 minutes before a session's Stop was followed by a break when
+// 5 minutes or more passed until the next session (or none came); the first drowsy stretch starts its 12 half minutes
+// again after each break.
 import 'dart:convert';
 import 'dart:io';
 
@@ -65,8 +68,11 @@ Map<String, Map<String, double>> workDayNumbers(Iterable<Object?> sessions) {
   parsed.sort((a, b) => a.$1.compareTo(b.$1));
   final days = <String, _Day>{};
   _Day day(DateTime t) => days.putIfAbsent(dayKey(t), _Day.new);
-  for (final (start, j) in parsed) {
+  for (final (i, (start, j)) in parsed.indexed) {
     final end = _time(j['end']) ?? start;
+    // the time after the Stop until the next session (none: the day's end) is a break when 5 minutes or more
+    final next = i + 1 < parsed.length ? parsed[i + 1].$1 : null;
+    final gapAfter = next == null ? j['ended'] == 'stopped' : next.difference(end).inMilliseconds >= BreakRule.breakMin * 60000;
     final breaks = <(DateTime, DateTime)>[];
     for (final b in j['breaks'] is List ? j['breaks'] as List : const []) {
       final from = b is Map ? _time(b['start']) : null;
@@ -76,11 +82,16 @@ Map<String, Map<String, double>> workDayNumbers(Iterable<Object?> sessions) {
       if (to.difference(from).inMilliseconds >= BreakRule.breakMin * 60000) day(from).breaks++;
     }
     bool inBreak(DateTime t) => breaks.any((b) => !t.isBefore(b.$1) && t.isBefore(b.$2));
+    bool breakSince(DateTime? a, DateTime t) => a != null && breaks.any((b) => b.$1.isAfter(a) && !b.$1.isAfter(t));
     final recent = <bool>[];
+    DateTime? lastT;
     for (final e in j['epochs'] is List ? j['epochs'] as List : const []) {
       if (e is! Map || e['level'] is! String || !_read.contains(e['level']) && e['level'] != 'unknown') continue;
       final t = _epochTime(e, start);
-      if (t == null || inBreak(t)) continue;
+      if (t == null) continue;
+      if (inBreak(t) || breakSince(lastT, t)) recent.clear(); // the hint rule counts only half minutes since a break
+      lastT = t;
+      if (inBreak(t)) continue;
       final d = day(t);
       final level = e['level'] as String;
       if (_read.contains(level) && e['eyes_closed'] != true) {
@@ -96,7 +107,9 @@ Map<String, Map<String, double>> workDayNumbers(Iterable<Object?> sessions) {
       if (at == null) continue;
       final d = day(at);
       d.hints++;
-      if ((h as Map)['taken'] == true) d.followed++;
+      final beforeEnd = end.difference(at).inMilliseconds / 60000;
+      final byStop = gapAfter && beforeEnd >= 0 && beforeEnd <= BreakRule.takenWindowMin;
+      if ((h as Map)['taken'] == true || byStop) d.followed++;
     }
     for (final r in j['ratings'] is List ? j['ratings'] as List : const []) {
       final at = r is Map ? _time(r['at']) : null;
