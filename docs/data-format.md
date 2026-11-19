@@ -454,7 +454,7 @@ per-30-s numbers are enough to score a session again with other weights or lines
 | `hints` | `at`, `reason` (`stretch`, `drowsy`, `eyesClosed`, `snooze`), `active_min` (worn minutes of the stretch), `threshold_min`, `level`, `answer` (`onBreak`, `snoozed`, `notNow` or `null`), `answered_at`, `taken` (a break of 5 minutes or more started within 30 minutes) |
 | `breaks` | `start`, `end`, `source` (`tapped` or `headbandOff`: no usable signal for 5 minutes, counted from when it stopped), `before` / `before_level` (the level's median just before), `after` / `after_level` (over the first 5 minutes after; `null` if never readable) |
 | `ratings` | `at`, `value` ("How sharp do you feel?", 1 Foggy to 5 Very sharp: the sharp-hours scale), `hint` (the index of the hint it answered, or `null`) |
-| `events` | `at`, `event`: the headband's drops, reconnects and stream restarts, each hint, the eyes-closed minute's outcome |
+| `events` | `at`, `event`: the headband's drops, reconnects and stream restarts, each hint, the eyes-closed minute's outcome, and `chime waited: a call` (with `hint`, the hint's `at`) when a hint came during a call and its chime waited (DECISIONS 495) |
 | `wearer` | optional, as in a night's report: `answer` (`me` or `someone else`) and `at`; a session marked `someone else` is left out of the Trends numbers below. The owner sets it by hand with "Someone else wore it" on the end page or under the session in the list of earlier sessions (DECISIONS rows 490-494); "Undo" removes the object. Nothing else in the file changes |
 
 The Trends page and the self-experiments read one set of day numbers from these files (DECISIONS rows 480-489; a day

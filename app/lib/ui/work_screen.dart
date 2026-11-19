@@ -10,6 +10,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
 import '../session_keeper.dart';
+import '../sound/audio_route.dart' show phoneInCall, phoneMediaVolume;
 import '../sound/soloud_work_sound.dart';
 import '../wearer/wearer.dart';
 import '../work/breaks.dart';
@@ -31,7 +32,13 @@ class WorkScreen extends StatefulWidget {
 
 class _WorkScreenState extends State<WorkScreen> {
   final BrainBitFinder _finder = BrainBitFinder();
-  late final WorkController _c = WorkController(finder: _finder, sound: SoloudWorkSound(), keeper: PhoneSessionKeeper());
+  late final WorkController _c = WorkController(
+    finder: _finder,
+    sound: SoloudWorkSound(),
+    keeper: PhoneSessionKeeper(),
+    inCall: phoneInCall,
+    mediaVolume: phoneMediaVolume,
+  );
   bool _nightRunning = false, _eyesClosedFirst = false, _screenOn = false;
   List<WorkSummary> _sessions = const [];
   String? _recordings;
@@ -219,6 +226,7 @@ class _WorkScreenState extends State<WorkScreen> {
       wearerOn: _wearerOn,
       sessions: _sessions,
       saveNote: c.saveNote ?? (c.store == null && c.stage == WorkStage.done ? 'This session was not saved.' : null),
+      volumeNote: c.active ? c.volumeNote : null,
     );
     return PopScope(
       canPop: !c.active,

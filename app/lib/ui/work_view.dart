@@ -42,6 +42,7 @@ class WorkViewModel {
     this.sessions = const [],
     this.saveNote,
     this.wearerOn = false,
+    this.volumeNote,
   });
 
   final WorkStage stage;
@@ -73,6 +74,9 @@ class WorkViewModel {
 
   /// "Was this you?" is switched on (Settings): the by-hand "Someone else wore it" is offered (DECISIONS 490).
   final bool wearerOn;
+
+  /// The media volume is off or low, so the chime may not be heard (DECISIONS 496); a quiet line, not a dialog.
+  final String? volumeNote;
 
   bool get live => stage.index >= WorkStage.connecting.index && stage.index <= WorkStage.ending.index;
 }
@@ -194,6 +198,7 @@ class WorkView extends StatelessWidget {
         if (!m.kept) Para('The phone could not hold the session in the background: keep this screen on.', color: Night.caution),
         if (m.hint == null && m.stage == WorkStage.running) _RateLater(rated: m.rated, onRate: onRate),
       ],
+      if (m.volumeNote != null) Para(m.volumeNote!, color: Night.inkMuted),
     ];
   }
 

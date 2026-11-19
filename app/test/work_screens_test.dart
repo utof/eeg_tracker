@@ -24,12 +24,15 @@ const _cells = [
 final _past = WorkSummary(start: DateTime(2026, 11, 18, 14, 5), end: DateTime(2026, 11, 18, 16, 50), wornMin: 152, hints: 2, breaks: 1, drowsyMin: 18, alertMin: 120, hintList: [_hint]);
 final _other = WorkSummary(start: DateTime(2026, 11, 17, 9, 30), end: DateTime(2026, 11, 17, 11, 0), wornMin: 85, hints: 0, breaks: 0, drowsyMin: 4, alertMin: 80, hintList: const [], wearerAnswer: 'someone else');
 
+const _quiet = 'The media volume is low (2 of 15), so the break chime may not be heard. The hints also show on the lock screen.';
+
 final Map<String, WorkViewModel> states = {
   'setup': WorkViewModel(stage: WorkStage.setup, sessions: [_past, _other], wearerOn: true),
   'night': const WorkViewModel(stage: WorkStage.setup, nightRunning: true),
   'connecting': const WorkViewModel(stage: WorkStage.connecting, message: 'Found BrainBit. Connecting.'),
   'eyes_closed': const WorkViewModel(stage: WorkStage.eyesClosed, closedLeft: 42),
   'calibrating': const WorkViewModel(stage: WorkStage.calibrating, calibrationLeftMin: 2.5, cells: [WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none], wornMin: 1.5, stretchMin: 1.5),
+  'quiet': const WorkViewModel(stage: WorkStage.calibrating, calibrationLeftMin: 3.5, wornMin: 0.5, stretchMin: 0.5, volumeNote: _quiet),
   'alert': const WorkViewModel(stage: WorkStage.running, level: DrowsyLevel.alert, cells: _cells, wornMin: 64, stretchMin: 23, hintsToday: 1, afterBreak: 'After your break: drowsiness went down (getting drowsy before, alert after).'),
   'hint': WorkViewModel(stage: WorkStage.running, level: DrowsyLevel.gettingDrowsy, cells: _cells, wornMin: 64, stretchMin: 48, hintsToday: 2, hint: _hint),
   'rated': WorkViewModel(stage: WorkStage.running, level: DrowsyLevel.drowsy, cells: _cells, wornMin: 64, stretchMin: 48, hintsToday: 2, hint: _hint, rated: 2),
@@ -106,6 +109,17 @@ void main() {
     expect(find.text('On a break'), findsOneWidget, reason: 'the status word');
     await tester.tap(find.text('Back'));
     expect(calls, ['start', 'eyes true', 'break', 'snooze', 'not now', 'rate 2', 'stop', 'back']);
+  });
+
+  testWidgets('a low media volume is a quiet line on the running page, not a dialog (DECISIONS 496)', (tester) async {
+    tester.view.physicalSize = const Size(1210, 2695);
+    tester.view.devicePixelRatio = 2.75;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: WorkView(model: states['quiet']!)));
+    expect(find.text(_quiet), findsOneWidget);
+    expect(find.byType(AlertDialog), findsNothing);
+    await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: WorkView(model: states['calibrating']!)));
+    expect(find.textContaining('media volume'), findsNothing);
   });
 
   testWidgets('during a night the page says so and Start is off', (tester) async {

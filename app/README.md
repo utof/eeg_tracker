@@ -1087,7 +1087,10 @@ not measured.
 4. A **hint**: a soft two-note chime, and the words on the screen and the lock-screen card: after 60 minutes worn
    (plus 15 for each hint you let pass), or when drowsiness read up for most of the last 6 minutes, or your eyes were
    closed for 3 of them. At most 4 a day, 45 minutes apart, none 23:00-08:00. Answer **On a break**, **Snooze 20
-   min** or **Not now**; tap how sharp you feel (1 Foggy to 5 Very sharp) if you can.
+   min** or **Not now**; tap how sharp you feel (1 Foggy to 5 Very sharp) if you can. During a call (ringing, a
+   phone call, or a voice or video call in another app) the chime waits until the call is over; the words show at
+   once. If the media volume is off or under a fifth when you start, a quiet line under the session says the chime
+   may not be heard.
 5. **On a break** when you get up, **Back** when you return (taking the headband off for 5 minutes counts too). Some
    minutes after Back the screen says whether drowsiness went down.
 6. **Stop** at the end: the session's totals and its hints.

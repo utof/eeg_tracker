@@ -102,12 +102,36 @@ String? cueCheck({MediaVolume? volume, AudioRoute route = AudioRoute.unknown, re
   return out.isEmpty ? null : out.join(' ');
 }
 
+/// The work session's quiet line at Start (DECISIONS 496): the break chime may not be heard. Null when nothing needs
+/// saying or the volume is unknown.
+String? chimeVolumeNote(MediaVolume? volume) {
+  if (volume == null || volume.max <= 0) return null;
+  const also = 'The hints also show on the lock screen.';
+  if (volume.volume <= 0) return 'The media volume is off, so the break chime cannot be heard. $also';
+  if (volume.volume < volume.max * toneVolumeFloor) {
+    return 'The media volume is low (${volume.volume} of ${volume.max}), so the break chime may not be heard. $also';
+  }
+  return null;
+}
+
 /// The media volume over the phone channel; null when the phone cannot say.
 Future<MediaVolume?> phoneMediaVolume() async {
   try {
     final m = await const MethodChannel('eeg_tracker/phone').invokeMethod<Map<Object?, Object?>>('mediaVolume');
     final v = m?['volume'], x = m?['max'];
     return v is int && x is int ? (volume: v, max: x) : null;
+  } on PlatformException {
+    return null;
+  } on MissingPluginException {
+    return null;
+  }
+}
+
+/// A call holds the phone's sound now (Android's audio mode is not normal: ringing, a phone call, or a voice or video
+/// call in another app); null when the phone cannot say. No permission needed (DECISIONS 495).
+Future<bool?> phoneInCall() async {
+  try {
+    return await const MethodChannel('eeg_tracker/phone').invokeMethod<bool>('inCall');
   } on PlatformException {
     return null;
   } on MissingPluginException {

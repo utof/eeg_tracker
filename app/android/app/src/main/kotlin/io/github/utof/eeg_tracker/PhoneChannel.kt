@@ -91,6 +91,7 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
                     playCue(call.argument<String>("path") ?: "", call.argument<Number>("gain")?.toFloat() ?: 0f),
                 )
                 "mediaVolume" -> result.success(mediaVolume())
+                "inCall" -> result.success(inCall())
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {
@@ -138,6 +139,16 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
             "volume" to am?.getStreamVolume(AudioManager.STREAM_MUSIC),
             "max" to am?.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
         )
+    }
+
+    /**
+     * A call holds the phone's sound: Android's audio mode is not normal while a call rings, during a phone call, and
+     * during a voice or video call in another app. The work session's chime waits meanwhile (DECISIONS 495). Needs no
+     * permission, unlike the phone state.
+     */
+    private fun inCall(): Boolean? {
+        val am = context.getSystemService(AudioManager::class.java) ?: return null
+        return am.mode != AudioManager.MODE_NORMAL
     }
 
     /** The app's private folder (filesDir/recordings): other apps cannot read it, Android encrypts it. */

@@ -19,6 +19,7 @@ import '../recorder/chunk_writer.dart' show Sample;
 import '../recorder/headband.dart' show HeadbandFinder;
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
 import '../session_keeper.dart';
+import '../sound/audio_route.dart' show MediaVolume, chimeVolumeNote;
 import '../sound/work_sound.dart';
 import 'breaks.dart';
 import 'drowsiness.dart';
@@ -64,6 +65,8 @@ class WorkController extends ChangeNotifier {
     this.store,
     this.timing = const WorkTiming(),
     DateTime Function()? clock,
+    this.inCall,
+    this.mediaVolume,
   }) : sound = sound ?? SilentWorkSound(),
        keeper = keeper ?? FakeSessionKeeper(grant: false),
        _now = clock ?? DateTime.now;
@@ -76,6 +79,16 @@ class WorkController extends ChangeNotifier {
   WorkStore? store;
   final WorkTiming timing;
   final DateTime Function() _now;
+
+  /// A call holds the phone's sound (ringing, a phone call, another app's voice call); null when the phone cannot
+  /// say. Null: never asked (tests, laptop tools).
+  final Future<bool?> Function()? inCall;
+
+  /// The media volume, read at Start and before each chime; null: never read.
+  final Future<MediaVolume?> Function()? mediaVolume;
+
+  /// A quiet line when the chime may not be heard (the media volume off or low); null when nothing needs saying.
+  String? volumeNote;
 
   WorkStage stage = WorkStage.setup;
   String message = '';
@@ -171,6 +184,10 @@ class WorkController extends ChangeNotifier {
   int? _lastPack;
   bool _gapPending = false, _quiet = false, _ended = false, _disposed = false;
   int _lostSamples = 0, _moveCursor = 0;
+
+  /// The hint whose chime has not played yet (a call held it back), and a call check under way.
+  WorkHint? _chimeWaits;
+  bool _callAsked = false;
   final List<bool> _usable = [];
   final List<double> _closedAlpha = [];
   int _closedSeconds = 0;
@@ -188,6 +205,7 @@ class WorkController extends ChangeNotifier {
     _reset();
     final run = ++_run;
     _set(WorkStage.connecting, 'Looking for the headband.');
+    unawaited(_readVolume(run));
     try {
       final link = BandLink(finder: finder, timing: timing.link, onBatch: _onBatch, onEvent: _onLinkEvent, clock: _now);
       _link = link;
@@ -276,6 +294,8 @@ class WorkController extends ChangeNotifier {
     closedAlpha = null;
     closedLeft = 0;
     hint = null;
+    _chimeWaits = null;
+    volumeNote = null;
     afterBreak = null;
     last = null;
     saveNote = null;
@@ -378,6 +398,7 @@ class WorkController extends ChangeNotifier {
         _rehold();
       }
     }
+    if (_chimeWaits != null) unawaited(_chime());
     if (_savedAt == null || now.difference(_savedAt!) >= timing.saveEvery) _save(now);
     if (_heldAt != null && now.difference(_heldAt!) >= timing.holdEvery) _rehold();
     _notify();
@@ -386,8 +407,60 @@ class WorkController extends ChangeNotifier {
   void _showHint(WorkHint h) {
     hint = h;
     _events.add({'at': h.at.toIso8601String(), 'event': 'hint', 'reason': h.reason.name});
-    unawaited(sound.chime());
+    _chimeWaits = h;
+    unawaited(_chime());
     _rehold();
+  }
+
+  /// Plays the waiting hint's chime, unless a call holds the phone's sound (DECISIONS 495): then it waits, asked again
+  /// each tick, and is dropped once the hint is answered or gone. The words are on the lock-screen card meanwhile.
+  Future<void> _chime() async {
+    final h = _chimeWaits, ask = inCall;
+    if (h == null || _callAsked) return;
+    if (!identical(hint, h) || _ended) {
+      _chimeWaits = null;
+      return;
+    }
+    if (ask != null) {
+      _callAsked = true;
+      bool? busy;
+      try {
+        busy = await ask().timeout(const Duration(seconds: 2));
+      } catch (_) {
+        busy = null; // the phone did not say: the chime is not held back
+      } finally {
+        _callAsked = false;
+      }
+      if (!identical(_chimeWaits, h)) return;
+      if (!identical(hint, h) || _ended) {
+        _chimeWaits = null;
+        return;
+      }
+      if (busy ?? false) {
+        if (!_events.any((e) => e['event'] == 'chime waited: a call' && e['hint'] == h.at.toIso8601String())) {
+          _events.add({'at': _now().toIso8601String(), 'event': 'chime waited: a call', 'hint': h.at.toIso8601String()});
+        }
+        return;
+      }
+    }
+    _chimeWaits = null;
+    unawaited(_readVolume(_run));
+    await sound.chime();
+  }
+
+  /// The media volume, at Start and before each chime: [volumeNote] says when the chime may not be heard.
+  Future<void> _readVolume(int run) async {
+    final read = mediaVolume;
+    if (read == null) return;
+    MediaVolume? v;
+    try {
+      v = await read().timeout(const Duration(seconds: 2));
+    } catch (_) {
+      v = null;
+    }
+    if (run != _run || v == null) return;
+    volumeNote = chimeVolumeNote(v);
+    _notify();
   }
 
   void _rehold() {

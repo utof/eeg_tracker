@@ -9,6 +9,7 @@ import 'package:eeg_tracker/dream/band_link.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/session_keeper.dart';
+import 'package:eeg_tracker/sound/audio_route.dart' show MediaVolume;
 import 'package:eeg_tracker/sound/work_sound.dart';
 import 'package:eeg_tracker/work/breaks.dart';
 import 'package:eeg_tracker/work/controller.dart';
@@ -126,10 +127,18 @@ void main() {
   setUp(() => tmp = Directory.systemTemp.createTempSync('work-ctl'));
   tearDown(() => tmp.deleteSync(recursive: true));
 
-  WorkController make(WorkBand band, {SilentWorkSound? sound, FakeSessionKeeper? keeper}) => WorkController(
+  WorkController make(
+    WorkBand band, {
+    SilentWorkSound? sound,
+    FakeSessionKeeper? keeper,
+    Future<bool?> Function()? inCall,
+    Future<MediaVolume?> Function()? mediaVolume,
+  }) => WorkController(
     finder: OneFinder(band),
     sound: sound,
     keeper: keeper,
+    inCall: inCall,
+    mediaVolume: mediaVolume,
     store: WorkStore(Directory('${tmp.path}/work-sessions')),
     timing: const WorkTiming(link: fastLink, tick: Duration(milliseconds: 4), noDataAfter: Duration(seconds: 3)),
     clock: band.now,
@@ -366,6 +375,85 @@ void main() {
     expect(atRelease?['headband'], 'BrainBit W', reason: 'not blank: the headband was still held');
     expect(c.last!['headband'], 'BrainBit W');
     c.dispose();
+  });
+
+  test('a hint during a call: its words show at once, its chime waits until the call is over (DECISIONS 495)', () async {
+    final band = WorkBand(start: DateTime(2026, 11, 19, 10).millisecondsSinceEpoch / 1000);
+    final sound = SilentWorkSound(), keeper = FakeSessionKeeper();
+    var call = true, asked = 0;
+    final c = make(band, sound: sound, keeper: keeper, inCall: () async {
+      asked++;
+      return call;
+    });
+    await c.start();
+    await until(() => c.level == DrowsyLevel.alert);
+    band.mode = Mode.drowsy;
+    await until(() => c.hint != null);
+    expect(keeper.spec!.text, startsWith('You seem to be getting drowsy'), reason: 'the lock-screen card at once');
+    final at = band.clockS;
+    await until(() => band.clockS > at + 30);
+    expect(sound.played, isNot(contains('chime')), reason: 'not over a call');
+    expect(asked, greaterThan(1), reason: 'checked again while the hint waits');
+    call = false;
+    await until(() => sound.played.contains('chime'));
+    expect(sound.played.where((p) => p == 'chime'), hasLength(1));
+    await c.stop();
+    final events = (c.last!['events'] as List).cast<Map<String, Object?>>();
+    expect(events.map((e) => e['event']), contains('chime waited: a call'));
+    c.dispose();
+  });
+
+  test('a hint answered during the call never chimes; with no call it chimes at once (DECISIONS 495)', () async {
+    final band = WorkBand(start: DateTime(2026, 11, 19, 10).millisecondsSinceEpoch / 1000);
+    final sound = SilentWorkSound();
+    var call = true;
+    final c = make(band, sound: sound, inCall: () async => call);
+    await c.start();
+    await until(() => c.level == DrowsyLevel.alert);
+    band.mode = Mode.drowsy;
+    await until(() => c.hint != null);
+    c.answer(HintAnswer.notNow);
+    call = false;
+    final at = band.clockS;
+    await until(() => band.clockS > at + 30);
+    expect(sound.played, isNot(contains('chime')), reason: 'the hint was answered meanwhile');
+    await c.stop();
+    c.dispose();
+
+    final band2 = WorkBand(start: DateTime(2026, 11, 19, 10).millisecondsSinceEpoch / 1000);
+    final sound2 = SilentWorkSound();
+    final c2 = make(band2, sound: sound2, inCall: () async => null); // the phone cannot say: not held back
+    await c2.start();
+    await until(() => c2.level == DrowsyLevel.alert);
+    band2.mode = Mode.drowsy;
+    await until(() => c2.hint != null);
+    await until(() => sound2.played.contains('chime'));
+    await c2.stop();
+    c2.dispose();
+  });
+
+  test('a low media volume at Start gives a quiet line; loud enough or unknown says nothing (DECISIONS 496)', () async {
+    Future<String?> noteFor(MediaVolume? v) async {
+      final band = WorkBand(start: DateTime(2026, 11, 19, 10).millisecondsSinceEpoch / 1000);
+      final c = make(band, mediaVolume: () async => v);
+      await c.start();
+      await until(() => band.clockS > 20);
+      final note = c.volumeNote;
+      await c.stop();
+      c.dispose();
+      return note;
+    }
+
+    expect(
+      await noteFor((volume: 2, max: 15)),
+      'The media volume is low (2 of 15), so the break chime may not be heard. The hints also show on the lock screen.',
+    );
+    expect(
+      await noteFor((volume: 0, max: 15)),
+      'The media volume is off, so the break chime cannot be heard. The hints also show on the lock screen.',
+    );
+    expect(await noteFor((volume: 3, max: 15)), isNull, reason: '20 % of the range, as the check-in\'s soft tones');
+    expect(await noteFor(null), isNull);
   });
 
   test('words: the hint lines and the after-break line', () {
