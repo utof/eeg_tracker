@@ -278,6 +278,16 @@ hours switched on armed its questions beside the smart alarm's alarm clock, and 
 emulator refuses to boot ("not enough disk space") when the disk that holds the AVD is nearly full: free space there,
 or make an AVD of your own elsewhere (`ANDROID_AVD_HOME=/var/tmp/<name> avdmanager create avd ...`).
 
+**Scoring after an update, and Share on Wi-Fi meanwhile** (`fix/app-scoring-background`, 2026-11-20, release x86_64,
+2-core AVD, DECISIONS rows 580-589): with the 12.9-hour night in the app and Share on Wi-Fi on, the scoring started 49 s
+after the app opened (Share answered from 4 s); `adb install -r` of the same APK after 8 of 78 model calls ended the
+app like an update, and the next start said "Preparing the recording to go on from 10 %" and made only the other 70;
+the report matched the laptop on all 1330 scored epochs; a restart scored nothing. `/state` answered every 2 s
+throughout in at most 0.16 s; the first `/files` hashed 215 MB in 10 s, later ones (also after the update) took
+0.01-0.05 s. With sharing on and the app in the background, `dumpsys activity processes` showed it as a foreground
+service (`curProcState=4`), and the server answered. Check `adb logcat -s flutter` for the lines `sleep scoring of
+<night>: starting / going on at N of M model calls / done, ...`. The scripts are in the lane's `_local/emu/`.
+
 **With the lucid dream cues** (second integration, 2026-11-19, release x86_64): the Lucid dreams page opened from
 the night screen, **Turn on** started the evening practice (the cue every 3 s, a little louder each time: "Cue 6,
 0.6 % of the media volume") and Stop kept the cues waiting for a loudness. The alarm smoke tool with the cues on
