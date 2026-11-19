@@ -3,8 +3,8 @@
 ## What it does
 
 Built in the phone app (2026-11-19), not yet worn at work. You wear the headband while you work. After 4 minutes
-that become your awake baseline, the app reads every 5 minutes as alert, getting drowsy or drowsy against it, and
-with a soft chime suggests a break after an hour worn, or sooner when drowsiness stays up. It notices breaks and
+that become your awake baseline, every half minute the app reads the last 5 minutes as alert, getting drowsy or
+drowsy against it, and with a soft chime suggests a break after an hour worn, or sooner when drowsiness stays up. It notices breaks and
 shows whether drowsiness went down after one.
 
 ## Evidence for this headband: some
