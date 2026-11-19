@@ -1,7 +1,9 @@
 // The headband connection of a session run from the app's screen (the dream catcher; DECISIONS row 110), on the
 // meditation's rules (row 76) at a 45-minute scale: contact checked once at the start, no SDK call on a headband
 // that went out of range, reconnect straight to the same headband after 2, 5, 10 s and then every 10 s with a scan
-// every third try, the stream restarted once if nothing arrives in 8 s, every SDK call with a deadline.
+// every third try, every SDK call with a deadline. A stream that stops while the headband stays in range (or never
+// starts) is mended on the night recorder's rule (DECISIONS 49, 520): no data for 8 s, the stream is restarted once;
+// still none 40 s after the last batch, the headband is let go and reached again as after a drop.
 // It hands every batch over as it arrived; finding holes in the signal is the session's job.
 // Used by the dream catcher, sound for states, the nap coach, the hands-free calibration, and the meditation and
 // alpha-theta sessions (DECISIONS 270): the reconnect rules live here and nowhere else.
@@ -24,6 +26,7 @@ class LinkTiming {
     this.contactFor = const Duration(seconds: 6),
     this.settle = const Duration(seconds: 1),
     this.restartStreamAfter = const Duration(seconds: 8),
+    this.reconnectAfter = const Duration(seconds: 40),
     this.reconnectWaits = const [Duration(seconds: 2), Duration(seconds: 5), Duration(seconds: 10)],
     this.rescanFor = const Duration(seconds: 10),
   });
@@ -33,7 +36,13 @@ class LinkTiming {
   final Duration sdkTimeout;
   final Duration contactFor;
   final Duration settle;
+  /// No data this long (since the stream started or the last batch) with the headband in range: the stream is
+  /// restarted, once per stall (not for a headband that mends its own drops once it has streamed).
   final Duration restartStreamAfter;
+
+  /// No data this long with the headband in range: it is let go (stopped, disconnected) and reached again as after a
+  /// drop (the night recorder gives up a run after 40 s without data too).
+  final Duration reconnectAfter;
 
   /// Waits before reconnect tries; the last one repeats. Every third try is a scan of [rescanFor].
   final List<Duration> reconnectWaits;
@@ -91,7 +100,8 @@ class BandLink {
   final List<Headband> _lostBands = [];
   StreamSubscription<List<Sample>>? _signalSub;
   StreamSubscription<bool>? _rangeSub;
-  DateTime? _signalAt;
+  /// The last batch, or the stream's start when none came since: the stall clock.
+  DateTime? _quietFrom;
   bool _restarted = false;
   bool _closed = false;
 
@@ -206,33 +216,52 @@ class BandLink {
     if (band == null) return;
     _signalSub = band.signal.listen(_onSignal);
     await _sdk(band.startSignal(), 'start signal');
-    _signalAt = _now();
+    _quietFrom = _now();
   }
 
   void _onSignal(List<Sample> batch) {
     if (_closed || batch.isEmpty) return;
     final now = _now();
     lastData = now;
+    _quietFrom = now;
+    _restarted = false;
     onBatch(now, batch);
   }
 
-  /// Call about every second: restarts the stream once when nothing has arrived since it started.
+  /// Call about every second: mends a stream that stopped (or never started) while the headband is in range. No data
+  /// for [LinkTiming.restartStreamAfter]: the stream is restarted once; none for [LinkTiming.reconnectAfter]: the
+  /// headband is let go and reached again ([LinkEvent.drop], then the reconnect tries).
   void tick() {
-    final at = _signalAt;
-    if (_closed || lost || _restarted || lastData != null || at == null) return;
-    if (_now().difference(at) < timing.restartStreamAfter) return;
+    final band = _band, from = _quietFrom;
+    if (_closed || lost || band == null || from == null) return;
+    final quiet = _now().difference(from);
+    if (quiet >= timing.reconnectAfter) {
+      _stalled(band, quiet);
+      return;
+    }
+    // a headband that mends its own drops (ours) is left to it once it has streamed, as in the night recorder
+    if (_restarted || quiet < timing.restartStreamAfter || (band is MendsDrops && lastData != null)) return;
     _restarted = true;
-    unawaited(_restartStream());
+    unawaited(_restartStream(band, quiet));
   }
 
-  Future<void> _restartStream() async {
-    final band = _band;
-    if (band == null) return;
-    onEvent?.call(LinkEvent.streamRestarted, 'no data since the start: stream restarted');
+  Future<void> _restartStream(Headband band, Duration quiet) async {
+    onEvent?.call(
+      LinkEvent.streamRestarted,
+      lastData == null ? 'no data since the start: stream restarted' : 'no data for ${quiet.inSeconds} s: stream restarted',
+    );
     try {
       await _sdk(band.stopSignal(), 'stop signal');
       await _sdk(band.startSignal(), 'start signal');
     } catch (_) {}
+  }
+
+  /// No data for [LinkTiming.reconnectAfter] with the headband in range: it is let go and reached again.
+  void _stalled(Headband band, Duration quiet) {
+    lost = true;
+    _band = null;
+    onEvent?.call(LinkEvent.drop, 'no data for ${quiet.inSeconds} s with the headband in range; reconnecting');
+    unawaited(_reconnect(band, inRange: true));
   }
 
   void _onRange(Headband band, bool inRange) {
@@ -245,12 +274,15 @@ class BandLink {
     unawaited(_reconnect(band));
   }
 
-  Future<void> _reconnect(Headband old) async {
+  /// [inRange]: the old headband stalled in range, so it is let go first (a BrainBit held by a sensor object nobody
+  /// uses stops advertising); one that went out of range is never touched.
+  Future<void> _reconnect(Headband old, {bool inRange = false}) async {
     final signalSub = _signalSub, rangeSub = _rangeSub;
     _signalSub = null;
     _rangeSub = null;
     await signalSub?.cancel();
     await rangeSub?.cancel();
+    if (inRange && !_lostBands.contains(old)) await _letGo(old, streaming: true);
     for (var tries = 1; !_closed; tries++) {
       await Future<void>.delayed(timing.reconnectWaits[math.min(tries - 1, timing.reconnectWaits.length - 1)]);
       if (_closed) return;
@@ -286,6 +318,8 @@ class BandLink {
     }
     if (!identical(_band, band)) return false; // Stop came meanwhile and let it go
     if (started && !_lostBands.contains(band)) {
+      _quietFrom = _now();
+      _restarted = false;
       lost = false;
       onEvent?.call(LinkEvent.reconnected, 'reconnected');
       return true;

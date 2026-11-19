@@ -1,11 +1,13 @@
 // The work session's drowsiness level (DECISIONS 440-442): a baseline from the first scored minutes, each 30 s epoch's
 // eyes-open alpha, theta and slow eye movement against it, the median of the last 5 minutes, and the level in words.
+import 'dart:math' as math;
+
 import 'package:eeg_tracker/detectors/detectors.dart';
 import 'package:eeg_tracker/work/drowsiness.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// [n] seconds of the same input.
-void feed(WorkDrowsiness d, int n, {double alpha = 10, double theta = 6, double sem = 20, int blinkEvery = 0, int moveEvery = 0, bool muscle = false, bool movement = false, bool backClean = true}) {
+void feed(WorkDrowsiness d, int n, {double alpha = 10, double theta = 6, double sem = 20, int blinkEvery = 0, int moveEvery = 0, bool muscle = false, bool movement = false, bool backClean = true, bool eyeClean = true}) {
   for (var i = 0; i < n; i++) {
     d.second(WorkInput(
       alpha: alpha,
@@ -13,6 +15,7 @@ void feed(WorkDrowsiness d, int n, {double alpha = 10, double theta = 6, double 
       sem: sem,
       backClean: backClean,
       sideClean: true,
+      eyeClean: eyeClean,
       blinks: blinkEvery > 0 && (i % ep) % blinkEvery == 0 ? 1 : 0,
       eyeMoves: moveEvery > 0 && (i % ep) % moveEvery == 0 ? 1 : 0,
       muscle: muscle,
@@ -67,13 +70,17 @@ void main() {
     expect(d.level, DrowsyLevel.drowsy);
   });
 
-  test('alpha up alone counts half; still eyes with alpha down never raise the level (focus, not drowsiness)', () {
+  test('alpha up alone counts half; still eyes without alpha up never raise the level (focus, not drowsiness)', () {
     final d = WorkDrowsiness();
     feed(d, (cal + 6) * ep, blinkEvery: 10, moveEvery: 7);
-    feed(d, 10 * ep, alpha: 10, blinkEvery: 30); // still eyes, alpha unchanged: (0 + 2.17) / 2, but a < 0? no: a = 0
-    expect(d.epochs.last.index, closeTo(1.0849625007211563, 1e-9));
-    feed(d, 10 * ep, alpha: 7, blinkEvery: 30); // alpha down: capped
-    expect(d.epochs.last.index, WorkRule.stillAloneCap);
+    // still eyes, alpha unchanged (deep focus, heavy reading): the still part counts only as far as alpha is up
+    // (review 2026-11-20, finding 4: this was (0 + 2.17) / 2 = 1.08, drowsy)
+    feed(d, 10 * ep, alpha: 10, blinkEvery: 30);
+    expect(d.epochs.last.still, closeTo(2.1699250014423126, 1e-9));
+    expect(d.epochs.last.index, closeTo(0, 1e-9));
+    expect(d.level, DrowsyLevel.alert);
+    feed(d, 10 * ep, alpha: 7, blinkEvery: 30); // alpha down: still eyes count nothing
+    expect(d.epochs.last.index, closeTo(math.log(0.7) / math.ln2 / 2, 1e-9));
     expect(d.level, DrowsyLevel.alert);
     feed(d, 10 * ep, alpha: 20, blinkEvery: 10, moveEvery: 7); // alpha x2, eyes as usual: index 0.5
     expect(d.epochs.last.index, closeTo(0.5, 1e-9));
@@ -197,12 +204,80 @@ void main() {
     final d = WorkDrowsiness();
     feed(d, (cal + 6) * ep, blinkEvery: 10, moveEvery: 7);
     final j = d.epochs.last.toJson();
-    expect(j.keys, containsAll(['s', 'clean_s', 'alpha', 'theta', 'sem', 'events', 'blinks', 'eye_moves', 'muscle_s', 'movement_s', 'eyes_closed', 'a', 'still', 'index', 'window', 'level']));
+    expect(j.keys, containsAll(['s', 'clean_s', 'alpha', 'theta', 'sem', 'events', 'blinks', 'eye_moves', 'muscle_s', 'movement_s', 'eyes_closed', 'a', 'still', 'index', 'window', 'level', 'eye_s']));
     expect(j['level'], 'alert');
     expect(j['blinks'], 3);
     final b = WorkBaseline.fromJson(d.baseline!.toJson())!;
     expect(b.alpha, d.baseline!.alpha);
     expect(b.events, d.baseline!.events);
     expect(levelOf('getting_drowsy'), DrowsyLevel.gettingDrowsy);
+  });
+
+  group('work review 2026-11-20', () {
+    test('still eyes with alpha jittering around its baseline stay alert (finding 4)', () {
+      final d = WorkDrowsiness();
+      feed(d, (cal + 6) * ep, blinkEvery: 10, moveEvery: 7);
+      for (var i = 0; i < 12; i++) {
+        feed(d, ep, alpha: i.isEven ? 10.3 : 9.7, blinkEvery: 15); // 2 events a half minute against 8
+      }
+      expect(d.window, lessThan(WorkRule.gettingDrowsy));
+      expect(d.level, DrowsyLevel.alert);
+    });
+
+    test('the still part grows with alpha: half way at alpha 1.19x, whole from 1.41x (finding 4)', () {
+      final d = WorkDrowsiness();
+      feed(d, (cal + 6) * ep, blinkEvery: 10, moveEvery: 7);
+      feed(d, ep, alpha: 10 * math.pow(2, 0.25).toDouble(), blinkEvery: 30); // a = 0.25
+      expect(d.epochs.last.index, closeTo((0.25 + 2.1699250014423126 * 0.5) / 2, 1e-9));
+      feed(d, ep, alpha: 10 * math.pow(2, 0.8).toDouble(), blinkEvery: 30); // a = 0.8
+      expect(d.epochs.last.index, closeTo((0.8 + 2.1699250014423126) / 2, 1e-9));
+      // busy eyes (more events than the baseline) always count against drowsiness
+      feed(d, ep, alpha: 10 * math.pow(2, 0.2).toDouble(), blinkEvery: 2);
+      expect(d.epochs.last.still, lessThan(0));
+      expect(d.epochs.last.index, closeTo((0.2 + d.epochs.last.still!) / 2, 1e-9));
+    });
+
+    test('seconds without all four channels usable are not counted for eye events: none left, alpha alone (finding 3)', () {
+      final d = WorkDrowsiness();
+      feed(d, (cal + 6) * ep, blinkEvery: 10, moveEvery: 7);
+      expect(d.level, DrowsyLevel.alert);
+      // T4 lifted: the detectors find no blink or eye movement, which used to read as very still eyes
+      feed(d, 12 * ep, alpha: 10, eyeClean: false);
+      expect(d.epochs.last.events, isNull);
+      expect(d.epochs.last.eyeS, 0);
+      expect(d.epochs.last.still, isNull);
+      expect(d.epochs.last.index, closeTo(0, 1e-9), reason: 'alpha alone');
+      expect(d.level, DrowsyLevel.alert);
+      expect(d.eyesPaused, isTrue);
+      feed(d, 2 * ep, blinkEvery: 10, moveEvery: 7);
+      expect(d.eyesPaused, isFalse);
+    });
+
+    test('the input of one detector second: eye events need all four channels usable (finding 3)', () {
+      final s = Second(3);
+      expect(workInputOf(s).eyeClean, isTrue);
+      s.railed[3] = true;
+      expect(workInputOf(s).eyeClean, isFalse, reason: 'T4 railed');
+      s.railed[3] = false;
+      s.flat[0] = true;
+      expect(workInputOf(s).eyeClean, isFalse, reason: 'O1 flat: a blink must show on all four');
+      s.flat[0] = false;
+      s.qrange[2] = 420;
+      expect(workInputOf(s).eyeClean, isFalse, reason: "over the detectors' 400 µV");
+      s.qrange[2] = 300;
+      expect(workInputOf(s).eyeClean, isTrue);
+      s.gap = true;
+      expect(workInputOf(s).eyeClean, isFalse);
+    });
+
+    test("before the baseline the closed-eyes line is between the settling minute's alpha and the closed alpha (finding 14)", () {
+      // the owner: closed eyes 2.5x open alpha; half the closed alpha (1.25x open) dropped open half minutes
+      final d = WorkDrowsiness(closedAlpha: 25);
+      feed(d, 2 * ep, blinkEvery: 10, moveEvery: 7); // settling in, eyes open, alpha 10
+      feed(d, ep, alpha: 13); // open eyes, a little more alpha, no blink detected
+      expect(d.epochs.last.eyesClosed, isFalse, reason: 'line max(2 x 10, sqrt(10 x 25)) = 20, not 12.5');
+      feed(d, ep, alpha: 22);
+      expect(d.epochs.last.eyesClosed, isTrue);
+    });
   });
 }

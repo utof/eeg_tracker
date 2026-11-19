@@ -20,7 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/fast_band.dart' show OneFinder, until;
 import 'support/gates.dart';
 
-enum Mode { awake, drowsy, eyesClosed, off }
+enum Mode { awake, drowsy, eyesClosed, off, stall }
 
 /// O1/O2: 10 Hz alpha; blinks every 4 s and sideways eye movements every 5 s while awake; none while drowsy; the
 /// rails when off. Each batch is one second of its own clock.
@@ -37,6 +37,14 @@ class WorkBand implements Headband {
     return (_seed / 0x7fffffff - 0.5) * 7;
   }
   Timer? _timer;
+
+  /// What mends a stall: 'restart' (the stream started again) or 'reconnect' (a new connection); null: nothing.
+  String? healOn;
+
+  /// T4 has lost contact: held at the rail.
+  bool t4lost = false;
+  bool _started = false;
+  final List<String> calls = [];
   final _signal = StreamController<List<Sample>>.broadcast(sync: true);
   final _resist = StreamController<Map<String, double>>.broadcast();
   final _range = StreamController<bool>.broadcast();
@@ -47,7 +55,7 @@ class WorkBand implements Headband {
     final out = <Sample>[];
     for (var k = 0; k < 250; k++, _i++) {
       final t = _i / 250;
-      if (mode == Mode.off) {
+      if (mode == Mode.off || mode == Mode.stall) {
         out.add((pack: _pack++ % 2048, o1: 0.4, o2: 0.4, t3: 0.4, t4: 0.4));
         continue;
       }
@@ -55,7 +63,7 @@ class WorkBand implements Headband {
         Mode.awake => 10.0,
         Mode.drowsy => 16.0,
         Mode.eyesClosed => 40.0,
-        Mode.off => 0.0,
+        Mode.off || Mode.stall => 0.0,
       };
       final alpha = amp * math.sin(2 * math.pi * 10 * t);
       final slow = 3 * math.sin(2 * math.pi * 3 * t);
@@ -73,7 +81,7 @@ class WorkBand implements Headband {
         o1: (alpha + blink + slow + _noise()) * 1e-6,
         o2: (alpha * 0.9 + blink - slow + _noise()) * 1e-6,
         t3: (blink + eye + slow + _noise()) * 1e-6,
-        t4: (blink - eye - slow + _noise()) * 1e-6,
+        t4: t4lost ? 0.4 : (blink - eye - slow + _noise()) * 1e-6,
       ));
     }
     return out;
@@ -98,16 +106,23 @@ class WorkBand implements Headband {
 
   @override
   Future<void> startSignal() async {
+    calls.add('startSignal');
+    if (_started && mode == Mode.stall && healOn == 'restart') mode = Mode.awake;
+    _started = true;
+    _timer?.cancel();
     _timer = Timer.periodic(const Duration(milliseconds: 1), (_) {
       if (!_signal.hasListener) return;
       final b = _batch();
       clockS += 1;
-      _signal.add(b);
+      if (mode != Mode.stall) _signal.add(b); // a stall: the clock goes on, nothing arrives
     });
   }
 
   @override
-  Future<void> stopSignal() async => _timer?.cancel();
+  Future<void> stopSignal() async {
+    calls.add('stopSignal');
+    _timer?.cancel();
+  }
   @override
   Future<void> startResist() async => Timer(const Duration(milliseconds: 1), () => _resist.add({'O1': 4e5, 'O2': 6e5, 'T3': 1.2e6, 'T4': 1.5e6}));
   @override
@@ -117,7 +132,21 @@ class WorkBand implements Headband {
   @override
   Future<int> battery() async => 80;
   @override
-  Future<void> disconnectAndDispose() async => _timer?.cancel();
+  Future<void> disconnectAndDispose() async {
+    calls.add('disconnect');
+    _timer?.cancel();
+    if (mode == Mode.stall && healOn == 'reconnect') mode = Mode.awake;
+  }
+}
+
+/// Finds [band] once, and reaches it again directly (a reconnect after a drop or a stall).
+class _AgainFinder implements HeadbandFinder {
+  _AgainFinder(this.band);
+  final WorkBand band;
+  @override
+  Future<Headband?> find(Duration scanFor, {void Function(String name, int rssi)? onFound}) async => band;
+  @override
+  Future<Headband> connectDirect(BandId id) async => band;
 }
 
 const fastLink = LinkTiming(scanFor: Duration(milliseconds: 50), contactFor: Duration(milliseconds: 5), settle: Duration.zero);
@@ -454,6 +483,243 @@ void main() {
     );
     expect(await noteFor((volume: 3, max: 15)), isNull, reason: '20 % of the range, as the check-in\'s soft tones');
     expect(await noteFor(null), isNull);
+  });
+
+  WorkController again(WorkBand band) => WorkController(
+    finder: _AgainFinder(band),
+    store: WorkStore(Directory('${tmp.path}/work-sessions')),
+    timing: const WorkTiming(
+      link: LinkTiming(scanFor: Duration(milliseconds: 50), contactFor: Duration(milliseconds: 5), settle: Duration.zero, reconnectWaits: [Duration(milliseconds: 5)]),
+      tick: Duration(milliseconds: 4),
+    ),
+    clock: band.now,
+  );
+
+  List<String> eventsOf(WorkController c) => [for (final e in c.sessionJson(c.startedAt!.add(const Duration(hours: 1)))['events']! as List) '${(e as Map)['event']}'];
+
+  test('a stream that stops with the headband in range is restarted, and the session goes on (review 2026-11-20, finding 1)', () async {
+    final band = WorkBand(start: DateTime(2026, 11, 20, 10).millisecondsSinceEpoch / 1000)..healOn = 'restart';
+    final c = again(band);
+    await c.start();
+    await until(() => c.level == DrowsyLevel.alert);
+    band.mode = Mode.stall;
+    await until(() => band.calls.where((x) => x == 'startSignal').length == 2);
+    await until(() => c.signal == WorkSignal.good && c.worn);
+    expect(eventsOf(c), contains(startsWith('no data for')), reason: 'the restart is in the file');
+    expect(c.onBreak, isFalse, reason: 'seconds without data are not a break');
+    await c.stop();
+    c.dispose();
+  });
+
+  test('still nothing 40 s later: the headband is let go and reached again; no break all afternoon (finding 1)', () async {
+    final band = WorkBand(start: DateTime(2026, 11, 20, 10).millisecondsSinceEpoch / 1000)..healOn = 'reconnect';
+    final c = again(band);
+    await c.start();
+    await until(() => c.level == DrowsyLevel.alert);
+    final at = band.clockS;
+    band.mode = Mode.stall;
+    await until(() => band.calls.contains('disconnect'));
+    expect(c.signal, WorkSignal.lost);
+    await until(() => band.clockS > at + 10 * 60);
+    expect(eventsOf(c), containsAllInOrder([startsWith('no data for'), contains('reconnecting'), 'reconnected']));
+    expect(c.onBreak, isFalse);
+    expect(c.planner!.breaks, isEmpty, reason: 'under a minute without data');
+    expect(c.signal, WorkSignal.good);
+    expect(c.level, DrowsyLevel.alert);
+    await c.stop();
+    c.dispose();
+  });
+
+  test('one electrode losing contact pauses the eye readings instead of reading as drowsy (review 2026-11-20, finding 3)', () async {
+    final band = WorkBand(start: DateTime(2026, 11, 20, 10).millisecondsSinceEpoch / 1000);
+    final c = make(band);
+    await c.start();
+    await until(() => c.level == DrowsyLevel.alert);
+    final at = band.clockS;
+    band.t4lost = true;
+    await until(() => band.clockS > at + 12 * 60);
+    expect(c.level, DrowsyLevel.alert, reason: 'window ${c.drowsiness!.window}');
+    expect(c.hint, isNull);
+    expect(c.signal, WorkSignal.noEyes, reason: 'the signal line says the eye readings are paused');
+    final last = c.drowsiness!.epochs.last;
+    expect(last.events, isNull);
+    expect(last.still, isNull);
+    band.t4lost = false;
+    await until(() => band.clockS > at + 14 * 60);
+    expect(c.signal, WorkSignal.good);
+    await c.stop();
+    c.dispose();
+  });
+
+  group('work review 2026-11-20', () {
+    WorkBand bandAt10() => WorkBand(start: DateTime(2026, 11, 20, 10).millisecondsSinceEpoch / 1000);
+
+    test('a forgotten Back: off and on again ends the break by itself; the card and the file say so (finding 2)', () async {
+      final band = bandAt10();
+      final keeper = FakeSessionKeeper();
+      final c = make(band, keeper: keeper);
+      await c.start();
+      await until(() => c.level == DrowsyLevel.alert);
+      c.takeBreak();
+      expect(keeper.spec!.text, 'On a break');
+      final at = band.clockS;
+      band.mode = Mode.off;
+      await until(() => band.clockS > at + 3 * 60);
+      band.mode = Mode.awake;
+      await until(() => !c.onBreak);
+      expect(band.clockS - at, inInclusiveRange(4.5 * 60, 6 * 60), reason: '2 minutes worn after it came back');
+      final b = c.planner!.breaks.single;
+      expect(b.endSource, BreakEnd.auto);
+      expect(eventsOf(c), contains(startsWith('break ended by itself')));
+      expect(keeper.spec!.text, isNot('On a break'), reason: 'the card was held again');
+      expect(keeper.spec!.button, isNull);
+      expect(c.afterBreak, isNotNull);
+      await c.stop();
+      c.dispose();
+    });
+
+    test('Back on the lock-screen card while on a break (finding 2)', () async {
+      final band = bandAt10();
+      final keeper = FakeSessionKeeper();
+      final c = make(band, keeper: keeper);
+      await c.start();
+      await until(() => c.stage == WorkStage.running);
+      expect(keeper.spec!.button, isNull, reason: 'no break: only Stop');
+      c.takeBreak();
+      expect(keeper.spec!.button, 'Back');
+      keeper.onButton!();
+      expect(c.onBreak, isFalse);
+      expect(c.planner!.breaks.single.endSource, BreakEnd.back);
+      expect(keeper.spec!.button, isNull);
+      keeper.onButton!(); // a late second tap: nothing
+      expect(c.onBreak, isFalse);
+      await c.stop();
+      c.dispose();
+    });
+
+    test('the headband put down for a break keeps the level before it; the after line compares (finding 6)', () async {
+      final band = bandAt10();
+      final c = make(band);
+      await c.start();
+      await until(() => c.level == DrowsyLevel.alert);
+      band.mode = Mode.off;
+      await until(() => c.onBreak);
+      final b = c.planner!.breaks.single;
+      expect(b.source, BreakSource.headbandOff);
+      expect(b.before, isNotNull);
+      expect(b.beforeLevel, DrowsyLevel.alert);
+      band.mode = Mode.awake;
+      await until(() => !c.onBreak);
+      await until(() => b.after != null);
+      expect(c.afterBreak, startsWith('After your break: drowsiness about the same (alert before, alert after)'));
+      await c.stop();
+      c.dispose();
+    });
+
+    test('an unanswered hint goes after its 30 minutes, from the page and the card (finding 9)', () async {
+      final band = bandAt10();
+      final keeper = FakeSessionKeeper();
+      final c = make(band, keeper: keeper);
+      await c.start();
+      await until(() => c.level == DrowsyLevel.alert);
+      band.mode = Mode.drowsy;
+      await until(() => c.hint != null);
+      final h = c.hint!;
+      band.mode = Mode.awake;
+      await until(() => band.now().difference(h.at).inMinutes >= 29);
+      expect(c.hint, same(h));
+      await until(() => band.now().difference(h.at).inMinutes >= 31);
+      expect(c.hint, isNull);
+      expect(keeper.spec!.text, isNot(startsWith('You seem')));
+      c.takeBreak();
+      expect(h.answer, isNull, reason: 'a break long after is not its answer');
+      await c.stop();
+      c.dispose();
+    });
+
+    test("a jump of the phone's clock is not worn time (finding 8)", () async {
+      final band = bandAt10();
+      var offset = Duration.zero;
+      final c = WorkController(
+        finder: OneFinder(band),
+        store: WorkStore(Directory('${tmp.path}/work-sessions')),
+        timing: const WorkTiming(link: fastLink, tick: Duration(milliseconds: 4)),
+        clock: () => band.now().add(offset),
+        monotonic: () => Duration(microseconds: (band.clockS * 1e6).round()),
+      );
+      await c.start();
+      await until(() => c.level == DrowsyLevel.alert);
+      final before = c.wornMin, at = band.clockS;
+      offset = const Duration(hours: 2);
+      await until(() => band.clockS > at + 20);
+      expect(c.wornMin - before, lessThan(1));
+      expect(c.hint, isNull);
+      await c.stop();
+      c.dispose();
+    });
+
+    test("the card's words follow the level, not only every 20 minutes (finding 13)", () async {
+      final band = bandAt10();
+      final keeper = FakeSessionKeeper();
+      final c = make(band, keeper: keeper);
+      await c.start();
+      await until(() => c.level == DrowsyLevel.alert);
+      expect(keeper.spec!.text, startsWith('Alert'));
+      band.mode = Mode.drowsy;
+      await until(() => c.level != DrowsyLevel.alert);
+      expect(keeper.spec!.text, startsWith(levelWords[c.level]!));
+      await c.stop();
+      c.dispose();
+    });
+
+    test('the after-break line goes 30 minutes after the break (finding 15)', () async {
+      final band = bandAt10();
+      final c = make(band);
+      await c.start();
+      await until(() => c.level == DrowsyLevel.alert);
+      c.takeBreak();
+      final at = band.clockS;
+      await until(() => band.clockS > at + 6 * 60);
+      c.back();
+      expect(c.afterBreak, startsWith('Back from your break'));
+      await until(() => band.clockS > at + 30 * 60);
+      expect(c.afterBreak, isNotNull);
+      await until(() => band.clockS > at + 37 * 60);
+      expect(c.afterBreak, isNull);
+      await c.stop();
+      c.dispose();
+    });
+
+    test('Start under 5 minutes after the last Stop carries its stretch; the earlier hint before a lunch Stop counts as followed (finding 7)', () async {
+      final dir = Directory('${tmp.path}/work-sessions');
+      final store = WorkStore(dir);
+      final t0 = DateTime(2026, 11, 20, 10);
+      Map<String, Object?> earlier(DateTime start, DateTime end, {required double stretch, DateTime? hintAt}) => {
+        'version': workFormatVersion,
+        'kind': 'work_session',
+        'start': start.toIso8601String(),
+        'end': end.toIso8601String(),
+        'ended': 'stopped',
+        'stretch_min': stretch,
+        'hints': [
+          if (hintAt != null) {'at': hintAt.toIso8601String(), 'reason': 'stretch', 'active_min': 60.0, 'threshold_min': 60.0, 'level': 'alert', 'taken': false},
+        ],
+        'breaks': [],
+        'epochs': [],
+      };
+      // the morning: a hint at 08:50 not followed inside the session, stopped at 09:00 for an hour
+      store.save(earlier(DateTime(2026, 11, 20, 7, 45), DateTime(2026, 11, 20, 9), stretch: 70, hintAt: DateTime(2026, 11, 20, 8, 50)));
+      // the session before this one: ended 2 minutes before Start (a crash, a restart)
+      store.save(earlier(DateTime(2026, 11, 20, 9, 30), t0.subtract(const Duration(minutes: 2)), stretch: 40));
+      final band = WorkBand(start: t0.millisecondsSinceEpoch / 1000);
+      final c = make(band);
+      await c.start();
+      expect(c.stretchMin, closeTo(40, 0.5));
+      expect(c.planner!.thresholdMin(t0), 60, reason: 'the lunch Stop was the hint\'s break');
+      expect(eventsOf(c), contains(startsWith('stretch carried over')));
+      await c.stop();
+      c.dispose();
+    });
   });
 
   test('words: the hint lines and the after-break line', () {

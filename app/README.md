@@ -1143,17 +1143,23 @@ not measured.
 2. **Start work session**. After the connection, work as usual: 1 minute of settling in, then 3 minutes of baseline
    ("Calibrating"). Then the big word says **Alert**, **Getting drowsy**, **Drowsy** or **Not sure** (too noisy:
    talking, chewing, moving), from the last 5 minutes against your baseline. **The last hour** shows twelve 5-minute
-   cells (empty alert, half full getting drowsy, full drowsy).
-3. Lock the phone if you like: the session goes on (a card with Stop on the lock screen) and the chime still sounds.
+   cells (empty alert, half full getting drowsy, full drowsy). If the signal line says **An electrode has no
+   contact: eye readings paused**, press the headband on: until then the level reads alpha alone. If the headband
+   stops sending, the app restarts its stream after 8 seconds and reconnects after 40.
+3. Lock the phone if you like: the session goes on (a card with the level and Stop on the lock screen) and the chime
+   still sounds.
 4. A **hint**: a soft two-note chime, and the words on the screen and the lock-screen card: after 60 minutes worn
    (plus 15 for each hint you let pass), or when drowsiness read up for most of the last 6 minutes, or your eyes were
    closed for 3 of them. At most 4 a day, 45 minutes apart, none 23:00-08:00. Answer **On a break**, **Snooze 20
-   min** or **Not now**; tap how sharp you feel (1 Foggy to 5 Very sharp) if you can. During a call (ringing, a
-   phone call, or a voice or video call in another app) the chime waits until the call is over; the words show at
-   once. If the media volume is off or under a fifth when you start, a quiet line under the session says the chime
-   may not be heard.
-5. **On a break** when you get up, **Back** when you return (taking the headband off for 5 minutes counts too). Some
-   minutes after Back the screen says whether drowsiness went down.
+   min** or **Not now**; tap how sharp you feel (1 Foggy to 5 Very sharp) if you can. A hint nobody answers goes
+   after 30 minutes. Stopping the session for 5 minutes or more (lunch) counts as the break after a hint; a restart
+   within 5 minutes carries the hour on. During a call (ringing, a phone call, or a voice or video call in another
+   app) the chime waits until the call is over; the words show at once. If the media volume is off or under a fifth
+   when you start, a quiet line under the session says the chime may not be heard.
+5. **On a break** when you get up, **Back** when you return (on the lock-screen card too; taking the headband off
+   for 5 minutes counts as a break as well). A forgotten Back ends the break by itself 2 minutes after the headband
+   is back on, or after 20 minutes of readable work with it on. Some minutes after the break the screen says
+   whether drowsiness went down.
 6. **Stop** at the end: the session's totals and its hints.
 7. If someone else wore the headband, tap **Someone else wore it** on the end page, or under that session in the list of
    earlier sessions on the start page (**Undo** takes it back). The session stays on the phone but is left out of
@@ -1164,9 +1170,11 @@ for it, each next to yesterday and your usual like the other numbers, with a wor
 "The last 14 days": **Work with a signal** (minutes, not counting noisy or closed-eyes time or breaks), **Work time
 drowsy** (the share of that time at getting drowsy or drowsy), **Work until first drowsy stretch** (only on days
 that had one), **Break hints shown**, **Hints followed by a break**, **Work breaks** (5 minutes or more) and
-**Sharpness at work** (the mean of your "how sharp" taps). Every row says "Seen together, not tested." A day with
-under 30 minutes of readable time has no work number, and sessions marked as worn by someone else are left out. The
-share of work time drowsy and the tap mean can also be the outcome of a self-experiment (Experiments in Trends).
+**Sharpness at work** (the mean of your "how sharp" taps). A hint counts as followed by a break when you took one
+within 30 minutes, also by stopping the session for 5 minutes or more. Every row says "Seen together, not tested."
+A day with under 30 minutes of readable time has no work number, and sessions marked as worn by someone else are
+left out. The share of work time drowsy and the tap mean can also be the outcome of a self-experiment (Experiments
+in Trends).
 
 Files, app-private, exported by Export data: `files/work-sessions/<time>.work.json` (written every 5 minutes and at
 Stop; every 30 s the numbers behind the level, the hints, breaks, taps and connection events; no raw EEG;

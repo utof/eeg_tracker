@@ -9,20 +9,22 @@
 // late with its blinks known). Every 30 s epoch:
 //   - clean seconds: a back channel usable, no movement, no muscle (jaw, talking, chewing), no blink, no hole; under
 //     10 of them and the epoch is not scored ("noisy"); alpha is the median over them;
-//   - eye events: blinks and sideways eye movements per 30 seconds without a hole or movement (at least 20 of them);
+//   - eye events: blinks and sideways eye movements per 30 seconds without a hole or movement and with all four
+//     channels usable for the detectors (not flat or railed, range under 400 µV; at least 20 such seconds, else the
+//     index is alpha alone: a lost electrode finds no blink, which must not read as still eyes);
 //   - eyes closed: alpha 3 times the baseline (with the eyes-closed minute: the geometric middle of the baseline and
 //     its alpha, at least 2 times) with no blink and at most one sideways eye movement in 30 s; not scored (closed
 //     eyes raise alpha without drowsiness), shown as "eyes closed";
 //   - after 1 minute of settling in, the next 6 scored epochs (3 minutes) are the baseline (medians); after it each
 //     epoch's index is the mean of a = log2(alpha / baseline) and still = log2((baseline events + 1) / (events + 1)),
-//     each clipped to -2..3; with alpha under its baseline the index stays at 0.25 at most (still eyes alone may be
-//     focus);
+//     each clipped to -2..3; still eyes (still > 0) count only as far as alpha is up, in full from a = 0.5 (alpha
+//     1.41 times its baseline): still eyes alone may be focus, so they never raise the level without alpha;
 //   - the level is the median index of the scored epochs among the last 10 (5 minutes; at least 6 needed, else
 //     "not sure"): under 0.5 alert, 0.5 getting drowsy, 1.0 drowsy, with 0.1 of hysteresis on the way down.
 // Planning values (docs/evidence/work-session.md).
 import 'dart:math' as math;
 
-import '../detectors/detectors.dart' show Second, backChannels, sideChannels, epochS;
+import '../detectors/detectors.dart' show BlinkRule, Second, backChannels, sideChannels, epochS;
 import '../feedback/features.dart' show median;
 
 abstract final class WorkRule {
@@ -31,8 +33,9 @@ abstract final class WorkRule {
   /// Eye events (blinks and sideways movements) are counted per 30 usable seconds; at least this many needed.
   static const int minEyeS = 20;
 
-  /// Still eyes alone never raise the index above this: without alpha up they may be focus, not drowsiness.
-  static const double stillAloneCap = 0.25;
+  /// Still eyes count in full once alpha is up this much (log2; 1.41 times the baseline), in proportion below and not
+  /// at all without alpha up: still eyes alone may be focus, not drowsiness.
+  static const double stillFullAt = 0.5;
   static const double gettingDrowsy = 0.5, drowsy = 1.0, hysteresis = 0.1;
   static const double clipLo = -2, clipHi = 3;
 
@@ -71,6 +74,7 @@ class WorkInput {
     required this.sem,
     required this.backClean,
     required this.sideClean,
+    this.eyeClean = true,
     this.blinks = 0,
     this.eyeMoves = 0,
     this.muscle = false,
@@ -84,8 +88,9 @@ class WorkInput {
   /// µV², T3-T4 at 0.2-0.7 Hz.
   final double sem;
 
-  /// At least one back channel usable / both side channels usable.
-  final bool backClean, sideClean;
+  /// At least one back channel usable / both side channels usable / all four usable for the blink and eye-movement
+  /// detectors (not flat or railed, range under their 400 µV, no hole).
+  final bool backClean, sideClean, eyeClean;
   final int blinks, eyeMoves;
   final bool muscle, movement, gap;
 }
@@ -101,12 +106,14 @@ WorkInput workInputOf(Second s, {int eyeMoves = 0}) {
     t += s.theta[b];
   }
   bool sideOk(int c) => !(s.flat[c] || s.railed[c] || s.extreme(c));
+  bool eyeOk(int c) => !(s.flat[c] || s.railed[c] || s.qrange[c] >= BlinkRule.maxUv);
   return WorkInput(
     alpha: n > 0 ? a / n : 0,
     theta: n > 0 ? t / n : 0,
     sem: s.sem,
     backClean: n > 0,
     sideClean: !s.gap && sideChannels.every(sideOk),
+    eyeClean: !s.gap && [for (var c = 0; c < 4; c++) c].every(eyeOk),
     blinks: s.blinks,
     eyeMoves: eyeMoves,
     muscle: s.muscleOn,
@@ -152,6 +159,8 @@ class WorkEpoch {
     required this.gapS,
     required this.blinks,
     required this.eyeMoves,
+    this.eyeS = 0,
+    this.eyeBadS = 0,
     this.alpha,
     this.theta,
     this.sem,
@@ -162,6 +171,9 @@ class WorkEpoch {
   /// Epoch number and its first second, counted from the session's first second of signal.
   final int n, startS;
   final int cleanS, muscleS, movementS, gapS, blinks, eyeMoves;
+
+  /// Seconds counted for eye events, and seconds left out because a channel was unusable for the detectors.
+  final int eyeS, eyeBadS;
 
   /// Medians over the clean seconds (null: under 10 clean seconds).
   final double? alpha, theta, sem;
@@ -188,6 +200,7 @@ class WorkEpoch {
     'gap_s': gapS,
     'blinks': blinks,
     'eye_moves': eyeMoves,
+    'eye_s': eyeS,
     'alpha': alpha == null ? null : _r(alpha!),
     'theta': theta == null ? null : _r(theta!),
     'sem': sem == null ? null : _r(sem!),
@@ -237,6 +250,10 @@ class WorkDrowsiness {
   /// Calibrating: the scored epochs still needed for the baseline.
   int get baselineLeft => calibrated ? 0 : WorkRule.baselineEpochs - _base.length;
 
+  /// Eye events are not read now: over half of the last half minute had a channel unusable for the detectors (an
+  /// electrode with no contact), so the level reads alpha alone.
+  bool get eyesPaused => (epochs.lastOrNull?.eyeBadS ?? 0) * 2 > epochS;
+
   /// Over half of the last 5 minutes were too noisy to read (after the baseline).
   bool get noisy => calibrated && epochs.length >= WorkRule.windowEpochs && window == null && !eyesClosed;
 
@@ -257,7 +274,7 @@ class WorkDrowsiness {
 
   void _endEpoch() {
     final back = <WorkInput>[], side = <double>[];
-    var muscle = 0, moved = 0, gaps = 0, blinks = 0, moves = 0, eyeS = 0, eyeEvents = 0;
+    var muscle = 0, moved = 0, gaps = 0, blinks = 0, moves = 0, eyeS = 0, eyeBad = 0, eyeEvents = 0;
     for (final x in _ep) {
       if (x.muscle) muscle++;
       if (x.movement) moved++;
@@ -265,8 +282,12 @@ class WorkDrowsiness {
       blinks += x.blinks;
       moves += x.eyeMoves;
       if (!x.gap && !x.movement) {
-        eyeS++;
-        eyeEvents += x.blinks + x.eyeMoves;
+        if (x.eyeClean) {
+          eyeS++;
+          eyeEvents += x.blinks + x.eyeMoves;
+        } else {
+          eyeBad++;
+        }
       }
       final quiet = !x.movement && !x.muscle && !x.gap;
       if (quiet && x.backClean && x.blinks == 0) back.add(x);
@@ -283,6 +304,8 @@ class WorkDrowsiness {
       gapS: gaps,
       blinks: blinks,
       eyeMoves: moves,
+      eyeS: eyeS,
+      eyeBadS: eyeBad,
       alpha: alpha,
       theta: enough ? median([for (final x in back) x.theta]) : null,
       sem: side.length >= WorkRule.minCleanS ? median(side) : null,
@@ -331,19 +354,35 @@ class WorkDrowsiness {
     final ev = e.events, bev = b.events;
     if (ev != null && bev != null) e.still = _clip(_log2((bev + 1) / (ev + 1)));
     final a = e.a!, still = e.still;
-    var index = still == null ? a : (a + still) / 2;
-    if (a < 0) index = math.min(index, WorkRule.stillAloneCap);
-    e.index = index;
+    if (still == null) {
+      e.index = a;
+      return;
+    }
+    // still eyes count only as far as alpha is up; busy eyes (still < 0) always count against drowsiness
+    final weight = math.min(1, math.max(0, a / WorkRule.stillFullAt));
+    e.index = (a + (still > 0 ? still * weight : still)) / 2;
   }
 
-  /// Alpha over this is closed eyes (with no blink and at most one glance): before the baseline half the eyes-closed
-  /// minute's alpha (nothing without it); after it 3x the baseline, or with the minute the geometric middle of the
-  /// two, at least 2x (the owner's eyes-closed alpha was only 2.5x his eyes-open alpha).
+  /// Alpha over this is closed eyes (with no blink and at most one glance): 3x the eyes-open alpha, or with the
+  /// eyes-closed minute the geometric middle of the two, at least 2x (the owner's eyes-closed alpha was only 2.5x his
+  /// eyes-open alpha). The eyes-open alpha is the baseline's, before it the settling minute's (its open-eyed half
+  /// minutes); before either, half the minute's alpha. Without the minute, nothing is closed before the baseline.
   double _closedLine() {
     final cal = closedAlpha, b = baseline;
-    if (b == null) return cal != null && cal > 0 ? WorkRule.closedOfCal * cal : double.infinity;
-    if (cal == null || cal <= b.alpha) return WorkRule.closedX * b.alpha;
-    return math.max(WorkRule.closedMinX * b.alpha, math.sqrt(b.alpha * cal));
+    if (b == null && (cal == null || cal <= 0)) return double.infinity;
+    final open = b?.alpha ?? _settleAlpha();
+    if (open == null) return WorkRule.closedOfCal * cal!;
+    if (cal == null || cal <= open) return WorkRule.closedX * open;
+    return math.max(WorkRule.closedMinX * open, math.sqrt(open * cal));
+  }
+
+  /// The median alpha of the settling minute's open-eyed half minutes so far (null: none yet).
+  double? _settleAlpha() {
+    final open = [
+      for (final e in epochs.take(WorkRule.settleEpochs))
+        if (e.alpha != null && !e.eyesClosed) e.alpha!,
+    ];
+    return open.isEmpty ? null : median(open);
   }
 
   void _level() {

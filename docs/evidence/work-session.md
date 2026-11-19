@@ -32,41 +32,52 @@ recorded morning the level rose 8 minutes before the sleep model saw the owner d
 - On the owner's recordings (the laptop's `tool/work_check.dart`), theta at O1/O2 and the slow eye power at T3-T4
   fell as he got drowsy, not rose: against the forehead reference both follow eye activity. So the app does not
   use them; it uses eyes-open alpha and how still the eyes are (fewer blinks and glances).
-- Still eyes can also mean deep focus. Still eyes alone never raise the level above alert; alpha must rise too.
+- Still eyes can also mean deep focus. They count only as far as alpha rises too (fully from alpha 1.4 times the
+  baseline), so still eyes alone never raise the level above alert.
 - Tested on one morning only: an hour with eyes open after a short, restless night, where the owner then fell
   asleep. The level read alert until 08:42, getting drowsy from 08:43 and drowsy from 08:48, and a drowsy hint would
   have come at 08:47, 9 minutes before the sleep model saw him doze; 2 hours awake in bed earlier gave no drowsy
-  reading. Working days, coffee, talking and other people are untested.
+  reading. The later fixes (still eyes, a lost electrode; work review of 2026-11-20) left these times as they
+  were, and the alert minutes before them read further from the line. Working days, coffee, talking and other
+  people are untested.
 - With eyes closed (resting, or dozing at the desk) alpha falls as you drift off, so the level cannot follow it;
   the screen says "Eyes closed" instead, and 3 minutes of it in 6 bring a hint.
 - If your first 4 minutes were not your usual awake work (tests, talking, already drowsy), every later reading is
   off: with the morning's baseline taken during eye tests the level only reached "getting drowsy".
 - Taking the headband off and putting it back can shift the signal; the baseline stays the session's first minutes.
+- One electrode with no contact hides every blink and eye movement, which would read as very still eyes; the eye
+  readings then pause (the signal line says so) and the level reads alpha alone.
 - "Mental fatigue" and "focus" are not measured: no study links these electrodes to either during real work.
 
 ## How the app uses this
 
 - Every 30 seconds: alpha (8-12 Hz) at O1/O2 from clean seconds only (no muscle, talking, chewing, movement, blink
-  or hole), and blinks plus sideways eye movements per 30 seconds; under 10 clean seconds the half minute is not
-  read.
+  or hole), and blinks plus sideways eye movements per 30 seconds with all four electrodes usable; under 10 clean
+  seconds the half minute is not read.
 - Your baseline: after 1 minute of settling in, the medians of the next 3 minutes. The index is the mean of alpha
-  against it and eye stillness against it (both on a log2 scale); the level is the median of the last 5 minutes
+  against it and eye stillness against it (both on a log2 scale; stillness counts only as far as alpha is up); the
+  level is the median of the last 5 minutes
   (needs 3 readable minutes): under 0.5 alert, from 0.5 getting drowsy, from 1.0 drowsy.
 - Closed eyes are told apart by alpha 3 times the baseline with no blink and at most one glance in 30 seconds; with
   the optional eyes-closed minute, the line is halfway (geometrically) between your open and closed alpha, at least 2
   times (the owner's closed eyes gave only 2.5 times his open-eye alpha). They are left out of the level.
-- Hints, the laptop's break-hint rules: after 60 minutes worn, plus 15 minutes for each hint no break followed; or
-  when the level read getting drowsy or more in 8 of the last 12 half minutes. At most 4 a day (04:00 to 04:00),
-  45 minutes apart, none 23:00-08:00; Snooze brings one back 20 minutes later. A soft chime and the words on the
-  lock-screen card.
-- A break: On a break / Back, or the headband off (no usable signal) for 5 minutes. A break of 5 minutes or more
-  resets the hour; after it the app compares the level before it with the first 5 minutes after it.
+- Hints, the laptop's break-hint rules: after 60 minutes worn, plus 15 minutes for each hint no break followed (a
+  Stop of 5 minutes or more counts as the break); or when the level read getting drowsy or more in 8 of the last 12
+  half minutes since the last break. At most 4 a day (04:00 to 04:00), 45 minutes apart, none 23:00-08:00; Snooze
+  brings one back 20 minutes later. A soft chime and the words on the lock-screen card; an unanswered hint goes
+  after 30 minutes.
+- A break: On a break / Back (also on the lock screen), or the headband off (no usable signal) for 5 minutes. A
+  forgotten Back ends the break by itself 2 minutes after the headband is back on, or after 20 minutes of readable
+  work with it on. A break of 5 minutes or more resets the hour; after it the app compares the level before it (for
+  the headband taken off: before it came off) with the first 5 minutes after it.
 - With each hint an optional one-tap "How sharp do you feel?" (the sharp-hours scale, 1 Foggy to 5 Very sharp),
   kept in the session's file so a later check can ask whether the EEG agrees with you.
 - Across days (Trends, from 30 minutes of usable work time a day): the time worked with a readable signal, the share
-  of it at getting drowsy or drowsy, the worked minutes until the level first read drowsy for 8 of 12 half minutes,
-  hints shown and followed by a break, breaks of 5 minutes or more, and the mean "how sharp" tap, each beside your
-  usual and, from 14 days, an arrow beyond your normal spread. Noisy and closed-eyes time is left out. They are
+  of it at getting drowsy or drowsy, the worked minutes until the level first read getting drowsy or drowsy for 8 of
+  12 half minutes, hints shown and followed by a break, breaks of 5 minutes or more, and the mean "how sharp" tap,
+  each beside your usual and, from 14 days, an arrow beyond your normal spread. Half minutes whose 5 minutes read
+  "Not sure" and closed-eyes half minutes are left out (a single noisy half minute inside readable 5 minutes counts
+  at their level). They are
   seen together with your other numbers, not tested; the share of work time drowsy and the tap mean can also be
   the outcome of a self-experiment (judged by the next day's number).
 - All planning values, set on one morning; your own weeks will tell.

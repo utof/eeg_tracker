@@ -1,6 +1,7 @@
 // The shared headband link of the daytime sessions (lib/dream/band_link.dart) against a finder and headbands the
 // test answers by hand: what happens to a headband that turns up after Stop or after a deadline, to a reconnect whose
-// start fails, and to a search that never comes back (review 2026-11-19, findings 4, 7, 15).
+// start fails, and to a search that never comes back (review 2026-11-19, findings 4, 7, 15); and to a stream that
+// stops while the headband stays in range (work review 2026-11-20, finding 1).
 import 'dart:async';
 
 import 'package:eeg_tracker/dream/band_link.dart';
@@ -114,11 +115,12 @@ void main() {
   late List<String> batches;
   late BandLink link;
 
-  BandLink linkOf(HandFinder f, {LinkTiming timing = quick}) => BandLink(
+  BandLink linkOf(HandFinder f, {LinkTiming timing = quick, DateTime Function()? clock}) => BandLink(
     finder: f,
     timing: timing,
     onBatch: (_, b) => batches.add('batch'),
     onEvent: (e, line) => events.add(e.name),
+    clock: clock,
   );
 
   /// The link connected to [first] and streaming.
@@ -269,6 +271,115 @@ void main() {
       finder.finds[1].complete(band);
       expect(await connected, isTrue);
       await next.close();
+    });
+  });
+
+  group('a stream that stops while the headband stays in range (work review 2026-11-20, finding 1)', () {
+    late DateTime now;
+    void pass(int seconds) => now = now.add(Duration(seconds: seconds));
+
+    setUp(() {
+      now = DateTime(2026, 11, 20, 10);
+      // a direct try waits for the test's answer (5 s), so no try is abandoned meanwhile
+      final l = link = linkOf(
+        finder,
+        clock: () => now,
+        timing: const LinkTiming(
+          scanFor: Duration(milliseconds: 20),
+          connectTimeout: Duration(seconds: 5),
+          sdkTimeout: Duration(milliseconds: 40),
+          settle: Duration.zero,
+          reconnectWaits: [Duration(milliseconds: 5)],
+          rescanFor: Duration(milliseconds: 10),
+        ),
+      );
+      addTearDown(l.close);
+    });
+
+    test('no data for 8 s: the stream is restarted once; a later stall gets its own restart', () async {
+      final band = HandBand('A');
+      await streaming(band);
+      band.send();
+      pass(7);
+      link.tick();
+      await settle();
+      expect(band.calls, ['startSignal'], reason: 'not yet');
+      pass(2);
+      link.tick();
+      await settle();
+      expect(band.calls, ['startSignal', 'stopSignal', 'startSignal']);
+      expect(events, ['streamRestarted']);
+      pass(5);
+      link.tick();
+      await settle();
+      expect(band.calls, hasLength(3), reason: 'once per stall');
+      band.send(); // the restart mended it
+      pass(9);
+      link.tick();
+      await settle();
+      expect(events, ['streamRestarted', 'streamRestarted']);
+      expect(link.lost, isFalse);
+      await link.close();
+    });
+
+    test('still nothing 40 s after the last batch: the headband is let go and reached again, as after a drop', () async {
+      final band = HandBand('A'), again = HandBand('B');
+      await streaming(band);
+      band.send();
+      for (var s = 0; s < 40; s++) {
+        pass(1);
+        link.tick();
+        await Future<void>.delayed(Duration.zero);
+      }
+      await settle();
+      expect(events, ['streamRestarted', 'drop']);
+      expect(link.lost, isTrue, reason: 'the session sees the signal lost while the link reconnects');
+      expect(band.calls, containsAllInOrder(['stopSignal', 'startSignal', 'stopSignal', 'disconnect']));
+      expect(link.leftLost, isFalse, reason: 'a headband in range is let go, not left as lost');
+      await until(() => finder.directs.length == 1);
+      finder.directs[0].complete(again);
+      await until(() => events.contains('reconnected'));
+      expect(link.lost, isFalse);
+      batches.clear();
+      again.send();
+      band.send();
+      expect(batches, hasLength(1), reason: 'only the reconnected headband feeds the session');
+      pass(9); // the reconnected stream has its own stall clock
+      link.tick();
+      await settle();
+      expect(again.calls, ['startSignal', 'stopSignal', 'startSignal']);
+      expect(events.where((e) => e != 'reconnectTry'), ['streamRestarted', 'drop', 'reconnected', 'streamRestarted']);
+      await link.close();
+    });
+
+    test('a stream that never starts: restarted once at 8 s, reached again at 40 s', () async {
+      final band = HandBand('A');
+      await streaming(band);
+      pass(9);
+      link.tick();
+      await settle();
+      expect(events, ['streamRestarted']);
+      pass(32);
+      link.tick();
+      await settle();
+      expect(events, ['streamRestarted', 'drop']);
+      await until(() => finder.directs.length == 1);
+      finder.directs[0].complete(HandBand('B'));
+      await until(() => events.contains('reconnected'));
+      await link.close();
+    });
+
+    test('a headband that goes out of range is not also reconnected by the stall rule', () async {
+      final band = HandBand('A');
+      await streaming(band);
+      band.send();
+      band.goOutOfRange();
+      pass(60);
+      link.tick();
+      await settle();
+      expect(events.where((e) => e != 'reconnectTry'), ['drop'], reason: 'one drop, no restart');
+      expect(band.calls, ['startSignal'], reason: 'no SDK call goes near a headband out of range');
+      await link.close();
     });
   });
 

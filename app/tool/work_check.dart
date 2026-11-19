@@ -96,13 +96,14 @@ void main(List<String> args) {
     stdout.writeln('\n== window ${w.label} (baseline from ${_hms(start + w.from)})');
     final b = w.d.baseline;
     stdout.writeln('baseline: ${b == null ? 'never complete' : jsonEncode(b.toJson())} at +${w.d.calibratedAtS}s');
-    stdout.writeln('time      stage clean blk mov closed   a      still  (t)    (s)    index  window level');
+    stdout.writeln('time      stage clean blk mov closed   a      still   (t)    (s)    index  window level');
     String f(double? v) => v == null ? '   -  ' : v.toStringAsFixed(2).padLeft(6);
     for (final (e, st) in w.rows) {
       stdout.writeln(
         '${_hms(start + w.from + e.startS)}  ${st.padRight(4)}  ${e.cleanS.toString().padLeft(3)}  '
         '${e.blinks.toString().padLeft(3)} ${e.eyeMoves.toString().padLeft(3)}  ${e.eyesClosed ? 'yes' : ' - '}   '
-        '${f(e.a)} ${f(e.t)} ${f(e.s)} ${f(e.index)} ${f(e.window)}  ${levelWords[e.level]}',
+        '${f(e.a)} ${f(e.still)} ${f(e.t)} ${f(e.s)} ${f(e.index)} ${f(e.window)}  ${levelWords[e.level]}'
+        '${e.eyeBadS > 0 ? '  (eye-bad ${e.eyeBadS} s)' : ''}',
       );
     }
     // share of each level by stage

@@ -31,6 +31,7 @@ class KeepSpec {
     this.headband = false,
     this.microphone = false,
     this.focus = true,
+    this.button,
   });
 
   /// The notification's title ("Fall asleep", "Meditation").
@@ -46,6 +47,10 @@ class KeepSpec {
   /// Ask for the sound (audio focus): other apps' sound pauses, and [SessionKeeper.onFocus] hears of calls. False for
   /// a session that plays nothing for a long time (the nap until its wake).
   final bool focus;
+
+  /// A second button on the card beside Stop, with these words (the work session's "Back" while on a break); its tap
+  /// reaches [SessionKeeper.onButton]. Null: Stop only.
+  final String? button;
 }
 
 abstract class SessionKeeper {
@@ -58,6 +63,9 @@ abstract class SessionKeeper {
 
   /// Stop was tapped on the notification or the lock screen.
   void Function()? onStop;
+
+  /// The card's second button ([KeepSpec.button]) was tapped.
+  void Function()? onButton;
 
   /// A call or another app took the sound, or it came back (only with [KeepSpec.focus]).
   void Function(FocusChange change)? onFocus;
@@ -74,6 +82,9 @@ class PhoneSessionKeeper implements SessionKeeper {
 
   @override
   void Function()? onStop;
+
+  @override
+  void Function()? onButton;
 
   @override
   void Function(FocusChange change)? onFocus;
@@ -103,6 +114,7 @@ class PhoneSessionKeeper implements SessionKeeper {
       _listening = true;
       _channel.setMethodCallHandler((call) async {
         if (call.method == 'stopTapped') _holder?.onStop?.call();
+        if (call.method == 'buttonTapped') _holder?.onButton?.call();
         final focus = call.method == 'focus' ? _focusWords[call.arguments] : null;
         if (focus != null) _holder?.onFocus?.call(focus);
       });
@@ -116,6 +128,7 @@ class PhoneSessionKeeper implements SessionKeeper {
           'headband': spec.headband,
           'microphone': spec.microphone,
           'focus': spec.focus,
+          'button': ?spec.button,
         });
         if (kept == null) return false;
         return (!spec.headband || kept.contains('headband')) && (!spec.microphone || kept.contains('microphone'));
@@ -156,6 +169,9 @@ class FakeSessionKeeper implements SessionKeeper {
 
   @override
   void Function()? onStop;
+
+  @override
+  void Function()? onButton;
 
   @override
   void Function(FocusChange change)? onFocus;
