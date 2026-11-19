@@ -1,0 +1,285 @@
+// Hands-free controls in the app (DECISIONS 240-249): the switch and calibration files, the per-session helper with
+// its sleep gate and tone, and the sessions acting on gestures: sound for states pauses and resumes its sound and
+// marks moments, from a fake headband that makes the gestures on its synthetic signal.
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math' as math;
+
+import 'package:eeg_tracker/detectors/detectors.dart';
+import 'package:eeg_tracker/detectors/gestures.dart';
+import 'package:eeg_tracker/dream/band_link.dart';
+import 'package:eeg_tracker/export/store.dart' show isExported;
+import 'package:eeg_tracker/feedback/demo.dart';
+import 'package:eeg_tracker/handsfree/live.dart';
+import 'package:eeg_tracker/handsfree/store.dart';
+import 'package:eeg_tracker/recorder/chunk_writer.dart' show Sample;
+import 'package:eeg_tracker/recorder/headband.dart';
+import 'package:eeg_tracker/sound/gesture_tone.dart';
+import 'package:eeg_tracker/sound/state_sound.dart';
+import 'package:eeg_tracker/states/controller.dart';
+import 'package:eeg_tracker/states/presets.dart';
+import 'package:eeg_tracker/states/store.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'dream_test.dart' show OneFinder;
+
+const fs = 250;
+
+/// A gesture drawn on the synthetic signal at [atS] seconds of signal.
+sealed class Drawn {
+  const Drawn(this.atS);
+  final double atS;
+}
+
+/// Two 0.4 s clenches 0.6 s apart (40 µV of noise on T3 and T4).
+class DrawnClench extends Drawn {
+  const DrawnClench(super.atS);
+}
+
+/// One way (+[uv] in T3-T4), the other way 0.7 s later, back to the middle 0.7 s after that.
+class DrawnGlance extends Drawn {
+  const DrawnGlance(super.atS, {this.uv = 140});
+  final double uv;
+}
+
+/// The demo signal (eyes closed, no blinks or jaw bursts) with gestures drawn on it; 1 s of signal a millisecond.
+class GestureBand implements Headband {
+  GestureBand(this.drawn);
+  final List<Drawn> drawn;
+  final DemoSignal demo = DemoSignal(3)
+    ..eyes = 'closed'
+    ..blinks = false
+    ..jawBursts = false;
+  final math.Random _r = math.Random(5);
+  int pack = 0;
+  Timer? _timer;
+  final _signal = StreamController<List<Sample>>.broadcast(sync: true);
+  final _resist = StreamController<Map<String, double>>.broadcast();
+  final _range = StreamController<bool>.broadcast();
+
+  @override
+  String get name => 'BrainBit G';
+  @override
+  String get address => 'AA:CC';
+  @override
+  String get serial => '2';
+  @override
+  int? get rssi => -60;
+  @override
+  BandId get id => const BandId(name: 'BrainBit', address: 'AA:CC', family: 'leBrainBitBlack');
+  @override
+  Stream<List<Sample>> get signal => _signal.stream;
+  @override
+  Stream<Map<String, double>> get resistance => _resist.stream;
+  @override
+  Stream<bool> get rangeChanges => _range.stream;
+
+  double _g() => (_r.nextDouble() + _r.nextDouble() + _r.nextDouble() - 1.5) * 2;
+
+  List<double> _row() {
+    final t = demo.t, row = demo.next(1).single;
+    for (final d in drawn) {
+      final s = t - d.atS;
+      switch (d) {
+        case DrawnClench():
+          if ((s >= 0 && s < 0.4) || (s >= 1.0 && s < 1.4)) {
+            final a = 40 * _g();
+            row[2] += a;
+            row[3] += 40 * _g();
+          }
+        case DrawnGlance(:final uv):
+          double step(double at) => 0.5 * (1 + _tanh((s - at) / 0.02));
+          final v = uv * (step(0) - 2 * step(0.7) + step(1.4));
+          row[2] += v / 2;
+          row[3] -= v / 2;
+      }
+    }
+    return row;
+  }
+
+  static double _tanh(double v) => v > 20 ? 1 : (v < -20 ? -1 : (math.exp(2 * v) - 1) / (math.exp(2 * v) + 1));
+
+  @override
+  Future<void> startSignal() async {
+    _timer = Timer.periodic(const Duration(milliseconds: 1), (_) {
+      if (!_signal.hasListener) return;
+      final batch = <Sample>[];
+      for (var i = 0; i < 250; i++) {
+        final r = _row();
+        batch.add((pack: pack % 2048, o1: r[0] * 1e-6, o2: r[1] * 1e-6, t3: r[2] * 1e-6, t4: r[3] * 1e-6));
+        pack++;
+      }
+      _signal.add(batch);
+    });
+  }
+
+  @override
+  Future<void> stopSignal() async => _timer?.cancel();
+  @override
+  Future<void> startResist() async {
+    Timer(const Duration(milliseconds: 1), () => _resist.add({'O1': 4e5, 'O2': 6e5, 'T3': 5e5, 'T4': 5e5}));
+  }
+
+  @override
+  Future<void> stopResist() async {}
+  @override
+  Future<bool> isInRange() async => true;
+  @override
+  Future<int> battery() async => 80;
+  @override
+  Future<void> disconnectAndDispose() async => _timer?.cancel();
+}
+
+/// Calibrated settings as a session gets them (left = + in T3-T4).
+const calibrated = GestureSettings(clenchX: 15, glanceUv: 80, leftSign: 1);
+
+const fast = StatesTiming(
+  link: LinkTiming(contactFor: Duration(milliseconds: 5), settle: Duration.zero, reconnectWaits: [Duration(milliseconds: 5)]),
+  tick: Duration(milliseconds: 20),
+);
+
+Future<void> until(bool Function() done, String what, {Duration max = const Duration(seconds: 40)}) async {
+  final end = DateTime.now().add(max);
+  while (!done()) {
+    if (DateTime.now().isAfter(end)) fail('stuck waiting for $what');
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
+
+/// Rows of the demo signal with [drawn] gestures, through detectors with a hands-free helper.
+List<GestureKind> heardOn(List<Drawn> drawn, double seconds, {bool Function()? asleep, HandsFree? Function(void Function(GestureKind))? make}) {
+  final band = GestureBand(drawn), heard = <GestureKind>[];
+  final d = Detectors();
+  final h = make?.call(heard.add) ?? HandsFree(calibrated, onGesture: heard.add, asleep: asleep);
+  h?.attach(d);
+  for (var i = 0; i < seconds * fs; i++) {
+    d.push(band._row());
+  }
+  return heard;
+}
+
+void main() {
+  late Directory root;
+  setUp(() => root = Directory.systemTemp.createTempSync('handsfree'));
+  tearDown(() => root.deleteSync(recursive: true));
+
+  group('the switch and the calibration', () {
+    final cal = CalibrationRecord(
+      made: DateTime(2026, 11, 19, 21, 5),
+      settings: calibrated,
+      tries: const [TryResult(GestureKind.clench, 33, 31.5, 0, 'ok'), TryResult(GestureKind.glance, 57, null, 0, 'none')],
+      clenchSeen: 3,
+      glanceSeen: 2,
+      leftKnown: true,
+      others: 0,
+      recording: '2026-11-19-210300',
+    );
+
+    test('off and not calibrated until set; on only counts with a usable calibration', () {
+      final s = HandsFreeStore(root);
+      expect(s.load().on, isFalse);
+      expect(s.load().calibration, isNull);
+      s.setOn(true, DateTime(2026, 11, 19, 21));
+      expect(s.load().on, isTrue);
+      expect(s.load().active, isNull, reason: 'on, but nothing calibrated');
+      s.saveCalibration(cal);
+      final back = s.load().calibration!;
+      expect([back.made, back.settings.clenchX, back.settings.leftSign, back.clenchSeen, back.recording], [cal.made, 15.0, 1, 3, cal.recording]);
+      expect([for (final t in back.tries) [t.kind, t.cue, t.level, t.why]], [
+        [GestureKind.clench, 33, 31.5, 'ok'],
+        [GestureKind.glance, 57, null, 'none'],
+      ]);
+      expect(s.load().active!.clenchX, 15);
+      s.setOn(false, DateTime(2026, 11, 19, 22));
+      expect(s.load().active, isNull);
+      final events = [for (final l in File('${root.path}/hands-free/events.jsonl').readAsLinesSync()) jsonDecode(l)['event']];
+      expect(events, ['switched on', 'calibrated: double clench 3 of 3 (on), look left then right 2 of 3 (on)', 'switched off']);
+    });
+
+    test('a damaged file reads as off and not calibrated; no temporary file is left', () {
+      final s = HandsFreeStore(root)..saveCalibration(cal);
+      File('${root.path}/hands-free/settings.json').writeAsStringSync('{"on": tru');
+      File('${root.path}/hands-free/calibration.json').writeAsStringSync('{"made": "x"}');
+      expect([s.load().on, s.load().calibration], [false, null]);
+      expect(Directory('${root.path}/hands-free').listSync().where((f) => f.path.endsWith('.tmp')), isEmpty);
+    });
+
+    test('Export data takes the folder', () {
+      for (final f in ['settings.json', 'calibration.json', 'events.jsonl']) {
+        expect(isExported('hands-free/$f'), isTrue, reason: f);
+      }
+    });
+  });
+
+  group('the session helper', () {
+    test('a gesture plays the tone and reaches the session; asleep, it is dropped and counted', () {
+      final tone = SilentGestureTone();
+      var asleep = false;
+      late HandsFree h;
+      final heard = heardOn([const DrawnClench(40), const DrawnGlance(50), const DrawnClench(60)], 66, make: (on) {
+        return h = HandsFree(calibrated, onGesture: (k) {
+          on(k);
+          asleep = true; // the drift-off detector says asleep from the first gesture on
+        }, tone: tone, asleep: () => asleep);
+      });
+      expect(heard, [GestureKind.clench]);
+      expect(tone.played, [GestureKind.clench]);
+      expect([h.heard, h.ignoredAsleep], [1, 2]);
+      expect(h.summary()['ignoredAsleep'], 2);
+    });
+
+    test('calibrated settings decide: a glance the wrong way, or with glances off, is not heard', () {
+      final drawn = [const DrawnGlance(40, uv: -140)];
+      expect(heardOn(drawn, 46), isEmpty);
+      expect(
+        heardOn([const DrawnGlance(40)], 46, make: (on) => HandsFree(const GestureSettings(glanceOn: false), onGesture: on)),
+        isEmpty,
+      );
+    });
+
+    test('the morning check-in never sees gestures: its code does not use them', () {
+      for (final f in Directory('lib/morning').listSync().whereType<File>()) {
+        final src = f.readAsStringSync();
+        expect(src.contains('handsfree') || src.contains('gestures.dart') || src.contains('DetectorTap'), isFalse, reason: f.path);
+      }
+    });
+  });
+
+  group('sound for states', () {
+    test('a double clench pauses the sound and the next resumes it; a glance marks a moment', () async {
+      final band = GestureBand([const DrawnClench(75), const DrawnGlance(85), const DrawnClench(95)]);
+      final sound = SilentStateSound(), tone = SilentGestureTone();
+      final recordings = Directory('${root.path}/recordings')..createSync();
+      final store = SoundStore(soundStatesDirFor(recordings.path));
+      final c = StatesController(finder: OneFinder(band), sound: () => sound, store: store, timing: fast, gestureTone: () => tone)
+        ..handsFree = calibrated;
+      await c.start(SoundPlan.of(SoundState.relax, minutes: 5));
+      await until(() => c.stage == SoundStage.playing, 'the sound');
+      await until(() => sound.pauses.length >= 2, 'two pauses');
+      expect(sound.pauses, [true, false]);
+      expect(c.paused, isFalse);
+      expect(tone.played, [GestureKind.clench, GestureKind.glance, GestureKind.clench]);
+      await c.stop();
+      final events = [for (final e in store.list().single.events) e.text];
+      expect(events.where((e) => e.startsWith('hands-free')), [
+        'hands-free: sound paused (double clench)',
+        'hands-free: moment (look left then right)',
+        'hands-free: sound back (double clench)',
+        'hands-free: 3 gestures acted on, 0 ignored while probably asleep',
+      ]);
+      c.dispose();
+    });
+
+    test('with the switch off nothing listens', () async {
+      final band = GestureBand([const DrawnClench(75)]);
+      final sound = SilentStateSound(), tone = SilentGestureTone();
+      final c = StatesController(finder: OneFinder(band), sound: () => sound, timing: fast, gestureTone: () => tone);
+      await c.start(SoundPlan.of(SoundState.relax, minutes: 5));
+      await until(() => c.seconds > 85, '85 s');
+      await c.stop();
+      expect([sound.pauses, tone.played], [isEmpty, isEmpty]);
+      c.dispose();
+    });
+  });
+}
