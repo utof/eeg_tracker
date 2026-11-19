@@ -181,12 +181,13 @@ laptop's stage on every scored epoch (two passes, 2026-11-19; the 1-hour pieces 
 and agreed on 96.6 %, measured in the same session; see `assets/models/README.md`). The emulator's speed is the
 laptop's, not a phone's.
 
-**The combined app** (`feat/app-line` with the smart alarm, the dream catcher's text, "Unusual for you" and two-pass
-scoring, 2026-11-19, release x86_64): every screen opened; the same night scored in 93 s and matched the laptop on all
+**The combined app** (`feat/app-line` with the smart alarm, the dream catcher's text, "Unusual for you", two-pass
+scoring and sharp hours, 2026-11-19, release x86_64): every screen opened; the same night scored in 93 s and matched the laptop on all
 1330 scored epochs; Start night with Share on Wi-Fi on and the smart alarm set searched for the headband, served the
 laptop from the recorder's service, set the phone's alarm, took Lights off and Alarm off (the phone's alarm went
 away), and Stop ended it; the speech model downloaded in about 95 s and wrote out the three spoken answers word for
-word, and the night scored again afterwards with the same stages, both ONNX Runtimes loaded in one process. The
+word, and the night scored again afterwards with the same stages, both ONNX Runtimes loaded in one process. Sharp
+hours switched on armed its questions beside the smart alarm's alarm clock, and a rating from its page was saved. The
 emulator refuses to boot ("not enough disk space") when the disk that holds the AVD is nearly full: free space there,
 or make an AVD of your own elsewhere (`ANDROID_AVD_HOME=/var/tmp/<name> avdmanager create avd ...`).
 
