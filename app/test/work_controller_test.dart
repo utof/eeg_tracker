@@ -551,6 +551,177 @@ void main() {
     c.dispose();
   });
 
+  group('work review 2026-11-20', () {
+    WorkBand bandAt10() => WorkBand(start: DateTime(2026, 11, 20, 10).millisecondsSinceEpoch / 1000);
+
+    test('a forgotten Back: off and on again ends the break by itself; the card and the file say so (finding 2)', () async {
+      final band = bandAt10();
+      final keeper = FakeSessionKeeper();
+      final c = make(band, keeper: keeper);
+      await c.start();
+      await until(() => c.level == DrowsyLevel.alert);
+      c.takeBreak();
+      expect(keeper.spec!.text, 'On a break');
+      final at = band.clockS;
+      band.mode = Mode.off;
+      await until(() => band.clockS > at + 3 * 60);
+      band.mode = Mode.awake;
+      await until(() => !c.onBreak);
+      expect(band.clockS - at, inInclusiveRange(4.5 * 60, 6 * 60), reason: '2 minutes worn after it came back');
+      final b = c.planner!.breaks.single;
+      expect(b.endSource, BreakEnd.auto);
+      expect(eventsOf(c), contains(startsWith('break ended by itself')));
+      expect(keeper.spec!.text, isNot('On a break'), reason: 'the card was held again');
+      expect(keeper.spec!.button, isNull);
+      expect(c.afterBreak, isNotNull);
+      await c.stop();
+      c.dispose();
+    });
+
+    test('Back on the lock-screen card while on a break (finding 2)', () async {
+      final band = bandAt10();
+      final keeper = FakeSessionKeeper();
+      final c = make(band, keeper: keeper);
+      await c.start();
+      await until(() => c.stage == WorkStage.running);
+      expect(keeper.spec!.button, isNull, reason: 'no break: only Stop');
+      c.takeBreak();
+      expect(keeper.spec!.button, 'Back');
+      keeper.onButton!();
+      expect(c.onBreak, isFalse);
+      expect(c.planner!.breaks.single.endSource, BreakEnd.back);
+      expect(keeper.spec!.button, isNull);
+      keeper.onButton!(); // a late second tap: nothing
+      expect(c.onBreak, isFalse);
+      await c.stop();
+      c.dispose();
+    });
+
+    test('the headband put down for a break keeps the level before it; the after line compares (finding 6)', () async {
+      final band = bandAt10();
+      final c = make(band);
+      await c.start();
+      await until(() => c.level == DrowsyLevel.alert);
+      band.mode = Mode.off;
+      await until(() => c.onBreak);
+      final b = c.planner!.breaks.single;
+      expect(b.source, BreakSource.headbandOff);
+      expect(b.before, isNotNull);
+      expect(b.beforeLevel, DrowsyLevel.alert);
+      band.mode = Mode.awake;
+      await until(() => !c.onBreak);
+      await until(() => b.after != null);
+      expect(c.afterBreak, startsWith('After your break: drowsiness about the same (alert before, alert after)'));
+      await c.stop();
+      c.dispose();
+    });
+
+    test('an unanswered hint goes after its 30 minutes, from the page and the card (finding 9)', () async {
+      final band = bandAt10();
+      final keeper = FakeSessionKeeper();
+      final c = make(band, keeper: keeper);
+      await c.start();
+      await until(() => c.level == DrowsyLevel.alert);
+      band.mode = Mode.drowsy;
+      await until(() => c.hint != null);
+      final h = c.hint!;
+      band.mode = Mode.awake;
+      await until(() => band.now().difference(h.at).inMinutes >= 29);
+      expect(c.hint, same(h));
+      await until(() => band.now().difference(h.at).inMinutes >= 31);
+      expect(c.hint, isNull);
+      expect(keeper.spec!.text, isNot(startsWith('You seem')));
+      c.takeBreak();
+      expect(h.answer, isNull, reason: 'a break long after is not its answer');
+      await c.stop();
+      c.dispose();
+    });
+
+    test("a jump of the phone's clock is not worn time (finding 8)", () async {
+      final band = bandAt10();
+      var offset = Duration.zero;
+      final c = WorkController(
+        finder: OneFinder(band),
+        store: WorkStore(Directory('${tmp.path}/work-sessions')),
+        timing: const WorkTiming(link: fastLink, tick: Duration(milliseconds: 4)),
+        clock: () => band.now().add(offset),
+        monotonic: () => Duration(microseconds: (band.clockS * 1e6).round()),
+      );
+      await c.start();
+      await until(() => c.level == DrowsyLevel.alert);
+      final before = c.wornMin, at = band.clockS;
+      offset = const Duration(hours: 2);
+      await until(() => band.clockS > at + 20);
+      expect(c.wornMin - before, lessThan(1));
+      expect(c.hint, isNull);
+      await c.stop();
+      c.dispose();
+    });
+
+    test("the card's words follow the level, not only every 20 minutes (finding 13)", () async {
+      final band = bandAt10();
+      final keeper = FakeSessionKeeper();
+      final c = make(band, keeper: keeper);
+      await c.start();
+      await until(() => c.level == DrowsyLevel.alert);
+      expect(keeper.spec!.text, startsWith('Alert'));
+      band.mode = Mode.drowsy;
+      await until(() => c.level != DrowsyLevel.alert);
+      expect(keeper.spec!.text, startsWith(levelWords[c.level]!));
+      await c.stop();
+      c.dispose();
+    });
+
+    test('the after-break line goes 30 minutes after the break (finding 15)', () async {
+      final band = bandAt10();
+      final c = make(band);
+      await c.start();
+      await until(() => c.level == DrowsyLevel.alert);
+      c.takeBreak();
+      final at = band.clockS;
+      await until(() => band.clockS > at + 6 * 60);
+      c.back();
+      expect(c.afterBreak, startsWith('Back from your break'));
+      await until(() => band.clockS > at + 30 * 60);
+      expect(c.afterBreak, isNotNull);
+      await until(() => band.clockS > at + 37 * 60);
+      expect(c.afterBreak, isNull);
+      await c.stop();
+      c.dispose();
+    });
+
+    test('Start under 5 minutes after the last Stop carries its stretch; the earlier hint before a lunch Stop counts as followed (finding 7)', () async {
+      final dir = Directory('${tmp.path}/work-sessions');
+      final store = WorkStore(dir);
+      final t0 = DateTime(2026, 11, 20, 10);
+      Map<String, Object?> earlier(DateTime start, DateTime end, {required double stretch, DateTime? hintAt}) => {
+        'version': workFormatVersion,
+        'kind': 'work_session',
+        'start': start.toIso8601String(),
+        'end': end.toIso8601String(),
+        'ended': 'stopped',
+        'stretch_min': stretch,
+        'hints': [
+          if (hintAt != null) {'at': hintAt.toIso8601String(), 'reason': 'stretch', 'active_min': 60.0, 'threshold_min': 60.0, 'level': 'alert', 'taken': false},
+        ],
+        'breaks': [],
+        'epochs': [],
+      };
+      // the morning: a hint at 08:50 not followed inside the session, stopped at 09:00 for an hour
+      store.save(earlier(DateTime(2026, 11, 20, 7, 45), DateTime(2026, 11, 20, 9), stretch: 70, hintAt: DateTime(2026, 11, 20, 8, 50)));
+      // the session before this one: ended 2 minutes before Start (a crash, a restart)
+      store.save(earlier(DateTime(2026, 11, 20, 9, 30), t0.subtract(const Duration(minutes: 2)), stretch: 40));
+      final band = WorkBand(start: t0.millisecondsSinceEpoch / 1000);
+      final c = make(band);
+      await c.start();
+      expect(c.stretchMin, closeTo(40, 0.5));
+      expect(c.planner!.thresholdMin(t0), 60, reason: 'the lunch Stop was the hint\'s break');
+      expect(eventsOf(c), contains(startsWith('stretch carried over')));
+      await c.stop();
+      c.dispose();
+    });
+  });
+
   test('words: the hint lines and the after-break line', () {
     final h = WorkHint(at: DateTime(2026), reason: HintReason.stretch, activeMin: 75.4, thresholdMin: 60, level: DrowsyLevel.alert);
     expect(hintTitle(h), "You've been at it for 1 h 15 min. A few minutes away from the screen?");

@@ -67,24 +67,31 @@ class _WorkScreenState extends State<WorkScreen> {
     }
     final running = await FlutterForegroundTask.isRunningService;
     if (!mounted) return;
-    setState(() {
-      _nightRunning = running;
-      _load();
-    });
+    setState(() => _nightRunning = running);
+    await _load();
   }
 
-  void _load() {
+  /// The earlier sessions (decoded away from the screen's thread; each file once while it is unchanged) and the
+  /// "Was this you?" switch.
+  Future<void> _load() async {
     final rec = _recordings;
+    bool wearerOn;
     try {
-      _wearerOn = rec != null && WearerStore(wearerDirFor(rec)).on;
+      wearerOn = rec != null && WearerStore(wearerDirFor(rec)).on;
     } catch (_) {
-      _wearerOn = false;
+      wearerOn = false;
     }
+    List<WorkSummary> sessions;
     try {
-      _sessions = _c.store?.list() ?? const [];
+      sessions = await (_c.store?.listAsync() ?? Future.value(const <WorkSummary>[]));
     } catch (_) {
-      _sessions = const [];
+      sessions = const [];
     }
+    if (!mounted) return;
+    setState(() {
+      _wearerOn = wearerOn;
+      _sessions = sessions;
+    });
   }
 
   void _changed() {
@@ -94,7 +101,7 @@ class _WorkScreenState extends State<WorkScreen> {
       workSessionRunning = _c.active;
       if (!_c.active) {
         _finder.dispose(anyLost: _c.leftLost);
-        _load();
+        unawaited(_load());
       }
       // the clock on screen (worn minutes, the strip) moves even between epochs
       _clock?.cancel();
@@ -181,7 +188,7 @@ class _WorkScreenState extends State<WorkScreen> {
     } catch (e) {
       _say('Not saved: $e');
     }
-    setState(_load);
+    unawaited(_load());
   }
 
   void _say(String message) {
@@ -247,7 +254,7 @@ class _WorkScreenState extends State<WorkScreen> {
         onEyesClosedFirst: (v) => setState(() => _eyesClosedFirst = v),
         onAgain: () {
           c.again();
-          setState(_load);
+          unawaited(_load());
         },
         onInfo: () => showEvidence(context, 'work-session'),
         onWearer: _answerWearer,

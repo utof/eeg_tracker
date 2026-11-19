@@ -5,8 +5,10 @@
 // runs out on a long day.
 //
 // Samples -> the shared detectors (lib/detectors) -> one [WorkInput] a second -> the drowsiness level (drowsiness.dart)
-// -> the break planner (breaks.dart) with the worn time. Optional first: one minute with eyes closed, whose alpha
-// tells closed eyes apart later. The session file is written whole every 5 minutes and at Stop (store.dart).
+// -> the break planner (breaks.dart) with the worn time (on a monotonic clock: a change of the phone's clock is not
+// worn time). Optional first: one minute with eyes closed, whose alpha tells closed eyes apart later. The session file
+// is written whole every 5 minutes and at Stop (store.dart). The lock-screen card follows the level, the hint (gone
+// after its 30 minutes) and the break (with Back on it).
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -18,6 +20,7 @@ import '../feedback/features.dart' show fs, median;
 import '../recorder/chunk_writer.dart' show Sample;
 import '../recorder/headband.dart' show HeadbandFinder;
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
+import '../session_clock.dart';
 import '../session_keeper.dart';
 import '../sound/audio_route.dart' show MediaVolume, chimeVolumeNote;
 import '../sound/work_sound.dart';
@@ -36,6 +39,9 @@ enum WorkSignal { good, noisy, noEyes, lost, off }
 
 /// The strip: 12 cells of 5 minutes, oldest first, the newest ending now.
 const int stripCells = 12, cellMinutes = 5;
+
+/// The after-break line stays this long after the break (minutes).
+const double afterBreakShowMin = 30;
 
 /// A skip of this many packet numbers or more (0.1 s) is a hole (as in meditation).
 const int workGapSamples = 25;
@@ -68,9 +74,11 @@ class WorkController extends ChangeNotifier {
     DateTime Function()? clock,
     this.inCall,
     this.mediaVolume,
+    Duration Function()? monotonic,
   }) : sound = sound ?? SilentWorkSound(),
        keeper = keeper ?? FakeSessionKeeper(grant: false),
-       _now = clock ?? DateTime.now;
+       _now = clock ?? DateTime.now,
+       _mono = SessionClock(wall: clock, monotonic: monotonic);
 
   final HeadbandFinder finder;
   final WorkSound sound;
@@ -80,6 +88,9 @@ class WorkController extends ChangeNotifier {
   WorkStore? store;
   final WorkTiming timing;
   final DateTime Function() _now;
+
+  /// The worn time's clock (DECISIONS 462): a clock correction on the phone must not add hours of work.
+  final SessionClock _mono;
 
   /// A call holds the phone's sound (ringing, a phone call, another app's voice call); null when the phone cannot
   /// say. Null: never asked (tests, laptop tools).
@@ -187,6 +198,9 @@ class WorkController extends ChangeNotifier {
   bool _gapPending = false, _quiet = false, _ended = false, _disposed = false;
   int _lostSamples = 0, _moveCursor = 0;
 
+  /// The level the lock-screen card says (null: it says something else).
+  DrowsyLevel? _cardLevel;
+
   /// The hint whose chime has not played yet (a call held it back), and a call check under way.
   WorkHint? _chimeWaits;
   bool _callAsked = false;
@@ -222,7 +236,15 @@ class WorkController extends ChangeNotifier {
       contact = ohms;
       final now = _now();
       startedAt = now;
-      _planner = BreakPlanner(earlier: _earlierHints(now));
+      final prior = _prior(now);
+      _planner = BreakPlanner(earlier: prior.hints, carriedStretchMin: prior.stretchMin);
+      if (prior.stretchMin > 0) {
+        _events.add({
+          'at': now.toIso8601String(),
+          'event': 'stretch carried over from a session that ended under 5 minutes ago',
+          'stretch_min': prior.stretchMin,
+        });
+      }
       _seen = Detectors(onSecond: _onSecond);
       if (!eyesClosedMinute) _drowsy = WorkDrowsiness(onEpoch: _onEpoch);
       await link.startSignal();
@@ -233,6 +255,7 @@ class WorkController extends ChangeNotifier {
       if (!_live(run)) return await link.close(); // Stop came while the service was being held
       kept = held;
       keeper.onStop = () => unawaited(stop());
+      keeper.onButton = back; // Back on the card while on a break
       _heldAt = _now();
       if (eyesClosedMinute) {
         closedLeft = closedMinuteS;
@@ -251,28 +274,31 @@ class WorkController extends ChangeNotifier {
     }
   }
 
-  List<WorkHint> _earlierHints(DateTime now) {
+  /// The day's earlier hints (a Stop for lunch counts as their break) and a stretch carried over from a restart.
+  ({List<WorkHint> hints, double stretchMin}) _prior(DateTime now) {
     try {
-      return store?.hintsOfDay(now) ?? const [];
+      return store?.priorOfDay(now) ?? (hints: const <WorkHint>[], stretchMin: 0.0);
     } catch (_) {
-      return const [];
+      return (hints: const <WorkHint>[], stretchMin: 0.0);
     }
   }
 
   KeepSpec _keep() {
     final h = hint;
     final String text;
+    _cardLevel = null;
     if (h != null) {
       text = hintTitle(h);
     } else if (onBreak) {
       text = 'On a break';
     } else if (stage == WorkStage.running) {
       text = '${levelWords[level]} · ${_minutes(wornMin)} worn';
+      _cardLevel = level;
     } else {
       text = 'Calibrating';
     }
     // no audio focus: only a short chime plays now and then, and music or a podcast while working goes on (row 468)
-    return KeepSpec(title: 'Work session', text: text, headband: true, focus: false);
+    return KeepSpec(title: 'Work session', text: text, headband: true, focus: false, button: onBreak ? 'Back' : null);
   }
 
   void _reset() {
@@ -296,6 +322,7 @@ class WorkController extends ChangeNotifier {
     closedAlpha = null;
     closedLeft = 0;
     hint = null;
+    _cardLevel = null;
     _chimeWaits = null;
     volumeNote = null;
     afterBreak = null;
@@ -374,14 +401,18 @@ class WorkController extends ChangeNotifier {
     _epochs.add({'at': now.subtract(const Duration(seconds: 30)).toIso8601String(), ...e.toJson()});
     _planner?.epoch(e.level, eyesClosed: e.eyesClosed, window: e.window);
     if (stage == WorkStage.calibrating && (_drowsy?.calibrated ?? false)) _set(WorkStage.running, '');
-    _afterBreakLine();
+    _afterBreakLine(now);
+    // the card's words follow the level (not only at the 20-minute hold)
+    if (stage == WorkStage.running && hint == null && !onBreak && level != _cardLevel) _rehold();
     _notify();
   }
 
-  void _afterBreakLine() {
+  /// The line after the last break, for [afterBreakShowMin] minutes after it.
+  void _afterBreakLine(DateTime now) {
     final b = _planner?.breaks.lastOrNull;
-    if (b == null || b.end == null) return;
-    afterBreak = afterBreakWords(b);
+    final end = b?.end;
+    if (b == null || end == null) return;
+    afterBreak = now.difference(end).inMilliseconds / 60000 > afterBreakShowMin ? null : afterBreakWords(b);
   }
 
   void _tick() {
@@ -392,18 +423,34 @@ class WorkController extends ChangeNotifier {
     _link?.tick();
     final p = _planner;
     if (p != null && stage.index >= WorkStage.calibrating.index && stage != WorkStage.ending) {
-      final h = p.tick(now, worn: worn);
+      final was = p.currentBreak;
+      final h = p.tick(now, worn: worn, mono: _mono.now);
       if (h != null) _showHint(h);
-      // the headband came off for a break: the hint no longer needs an answer
-      if (p.onBreak && hint != null) {
+      if (was == null && p.onBreak) {
+        // the headband came off for a break: the hint no longer needs an answer; the card says so, with Back
         hint = null;
         _rehold();
+      } else if (was != null && !p.onBreak) {
+        if (was.endSource == BreakEnd.auto) {
+          _events.add({'at': now.toIso8601String(), 'event': 'break ended by itself (Back not tapped)', 'end': was.end?.toIso8601String()});
+        }
+        _afterBreakLine(now);
+        _rehold();
       }
+      _expireHint(now);
     }
     if (_chimeWaits != null) unawaited(_chime());
     if (_savedAt == null || now.difference(_savedAt!) >= timing.saveEvery) _save(now);
     if (_heldAt != null && now.difference(_heldAt!) >= timing.holdEvery) _rehold();
     _notify();
+  }
+
+  /// An unanswered hint goes after its 30 minutes, from the page and the card.
+  void _expireHint(DateTime now) {
+    final h = hint;
+    if (h == null || now.difference(h.at).inMilliseconds / 60000 <= BreakRule.takenWindowMin) return;
+    hint = null;
+    _rehold();
   }
 
   void _showHint(WorkHint h) {
@@ -492,8 +539,9 @@ class WorkController extends ChangeNotifier {
   void back() {
     final p = _planner;
     if (p == null || !p.onBreak) return;
-    p.endBreak(_now());
-    _afterBreakLine();
+    final now = _now();
+    p.endBreak(now);
+    _afterBreakLine(now);
     _rehold();
     _notify();
   }
@@ -540,7 +588,7 @@ class WorkController extends ChangeNotifier {
     }
     _set(WorkStage.ending, 'Stopping.');
     final p = _planner;
-    if (p != null && p.onBreak) p.endBreak(_now());
+    if (p != null && p.onBreak) p.endBreak(_now(), how: BreakEnd.stop);
     // the file first: the headband's release can take its deadlines, and once the service is let go a locked phone
     // may freeze the app (as the nap, DECISIONS 460 and 463)
     _save(_now(), end: true);

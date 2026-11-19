@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:eeg_tracker/work/breaks.dart';
 import 'package:eeg_tracker/work/store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -66,5 +67,87 @@ void main() {
     final j = jsonDecode(File('${store.dir.path}/2026-11-19-090000.work.json').readAsStringSync()) as Map;
     expect(j['kind'], 'work_session');
     expect(j['version'], workFormatVersion);
+  });
+
+  group('work review 2026-11-20', () {
+    Map<String, Object?> plain(DateTime start, DateTime end, {List<DateTime> hints = const [], double? stretch, String ended = 'stopped'}) => {
+      'version': workFormatVersion,
+      'kind': 'work_session',
+      'start': start.toIso8601String(),
+      'end': end.toIso8601String(),
+      'ended': ended,
+      'stretch_min': ?stretch,
+      'hints': [
+        for (final h in hints) {'at': h.toIso8601String(), 'reason': 'stretch', 'active_min': 60.0, 'threshold_min': 60.0, 'level': 'alert', 'taken': false},
+      ],
+      'breaks': [],
+      'epochs': [],
+    };
+    DateTime t(int h, [int m = 0]) => DateTime(2026, 11, 20, h, m);
+
+    test('a Stop for lunch is a break: a hint in the 30 minutes before it counts as followed (finding 7)', () {
+      final store = WorkStore(Directory('${tmp.path}/work-sessions'));
+      store.save(plain(t(9), t(13), hints: [t(10), t(12, 50)]));
+      final lunch = store.priorOfDay(t(14));
+      expect(lunch.hints.map((h) => h.taken), [false, true], reason: 'the 10:00 hint was long before the Stop');
+      expect(lunch.stretchMin, 0);
+      expect(BreakPlanner(earlier: lunch.hints).thresholdMin(t(14)), 75, reason: 'only the 10:00 hint backs off');
+      // a restart 2 minutes after the Stop is no break
+      expect(store.priorOfDay(t(13, 2)).hints.map((h) => h.taken), [false, false]);
+      // the file itself is not changed
+      expect(WorkSummary.fromJson(jsonDecode(File('${store.dir.path}/2026-11-20-090000.work.json').readAsStringSync()))!.hintList.last.taken, isFalse);
+    });
+
+    test('a session that ended under 5 minutes ago hands over its stretch; one longer ago does not (finding 7)', () {
+      final store = WorkStore(Directory('${tmp.path}/work-sessions'));
+      store.save(plain(t(9), t(10), stretch: 42.5, ended: 'running')); // a crash: its last save
+      expect(store.priorOfDay(t(10, 4)).stretchMin, 42.5);
+      expect(store.priorOfDay(t(10, 6)).stretchMin, 0);
+      store.save(plain(t(8), t(8, 30))); // an older file without stretch_min
+      expect(store.priorOfDay(t(8, 32)).stretchMin, 0);
+    });
+
+    test('Start reads only the files of the last 28 hours, by their names (finding 10)', () {
+      final store = WorkStore(Directory('${tmp.path}/work-sessions'));
+      store.save(plain(t(9), t(10), hints: [t(9, 30)]));
+      // a file named for a month ago (its contents claim today: it must not even be opened)
+      File('${store.dir.path}/2026-10-20-090000.work.json').writeAsStringSync(jsonEncode(plain(t(9, 5), t(9, 50), hints: [t(9, 40)])));
+      expect(store.priorOfDay(t(15)).hints.map((h) => h.at), [t(9, 30)]);
+    });
+
+    test('the list is cached by file: an unchanged file is not read again, a changed one is (finding 10)', () async {
+      final store = WorkStore(Directory('${tmp.path}/work-sessions'));
+      store.save(plain(t(9), t(10), hints: [t(9, 30)]));
+      final f = File('${store.dir.path}/2026-11-20-090000.work.json');
+      expect(store.list().single.hints, 1);
+      // the same length and time, other contents: the cached summary stays
+      final when = f.lastModifiedSync();
+      final text = f.readAsStringSync();
+      f.writeAsStringSync(text.replaceAll('"stretch"', '"STRETCH"'));
+      f.setLastModifiedSync(when);
+      expect(WorkStore(store.dir).list().single.hintList.single.reason, HintReason.stretch, reason: 'not decoded again');
+      store.save(plain(t(9), t(10, 30), hints: [t(9, 30), t(10, 20)]));
+      expect(store.list().single.hints, 2);
+      expect((await store.listAsync()).single.hints, 2);
+    });
+
+    test('listAsync decodes in the background and gives what list gives (finding 10)', () async {
+      final store = WorkStore(Directory('${tmp.path}/work-sessions'));
+      store.save(plain(t(9), t(10), hints: [t(9, 30)]));
+      store.save(plain(t(14), t(15)));
+      File('${store.dir.path}/broken.work.json').writeAsStringSync('{');
+      final a = await WorkStore(store.dir).listAsync();
+      expect(a.map((s) => s.start), [t(14), t(9)]);
+      expect(a.last.hintList.single.at, t(9, 30));
+      expect(await WorkStore(Directory('${tmp.path}/none')).listAsync(), isEmpty);
+    });
+
+    test('the file is compact JSON (a 10-hour session is a third smaller) (finding 10)', () {
+      final store = WorkStore(Directory('${tmp.path}/work-sessions'));
+      store.save(plain(t(9), t(10)));
+      final text = File('${store.dir.path}/2026-11-20-090000.work.json').readAsStringSync();
+      expect(text, isNot(contains('\n')));
+      expect(text, startsWith('{"version":'));
+    });
   });
 }

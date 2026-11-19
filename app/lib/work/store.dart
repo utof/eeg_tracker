@@ -1,10 +1,13 @@
 // Work sessions on the phone (DECISIONS 446): `files/work-sessions/<stem>.work.json`, one per session, next to
 // `files/recordings/` in the app's private folder; Export data and Share on Wi-Fi take the whole folder like any other.
-// The file is written whole (a temporary file, then a rename) every few minutes during the session and at Stop, so a
-// crash loses at most the last minutes. No raw EEG: the per-30-s numbers are enough to re-score a session with
-// other weights or lines (docs/data-format.md, "Work sessions").
+// The file is written whole (a temporary file, then a rename; compact JSON) every few minutes during the session and
+// at Stop, so a crash loses at most the last minutes. No raw EEG: the per-30-s numbers are enough to re-score a session
+// with other weights or lines (docs/data-format.md, "Work sessions").
+// Reading (DECISIONS 523): a Start opens only the files named for the last 28 hours; the page's list keeps each file's
+// summary for as long as the file is unchanged, and decodes new or changed files away from the screen's thread.
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import '../recorder/chunk_writer.dart' show fileStem;
 import '../wearer/check.dart' show wearerAnswerIn;
@@ -27,6 +30,7 @@ class WorkSummary {
     required this.alertMin,
     required this.hintList,
     this.wearerAnswer,
+    this.stretchMin,
   });
 
   final DateTime start, end;
@@ -39,6 +43,9 @@ class WorkSummary {
 
   /// What the owner said about who wore it (`me`, `someone else`), or null (DECISIONS 490).
   final String? wearerAnswer;
+
+  /// The worn minutes since the last break at the file's end (null: a file from before `stretch_min`).
+  final double? stretchMin;
 
   /// The session's file stem (`yyyy-MM-dd-HHmmss` of its start): what "Was this you?" answers are filed under.
   String get id => fileStem(start);
@@ -72,8 +79,33 @@ class WorkSummary {
       alertMin: n(m['alert']),
       hintList: hints,
       wearerAnswer: wearerAnswerIn(Map<String, Object?>.from(j)),
+      stretchMin: j['stretch_min'] is num ? (j['stretch_min'] as num).toDouble() : null,
     );
   }
+}
+
+/// A file's summary, decoded once for as long as the file keeps its time and length.
+typedef _Cached = ({DateTime modified, int length, WorkSummary? summary});
+
+/// The summaries of the files at [paths] (null for a damaged or foreign one), in order.
+List<WorkSummary?> _decode(List<String> paths) => [for (final p in paths) _decodeOne(p)];
+
+WorkSummary? _decodeOne(String path) {
+  try {
+    return WorkSummary.fromJson(jsonDecode(File(path).readAsStringSync()));
+  } on FormatException {
+    return null;
+  } on FileSystemException {
+    return null;
+  }
+}
+
+/// The start of a session from its file name (`yyyy-MM-dd-HHmmss.work.json`), or null for another name.
+DateTime? _startOfName(String path) {
+  final m = RegExp(r'(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})' '${RegExp.escape(workSuffix)}' r'$').firstMatch(path);
+  if (m == null) return null;
+  final v = [for (var i = 1; i <= 6; i++) int.parse(m.group(i)!)];
+  return DateTime(v[0], v[1], v[2], v[3], v[4], v[5]);
 }
 
 class WorkStore {
@@ -85,7 +117,7 @@ class WorkStore {
     final start = DateTime.parse(session['start']! as String);
     dir.createSync(recursive: true);
     final path = '${dir.path}/${fileStem(start)}$workSuffix';
-    final tmp = File('$path.tmp')..writeAsStringSync(const JsonEncoder.withIndent(' ').convert(session), flush: true);
+    final tmp = File('$path.tmp')..writeAsStringSync(jsonEncode(session), flush: true);
     tmp.renameSync(path);
   }
 
@@ -101,28 +133,88 @@ class WorkStore {
     }
   }
 
-  /// Every readable session, newest first; damaged or foreign files are skipped.
-  List<WorkSummary> list() {
+  /// Each file's summary while the file is unchanged, for this app process (all stores share it).
+  static final Map<String, _Cached> _cache = {};
+
+  /// The session files with their time and length (only those [keep] wants, by path).
+  List<(String, DateTime, int)> _files([bool Function(String path)? keep]) {
     if (!dir.existsSync()) return const [];
-    final out = <WorkSummary>[];
+    final out = <(String, DateTime, int)>[];
     for (final f in dir.listSync().whereType<File>()) {
-      if (!f.path.endsWith(workSuffix)) continue;
+      if (!f.path.endsWith(workSuffix) || !(keep?.call(f.path) ?? true)) continue;
       try {
-        final s = WorkSummary.fromJson(jsonDecode(f.readAsStringSync()));
-        if (s != null) out.add(s);
-      } on FormatException {
-        continue;
+        final st = f.statSync();
+        out.add((f.path, st.modified, st.size));
       } on FileSystemException {
         continue;
       }
     }
-    return out..sort((a, b) => b.start.compareTo(a.start));
+    return out;
   }
 
-  /// The hints of earlier sessions on [now]'s day (04:00 to 04:00), oldest first.
-  List<WorkHint> hintsOfDay(DateTime now) => [
-    for (final s in list())
-      for (final h in s.hintList)
-        if (workDay(h.at) == workDay(now)) h,
-  ]..sort((a, b) => a.at.compareTo(b.at));
+  static bool _fresh((String, DateTime, int) f) {
+    final c = _cache[f.$1];
+    return c != null && c.modified == f.$2 && c.length == f.$3;
+  }
+
+  /// The summaries of [files], from the cache where the file is unchanged; the rest from [decode].
+  static List<WorkSummary> _summaries(List<(String, DateTime, int)> files, List<WorkSummary?> Function(List<String>) decode) {
+    final stale = [for (final f in files) if (!_fresh(f)) f];
+    final read = stale.isEmpty ? const <WorkSummary?>[] : decode([for (final f in stale) f.$1]);
+    for (var i = 0; i < stale.length; i++) {
+      _cache[stale[i].$1] = (modified: stale[i].$2, length: stale[i].$3, summary: read[i]);
+    }
+    return [
+      for (final f in files) ?_cache[f.$1]?.summary,
+    ]..sort((a, b) => b.start.compareTo(a.start));
+  }
+
+  /// Every readable session, newest first; damaged or foreign files are skipped.
+  List<WorkSummary> list() => _summaries(_files(), _decode);
+
+  /// [list], with new or changed files decoded on another thread (the page's list: the screen does not freeze once
+  /// there are months of sessions).
+  Future<List<WorkSummary>> listAsync() async {
+    final files = _files();
+    final stale = [for (final f in files) if (!_fresh(f)) f.$1];
+    final read = stale.isEmpty ? const <WorkSummary?>[] : await Isolate.run(() => _decode(stale));
+    final byPath = {for (var i = 0; i < stale.length; i++) stale[i]: read[i]};
+    return _summaries(files, (paths) => [for (final p in paths) byPath.containsKey(p) ? byPath[p] : _decodeOne(p)]);
+  }
+
+  /// What a session starting at [now] takes over from the earlier ones of its day (04:00 to 04:00; only the files
+  /// named for the last 28 hours are opened): their hints, oldest first, where a hint in the 30 minutes before a
+  /// session's end counts as followed by a break (`taken`, in memory only) when 5 minutes or more passed until the next
+  /// session or [now] (a Stop for lunch is a break, as 5 minutes away is on the laptop); and the stretch of a session
+  /// that ended under 5 minutes before [now] (a restart is not a break: the hour goes on).
+  ({List<WorkHint> hints, double stretchMin}) priorOfDay(DateTime now) {
+    final from = now.subtract(const Duration(hours: 28));
+    bool recent(String path) {
+      final start = _startOfName(path);
+      return start == null || start.isAfter(from);
+    }
+
+    final sessions = _summaries(_files(recent), _decode).where((s) => !s.start.isAfter(now)).toList()
+      ..sort((a, b) => a.start.compareTo(b.start));
+    final hints = <WorkHint>[];
+    var stretch = 0.0;
+    for (var i = 0; i < sessions.length; i++) {
+      final s = sessions[i];
+      final next = i + 1 < sessions.length ? sessions[i + 1].start : now;
+      final gapMin = next.difference(s.end).inMilliseconds / 60000;
+      for (final h0 in s.hintList) {
+        if (workDay(h0.at) != workDay(now)) continue;
+        final h = WorkHint.fromJson(h0.toJson()); // a copy: the cached summary is not changed
+        final beforeEnd = s.end.difference(h.at).inMilliseconds / 60000;
+        if (gapMin >= BreakRule.breakMin && beforeEnd >= 0 && beforeEnd <= BreakRule.takenWindowMin) h.taken = true;
+        hints.add(h);
+      }
+      final since = now.difference(s.end).inMilliseconds / 60000;
+      if (since >= 0 && since < BreakRule.breakMin) stretch = s.stretchMin ?? 0;
+    }
+    return (hints: hints..sort((a, b) => a.at.compareTo(b.at)), stretchMin: stretch);
+  }
+
+  /// The hints of earlier sessions on [now]'s day (04:00 to 04:00), oldest first (see [priorOfDay]).
+  List<WorkHint> hintsOfDay(DateTime now) => priorOfDay(now).hints;
 }

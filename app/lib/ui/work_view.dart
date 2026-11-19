@@ -284,8 +284,17 @@ class WorkView extends StatelessWidget {
     default:
       break;
   }
-  if (m.onBreak) return (_Mark.idle, 'On a break', 'Tap Back when you return. The headband can stay on or come off.');
-  if (m.signal == WorkSignal.lost) return (_Mark.problem, 'No signal', 'The headband is out of reach or off; the app keeps reconnecting.');
+  if (m.onBreak) {
+    return (
+      _Mark.idle,
+      'On a break',
+      'Tap Back when you return (on the lock screen too). The headband can stay on or come off; if you forget Back, '
+          'the break ends by itself once you are working again.',
+    );
+  }
+  if (m.signal == WorkSignal.lost) {
+    return (_Mark.problem, 'No signal', 'The headband is out of reach, off or not sending; the app keeps reconnecting.');
+  }
   if (m.stage == WorkStage.calibrating) {
     return (_Mark.idle, 'Calibrating', 'Learning your awake baseline: work as usual, ${left(m.calibrationLeftMin)} left.');
   }
