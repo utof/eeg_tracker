@@ -555,6 +555,27 @@ void main() {
       expect(ownBleDirFor('/data/files/recordings').path, '/data/files/own-ble');
     });
 
+    test('remembering a headband never writes over settings it could not read', () {
+      final s = OwnBleStore(Directory('${dir.path}/own-ble'));
+      // Half a file (two writers at once): left as it is for the screen's next save, not replaced by the defaults.
+      const half = '{"useOwn": true, "layout": {"or';
+      s.dir.createSync(recursive: true);
+      s.file.writeAsStringSync(half);
+      s.remember('AA:BB:CC:33:44:55', 'BB Black');
+      expect(s.file.readAsStringSync(), half);
+      // A read that fails (here a link that points at itself): nothing is written either.
+      s.file.deleteSync();
+      Link(s.file.path).createSync(s.file.path);
+      s.remember('AA:BB:CC:33:44:55', 'BB Black');
+      expect(FileSystemEntity.isLinkSync(s.file.path), isTrue);
+      // No file yet: remembering starts one.
+      Link(s.file.path).deleteSync();
+      s.remember(fakeAddress, 'BB Black');
+      expect(s.load().address, fakeAddress);
+      expect(s.load().useOwn, isFalse);
+      expect(s.dir.listSync().map((e) => e.uri.pathSegments.last), ['settings.json'], reason: 'no temporary file left');
+    });
+
     test('the package named in the log is the one pinned in pubspec.lock', () {
       final lock = File('pubspec.lock').readAsStringSync();
       final m = RegExp(r'  universal_ble:\n(?:    .*\n)*?    version: "([^"]+)"').firstMatch(lock)!;
