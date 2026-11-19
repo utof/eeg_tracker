@@ -12,16 +12,11 @@ import '../sharp/page.dart';
 import '../sharp/prompts.dart';
 import '../sharp/schedule.dart';
 import '../sharp/store.dart';
+import '../study/arm.dart' show rearmPrompts;
 import '../wearer/wearer.dart' show ownNightReports;
 import 'evidence_sheet.dart';
 import 'sharp_hours_view.dart';
 import 'sharp_rating_screen.dart';
-
-/// The day numbers the Trends page and the self-experiments read (sharp/hours.dart), from the app's folder.
-Map<String, Map<String, double>> readSharpDayNumbers(String recordingsDir) {
-  final s = SharpStore(sharpDirFor(recordingsDir));
-  return sharpDayNumbers(s.ratings(), s.reactions());
-}
 
 class SharpHoursScreen extends StatefulWidget {
   const SharpHoursScreen({super.key, this.recordingsDir, this.phone, this.now});
@@ -100,7 +95,7 @@ class _SharpHoursScreenState extends State<SharpHoursScreen> {
       _store
         ..saveSettings(s)
         ..logEvent(_now, event, {'per_day': s.perDay, 'awake_from': clockText(s.fromMin), 'awake_until': clockText(s.untilMin)});
-      await rearmSharp(_store, _phone, _now);
+      await rearmPrompts(_dir!, _phone, _now);
       _error = null;
     } on Exception catch (e) {
       _error = 'The phone did not take the questions: $e';
@@ -170,7 +165,7 @@ class _SharpHoursScreenState extends State<SharpHoursScreen> {
         false;
     if (!yes) return;
     _store.deleteAll();
-    await _quiet(() => rearmSharp(_store, _phone, _now));
+    await _quiet(() => rearmPrompts(_dir!, _phone, _now));
     await _load();
   }
 

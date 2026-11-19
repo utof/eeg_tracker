@@ -11,12 +11,14 @@ import '../handsfree/calibration_controller.dart';
 import '../handsfree/store.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
+import '../study/store.dart' show StudyStore, studyDirFor;
 import '../sound/check_in_sound.dart';
 import '../training/check_store.dart' show filesDirFor;
 import '../wearer/wearer.dart';
 import 'evidence_sheet.dart';
 import 'hands_free_view.dart';
 import 'nearby.dart';
+import 'study_screen.dart';
 
 /// The hands-free settings of the app's folder, or null when the folder is not known.
 Future<HandsFreeStore?> handsFreeStore() async {
@@ -42,6 +44,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   HandsFreeStore? _store;
   HandsFreeState _state = const HandsFreeState();
   bool _nightRunning = false;
+  bool? _studyOn;
   String? _error;
 
   /// "Was this you?" (DECISIONS 370-379): the app's recordings folder and the check's state, when known.
@@ -65,8 +68,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (_) {
       wearer = null; // the section is left out; hands-free still works
     }
+    final studyOn = await _readStudyOn();
     if (!mounted) return;
     setState(() {
+      _studyOn = studyOn;
       _store = store;
       _state = store?.load() ?? const HandsFreeState();
       _nightRunning = running;
@@ -85,6 +90,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('The setting could not be saved: $e')));
     }
+  }
+
+  /// The study reminders' switch, read from their own file (null when the app's folder is not known).
+  Future<bool?> _readStudyOn() async {
+    try {
+      final dir = await Phone.recordingsDir();
+      return dir == null ? null : StudyStore(studyDirFor(dir)).settings()?.on == true;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _openStudy() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const StudyScreen()));
+    final on = await _readStudyOn();
+    if (mounted) setState(() => _studyOn = on);
   }
 
   void _set(bool on) {
@@ -136,6 +157,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     onInfo: () => showEvidence(context, 'hands-free'),
     onWearerSwitch: _setWearer,
     onWearerInfo: () => showEvidence(context, 'was-this-you'),
+    studyOn: _studyOn,
+    onStudy: () => unawaited(_openStudy()),
   );
 }
 

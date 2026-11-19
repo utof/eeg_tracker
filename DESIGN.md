@@ -109,6 +109,11 @@ row, Awake and A day as label-left / value-right rows, the delivery line, Collec
 hour (chips, then the ratings' and the reaction times' charts), Today, Your data; Rate now pinned. Its question page
 shows one decision at a time: the question at headlineSmall and five full-width 64 dp rows (5 Very sharp at the top);
 then the reaction test, with Skip outlined until a test is done and Done filled after.
+Study reminders (from Settings, the first row; the assistant's proposal) is one page: a muted sentence saying whose idea it
+is, the switch row ("Evening study, morning review"), Evening and Morning as label-left / value-right rows with Change and
+one muted line each saying where the time comes from, the delivery line, Log it yourself (two outlined buttons), Today,
+The last 14 days, Your data. Its question page shows one decision at a time: the question at headlineSmall and full-width
+64 dp rows (Yes, No; Well, Some, A little) with a text button, Not yet, then the saved line and Done pinned.
 Lucid dreams (a section between nights after Nap coach) is one page ordered by what is due: the status word, then the
 morning's questions or Tonight (the plan lane, practice, loudness and the night's number in the test), Last night (its
 lane and log rows), The test (the night cells and the sealed answer, later the tested table), How it works, Who should

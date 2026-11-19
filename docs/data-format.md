@@ -393,6 +393,24 @@ The moments themselves are not stored: they are drawn again from `seed`, the day
 60 minutes apart; two of them suggest the test. The Trends page reads two day numbers from these files (a day runs
 04:00 to 04:00): `sharp`, the mean of the day's ratings, and `dayrt`, the median of the day's tests' medians.
 
+### Study reminders (`study-review/`)
+
+The assistant's proposal "Evening study, morning review" (DECISIONS rows 400-401), off unless switched on in Settings.
+Times are local with their UTC offset. The JSON-lines files only grow; a line cut off by a crash is skipped when read.
+`settings.json` is written under a temporary name, then renamed. Nothing here holds EEG, and nothing records what was
+studied.
+
+| File | Content |
+|---|---|
+| `settings.json` | `version` 1, `on`, `evening` and `morning` (`HH:MM` when the owner set the time by hand, `null` while it follows the sleep), `first_on`, `changed` (local ISO times) |
+| `log.jsonl` | one line per one-tap answer: `version` 1, `at` (when answered), `kind`: `evening` with `studied` (`true` or `false`: "Did you study something tonight?"), or `morning` with `recall` (`well`, `some` or `little`: "How much do you recall of what you studied?"); `prompt` (the planned reminder it answers; `null` when logged from the page) and `shown` (when its notification appeared) |
+| `prompts.jsonl` | written by the Android side, in the sharp-hours log's format (`planned`, `at`, `event`: `shown`, `skipped` with `reason`, `late`, `snoozed`, `dismissed`); the phone's one alarm chain also carries the sharp-hours questions, whose lines stay in `sharp-hours/prompts.jsonl` |
+| `events.jsonl` | one line per change: `on`, `off`, `evening time`, `morning time`, `evening automatic`, `morning automatic`, each with the times then (`auto` or `HH:MM`) |
+
+The reminders' times are not stored when they follow the sleep: they are worked out again from the sleep reports
+(`app/lib/study/schedule.dart`). The Trends page reads one day number from the log (a day runs 04:00 to 04:00):
+`recall`, the mean of the day's morning answers (`little` 1, `some` 2, `well` 3).
+
 ### Lucid dream cues (`lucid/`)
 
 The evening practice, the nights with the cues on and the honest self-test (DECISIONS rows 300-309). Each JSON file is

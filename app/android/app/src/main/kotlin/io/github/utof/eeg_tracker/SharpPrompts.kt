@@ -18,9 +18,12 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * The sharp-hours questions (DECISIONS rows 281-283): rings the moments the app's Dart side drew
- * (lib/sharp/schedule.dart) as a notification "How sharp do you feel?", and logs what happened to each moment in
- * files/sharp-hours/prompts.jsonl.
+ * The sharp-hours questions (DECISIONS rows 281-283) and the study reminders (rows 400-401): rings the moments the
+ * app's Dart side drew (lib/sharp/schedule.dart, lib/study/schedule.dart) as a notification "How sharp do you feel?"
+ * or "Good time to learn something you want to keep" / "Try to recall what you studied last night, before looking",
+ * and logs what happened to each moment in files/sharp-hours/prompts.jsonl (files/study-review/prompts.jsonl for
+ * the study reminders). One list and one alarm chain carry all three kinds of moment ([Kind]); the same rules
+ * apply to each.
  *
  * - No exact-alarm permission. Each moment is armed twice: a window alarm (setWindow, 10 minutes: on time while
  *   the phone is in use) and a backup 10 minutes later that may ring in Doze (setAndAllowWhileIdle); whichever
@@ -36,7 +39,9 @@ import java.util.Locale
  */
 object SharpPrompts {
     const val CHANNEL = "sharp_hours"
+    const val STUDY_CHANNEL = "study_review"
     private const val NOTIFICATION_ID = 4713
+    private const val STUDY_NOTIFICATION_ID = 4714
     const val ACTION_FIRE = "io.github.utof.eeg_tracker.sharp.FIRE"
     const val ACTION_SNOOZE = "io.github.utof.eeg_tracker.sharp.SNOOZE"
     const val ACTION_DISMISSED = "io.github.utof.eeg_tracker.sharp.DISMISSED"
@@ -45,6 +50,7 @@ object SharpPrompts {
     const val EXTRA_TEST = "sharpTest"
     const val EXTRA_SHOWN = "sharpShown"
     const val EXTRA_SNOOZED = "sharpSnoozed"
+    const val EXTRA_KIND = "sharpKind"
     private const val PREFS = "sharp_hours"
     private const val KEY_PLAN = "plan"
     private const val KEY_HANDLED = "handled"
@@ -60,27 +66,50 @@ object SharpPrompts {
     private const val REQ_BACKUP = 45
     private val ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssxxx", Locale.ROOT)
 
+    /** What a moment asks: a sharp-hours question, or the evening or morning study reminder. */
+    enum class Kind(val wire: String, val code: String, val folder: String) {
+        SHARP("sharp", "s", "sharp-hours"),
+        STUDY_EVENING("study_evening", "e", "study-review"),
+        STUDY_MORNING("study_morning", "m", "study-review");
+
+        val isStudy: Boolean get() = this != SHARP
+
+        companion object {
+            fun ofWire(s: String?): Kind = values().firstOrNull { it.wire == s } ?: SHARP
+            fun ofCode(s: String?): Kind = values().firstOrNull { it.code == s } ?: SHARP
+        }
+    }
+
+    /** One kept moment: when (epoch ms), whether a sharp question suggests the reaction test, and what it asks. */
+    data class Moment(val at: Long, val test: Boolean, val kind: Kind)
+
     /** A session screen keeps the screen on (MainActivity's "keepScreenOn"): no question then. */
     @Volatile
     var screenHeld = false
 
-    /** Keeps [at] (epoch ms) and whether each suggests the reaction test, and arms the first one ahead. */
-    fun arm(context: Context, at: List<Long>, test: List<Boolean>) {
-        val plan = at.indices.joinToString(",") { "${at[it]}:${if (test.getOrNull(it) == true) 1 else 0}" }
+    /** Keeps [at] (epoch ms), whether each suggests the reaction test and what each asks, and arms the first one ahead. */
+    fun arm(context: Context, at: List<Long>, test: List<Boolean>, kind: List<String>) {
+        val plan = at.indices.joinToString(",") {
+            "${at[it]}:${if (test.getOrNull(it) == true) 1 else 0}:${Kind.ofWire(kind.getOrNull(it)).code}"
+        }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_PLAN, plan).apply()
         armNext(context)
     }
 
-    private fun plan(context: Context): List<Pair<Long, Boolean>> {
+    /** The kept moments, oldest first. A plan kept by an older version (`ms:test`) holds sharp questions only. */
+    private fun plan(context: Context): List<Moment> {
         val s = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_PLAN, "") ?: ""
         return s.split(",").mapNotNull { item ->
             val p = item.split(":")
             val t = p.getOrNull(0)?.toLongOrNull() ?: return@mapNotNull null
-            t to (p.getOrNull(1) == "1")
-        }.sortedBy { it.first }
+            Moment(t, p.getOrNull(1) == "1", Kind.ofCode(p.getOrNull(2)))
+        }.sortedBy { it.at }
     }
 
-    private fun fireIntent(context: Context, planned: Long, test: Boolean, snoozed: Boolean, request: Int): PendingIntent =
+    /** Request codes: each kind has its own, so a postponed study reminder never replaces a postponed question. */
+    private fun request(base: Int, kind: Kind): Int = base + kind.ordinal * 100
+
+    private fun fireIntent(context: Context, planned: Long, test: Boolean, kind: Kind, snoozed: Boolean, request: Int): PendingIntent =
         PendingIntent.getBroadcast(
             context,
             request,
@@ -88,6 +117,7 @@ object SharpPrompts {
                 .setAction(ACTION_FIRE)
                 .putExtra(EXTRA_PLANNED, planned)
                 .putExtra(EXTRA_TEST, test)
+                .putExtra(EXTRA_KIND, kind.wire)
                 .putExtra(EXTRA_SNOOZED, snoozed),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
@@ -96,20 +126,21 @@ object SharpPrompts {
     fun armNext(context: Context) {
         val am = context.getSystemService(AlarmManager::class.java) ?: return
         val now = System.currentTimeMillis()
-        val next = plan(context).firstOrNull { it.first > now }
-        val main = fireIntent(context, next?.first ?: 0L, next?.second ?: false, false, REQ_NEXT)
-        val backup = fireIntent(context, next?.first ?: 0L, next?.second ?: false, false, REQ_BACKUP)
+        val next = plan(context).firstOrNull { it.at > now }
+        val kind = next?.kind ?: Kind.SHARP
+        val main = fireIntent(context, next?.at ?: 0L, next?.test ?: false, kind, false, REQ_NEXT)
+        val backup = fireIntent(context, next?.at ?: 0L, next?.test ?: false, kind, false, REQ_BACKUP)
         if (next == null) {
             am.cancel(main)
             am.cancel(backup)
             return
         }
-        am.setWindow(AlarmManager.RTC_WAKEUP, next.first, WINDOW_MS, main)
-        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next.first + WINDOW_MS, backup)
+        am.setWindow(AlarmManager.RTC_WAKEUP, next.at, WINDOW_MS, main)
+        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next.at + WINDOW_MS, backup)
     }
 
     /** A moment rang (or its postponed copy): show it, skip it or drop it, log it, and arm the next. */
-    fun fire(context: Context, planned: Long, test: Boolean, snoozed: Boolean) {
+    fun fire(context: Context, planned: Long, test: Boolean, kind: Kind, snoozed: Boolean) {
         val now = System.currentTimeMillis()
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (!snoozed) {
@@ -119,19 +150,19 @@ object SharpPrompts {
         }
         try {
             if (now - planned > LATE_MS) {
-                log(context, planned, now, "late", null, test)
+                log(context, planned, now, "late", null, test, kind)
             } else {
-                val busy = busyReason(context) ?: if (!notificationsOn(context)) "notifications off" else null
+                val busy = busyReason(context) ?: if (!notificationsOn(context, channelOf(kind))) "notifications off" else null
                 if (busy != null) {
-                    log(context, planned, now, "skipped", busy, test)
+                    log(context, planned, now, "skipped", busy, test, kind)
                 } else {
-                    show(context, planned, test, now)
-                    log(context, planned, now, "shown", null, test)
+                    show(context, planned, test, kind, now)
+                    log(context, planned, now, "shown", null, test, kind)
                 }
             }
             // moments that came due while this one waited (the phone held the alarm back): never rung, so late
             if (!snoozed) {
-                for ((t, x) in plan(context)) if (t in (planned + 1)..now) log(context, t, now, "late", null, x)
+                for (m in plan(context)) if (m.at in (planned + 1)..now) log(context, m.at, now, "late", null, m.test, m.kind)
             }
         } finally {
             if (!snoozed) armNext(context)
@@ -139,16 +170,22 @@ object SharpPrompts {
     }
 
     /** "In 15 min": the notification goes and comes back once more in 15 minutes (or is dropped as late). */
-    fun snooze(context: Context, planned: Long, test: Boolean) {
-        context.getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
+    fun snooze(context: Context, planned: Long, test: Boolean, kind: Kind) {
+        context.getSystemService(NotificationManager::class.java)?.cancel(notificationId(kind))
         val now = System.currentTimeMillis()
-        log(context, planned, now, "snoozed", null, test)
-        context.getSystemService(AlarmManager::class.java)
-            ?.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, now + SNOOZE_MS, fireIntent(context, planned, test, true, REQ_SNOOZED))
+        log(context, planned, now, "snoozed", null, test, kind)
+        context.getSystemService(AlarmManager::class.java)?.setAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            now + SNOOZE_MS,
+            fireIntent(context, planned, test, kind, true, request(REQ_SNOOZED, kind)),
+        )
     }
 
-    fun dismissed(context: Context, planned: Long, test: Boolean) =
-        log(context, planned, System.currentTimeMillis(), "dismissed", null, test)
+    fun dismissed(context: Context, planned: Long, test: Boolean, kind: Kind) =
+        log(context, planned, System.currentTimeMillis(), "dismissed", null, test, kind)
+
+    private fun notificationId(kind: Kind): Int = if (kind.isStudy) STUDY_NOTIFICATION_ID else NOTIFICATION_ID
+    private fun channelOf(kind: Kind): String = if (kind.isStudy) STUDY_CHANNEL else CHANNEL
 
     private fun busyReason(context: Context): String? = when {
         recorderRunning(context) -> "night recording"
@@ -165,47 +202,65 @@ object SharpPrompts {
         false
     }
 
-    fun notificationsOn(context: Context): Boolean {
+    /** Notifications are allowed for the app and for [channel] (the questions' or the study reminders'). */
+    fun notificationsOn(context: Context, channel: String = CHANNEL): Boolean {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return false
         if (!nm.areNotificationsEnabled()) return false // Android 13+: also when the permission was never given
-        val c = nm.getNotificationChannel(CHANNEL)
+        val c = nm.getNotificationChannel(channel)
         return c == null || c.importance != NotificationManager.IMPORTANCE_NONE
     }
 
-    /** The questions' own channel: the owner can make it silent or louder in the phone's settings. */
+    /** The questions' own channel and the study reminders' own: the owner can make each silent or louder in the phone's settings. */
     fun channel(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
-        if (nm.getNotificationChannel(CHANNEL) != null) return
-        val c = NotificationChannel(CHANNEL, "Sharp-hours questions", NotificationManager.IMPORTANCE_DEFAULT)
-        c.description = "A few times a day: how sharp do you feel? (off unless switched on in Trends, Sharp hours)"
-        c.setShowBadge(false)
-        nm.createNotificationChannel(c)
+        if (nm.getNotificationChannel(CHANNEL) == null) {
+            val c = NotificationChannel(CHANNEL, "Sharp-hours questions", NotificationManager.IMPORTANCE_DEFAULT)
+            c.description = "A few times a day: how sharp do you feel? (off unless switched on in Trends, Sharp hours)"
+            c.setShowBadge(false)
+            nm.createNotificationChannel(c)
+        }
+        if (nm.getNotificationChannel(STUDY_CHANNEL) == null) {
+            val c = NotificationChannel(STUDY_CHANNEL, "Study reminders", NotificationManager.IMPORTANCE_DEFAULT)
+            c.description = "Twice a day: learn in the evening, recall in the morning (off unless switched on in Settings, Study reminders)"
+            c.setShowBadge(false)
+            nm.createNotificationChannel(c)
+        }
     }
 
-    private fun show(context: Context, planned: Long, test: Boolean, now: Long) {
+    private fun show(context: Context, planned: Long, test: Boolean, kind: Kind, now: Long) {
         channel(context)
         val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         val open = PendingIntent.getActivity(
             context,
-            REQ_OPEN,
+            request(REQ_OPEN, kind),
             Intent(context, MainActivity::class.java)
                 .setAction(ACTION_OPEN)
                 .putExtra(EXTRA_PLANNED, planned)
                 .putExtra(EXTRA_TEST, test)
+                .putExtra(EXTRA_KIND, kind.wire)
                 .putExtra(EXTRA_SHOWN, now)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             flags,
         )
-        fun broadcast(action: String, request: Int) = PendingIntent.getBroadcast(
+        fun broadcast(action: String, base: Int) = PendingIntent.getBroadcast(
             context,
-            request,
-            Intent(context, SharpPromptReceiver::class.java).setAction(action).putExtra(EXTRA_PLANNED, planned).putExtra(EXTRA_TEST, test),
+            request(base, kind),
+            Intent(context, SharpPromptReceiver::class.java)
+                .setAction(action)
+                .putExtra(EXTRA_PLANNED, planned)
+                .putExtra(EXTRA_TEST, test)
+                .putExtra(EXTRA_KIND, kind.wire),
             flags,
         )
-        val n = Notification.Builder(context, CHANNEL)
+        val (title, text) = when (kind) {
+            Kind.SHARP -> "How sharp do you feel?" to (if (test) "One tap, then a 1-minute reaction test." else "One tap.")
+            Kind.STUDY_EVENING -> "Good time to learn something you want to keep" to "Afterwards, one tap: did you study?"
+            Kind.STUDY_MORNING -> "Try to recall what you studied last night, before looking" to "Then one tap: how much came back?"
+        }
+        val n = Notification.Builder(context, channelOf(kind))
             .setSmallIcon(R.drawable.ic_sharp)
-            .setContentTitle("How sharp do you feel?")
-            .setContentText(if (test) "One tap, then a 1-minute reaction test." else "One tap.")
+            .setContentTitle(title)
+            .setContentText(text)
             .setContentIntent(open)
             .setDeleteIntent(broadcast(ACTION_DISMISSED, REQ_GONE))
             .setAutoCancel(true)
@@ -214,14 +269,14 @@ object SharpPrompts {
             .setVisibility(Notification.VISIBILITY_PRIVATE)
             .addAction(Notification.Action.Builder(Icon.createWithResource(context, R.drawable.ic_sharp), "In 15 min", broadcast(ACTION_SNOOZE, REQ_LATER)).build())
             .build()
-        context.getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, n)
+        context.getSystemService(NotificationManager::class.java)?.notify(notificationId(kind), n)
     }
 
     private fun iso(ms: Long): String = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).format(ISO)
 
-    private fun log(context: Context, planned: Long, at: Long, event: String, reason: String?, test: Boolean) {
+    private fun log(context: Context, planned: Long, at: Long, event: String, reason: String?, test: Boolean, kind: Kind) {
         try {
-            val dir = File(context.filesDir, "sharp-hours").apply { mkdirs() }
+            val dir = File(context.filesDir, kind.folder).apply { mkdirs() }
             val j = JSONObject().put("planned", iso(planned)).put("at", iso(at)).put("event", event)
             if (reason != null) j.put("reason", reason)
             if (test) j.put("test", true)
@@ -237,10 +292,11 @@ class SharpPromptReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val planned = intent.getLongExtra(SharpPrompts.EXTRA_PLANNED, 0L)
         val test = intent.getBooleanExtra(SharpPrompts.EXTRA_TEST, false)
+        val kind = SharpPrompts.Kind.ofWire(intent.getStringExtra(SharpPrompts.EXTRA_KIND))
         when (intent.action) {
-            SharpPrompts.ACTION_FIRE -> SharpPrompts.fire(context, planned, test, intent.getBooleanExtra(SharpPrompts.EXTRA_SNOOZED, false))
-            SharpPrompts.ACTION_SNOOZE -> SharpPrompts.snooze(context, planned, test)
-            SharpPrompts.ACTION_DISMISSED -> SharpPrompts.dismissed(context, planned, test)
+            SharpPrompts.ACTION_FIRE -> SharpPrompts.fire(context, planned, test, kind, intent.getBooleanExtra(SharpPrompts.EXTRA_SNOOZED, false))
+            SharpPrompts.ACTION_SNOOZE -> SharpPrompts.snooze(context, planned, test, kind)
+            SharpPrompts.ACTION_DISMISSED -> SharpPrompts.dismissed(context, planned, test, kind)
         }
     }
 }

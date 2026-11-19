@@ -17,6 +17,7 @@ import '../unusual/store.dart';
 import '../wearer/check.dart' show answerSomeoneElse;
 import '../wearer/wearer.dart' show ownNightReports;
 import 'evidence_sheet.dart';
+import '../study/arm.dart' show readOwnDayNumbers;
 import 'experiments_screen.dart';
 import 'experiments_view.dart' show experimentLine;
 import 'sharp_hours_screen.dart';
@@ -43,7 +44,7 @@ TrendInputs readTrendInputs(String recordingsDir) => (
 /// it does not have yet (DECISIONS 290-299). Also run off the night screen's thread for its one line.
 UnusualCard unusualToday(String recordingsDir, DateTime now) => refreshUnusual(
   UnusualStore(unusualDirFor(recordingsDir)),
-  dailySeries(readTrendInputs(recordingsDir), extra: readSharpDayNumbers(recordingsDir)),
+  dailySeries(readTrendInputs(recordingsDir), extra: readOwnDayNumbers(recordingsDir)),
   now,
 );
 
@@ -74,13 +75,13 @@ class _TrendsScreenState extends State<TrendsScreen> {
       if (dir == null) throw StateError("the app's folder is not known");
       final now = DateTime.now();
       final inputs = readTrendInputs(dir);
-      final sharpDays = readSharpDayNumbers(dir);
-      final m = buildTrends(inputs, now, extra: sharpDays);
+      final dayNumbers = readOwnDayNumbers(dir);
+      final m = buildTrends(inputs, now, extra: dayNumbers);
       final line = experimentLine(currentExperiment(dir, now));
       UnusualCard? unusual;
       String? unusualError;
       try {
-        unusual = refreshUnusual(_unusualStore(dir), dailySeries(inputs, extra: sharpDays), now);
+        unusual = refreshUnusual(_unusualStore(dir), dailySeries(inputs, extra: dayNumbers), now);
       } catch (e) {
         unusualError = '$e'; // the card is never worth breaking the trends
       }

@@ -583,6 +583,46 @@ Nothing of this has run on a phone yet, and HyperOS may hold notifications back.
 4. Tell the assistant: did any question come at a bad moment (asleep, in a session); was the sound too much; did the
    reaction test feel too long to do twice a day. To stop it: the same switch, off.
 
+## Study reminders (the assistant's proposal; off unless you switch it on)
+
+Not something you asked for: the assistant built it from the research on learning and sleep (DECISIONS rows 400-401;
+the **i** button shows `docs/evidence/study-timing.md`). The idea, from one small study: learn something in the evening,
+sleep, and go over it again the next morning. The app only nudges the order: it does not teach anything and does not
+know what you study.
+
+- Settings (the gear on the main screen), **Study reminders**. Switch it on (Android asks once to allow notifications).
+- **Evening**, 1 to 2 hours before your usual bedtime: "Good time to learn something you want to keep". Afterwards one
+  tap: **Did you study something tonight?** Yes, No or Not yet.
+- **Morning**, 30 to 60 minutes after you usually wake: "Try to recall what you studied last night, before looking".
+  One tap: **How much do you recall?** Well, Some or A little. Then look at your notes.
+- The times follow your recorded sleep (from 3 nights; until then 21:00 and 08:30). **Change** sets one by hand,
+  **Follow my sleep again** takes it back. They stay inside your waking hours (the Sharp hours window if you have one).
+- Never during a night recording, a sound session or a session on screen. A reminder you miss goes after an hour;
+  **In 15 min** puts it off once. Say **No** to studying and the next morning's reminder is skipped.
+- **Studied tonight?** and **Recalled it?** on the page log without a reminder. Trends shows the day's recall; the
+  self-experiment **Study in the evening, a few hours before bed** against **Study in the morning instead** (Trends,
+  Experiments) can test it on you. On a morning-study day the recall is 24 hours after studying, not 12, which
+  favours the evening: keep that in mind when you read the answer. If you answered No that evening, log the recall from
+  the page.
+- **Switch it off** with the same switch (your answers stay), or **Delete my study data** at the bottom of the page.
+
+Files, app-private, exported by Export data: `files/study-review/settings.json`, `log.jsonl`, `prompts.jsonl` and
+`events.jsonl`; format in `docs/data-format.md`.
+
+### Owner step: switch it on and watch the first two days (2 minutes, then a tap twice a day)
+
+Nothing of this has run on a phone yet, and HyperOS may hold notifications back (the reminders use the same alarms as
+Sharp hours).
+
+1. Settings, Study reminders, switch on, allow notifications. Look at the two times (Change if they are wrong).
+2. On a Xiaomi: Settings, Apps, EEG Tracker: **Autostart** on and **Battery saver: No restrictions**.
+3. The first evening: study something for a while, then tap the reminder and answer. The next morning, try to recall it
+   before looking, then tap the reminder and answer.
+4. Open the page: under the times it says how many reminders arrived in the last 7 days. If none came, tell the
+   assistant.
+5. Tell the assistant: did a reminder come at a bad moment (asleep, in a session); was the evening time too close to
+   bed or too early; did the morning reminder come before you were up.
+
 ## Replay check (off unless you switch it on)
 
 Does the live link to your brain matter, or would a similar sound do as well? The replay check finds out for you.

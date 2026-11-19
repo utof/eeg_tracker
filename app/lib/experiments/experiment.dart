@@ -43,6 +43,8 @@ const List<Preset> presets = [
   Preset('screens', 'No screens in the last hour before bed', 'Screens as usual', 'asleep'),
   Preset('meditation', 'A 10-minute meditation before bed', 'No meditation before bed', 'kss'),
   Preset('sound', 'Sound for Fall asleep at bedtime', 'Silence at bedtime', 'asleep'),
+  // the study reminders' recall (DECISIONS row 401): the next morning's answer, from the page on morning-study days
+  Preset('study', 'Study in the evening, a few hours before bed', 'Study in the morning instead', 'recall'),
 ];
 
 /// A number an experiment can test: one of the trends' per-day numbers, with the words for a difference.
@@ -82,6 +84,8 @@ const List<Outcome> outcomes = [
   // the sharp-hours log's day numbers (DECISIONS row 287): the mean of the next day's ratings, half a point
   Outcome('sharp', 'sharpness in the day', 'higher', 'lower', matters: 0.5),
   Outcome('dayrt', 'reaction time in the day', 'slower', 'quicker', matters: 0.05),
+  // the study reminders' morning recall (DECISIONS row 401): 1 a little, 2 some, 3 well; half a step
+  Outcome('recall', 'recall of what you studied', 'better', 'worse', matters: 0.5),
   Outcome('tension', 'tension', 'higher', 'lower', matters: 1),
   Outcome('jaw', 'jaw muscle bursts an hour', 'higher', 'lower', matters: 0.25, plural: true),
   Outcome('iaf', 'alpha speed', 'faster', 'slower', matters: 0.2),

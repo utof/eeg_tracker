@@ -71,14 +71,20 @@ class MainActivity : FlutterActivity() {
                         "arm" -> {
                             val at = (call.argument<List<Number>>("at") ?: emptyList()).map { it.toLong() }
                             val test = call.argument<List<Boolean>>("test") ?: emptyList()
-                            SharpPrompts.arm(applicationContext, at, test)
+                            val kind = call.argument<List<String>>("kind") ?: emptyList()
+                            SharpPrompts.arm(applicationContext, at, test, kind)
                             result.success(null)
                         }
                         "takeLaunch" -> {
                             result.success(sharpLaunch)
                             sharpLaunch = null
                         }
-                        "status" -> result.success(mapOf("notifications" to SharpPrompts.notificationsOn(applicationContext)))
+                        "status" -> result.success(
+                            mapOf(
+                                "notifications" to SharpPrompts.notificationsOn(applicationContext),
+                                "studyNotifications" to SharpPrompts.notificationsOn(applicationContext, SharpPrompts.STUDY_CHANNEL),
+                            ),
+                        )
                         "openChannelSettings" -> {
                             SharpPrompts.channel(applicationContext)
                             startActivity(
@@ -133,6 +139,7 @@ class MainActivity : FlutterActivity() {
             "planned" to intent.getLongExtra(SharpPrompts.EXTRA_PLANNED, 0L),
             "shown" to intent.getLongExtra(SharpPrompts.EXTRA_SHOWN, 0L),
             "test" to intent.getBooleanExtra(SharpPrompts.EXTRA_TEST, false),
+            "kind" to (intent.getStringExtra(SharpPrompts.EXTRA_KIND) ?: SharpPrompts.Kind.SHARP.wire),
         )
         intent.removeExtra(SharpPrompts.EXTRA_PLANNED) // taken once, also if the Activity is made again
         return true

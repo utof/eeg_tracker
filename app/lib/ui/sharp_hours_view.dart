@@ -149,17 +149,17 @@ class SharpHoursView extends StatelessWidget {
           ),
           if (error != null) Para(error!, color: Night.problem),
           if (m.on && !m.notificationsOn)
-            _Warning(
+            WarningLine(
               words: 'Notifications are off for this app, so the questions cannot appear.',
               actions: [TextButton(onPressed: onNotifications, child: const Text('Notification settings'))],
             ),
           const SizedBox(height: 8),
-          _LogRow(
+          LogRow(
             label: 'Awake',
             value: windowWords(m.settings),
             action: TextButton(onPressed: onWindow, child: const Text('Change')),
           ),
-          _LogRow(
+          LogRow(
             label: 'A day',
             value: '',
             action: SegmentedButton<int>(
@@ -181,7 +181,7 @@ class SharpHoursView extends StatelessWidget {
           if (!m.on) ...[const SizedBox(height: 6), Text(_howWords, style: muted)],
           if (reach != null)
             m.reach.heldBack
-                ? _Warning(
+                ? WarningLine(
                     words: reach,
                     actions: [
                       if (m.xiaomi) TextButton(onPressed: () => onPhoneSettings?.call('xiaomiAutostart'), child: const Text('Autostart')),
@@ -308,8 +308,8 @@ class SharpHoursView extends StatelessWidget {
 }
 
 /// Label left, value right, then the row's own control (DESIGN.md log rows).
-class _LogRow extends StatelessWidget {
-  const _LogRow({required this.label, required this.value, required this.action});
+class LogRow extends StatelessWidget {
+  const LogRow({super.key, required this.label, required this.value, required this.action});
   final String label, value;
   final Widget action;
 
@@ -334,8 +334,8 @@ class _LogRow extends StatelessWidget {
 }
 
 /// An amber line with its icon and the buttons that fix it (DESIGN.md: never colour alone).
-class _Warning extends StatelessWidget {
-  const _Warning({required this.words, required this.actions});
+class WarningLine extends StatelessWidget {
+  const WarningLine({super.key, required this.words, required this.actions});
   final String words;
   final List<Widget> actions;
 
