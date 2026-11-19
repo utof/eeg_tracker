@@ -49,6 +49,10 @@ dry headband like this keeps good contact through a whole night at home.
   the samples it already receives, after they are saved; if the detector ever fails or takes too long it switches
   itself off and the recording goes on. **Lights off** on the night screen marks the moment you close your eyes,
   and the morning report compares the detector with the sleep model.
+- The phone's **Signal** tab is its live check: a 3D head with each electrode's contact and ohms, a moving trace
+  per electrode with its noise, mains hum and band shares, and the raw data of every channel. During a night it
+  reads the recorder's own stream and shows the contact measured when the night started; it never opens a second
+  link to the headband. Good up to 1 MΩ and fair up to 2.5 MΩ are planning limits, not measured on your head.
 - Nothing is uploaded. There is no account and no server.
 
 ## Sources

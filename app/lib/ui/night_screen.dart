@@ -37,6 +37,7 @@ import 'dream_view.dart' show clock;
 import 'evidence_sheet.dart' show showEvidence;
 import 'export_screen.dart';
 import 'hands_free_screen.dart' show SettingsScreen;
+import 'home_tabs.dart';
 import 'lights_off_view.dart';
 import 'meditation_screen.dart';
 import 'lucid_screen.dart';
@@ -54,6 +55,9 @@ import 'pair_dialog.dart';
 import 'share_sheet.dart';
 import 'sleep_report_screen.dart';
 import 'sleep_scoring.dart';
+import '../signal/signal_feed.dart' show SignalFeed;
+import 'signal_phone.dart' show phoneSignal;
+import 'signal_screen.dart';
 import 'states_screen.dart';
 import 'work_screen.dart';
 import 'theme.dart';
@@ -265,6 +269,9 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   AlarmSetup _alarm = const AlarmSetup();
   AlarmClockState _clockState = const AlarmClockState({});
 
+  /// The Signal tab's feed (DECISIONS 590-599): made on its first look, kept so its signal and pose outlive a tab switch.
+  SignalFeed? _signal;
+
   /// "Headband: DIY board (test)" (DECISIONS rows 360-369), and this phone's Wi-Fi address for its words.
   DiyBoardSettings _diy = const DiyBoardSettings();
   String? _address;
@@ -323,6 +330,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _signal?.dispose();
     _scoring?.removeListener(_onScoring);
     _links.onOpen = null;
     _share.dispose();
@@ -991,7 +999,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final model = _model();
     final sleep = model.sleep;
-    return NightView(
+    NightView page(HomeTab? tab) => NightView(
+      tab: tab,
       model: model,
       onStart: _start,
       onStop: _stop,
@@ -1021,6 +1030,16 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onAlarm: _onAlarm,
       onAwake: _awake,
       onHeadbandPage: () => unawaited(_refresh()),
+      onLicences: () => showLicensePage(context: context, applicationName: 'EEG Tracker'),
+    );
+    // the bottom bar (DECISIONS 597); the alarm's wake face fills the screen with none
+    if (model.ringing != null) return page(null);
+    return HomeTabs(
+      page: (context, tab) => switch (tab) {
+        HomeTab.signal => SignalScreen(feed: _signal ??= SignalFeed(phoneSignal()), recordingsDir: _dir),
+        HomeTab.trends => TrendsScreen(recordingsDir: _dir),
+        _ => page(tab),
+      },
     );
   }
 }

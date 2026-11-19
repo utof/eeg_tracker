@@ -17,6 +17,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import '../feedback/features.dart' show channelNames;
 import '../recorder/chunk_writer.dart' show Sample;
 import '../recorder/headband.dart';
+import '../signal/live_tap.dart';
 
 class LinkTiming {
   const LinkTiming({
@@ -185,6 +186,7 @@ class BandLink {
     }
     _band = band;
     _rangeSub = band.rangeChanges.listen((inRange) => _onRange(band, inRange));
+    LiveTap.hold(this); // the Signal view reads along instead of connecting (DECISIONS 595)
     return true;
   }
 
@@ -205,10 +207,12 @@ class BandLink {
     await Future<void>.delayed(timing.settle);
     if (readings.isEmpty) return const {};
     final last = readings.last;
-    return {
+    final ohms = {
       for (final n in channelNames)
         if (last.containsKey(n)) n: last[n]!.isFinite && !last[n]!.isNaN ? last[n] : null,
     };
+    LiveTap.contact(ohms, _now());
+    return ohms;
   }
 
   Future<void> startSignal() async {
@@ -226,6 +230,7 @@ class BandLink {
     _quietFrom = now;
     _restarted = false;
     onBatch(now, batch);
+    LiveTap.publish(now, batch);
   }
 
   /// Call about every second: mends a stream that stopped (or never started) while the headband is in range. No data
@@ -334,9 +339,26 @@ class BandLink {
     return false;
   }
 
+  /// The Signal view's "Measure contact again", only on a link of its own (DECISIONS 596): the stream stops, the contact
+  /// is read as at the start ([contact]), and the stream starts again. Null when no headband is in range now.
+  Future<Map<String, double?>?> measureAgain() async {
+    final band = _band;
+    if (band == null || lost || _closed) return null;
+    final sub = _signalSub;
+    _signalSub = null;
+    await sub?.cancel();
+    try {
+      await _sdk(band.stopSignal(), 'stop signal');
+      return await contact();
+    } finally {
+      if (!_closed && identical(_band, band)) await startSignal();
+    }
+  }
+
   /// Stops the signal and lets the headband go (only one still in range; a lost one is never touched).
   Future<void> close() async {
     _closed = true;
+    LiveTap.release(this);
     final band = _band;
     _band = null;
     final signalSub = _signalSub, rangeSub = _rangeSub;

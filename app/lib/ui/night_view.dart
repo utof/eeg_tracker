@@ -5,6 +5,7 @@ import '../recorder/contact.dart';
 import '../recorder/status.dart' show BoardLive;
 import 'alarm_view.dart';
 import 'diy_board_view.dart';
+import 'home_tabs.dart';
 import 'lights_off_view.dart';
 import '../share/control.dart' show ShareLine;
 import 'night_strip.dart';
@@ -171,6 +172,8 @@ class NightView extends StatelessWidget {
     this.onAlarm,
     this.onAwake,
     this.onHeadbandPage,
+    this.tab,
+    this.onLicences,
   });
 
   final NightViewModel model;
@@ -211,6 +214,13 @@ class NightView extends StatelessWidget {
   /// Back from the Headband connection page (the device choice may have changed).
   final VoidCallback? onHeadbandPage;
 
+  /// The bottom bar's tab this page is (home_tabs.dart, DECISIONS 597): its sections only, and the pinned bar only on
+  /// Night; null: every section on one page, as before the tabs.
+  final HomeTab? tab;
+
+  /// The licences page (More).
+  final VoidCallback? onLicences;
+
   @override
   Widget build(BuildContext context) {
     final m = model;
@@ -221,9 +231,9 @@ class NightView extends StatelessWidget {
     final headband = [const SectionHeading('Headband'), _Headband(m)];
     return Scaffold(
       appBar: AppBar(
-        title: Text('EEG Tracker', style: text.titleMedium?.copyWith(color: Night.inkMuted)),
+        title: Text(tab?.title ?? 'EEG Tracker', style: text.titleMedium?.copyWith(color: Night.inkMuted)),
         actions: [
-          if (onSettings != null) ...[
+          if (onSettings != null && (tab == null || tab == HomeTab.night)) ...[
             IconButton(
               onPressed: onSettings,
               icon: const Icon(Icons.settings_outlined),
@@ -235,8 +245,9 @@ class NightView extends StatelessWidget {
         ],
       ),
       body: ListView(
+        key: PageStorageKey('home-${tab?.name}'),
         padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
-        children: [
+        children: sectionsFor(tab, [
           _Status(m),
           if (m.minutes != null) ...[const SizedBox(height: 28), _Readouts(m)],
           if (m.rows.isNotEmpty) ...[SectionHeading(m.stripTitle), NightStrip(rows: m.rows)],
@@ -262,6 +273,7 @@ class NightView extends StatelessWidget {
           PhoneChecksList(checks: m.checks, onFix: onFix),
           // Between nights the Headband section also leads to the connection page (the probe and the switch).
           if (!m.running) ...[...headband, OwnBleEntry(onReturn: onHeadbandPage, diy: m.diy)],
+          const TabStart(HomeTab.more),
           // A night being recorded is not finished, so Export waits for Stop (DECISIONS rows 56, 150); Share on
           // Wi-Fi is there during the night too (rows 220-229).
           if (m.share != null || (!m.running && (m.nightsOnPhone > 0 || m.exportLine != null))) ...[
@@ -277,6 +289,11 @@ class NightView extends StatelessWidget {
               onShareDetails: onShareDetails,
             ),
           ],
+          // More (the bottom bar): Settings and the licences, here as a section; on one page they are the night
+          // screen's gear and the sleep report's link
+          if (tab == HomeTab.more) ...[const SectionHeading('Settings'), _More(onSettings: onSettings, onLicences: onLicences)],
+          const TabStart(HomeTab.sessions),
+          if (tab == HomeTab.sessions && m.running) _Busy(),
           // The headband connects to one thing at a time, so meditation waits for the night to end.
           if (!m.running) ...[const SectionHeading('Meditation'), _Meditation(onMeditate: onMeditate)],
           // The dream catcher holds the headband too, so it also waits for the night to end (DECISIONS row 110).
@@ -296,15 +313,17 @@ class NightView extends StatelessWidget {
           // Sound for states also plays during a night, by its timer alone (DECISIONS row 130).
           const SectionHeading('Sound'),
           _Sound(running: m.running, onSound: onSound),
-        ],
+        ]),
       ),
-      bottomNavigationBar: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-          child: _Action(m, onStart: onStart, onStop: onStop, onLightsOff: onLightsOff, onAlarm: onAlarm),
-        ),
-      ),
+      bottomNavigationBar: tab != null && tab != HomeTab.night
+          ? null
+          : SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+                child: _Action(m, onStart: onStart, onStop: onStop, onLightsOff: onLightsOff, onAlarm: onAlarm),
+              ),
+            ),
     );
   }
 }
@@ -653,6 +672,48 @@ class _Sleep extends StatelessWidget {
       ],
     );
   }
+}
+
+/// More's Settings section: the settings page (hands-free, study reminders, "Was this you?") and the licences.
+class _More extends StatelessWidget {
+  const _More({required this.onSettings, required this.onLicences});
+  final VoidCallback? onSettings;
+  final VoidCallback? onLicences;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Hands-free controls, study reminders, "Was this you?" and the other switches.',
+          style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(onPressed: onSettings, icon: const Icon(Icons.settings_outlined), label: const Text('Settings')),
+        if (onLicences != null) ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(onPressed: onLicences, child: const Text('Licences')),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Sessions while a night records: why most of them wait.
+class _Busy extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 12),
+    child: Text(
+      'The headband is busy with the night: the sessions that use it start after Stop. Sound plays by its timer.',
+      style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
+    ),
+  );
 }
 
 class _Meditation extends StatelessWidget {

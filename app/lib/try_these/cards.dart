@@ -274,6 +274,26 @@ const List<TryCard> tryCards = [
     readme: [TryRef('Share on Wi-Fi', 'connect the laptop by one scan, then a night')],
   ),
   TryCard(
+    id: 'signal',
+    group: TryGroup.sessions,
+    title: 'A first look at the signal',
+    what: 'The Signal tab: a 3D head with each electrode\'s contact, a live trace per electrode, and the raw data.',
+    takes: '5 minutes',
+    steps: [
+      'Between nights, headband on and switched on. Tap Signal at the bottom and keep still while it checks the contact.',
+      'Turn the head with a finger, pinch, double-tap. Tap each electrode for its trace and numbers.',
+      'Open Traces: blink, clench your jaw, then close your eyes for 10 seconds and watch O1 and O2.',
+      'Open Raw: Pause, slide back a minute, then Back to live.',
+    ],
+    tell: [
+      'Did the head turn smoothly, and did the ohms match the night screen\'s contact?',
+      'Did blinks, the jaw and closed eyes show where you expected? Any channel always flat or railed?',
+      'Any missing packets in Raw after a few minutes? Did the phone get warm?',
+    ],
+    opens: TryOpen.nightScreen,
+    readme: [TryRef('Signal', 'a first look at the signal')],
+  ),
+  TryCard(
     id: 'work',
     group: TryGroup.sessions,
     title: 'Work session',

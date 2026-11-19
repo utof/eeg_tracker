@@ -20,10 +20,12 @@ import '../memory_cues/live_cues.dart' show memoryCuesFor;
 import '../phone.dart';
 import '../share/isolate.dart';
 import '../share/protocol.dart';
+import '../signal/live_tap.dart';
 import '../sleep/live_stager.dart';
 import '../sleep/night_scorer.dart';
 import '../sleep/onnx_runs.dart';
 import 'brainbit.dart';
+import 'chunk_writer.dart' show ChunkWriter;
 import 'headband.dart';
 import 'live_drift.dart';
 import 'night_recorder.dart';
@@ -192,6 +194,11 @@ class RecorderTaskHandler extends TaskHandler {
   DateTime? _lightsOffEarly;
   bool _alarmOffEarly = false;
 
+  /// The Signal view's night tap (lib/signal/live_tap.dart, DECISIONS 595): while the screen renews its lease, the
+  /// batches the recorder saves go to the screen too, every 100 ms. The recording never waits for it.
+  final NightTapSender _tap = NightTapSender(send: FlutterForegroundTask.sendDataToMain);
+  Timer? _tapTimer;
+
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     final rec = await _recordingsDir();
@@ -314,7 +321,23 @@ class RecorderTaskHandler extends TaskHandler {
       } else {
         _alarmOffEarly = true;
       }
+    } else if (nightTapLeaseFrom(data) case final on?) {
+      _signalTap(on: on);
     }
+  }
+
+  /// The Signal view took or renewed its lease ([on]), or let it go.
+  void _signalTap({required bool on}) {
+    _tap.lease(on: on && !_stopping);
+    if (!_tap.on) return _endTap();
+    ChunkWriter.onLive = _tap.add;
+    _tapTimer ??= Timer.periodic(nightTapEvery, (_) => _tap.on ? _tap.flush() : _endTap());
+  }
+
+  void _endTap() {
+    ChunkWriter.onLive = null;
+    _tapTimer?.cancel();
+    _tapTimer = null;
   }
 
   @override
@@ -326,6 +349,7 @@ class RecorderTaskHandler extends TaskHandler {
   Future<void> _stop({required bool endNight}) async {
     if (_stopping) return;
     _stopping = true;
+    _endTap();
     final r = _recorder;
     // Sharing in the background: its port is free again within about 4 s, while the recorder saves and stops.
     unawaited(_sharing(() async => _share?.stop()));
