@@ -129,7 +129,9 @@ class BandLink {
             _abandoned.remove(token);
             if (band != null) await letGo(band, sdkTimeout, streaming: false);
           },
-          onError: (Object _) => _abandoned.remove(token),
+          onError: (Object _) {
+            _abandoned.remove(token);
+          },
         ),
       );
       if (stuck) throw const LinkStuck();
