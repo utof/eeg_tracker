@@ -12,9 +12,10 @@
 // - the data is saved before every risky SDK call;
 // - the drift-off detector runs on the batches in this isolate (live_drift.dart, DECISIONS 180-184), always behind the
 //   files and inside a guard: an exception, or more than its share of time, switches it off with one log line;
-// - so does the smart alarm's live sleep model (alarm/live_alarm.dart, DECISIONS 230-236), only from an hour before
-//   its window, with a memory limit too; the phone's own alarm at the window's end never depends on it;
-// - so do the lucid dream cues (lucid/live_cues.dart, DECISIONS 300-303) through a WatchGuard with a memory limit too.
+// - so do the smart alarm (alarm/live_alarm.dart, DECISIONS 230-236: only from an hour before its window; the phone's
+//   own alarm at the window's end never depends on it) and the lucid dream cues (lucid/live_cues.dart, DECISIONS
+//   300-303), with the one live sleep model they share (sleep/night_scorer.dart, DECISIONS 330): one guard with a
+//   memory limit too covers all three; an exception in the alarm or the cues costs only that one.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -23,6 +24,7 @@ import 'dart:math';
 import '../alarm/live_alarm.dart';
 import '../alarm/rule.dart';
 import '../lucid/live_cues.dart';
+import '../sleep/night_scorer.dart';
 import 'battery.dart';
 import 'chunk_writer.dart';
 import 'contact.dart';
@@ -61,9 +63,6 @@ class RecorderTiming {
     this.packetLogEvery = const Duration(minutes: 10),
     this.driftBudget = 0.02,
     this.driftBudgetAfter = const Duration(minutes: 10),
-    this.alarmBudget = 0.02,
-    this.alarmBudgetAfter = const Duration(minutes: 10),
-    this.alarmMemoryMb = 700,
   });
 
   /// Buffered samples go to the files and a status goes to the screen this often.
@@ -110,13 +109,6 @@ class RecorderTiming {
   /// checked from [driftBudgetAfter] on (on the laptop it takes about 0.03 %).
   final double driftBudget;
   final Duration driftBudgetAfter;
-
-  /// The smart alarm's live model is switched off once it has taken more than this share of this isolate's time
-  /// (its own thread's model calls are not counted: they do not hold the recorder up), checked from
-  /// [alarmBudgetAfter] on, or once the process has grown by more than [alarmMemoryMb] since the model started.
-  final double alarmBudget;
-  final Duration alarmBudgetAfter;
-  final int alarmMemoryMb;
 }
 
 /// An SDK call passed its deadline. Never swallowed by the ordinary error handling.
@@ -141,14 +133,13 @@ class NightRecorder {
     this.probe,
     this.timing = const RecorderTiming(),
     this.watch = LiveDrift.new,
+    this.scorer,
     this.alarmPlan,
     this.alarm,
-    int Function()? rss,
     this.cues,
-    this.cueLimits = const GuardLimits(),
+    this.liveLimits = const GuardLimits(),
     DateTime Function()? clock,
-  }) : _now = clock ?? DateTime.now,
-       _rss = rss ?? _processRss;
+  }) : _now = clock ?? DateTime.now;
 
   final HeadbandFinder finder;
   final Directory dir;
@@ -171,13 +162,27 @@ class NightRecorder {
 
   /// Makes tonight's lucid dream cues for the night's start (null from it: they are off); null: none.
   final CueFactory? cues;
-  final GuardLimits cueLimits;
-  late final WatchGuard<CueWatch> _cues = WatchGuard(limits: cueLimits, onStop: _cuesStopped);
-  final DateTime Function() _now;
 
-  /// The process's resident memory in bytes (the alarm's memory limit).
-  final int Function() _rss;
-  static int _processRss() => ProcessInfo.currentRss;
+  /// The night's one live sleep model, which the smart alarm and the lucid cues made by [alarm] and [cues] listen to
+  /// (DECISIONS 330); the recorder feeds it. Null: none (an alarm or cues with a model of their own feed it).
+  final NightScorer? scorer;
+
+  /// The one guard over the smart alarm, the lucid cues and [scorer]: an exception in the scorer, more than its share
+  /// of this isolate's time (the model's own thread and the scaling isolate are not counted: they do not hold the
+  /// recorder up) or the app growing by more than its limit since the guard started switches all of them off for the
+  /// rest of the process with one log line (the phone's alarm still rings at the window's end).
+  final GuardLimits liveLimits;
+  late final WatchGuard<_LiveSleep> _live = WatchGuard(limits: liveLimits, onStop: _liveStopped);
+
+  /// Tonight's lucid dream cues while they run.
+  CueWatch? _cueWatch;
+
+  /// The guard switched the live sleep model off: nothing starts it again in this process.
+  bool _liveOff = false;
+
+  /// Who ran under the guard tonight (for the night's cost line).
+  final Set<String> _liveWho = {};
+  final DateTime Function() _now;
 
   RecorderStatus _status = const RecorderStatus();
   NightState _night = const NightState();
@@ -223,12 +228,9 @@ class NightRecorder {
   /// Markers given before tonight's first file set opened, with their times.
   List<(DateTime, String)> _pendingMarkers = const [];
 
-  /// The smart alarm's live model while it runs ([_alarmTime] its time in this isolate, [_alarmWall] since it
-  /// started, [_alarmRss0] the process's memory then); [_alarmLast] what it showed when it finished.
+  /// The smart alarm while its live model runs; [_alarmLast] what it showed when it finished.
   AlarmWatch? _alarm;
   bool _alarmMade = false;
-  final Stopwatch _alarmTime = Stopwatch(), _alarmWall = Stopwatch();
-  int _alarmRss0 = 0;
   AlarmLive? _alarmLast;
 
   RecorderStatus get status => _status;
@@ -285,8 +287,11 @@ class NightRecorder {
       _night = _night.copyWith(alarmScoring: false);
       await _closeAlarm(a).timeout(const Duration(seconds: 5), onTimeout: () {});
     }
-    final c = _cues.release();
+    final c = _cueWatch;
+    _cueWatch = null;
     if (c != null) await _closeCues(c).timeout(const Duration(seconds: 5), onTimeout: () {});
+    _live.release();
+    await _closeScorer().timeout(const Duration(seconds: 5), onTimeout: () {});
     await _done.future.timeout(timing.stopTimeout, onTimeout: () {});
     _writer?.close();
     await _save();
@@ -598,20 +603,96 @@ class NightRecorder {
       });
     }
     if (_alarm == null && !_alarmMade) _startAlarm(t);
-    if (_alarm != null) {
-      _alarmGuarded((a) {
-        a.add(t, rows, firstOfFile: firstOfFile);
-        for (final text in a.takeEvents()) {
-          _marker(text, t);
-        }
-      });
+    _live.run((_) {
+      scorer?.add(t, rows, firstOfFile: firstOfFile); // an exception here reaches the guard: all of it off
+      _scorerLines();
+      _alarmCall((a) => a.add(t, rows, firstOfFile: firstOfFile), t);
+      _cueCall((c) => c.add(t, rows, firstOfFile: firstOfFile), t);
+    });
+    _liveTidy();
+  }
+
+  /// The guard is on while the smart alarm or the cues run.
+  void _liveStart(String who) {
+    _liveWho.add(who);
+    if (_live.watch == null) _live.start(const _LiveSleep());
+  }
+
+  /// Lets finished helpers go; with none left the guard is off until one starts again.
+  void _liveTidy() {
+    final c = _cueWatch;
+    if (c != null && c.finished) {
+      _cueWatch = null;
+      unawaited(_closeCues(c));
     }
-    _cues.run((c) {
-      c.add(t, rows, firstOfFile: firstOfFile);
+    if (_alarm == null && _cueWatch == null && _live.watch != null) _live.release();
+  }
+
+  /// The scorer's own lines (the model on, shared, off) go into the `.log`.
+  void _scorerLines() {
+    for (final line in scorer?.takeEvents() ?? const <String>[]) {
+      _logLine(line);
+    }
+  }
+
+  /// A call into the smart alarm: its exception switches it off alone, with one log line.
+  void _alarmCall(void Function(AlarmWatch a) call, DateTime t) {
+    final a = _alarm;
+    if (a == null) return;
+    try {
+      call(a);
+      for (final text in a.takeEvents()) {
+        _marker(text, t);
+      }
+    } catch (e) {
+      _alarmStop(_short(e));
+      return;
+    }
+    if (identical(_alarm, a) && a.finished) _alarmFinished(a);
+  }
+
+  /// A call into the lucid cues: their exception switches them off alone, with one log line.
+  void _cueCall(void Function(CueWatch c) call, DateTime t) {
+    final c = _cueWatch;
+    if (c == null) return;
+    try {
+      call(c);
       for (final text in c.takeEvents()) {
         _marker(text, t);
       }
-    });
+    } catch (e) {
+      _cueWatch = null;
+      _cuesStopped(_short(e), c);
+    }
+  }
+
+  /// The guard switched everything off (the scorer threw, too much time or memory): one log line for all.
+  void _liveStopped(String why, _LiveSleep _) {
+    _liveOff = true;
+    final a = _alarm, c = _cueWatch, plan = _plan;
+    _alarm = null;
+    _cueWatch = null;
+    final who = [if (a != null) 'smart alarm', if (c != null) 'lucid cues'];
+    _logLine(
+      '${who.isEmpty ? 'live sleep model' : who.join(' and ')} stopped: $why; '
+      '${a == null ? '' : 'the phone\'s alarm still rings at ${plan == null ? 'the window\'s end' : _hm(plan.endMs)}; '}'
+      'the recording goes on',
+    );
+    if (a != null) {
+      _night = _night.copyWith(alarmScoring: false, alarmOff: true);
+      _alarmLast = AlarmLive(phase: AlarmPhase.off, note: 'The sleep model was switched off ($why).');
+      unawaited(_save().catchError((Object _) {}));
+      unawaited(_closeAlarm(a));
+      _set(_withAlarm(_status));
+    }
+    if (c != null) _offCues(why, c);
+    unawaited(_closeScorer());
+  }
+
+  Future<void> _closeScorer() async {
+    try {
+      await scorer?.close();
+    } catch (_) {}
   }
 
   /// Tonight's lucid dream cues, when they are on; a failure here costs only the cues.
@@ -621,7 +702,8 @@ class NightRecorder {
     try {
       final c = make(_night.startMs);
       if (c == null) return;
-      _cues.start(c);
+      _cueWatch = c;
+      if (!c.finished) _liveStart('lucid cues'); // off from the start (no loudness yet): let go at the next batch
       for (final text in c.takeEvents()) {
         _marker(text, _now());
       }
@@ -630,26 +712,28 @@ class NightRecorder {
     }
   }
 
-  /// The 10-second check of the cues: Lights off, the drift-off detector's state, their time and memory.
-  void _checkCues() {
-    if (_cues.watch == null) return;
+  /// The 10-second check of the smart alarm and the cues (the window's end, Lights off, the drift-off detector's
+  /// state, the model's own state), then the guard's time and memory.
+  void _checkLive() {
+    if (_live.watch == null) return;
     final t = _now();
-    _cues.run((c) {
-      c.check(t, lightsOffMs: _night.lightsOffMs, drift: _drift?.live?.state.name);
-      for (final text in c.takeEvents()) {
-        _marker(text, t);
-      }
+    _live.run((_) {
+      _alarmCall((a) => a.check(t), t);
+      _cueCall((c) => c.check(t, lightsOffMs: _night.lightsOffMs, drift: _drift?.live?.state.name), t);
+      _scorerLines();
     });
-    _cues.checkLimits();
-    final c = _cues.watch;
-    if (c != null && c.finished) {
-      _cues.release();
-      unawaited(_closeCues(c));
-    }
+    _live.checkLimits();
+    _liveTidy();
+    _scorerLines();
   }
 
+  /// The cues alone failed: one log line; the smart alarm and the model it uses go on.
   void _cuesStopped(String why, CueWatch c) {
     _cueLine('lucid cues stopped: $why; the recording goes on');
+    _offCues(why, c);
+  }
+
+  void _offCues(String why, CueWatch c) {
     try {
       if (c is LiveCues) c.off('The recorder stopped them ($why).');
     } catch (_) {}
@@ -765,13 +849,18 @@ class NightRecorder {
     final ms = now.millisecondsSinceEpoch;
     if (ms < plan.scoreFromMs || ms >= plan.endMs) return;
     _alarmMade = true;
+    if (_liveOff) {
+      _night = _night.copyWith(alarmOff: true);
+      _alarmLast = const AlarmLive(phase: AlarmPhase.off, note: 'The sleep model was switched off earlier tonight.');
+      _logLine(
+        'smart alarm: the live sleep model was switched off earlier tonight, so it stays off; the phone\'s alarm rings at '
+        '${_hm(plan.endMs)}',
+      );
+      return;
+    }
     try {
       _alarm = make(plan);
-      _alarmTime.reset();
-      _alarmWall
-        ..reset()
-        ..start();
-      _alarmRss0 = _rss();
+      _liveStart('smart alarm');
       _night = _night.copyWith(alarmScoring: true);
       unawaited(_save().catchError((Object _) {})); // a crash from here on keeps the model off after the restart
     } catch (e) {
@@ -780,38 +869,20 @@ class NightRecorder {
     }
   }
 
-  /// Every call into the alarm's live model goes through here: any exception switches it off for the night with one
-  /// log line; the recording and the phone's alarm never notice.
-  void _alarmGuarded(void Function(AlarmWatch a) call) {
-    final a = _alarm;
-    if (a == null) return;
-    _alarmTime.start();
-    try {
-      call(a);
-    } catch (e) {
-      _alarmStop(_short(e));
-    } finally {
-      _alarmTime.stop();
-    }
-    final still = _alarm;
-    if (still != null && still.finished) _alarmFinished(still);
-  }
-
   /// The model is done (it woke you, the window ended, or it gave up by itself).
   void _alarmFinished(AlarmWatch a) {
     _alarmLast = a.live;
     _alarm = null;
-    _alarmWall.stop();
     _night = _night.copyWith(alarmScoring: false, alarmOff: true);
     unawaited(_save().catchError((Object _) {}));
     unawaited(_closeAlarm(a));
   }
 
+  /// The alarm alone failed: one log line; the cues and the model they use go on.
   void _alarmStop(String why) {
     final a = _alarm;
     final plan = _plan;
     _alarm = null;
-    _alarmWall.stop();
     _night = _night.copyWith(alarmScoring: false, alarmOff: true);
     _alarmLast = AlarmLive(phase: AlarmPhase.off, note: 'The sleep model was switched off ($why).');
     unawaited(_save().catchError((Object _) {}));
@@ -828,42 +899,17 @@ class NightRecorder {
     } catch (_) {}
   }
 
-  /// The 10-second check: the window's end, the model's own state, and its time and memory limits.
-  void _checkAlarm() {
-    if (_alarm == null) return;
-    final t = _now();
-    _alarmGuarded((a) {
-      a.check(t);
-      for (final text in a.takeEvents()) {
-        _marker(text, t);
-      }
-    });
-    if (_alarm == null) return;
-    if (_alarmWall.elapsed >= timing.alarmBudgetAfter) {
-      final share = _alarmTime.elapsedMicroseconds / max(1, _alarmWall.elapsedMicroseconds);
-      if (share > timing.alarmBudget) {
-        _alarmStop(
-          'it took ${(share * 100).toStringAsFixed(1)} % of the recorder\'s time '
-          '(over ${(timing.alarmBudget * 100).toStringAsFixed(1)} %)',
-        );
-        return;
-      }
-    }
-    final grown = (_rss() - _alarmRss0) ~/ (1 << 20);
-    if (grown > timing.alarmMemoryMb) _alarmStop('the app grew by $grown MB (over ${timing.alarmMemoryMb} MB)');
-  }
-
   /// The night screen's Alarm off: the live model stops; the screen takes the phone's alarm away itself.
   void alarmOff() {
     if (_plan == null || _alarmLast?.note == 'Turned off.') return;
     final a = _alarm;
     _alarm = null;
-    _alarmWall.stop();
     _night = _night.copyWith(alarmScoring: false, alarmOff: true);
     _alarmLast = const AlarmLive(phase: AlarmPhase.off, note: 'Turned off.');
     unawaited(_save().catchError((Object _) {}));
     _marker('smart alarm: turned off', _now());
     if (a != null) unawaited(_closeAlarm(a));
+    _liveTidy();
     _set(_withAlarm(_status));
   }
 
@@ -997,8 +1043,7 @@ class NightRecorder {
       if (++ticks % timing.ticksPerCheck != 0) continue;
       w.sync();
       _checkDriftBudget();
-      _checkAlarm();
-      _checkCues();
+      _checkLive();
       await _save();
       final got = w.samplesReceived - lastTotal;
       lastTotal = w.samplesReceived;
@@ -1223,10 +1268,16 @@ class NightRecorder {
     }
     _note('end of night, ${_packets.counts.logLine()}');
     _note(_night.phoneBattery.summaryLine());
-    if (_alarmMade) {
+    if (_live.used) {
+      // one line for the guard's helpers; with both, they shared one model
+      final who = _liveWho.length > 1
+          ? 'smart alarm and lucid cues, one sleep model:'
+          : _liveWho.contains('smart alarm')
+          ? 'smart alarm: sleep model'
+          : 'lucid cues:';
       _note(
-        'smart alarm: sleep model ${(_alarmTime.elapsedMicroseconds / 1e6).toStringAsFixed(2)} s of the recorder\'s time '
-        'over ${(_alarmWall.elapsedMicroseconds / 6e7).toStringAsFixed(1)} min',
+        '$who ${(_live.spent.inMicroseconds / 1e6).toStringAsFixed(2)} s of the recorder\'s time over '
+        '${(_live.ran.inMicroseconds / 6e7).toStringAsFixed(1)} min',
       );
     }
     if (_driftUsed) {
@@ -1239,12 +1290,6 @@ class NightRecorder {
       final d = _drift;
       final h = d is LiveDrift ? d.hands : null;
       if (h != null) _note('hands-free: ${h.heard} moments marked, ${h.ignoredAsleep} double clenches ignored while probably asleep');
-    }
-    if (_cues.used) {
-      _note(
-        'lucid cues: ${(_cues.time.elapsedMicroseconds / 1e6).toStringAsFixed(2)} s of the recorder\'s time over '
-        '${(_cues.wall.elapsedMicroseconds / 6e7).toStringAsFixed(1)} min',
-      );
     }
     await _save();
   }
@@ -1296,4 +1341,10 @@ String _hm(int ms) {
 String _short(Object e) {
   final s = e.toString().replaceAll('\n', ' ');
   return s.length > 160 ? '${s.substring(0, 160)}...' : s;
+}
+
+/// What the one live-sleep guard watches (DECISIONS 330): the smart alarm, the lucid cues and their shared model, all
+/// held by the recorder itself.
+final class _LiveSleep {
+  const _LiveSleep();
 }

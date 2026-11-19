@@ -16,6 +16,7 @@ import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/night_recorder.dart';
 import 'package:eeg_tracker/recorder/status.dart';
+import 'package:eeg_tracker/recorder/watch_guard.dart';
 import 'package:eeg_tracker/sleep/live_prep.dart' show LiveWindow;
 import 'package:eeg_tracker/sleep/live_stager.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -241,7 +242,7 @@ void main() {
       AlarmPlan? plan,
       AlarmWatch Function(AlarmPlan plan)? alarm,
       RecorderTiming timing = fast,
-      int Function()? rss,
+      GuardLimits limits = const GuardLimits(),
     }) => NightRecorder(
       finder: OneFinder(band),
       dir: dir,
@@ -253,7 +254,7 @@ void main() {
       watch: null,
       alarmPlan: plan,
       alarm: alarm,
-      rss: rss,
+      liveLimits: limits,
     );
 
     test('a short night: the model from the start, the wake a marker, every sample saved, the screen sees it', () async {
@@ -342,23 +343,12 @@ void main() {
       final band = FastBand(start: t0);
       final plan = AlarmPlan(endMs: ((t0 + 40 * 60) * 1000).round(), windowMin: 30);
       final slow = BrokenAlarm(slowMs: 3);
-      const timing = RecorderTiming(
-        tick: Duration(milliseconds: 10),
-        ticksPerCheck: 5,
-        scanFor: Duration(milliseconds: 20),
-        contactFor: Duration(milliseconds: 20),
-        settle: Duration(milliseconds: 5),
-        retryWait: Duration(milliseconds: 5),
-        sdkTimeout: Duration(milliseconds: 300),
-        connectTimeout: Duration(milliseconds: 300),
-        notFoundWait: Duration(milliseconds: 10),
-        notFoundWaitLong: Duration(milliseconds: 10),
-        stopTimeout: Duration(seconds: 2),
-        reconnectWaits: [Duration(milliseconds: 5)],
-        rescanFor: Duration(milliseconds: 20),
-        alarmBudgetAfter: Duration(milliseconds: 100),
+      final r = recorder(
+        band,
+        plan: plan,
+        alarm: (_) => slow,
+        limits: const GuardLimits(after: Duration(milliseconds: 100)),
       );
-      final r = recorder(band, plan: plan, alarm: (_) => slow, timing: timing);
       final running = r.run(restartedBySystem: false);
       await until(() => statuses.any((s) => s.alarm?.phase == 'off'));
       await until(() => band.clockS >= 60);
@@ -373,7 +363,12 @@ void main() {
       final band = FastBand(start: t0);
       final plan = AlarmPlan(endMs: ((t0 + 40 * 60) * 1000).round(), windowMin: 30);
       var rss = 300 << 20;
-      final r = recorder(band, plan: plan, alarm: (_) => BrokenAlarm(), rss: () => rss);
+      final r = recorder(
+        band,
+        plan: plan,
+        alarm: (_) => BrokenAlarm(),
+        limits: GuardLimits(rss: () => rss),
+      );
       final running = r.run(restartedBySystem: false);
       await until(() => statuses.any((s) => s.alarm?.phase == 'scoring'));
       rss += 701 << 20;

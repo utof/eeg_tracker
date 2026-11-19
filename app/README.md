@@ -692,8 +692,9 @@ not on the 11T, not with a head, and the volumes are guesses.
    - Did it wake you, at what time, and did you feel groggy? Was the first note too soft or too loud?
    - Did "I'm awake" show over the lock screen, or only in the notification?
    - The sleep report's **Waking up** lines (the full-night scoring's word for that minute).
-   - The last lines of the night's `.log` (`smart alarm: sleep model ... s of the recorder's time`) and whether the
-     night's battery drain looked higher than usual.
+   - The last lines of the night's `.log` (`smart alarm: sleep model ... s of the recorder's time`; with the lucid
+     cues on too, `smart alarm and lucid cues, one sleep model: ...`) and whether the night's battery drain looked
+     higher than usual.
 4. If it rang only at the window's end every time, or never early, Export data: the laptop can replay the night.
 
 ## Lucid dream cues (off unless you turn them on)
@@ -741,7 +742,8 @@ recorder, or the eye-signal finder.
 4. After the first night tell the assistant:
    - Whether you heard the practice's first cues at the level you tapped, and whether the night woke you (the page's
      "A stir after a cue" and your answer).
-   - The night's `.log` end line `lucid cues: ... s of the recorder's time`, and any line starting `lucid cues stopped`
+   - The night's `.log` end line `lucid cues: ... s of the recorder's time` (with the smart alarm on too, `smart alarm
+     and lucid cues, one sleep model: ...`: they share one sleep model), and any line starting `lucid cues stopped`
      or `lucid cues off`.
    - The phone's battery drain that night against a night without the cues.
 5. Export data after a few nights: the laptop can replay the cue rule on your nights (`analysis/lucid_cues.py`) and

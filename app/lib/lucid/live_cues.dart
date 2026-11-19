@@ -4,12 +4,14 @@
 // or the app growing by over 700 MB switches them off for the night with one log line; the recording goes on).
 //
 // From an hour before the cue hours (the second half of the night: 4.5 h after Lights off, or the night's first
-// sample) it runs the nap coach's live sleep model (sleep/live_stager.dart) and the shared detectors on the batches,
-// placed on the clock as the drift-off detector places them (a pause over 0.5 s or a new file set is held at the last
-// value and counts as lost). Each second goes through the rule (rule.dart); a cue it allows plays through the phone's
-// media player (bell.dart), unless tonight is one of the test's silent nights: then everything is the same, the cue
-// moment and its marker too, only no sound plays (plan.dart). Which kind of night it is never shows: not in the
-// markers, the log, the night's record or the screen.
+// sample) it listens to the nap coach's live sleep model (sleep/live_stager.dart) and runs the shared detectors on the
+// batches, placed on the clock as the drift-off detector places them (a pause over 0.5 s or a new file set is held at
+// the last value and counts as lost). The model is the night's one scorer (sleep/night_scorer.dart, DECISIONS 330),
+// shared with the smart alarm when it runs too; the rule counts seconds and epochs on the scorer's clock, so a model
+// the alarm started earlier hands the cues the same epochs. Each second goes through the rule (rule.dart); a cue it
+// allows plays through the phone's media player (bell.dart), unless tonight is one of the test's silent nights: then
+// everything is the same, the cue moment and its marker too, only no sound plays (plan.dart). Which kind of night it
+// is never shows: not in the markers, the log, the night's record or the screen.
 //
 // The night's record (store.dart `LucidNightRecord`) says while the model runs; a process that comes back and finds
 // it so did not end cleanly while the model ran, and the cues stay off for the rest of that night.
@@ -20,6 +22,7 @@ import 'dart:typed_data';
 import '../detectors/detectors.dart';
 import '../recorder/chunk_writer.dart' show Sample, unixSeconds;
 import '../sleep/live_stager.dart';
+import '../sleep/night_scorer.dart';
 import '../sleep/night_signal.dart' show limitMicrovolts, minGapSeconds, roundHalfEven, sampleRate;
 import 'bell.dart';
 import 'plan.dart';
@@ -53,26 +56,29 @@ String _hm(int ms) {
 /// Makes tonight's cues when they are on, or null. Never throws past the recorder's guard: the guard catches.
 typedef CueFactory = CueWatch? Function(int nightStartMs);
 
-class LiveCues implements CueWatch {
+class LiveCues implements CueWatch, StageListener {
   LiveCues._(
-    this._arm, {
+    this._arm,
+    this._own, {
     required this.store,
     required this.record,
-    required this.model,
+    required this.scorer,
     required this.bell,
     required this.level,
     required this.cuesAfter,
     required this.modelBefore,
-    this.scale = scaleInBackground,
-    this.slow = slowCall,
-  });
+  }) {
+    scorer.join(this);
+  }
 
   /// Tonight's cues, or null when they are off. Reads the settings, freezes the test on its first night, and gives the
-  /// night its number (a night restarted by Android keeps its record and number).
+  /// night its number (a night restarted by Android keeps its record and number). [scorer]: the night's shared live
+  /// model, fed by the recorder; or [model]: the cues open their own and feed it (one of the two).
   static LiveCues? open({
     required LucidStore store,
     required int nightStartMs,
-    required LiveModel Function() model,
+    LiveModel Function()? model,
+    NightScorer? scorer,
     required CueBell bell,
     required DateTime now,
     ScaleFn scale = scaleInBackground,
@@ -80,6 +86,7 @@ class LiveCues implements CueWatch {
     Duration cuesAfter = LucidRule.cuesFrom,
     Duration modelBefore = LucidRule.modelBefore,
   }) {
+    if ((model == null) == (scorer == null)) throw ArgumentError('a model or a shared scorer');
     final settings = store.settings();
     final prior = store.night(nightStartMs);
     if (!settings.on && prior == null) return null;
@@ -94,15 +101,14 @@ class LiveCues implements CueWatch {
         );
     final w = LiveCues._(
       test.sealed.armOf(record.index),
+      scorer == null,
       store: store,
       record: record,
-      model: model,
+      scorer: scorer ?? NightScorer(model: model!, scale: scale, slow: slow),
       bell: bell,
       level: settings.level,
       cuesAfter: cuesAfter,
       modelBefore: modelBefore,
-      scale: scale,
-      slow: slow,
     );
     if (prior == null) {
       w._events.add(
@@ -121,21 +127,31 @@ class LiveCues implements CueWatch {
 
   final LucidStore store;
   LucidNightRecord record;
-  final LiveModel Function() model;
+
+  /// The live sleep model the cues listen to from the hour before the cue hours.
+  final NightScorer scorer;
+  final bool _own;
   final CueBell bell;
   final NightArm _arm;
   final double? level;
   final Duration cuesAfter, modelBefore;
-  final ScaleFn scale;
-  final Duration slow;
 
   final List<String> _events = [];
   late String _phase = record.phase;
+
+  /// The model listened to (kept after the cues let it go: the record's speed).
   LiveStager? _stager;
   CueRule? _rule;
   Detectors? _det;
   EyeBursts? _eyes;
+
+  /// The detectors' first sample, a whole unix second ([_ruleUnix] + [_shiftS]).
   int? _startUnix;
+
+  /// The rule's clock: the model's first sample, so epoch e starts at [_ruleUnix] + 30 e and second k at
+  /// [_ruleUnix] + k. The same as [_startUnix] unless the smart alarm started the model earlier.
+  int _ruleUnix = 0;
+  int _shiftS = 0;
   double _lastArrival = 0;
   List<double>? _lastRow;
   final Float32List _f32 = Float32List(4);
@@ -153,6 +169,13 @@ class LiveCues implements CueWatch {
   @override
   bool get finished => _phase == 'done' || _phase == 'off';
 
+  @override
+  String get who => 'lucid cues';
+
+  /// From the hour before the cue hours (once begun, whatever Lights off says later) until the cues end.
+  @override
+  bool needs(double t0Ms) => !finished && (_stager != null || t0Ms >= _modelFromMs);
+
   /// Tonight's rule, once the model runs (tests).
   CueRule? get rule => _rule;
 
@@ -167,12 +190,14 @@ class LiveCues implements CueWatch {
   @override
   void add(DateTime arrival, List<Sample> rows, {bool firstOfFile = false}) {
     if (finished || rows.isEmpty) return;
+    if (_own) scorer.add(arrival, rows, firstOfFile: firstOfFile);
     final arr = unixSeconds(arrival);
     final t0 = arr - rows.length / sampleRate; // a batch arrives just after its last sample
     if (_stager == null && t0 * 1000 < _modelFromMs) return;
     final start = _startUnix;
     if (start == null) {
       _begin(t0, rows.first);
+      if (finished) return;
     } else if (firstOfFile || t0 - _lastArrival > minGapSeconds) {
       final want = roundHalfEven((t0 - start) * sampleRate);
       final have = _eyes!.samples;
@@ -184,16 +209,25 @@ class LiveCues implements CueWatch {
     }
   }
 
+  /// The model's hour has come: the scorer started the model on this batch, or it already ran for the smart alarm.
   void _begin(double t0, Sample first) {
+    final s = scorer.stager, from = scorer.startUnix;
+    if (s == null || from == null) {
+      _off('The sleep model is not running tonight, so no cues tonight.');
+      return;
+    }
     final whole = _wholeSecond(t0);
     _startUnix = whole;
-    final rule = CueRule(cuesFrom: _cuesFromK(whole));
+    _ruleUnix = from;
+    _shiftS = whole - from;
+    _lastK = _shiftS - 1;
+    final rule = CueRule(cuesFrom: _cuesFromK(from));
     _rule = rule;
     _det = Detectors(onSecond: _second);
     final eyes = EyeBursts();
     _eyes = eyes;
     _det!.tap = eyes;
-    _stager = LiveStager(model: model(), scale: scale, slow: slow, onStage: _onStage, onChange: _onChange);
+    _stager = s;
     _phase = 'listening';
     record = record.copyWith(running: true);
     _events.add('lucid cues: sleep model on');
@@ -206,7 +240,7 @@ class LiveCues implements CueWatch {
     }
   }
 
-  int _cuesFromK(int startUnix) => (record.cuesFromMs / 1000 - startUnix).ceil();
+  int _cuesFromK(int ruleUnix) => (record.cuesFromMs / 1000 - ruleUnix).ceil();
 
   Future<void> _readVolume() async {
     try {
@@ -234,7 +268,6 @@ class LiveCues implements CueWatch {
 
   void _push(List<double> row, {required bool missing}) {
     _lastRow = row;
-    _stager!.push(row, missing: missing);
     final det = _det!;
     det.push(row, missing: missing);
     final b = _eyes!.push(row);
@@ -252,7 +285,6 @@ class LiveCues implements CueWatch {
   void _second(Second s) {
     final rule = _rule;
     if (rule == null || finished) return;
-    _lastK = s.k;
     var burst = false;
     _bursts.removeWhere((k) {
       if (k > s.k) return false;
@@ -262,22 +294,29 @@ class LiveCues implements CueWatch {
     final jaw =
         s.muscleOn &&
         math.min(s.muscleX[0].isNaN ? 0.0 : s.muscleX[0], s.muscleX[1].isNaN ? 0.0 : s.muscleX[1]) >= MuscleRule.bothX;
-    final cue = rule.second(s.k, moved: s.movement, jaw: jaw, burst: burst, drift: _drift);
+    final k = s.k + _shiftS; // on the rule's clock
+    _lastK = k;
+    final cue = rule.second(k, moved: s.movement, jaw: jaw, burst: burst, drift: _drift);
     if (cue != null) _cue(cue);
     _afterRule();
   }
 
-  void _onStage(LiveStage st) {
+  @override
+  void scored(LiveStage st, int epochStartMs) {
     final rule = _rule;
     if (rule == null || finished) return;
-    rule.stage(st.epoch, st.stage, st.confidence, math.max(0, _lastK));
-    _confidence.add(st.confidence);
-    if (_confidence.length > 8) _confidence.removeAt(0);
-    _afterRule();
+    try {
+      rule.stage(st.epoch, st.stage, st.confidence, math.max(0, _lastK));
+      _confidence.add(st.confidence);
+      if (_confidence.length > 8) _confidence.removeAt(0);
+      _afterRule();
+    } catch (e) {
+      _off('The cue rule failed (${'$e'.split('\n').first}), so no more cues tonight.');
+    }
   }
 
   void _cue(RuleCue c) {
-    final at = (_startUnix! + c.k) * 1000;
+    final at = (_ruleUnix + c.k) * 1000;
     final gain = math.min(1.0, (level ?? 0) * cueGain(c.step));
     final conf = _confidence.isEmpty ? 0.0 : _confidence.last;
     _moments.add(CueMoment(atMs: at, step: c.step, period: c.period, confidence: conf));
@@ -316,7 +355,8 @@ class LiveCues implements CueWatch {
     }
   }
 
-  void _onChange() {
+  @override
+  void modelChanged() {
     final s = _stager;
     if (s == null || s.mode == _modeSaid) return;
     _modeSaid = s.mode;
@@ -332,8 +372,7 @@ class LiveCues implements CueWatch {
       final from = lightsOffMs + cuesAfter.inMilliseconds;
       if (from != record.cuesFromMs) {
         record = record.copyWith(cuesFromMs: from);
-        final start = _startUnix;
-        if (start != null) _rule!.cuesFrom = _cuesFromK(start);
+        if (_startUnix != null) _rule!.cuesFrom = _cuesFromK(_ruleUnix);
         _events.add('lucid cues from ${_hm(from)} (4.5 h after Lights off)');
         _save();
       }
@@ -356,12 +395,12 @@ class LiveCues implements CueWatch {
   /// Switches the cues off for the night ([why]: a sentence; the recorder's guard calls it).
   void off(String why) => _off(why);
 
+  /// Lets the model go: the scorer frees it unless the smart alarm still uses it.
   Future<void> _freeModel() async {
-    final s = _stager;
-    if (s == null) return;
     try {
-      await s.close();
+      await scorer.leave(this);
     } catch (_) {}
+    if (_stager == null) return;
     record = record.copyWith(running: false);
     _save();
   }
@@ -381,7 +420,7 @@ class LiveCues implements CueWatch {
       final s = _stager, times = s?.callTimes;
       final aroused = {
         for (final c in rule?.cues ?? const <RuleCue>[])
-          if (c.aroused) (_startUnix ?? 0) + c.k,
+          if (c.aroused) _ruleUnix + c.k,
       };
       record = record.copyWith(
         phase: _phase,
@@ -397,8 +436,8 @@ class LiveCues implements CueWatch {
                     aroused: aroused.contains(m.atMs ~/ 1000),
                   ),
               ],
-        arousals: rule == null ? record.arousals : [for (final k in rule.arousals) ((_startUnix ?? 0) + k) * 1000],
-        stops: rule == null ? record.stops : [for (final (k, why) in rule.stops) (((_startUnix ?? 0) + k) * 1000, why)],
+        arousals: rule == null ? record.arousals : [for (final k in rule.arousals) (_ruleUnix + k) * 1000],
+        stops: rule == null ? record.stops : [for (final (k, why) in rule.stops) ((_ruleUnix + k) * 1000, why)],
         model: s == null
             ? record.model
             : {
@@ -422,18 +461,24 @@ class LiveCues implements CueWatch {
   }
 }
 
-/// Tonight's cues in the night recorder's isolate: AnySleep's runs on ONNX (as the nap coach and the smart alarm open
-/// them), the phone's media player for the sound, the files beside the recordings.
-CueFactory lucidCuesFor(String recordingsDir, {required LiveModel Function() model, required CueBell bell}) =>
-    (nightStartMs) {
-      final store = LucidStore(lucidDirFor(recordingsDir));
-      final cues = LiveCues.open(
-        store: store,
-        nightStartMs: nightStartMs,
-        model: model,
-        bell: bell,
-        now: DateTime.now(),
-      );
-      if (cues != null) ensureCueWav(store.cueWav); // only for a night with the cues on: no folder otherwise
-      return cues;
-    };
+/// Tonight's cues in the night recorder's isolate: the night's shared live model ([scorer]: AnySleep's runs on ONNX,
+/// as the nap coach and the smart alarm open them; or [model] for a model of their own), the phone's media player for
+/// the sound, the files beside the recordings.
+CueFactory lucidCuesFor(
+  String recordingsDir, {
+  LiveModel Function()? model,
+  NightScorer? scorer,
+  required CueBell bell,
+}) => (nightStartMs) {
+  final store = LucidStore(lucidDirFor(recordingsDir));
+  final cues = LiveCues.open(
+    store: store,
+    nightStartMs: nightStartMs,
+    model: model,
+    scorer: scorer,
+    bell: bell,
+    now: DateTime.now(),
+  );
+  if (cues != null) ensureCueWav(store.cueWav); // only for a night with the cues on: no folder otherwise
+  return cues;
+};

@@ -2,7 +2,7 @@
 // smart alarm's memory limit, DECISIONS 236): every call goes through [WatchGuard.run]; any exception, more than its
 // share of the recorder's time (checked from a while after it started) or the app growing by more than a limit since
 // it started switches the helper off for the rest of the process with one log line. The recording never notices.
-// Used by the lucid dream cues (lucid/live_cues.dart, DECISIONS 303).
+// Used once for the smart alarm, the lucid dream cues and the live sleep model they share (DECISIONS 303, 330).
 import 'dart:io';
 
 class GuardLimits {
@@ -29,8 +29,15 @@ class WatchGuard<W> {
   final void Function(String why, W watch) onStop;
 
   W? _watch;
+
+  /// Its time in this isolate and the time since it started, for the stretch since [start].
   final Stopwatch time = Stopwatch(), wall = Stopwatch();
   int _rss0 = 0;
+  int _spentUs = 0, _ranUs = 0;
+
+  /// [time] and [wall] over every stretch in this process (the night's cost line).
+  Duration get spent => Duration(microseconds: _spentUs + time.elapsedMicroseconds);
+  Duration get ran => Duration(microseconds: _ranUs + wall.elapsedMicroseconds);
 
   /// Whether a helper ran in this process (for the night's cost line).
   bool used = false;
@@ -84,6 +91,10 @@ class WatchGuard<W> {
     final w = _watch;
     _watch = null;
     wall.stop();
+    _spentUs += time.elapsedMicroseconds;
+    _ranUs += wall.elapsedMicroseconds;
+    time.reset();
+    wall.reset();
     return w;
   }
 

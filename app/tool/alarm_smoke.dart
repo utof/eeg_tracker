@@ -9,6 +9,9 @@
 //   {"mode": "night", "startInMin": 35, "windowMin": 10, "speed": 2, "skipS": 330}
 //     the recorder replays the files at `speed` times real time from `skipS` seconds in; the window opens
 //     `startInMin` minutes after the start, so the model (an hour before it) runs from the first sample;
+//     with `"lucidAfterMin": 3, "lucidModelBeforeMin": 2` the lucid dream cues are switched on too (a made-up
+//     loudness) with their cue hours from 3 minutes after the start and their model 2 minutes before: with a later
+//     window (`"startInMin": 70`) the cues start the night's one live model and the alarm joins it (DECISIONS 330);
 //   {"mode": "killed", "endInMin": 3}
 //     only the phone's alarm, `endInMin` minutes ahead: kill the process (`adb shell kill -9`), it must still ring.
 // `SMOKE` lines go to logcat (the service's from its own engine), `EegWake` lines are the ringer's.
@@ -21,11 +24,15 @@ import 'package:eeg_tracker/alarm/bell.dart';
 import 'package:eeg_tracker/alarm/live_alarm.dart';
 import 'package:eeg_tracker/alarm/notes.dart';
 import 'package:eeg_tracker/alarm/rule.dart';
+import 'package:eeg_tracker/lucid/bell.dart';
+import 'package:eeg_tracker/lucid/live_cues.dart';
+import 'package:eeg_tracker/lucid/store.dart';
 import 'package:eeg_tracker/phone.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/recorder_service.dart';
 import 'package:eeg_tracker/recorder/status.dart';
+import 'package:eeg_tracker/sleep/night_scorer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
@@ -96,9 +103,18 @@ Future<void> main() async {
     _say('night mode: window ${_hms(DateTime.fromMillisecondsSinceEpoch(plan.startMs))}-'
         '${_hms(DateTime.fromMillisecondsSinceEpoch(plan.endMs))}, the phone\'s alarm set (exact ${st.exact}, '
         'full screen ${st.fullScreen}, alarm volume ${st.alarmVolume}/${st.alarmVolumeMax}); ${_memory()}');
+    final lucidAfter = (cfg['lucidAfterMin'] as num?)?.toInt();
+    if (lucidAfter != null) {
+      final store = LucidStore(lucidDirFor(rec));
+      store.setLevel(0.05, now);
+      store.setOn(true, now);
+      _say('lucid cues on: cue hours from $lucidAfter min, the model ${cfg['lucidModelBeforeMin'] ?? 2} min before');
+    }
     await File('$files/smoke/config.json').writeAsString(jsonEncode({
       'speed': (cfg['speed'] as num?)?.toDouble() ?? 2,
       'skipS': (cfg['skipS'] as num?)?.toDouble() ?? 0,
+      'lucidAfterMin': lucidAfter,
+      'lucidModelBeforeMin': (cfg['lucidModelBeforeMin'] as num?)?.toInt() ?? 2,
     }));
     FlutterForegroundTask.addTaskDataCallback((data) {
       final s = RecorderStatus.fromMap(data);
@@ -122,8 +138,11 @@ Future<void> main() async {
 @pragma('vm:entry-point')
 void alarmSmokeEntryPoint() {
   LiveAlarm? made;
+  NightScorer? shared;
   final started = DateTime.now();
   Timer.periodic(const Duration(seconds: 20), (_) {
+    final n = shared;
+    if (n != null) debugPrint('SMOKE scorer: loads ${n.loads}, running ${n.stager != null}, used by ${n.users}');
     final s = made?.stager;
     final c = s == null || s.calls.isEmpty ? null : s.calls.last;
     final t = s?.callTimes;
@@ -138,7 +157,27 @@ void alarmSmokeEntryPoint() {
   FlutterForegroundTask.setTaskHandler(
     RecorderTaskHandler(
       finder: () => _ReplayFinder(),
-      alarm: (dir) => (plan) => made = smartAlarm(dir, plan),
+      alarm: (dir, scorer) {
+        shared = scorer;
+        return (plan) => made = smartAlarm(dir, plan, scorer);
+      },
+      cues: (dir, scorer) => (nightStartMs) {
+        final cfg = jsonDecode(File('${Directory(dir).parent.path}/smoke/config.json').readAsStringSync()) as Map;
+        final after = (cfg['lucidAfterMin'] as num?)?.toInt();
+        if (after == null) return lucidCuesWith(dir, scorer)(nightStartMs);
+        final store = LucidStore(lucidDirFor(dir));
+        final cues = LiveCues.open(
+          store: store,
+          nightStartMs: nightStartMs,
+          scorer: scorer,
+          bell: ChannelCueBell(),
+          now: DateTime.now(),
+          cuesAfter: Duration(minutes: after),
+          modelBefore: Duration(minutes: (cfg['lucidModelBeforeMin'] as num?)?.toInt() ?? 2),
+        );
+        if (cues != null) ensureCueWav(store.cueWav);
+        return cues;
+      },
     ),
   );
 }

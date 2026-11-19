@@ -12,11 +12,12 @@ import '../alarm/record.dart';
 import '../alarm/rule.dart';
 import '../handsfree/store.dart' show nightGestures;
 import '../lucid/bell.dart' show ChannelCueBell;
-import '../lucid/live_cues.dart' show lucidCuesFor;
+import '../lucid/live_cues.dart' show CueFactory, lucidCuesFor;
 import '../phone.dart';
 import '../share/isolate.dart';
 import '../share/protocol.dart';
 import '../sleep/live_stager.dart';
+import '../sleep/night_scorer.dart';
 import '../sleep/onnx_runs.dart';
 import 'brainbit.dart';
 import 'headband.dart';
@@ -120,19 +121,27 @@ Future<ServiceRequestResult> startRecorderService(
   );
 }
 
-/// The smart alarm's live model in the recorder's isolate: AnySleep's runs on ONNX (the plugin is registered in this
-/// engine too), the early ring through the phone's alarm, the record beside the recordings.
-AlarmWatch Function(AlarmPlan plan) smartAlarmFor(String recordingsDir) => (plan) => smartAlarm(recordingsDir, plan);
-
-LiveAlarm smartAlarm(String recordingsDir, AlarmPlan plan) => LiveAlarm(
-  plan: plan,
+/// The night's one live sleep model in the recorder's isolate: AnySleep's runs on ONNX (the plugin is registered in
+/// this engine too), shared by the smart alarm and the lucid cues (DECISIONS 330).
+NightScorer nightScorer(String recordingsDir) => NightScorer(
   model: () => RunsLiveModel(
     open: (run) => OnnxStageRun.open(run, modelsDir: modelsDirFor(recordingsDir)),
     closeRun: (run) => (run as OnnxStageRun).close(),
   ),
-  bell: ChannelAlarmBell(),
-  store: AlarmStore(alarmsDirFor(recordingsDir)),
 );
+
+/// The smart alarm in the recorder's isolate: the night's live model ([scorer]), the early ring through the phone's
+/// alarm, the record beside the recordings.
+AlarmWatch Function(AlarmPlan plan) smartAlarmFor(String recordingsDir, NightScorer scorer) =>
+    (plan) => smartAlarm(recordingsDir, plan, scorer);
+
+LiveAlarm smartAlarm(String recordingsDir, AlarmPlan plan, NightScorer scorer) =>
+    LiveAlarm(plan: plan, scorer: scorer, bell: ChannelAlarmBell(), store: AlarmStore(alarmsDirFor(recordingsDir)));
+
+/// Tonight's lucid dream cues in the recorder's isolate when they are on: the night's live model ([scorer]), the
+/// phone's media player (DECISIONS 303).
+CueFactory lucidCuesWith(String recordingsDir, NightScorer scorer) =>
+    lucidCuesFor(recordingsDir, scorer: scorer, bell: ChannelCueBell());
 
 Future<NightState> loadNight() async => _PrefsNightStore().load();
 
@@ -140,13 +149,16 @@ Future<NightState> loadNight() async => _PrefsNightStore().load();
 void recorderEntryPoint() => FlutterForegroundTask.setTaskHandler(RecorderTaskHandler());
 
 class RecorderTaskHandler extends TaskHandler {
-  RecorderTaskHandler({this.finder, this.alarm = smartAlarmFor});
+  RecorderTaskHandler({this.finder, this.alarm = smartAlarmFor, this.cues = lucidCuesWith});
 
   /// Only for smoke tests (a replayed headband); null: the BrainBit.
   final HeadbandFinder Function()? finder;
 
-  /// The smart alarm's live model for the recordings folder (a smoke test watches its own).
-  final AlarmWatch Function(AlarmPlan plan) Function(String recordingsDir) alarm;
+  /// The smart alarm for the recordings folder and the night's live model (a smoke test watches its own).
+  final AlarmWatch Function(AlarmPlan plan) Function(String recordingsDir, NightScorer scorer) alarm;
+
+  /// The lucid cues for the recordings folder and the night's live model (a smoke test brings their hours forward).
+  final CueFactory Function(String recordingsDir, NightScorer scorer) cues;
   NightRecorder? _recorder;
   BrainBitFinder? _finder;
   Phase? _shownPhase;
@@ -170,6 +182,7 @@ class RecorderTaskHandler extends TaskHandler {
       _finder = b;
       finder = b;
     }
+    final scorer = nightScorer(dir);
     final recorder = NightRecorder(
       finder: finder,
       dir: Directory(dir),
@@ -179,17 +192,12 @@ class RecorderTaskHandler extends TaskHandler {
       onStuck: _restartProcess,
       // the owner's hands-free double clench, read when the detector starts (DECISIONS 247)
       watch: () => LiveDrift(handsFree: nightGestures(Directory(dir).parent)),
+      // one live sleep model for the smart alarm and the lucid cues, fed by the recorder (DECISIONS 330)
+      scorer: scorer,
       alarmPlan: await _alarmPlan(),
-      alarm: alarm(dir),
-      // lucid dream cues when they are on: AnySleep on ONNX in this engine, the phone's media player (DECISIONS 303)
-      cues: lucidCuesFor(
-        dir,
-        model: () => RunsLiveModel(
-          open: (run) => OnnxStageRun.open(run, modelsDir: modelsDirFor(dir)),
-          closeRun: (run) => (run as OnnxStageRun).close(),
-        ),
-        bell: ChannelCueBell(),
-      ),
+      alarm: alarm(dir, scorer),
+      // lucid dream cues when they are on: the shared model, the phone's media player (DECISIONS 303)
+      cues: cues(dir, scorer),
     );
     _recorder = recorder;
     unawaited(recorder.run(restartedBySystem: starter == TaskStarter.system));

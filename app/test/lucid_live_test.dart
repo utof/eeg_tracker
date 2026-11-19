@@ -300,7 +300,7 @@ void main() {
           clock: band.now,
           watch: null,
           cues: cues,
-          cueLimits: limits,
+          liveLimits: limits,
         );
 
     String logOf() =>

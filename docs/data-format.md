@@ -362,8 +362,12 @@ The night's recording carries the cues' moments as markers in its `.markers.json
 `lucid cues on: night N of the test; cues from HH:MM, the sleep model from HH:MM`, `lucid cues: sleep model on`,
 `lucid cue N (dream sleep 0.84, +3 dB)`, `lucid cues: arousal after a cue; 3 dB quieter, 5 minutes without cues`,
 `lucid cues: done for tonight (...)`, `lucid cues off: ...`, `lucid cues from HH:MM (4.5 h after Lights off)`; its
-`.log` ends with the cues' share of the recorder's time, and says `lucid cues stopped: ...` if the guard switched
-them off. None of these says whether sound played.
+`.log` ends with the cues' share of the recorder's time (`lucid cues: ... s of the recorder's time`; on a night with
+the smart alarm too, one line for both: `smart alarm and lucid cues, one sleep model: ...`), and says `lucid cues
+stopped: ...` if the guard switched them off. None of these says whether sound played. The `.log` also says when the
+one live sleep model the cues and the smart alarm share opens and closes (DECISIONS 330): `live sleep model on for the
+... (load N tonight)`, `live sleep model: shared with the ... (no second copy)`, `live sleep model off, no one needs it
+(N calls, median S s)`.
 
 On the laptop, `scripts/import_phone.py <folder>` (standard library only) checks the manifest, copies
 `recordings/<stamp>.*` into `_local/recordings/` beside the laptop's own recordings and everything else into

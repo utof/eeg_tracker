@@ -3,18 +3,19 @@
 // the files, and wrapped by the recorder in a guard (an exception, too much time or too much memory switches it off
 // with one log line; the recording goes on, and the phone's alarm still rings at the window's end).
 //
-// It waits until an hour before the window, then starts the live sleep model (sleep/live_stager.dart: AnySleep on the
-// ONNX plugin's thread, the scaling in a background isolate) on the batches from then on, placed on the clock as the
-// drift-off detector places them (a pause over 0.5 s or a new file set is held at the last value and counts as lost).
-// Each stage goes through the rule (rule.dart); the first wake moment brings the phone's alarm forward (bell.dart)
-// and frees the model. The window's end needs nothing from here: the phone's alarm is set there at Start.
+// It waits until an hour before the window, then listens to the live sleep model (sleep/live_stager.dart: AnySleep on
+// the ONNX plugin's thread, the scaling in a background isolate) on the batches from then on. The model is the night's
+// one scorer (sleep/night_scorer.dart, DECISIONS 330), shared with the lucid dream cues when they run too; it places
+// the batches on the clock as the drift-off detector does. Each stage goes through the rule (rule.dart); the first
+// wake moment brings the phone's alarm forward (bell.dart) and lets the model go (freed unless the cues still use
+// it). The window's end needs nothing from here: the phone's alarm is set there at Start.
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import '../recorder/chunk_writer.dart' show Sample, unixSeconds;
 import '../sleep/live_stager.dart';
-import '../sleep/night_signal.dart' show limitMicrovolts, minGapSeconds, roundHalfEven, sampleRate;
+import '../sleep/night_scorer.dart';
+import '../sleep/night_signal.dart' show sampleRate;
 import '../sleep/periods.dart' show gapStage;
 import 'bell.dart';
 import 'record.dart';
@@ -84,42 +85,52 @@ String _hms(int ms) {
 const Map<String, String> _stageWords = {'N1': 'light sleep', 'N2': 'light sleep', 'R': 'dream sleep', 'W': 'awake'};
 const Map<String, String> _stageChar = {'W': 'W', 'N1': '1', 'N2': '2', 'N3': '3', 'R': 'R', gapStage: '-'};
 
-class LiveAlarm implements AlarmWatch {
+class LiveAlarm implements AlarmWatch, StageListener {
+  /// [scorer]: the night's shared live model, fed by the recorder; or [model]: this alarm opens its own and feeds it
+  /// (one of the two).
   LiveAlarm({
     required this.plan,
-    required this.model,
+    LiveModel Function()? model,
+    NightScorer? scorer,
     required this.bell,
     this.store,
-    this.scale = scaleInBackground,
-    this.slow = slowCall,
+    ScaleFn scale = scaleInBackground,
+    Duration slow = slowCall,
     DateTime Function()? clock,
-  }) : _now = clock ?? DateTime.now;
+  }) : assert((model == null) != (scorer == null), 'a model or a shared scorer'),
+       _own = scorer == null,
+       scorer = scorer ?? NightScorer(model: model!, scale: scale, slow: slow),
+       _now = clock ?? DateTime.now {
+    this.scorer.join(this);
+  }
 
   final AlarmPlan plan;
 
-  /// Opens the sleep model when the hour before the window starts.
-  final LiveModel Function() model;
+  /// The live sleep model it listens to from the hour before the window.
+  final NightScorer scorer;
+  final bool _own;
   final AlarmBell bell;
 
   /// Where the record goes (null: none).
   final AlarmStore? store;
-  final ScaleFn scale;
-  final Duration slow;
   final DateTime Function() _now;
 
   late final AlarmRules rules = AlarmRules.of(plan);
+
+  /// The model it listened to (kept after it let the model go: the record's speed).
   LiveStager? _stager;
   LiveStager? get stager => _stager;
 
   /// The model's first sample, a whole unix second: epoch e starts at [startUnix] + 30 e.
   int? startUnix;
 
+  /// The first epoch it was given (the record's stages start there).
+  int? _firstEpoch;
+  final List<String> _letters = [];
+
   AlarmPhase _phase = AlarmPhase.waiting;
   String? _note;
   String? _latest;
-  double _lastArrival = 0;
-  final Float32List _f32 = Float32List(4);
-  final List<double> _row = List.filled(4, 0);
   final List<String> _events = [];
   LiveMode? _modeSaid;
   Future<void>? _closing;
@@ -141,65 +152,55 @@ class LiveAlarm implements AlarmWatch {
   String get _window => '${_hm(plan.startMs)}-${_hm(plan.endMs)}';
 
   @override
+  String get who => 'smart alarm';
+
+  /// From the hour before the window until it has finished.
+  @override
+  bool needs(double t0Ms) => !finished && t0Ms >= plan.scoreFromMs && t0Ms < plan.endMs;
+
+  @override
   void add(DateTime arrival, List<Sample> rows, {bool firstOfFile = false}) {
     if (finished || rows.isEmpty) return;
+    if (_own) scorer.add(arrival, rows, firstOfFile: firstOfFile);
     final arr = unixSeconds(arrival);
     final t0 = arr - rows.length / sampleRate; // a batch arrives just after its last sample
     if (t0 * 1000 < plan.scoreFromMs || arr * 1000 >= plan.endMs) return;
-    var s = _stager;
-    final start = startUnix;
-    if (s == null || start == null) {
-      s = _start(arrival);
-      final whole = _wholeSecond(t0);
-      startUnix = whole;
-      final lead = roundHalfEven((t0 - whole) * sampleRate);
-      for (var i = 0; i < lead; i++) {
-        _push(s, rows.first, missing: true);
-      }
-    } else if (firstOfFile || t0 - _lastArrival > minGapSeconds) {
-      final want = roundHalfEven((t0 - start) * sampleRate);
-      if (want > s.prep.samples) s.hold(want - s.prep.samples);
-    }
-    _lastArrival = arr;
-    for (final r in rows) {
-      _push(s, r);
-    }
+    if (_stager == null) _start(arrival);
   }
 
-  LiveStager _start(DateTime at) {
-    final s = LiveStager(
-      model: model(),
-      scale: scale,
-      slow: slow,
-      onStage: _onStage,
-      onChange: _onChange,
-      fallback: 'the phone\'s alarm wakes you at ${_hm(plan.endMs)}',
-    );
+  /// The hour before the window has come: from now on it listens to the model (which the scorer started for it on
+  /// this batch, or was already running for the lucid cues).
+  void _start(DateTime at) {
+    final s = scorer.stager;
+    if (s == null) {
+      off('The sleep model is not running tonight, so the phone\'s alarm wakes you at ${_hm(plan.endMs)}.');
+      return;
+    }
     _stager = s;
+    startUnix = scorer.startUnix;
     _phase = AlarmPhase.scoring;
     _events.add('smart alarm: sleep model on (window $_window)');
     _save(modelFrom: at.millisecondsSinceEpoch);
-    return s;
   }
 
-  void _push(LiveStager s, Sample r, {bool missing = false}) {
-    final f = _f32, row = _row;
-    f[0] = r.o1;
-    f[1] = r.o2;
-    f[2] = r.t3;
-    f[3] = r.t4;
-    for (var c = 0; c < 4; c++) {
-      row[c] = (f[c] * 1e6).clamp(-limitMicrovolts, limitMicrovolts); // the files' float32, in µV, as the BDF clips
+  @override
+  void scored(LiveStage st, int epochStartMs) {
+    if (finished || _stager == null) return;
+    try {
+      _latest = st.stage;
+      final first = _firstEpoch ??= st.epoch;
+      final i = st.epoch - first;
+      if (i >= 0) {
+        while (_letters.length <= i) {
+          _letters.add('.');
+        }
+        _letters[i] = _stageChar[st.stage] ?? '-';
+      }
+      final wake = rules.stage(st, nowMs: _now().millisecondsSinceEpoch, epochStartMs: epochStartMs);
+      if (wake != null) _woke(wake);
+    } catch (e) {
+      off('The smart alarm failed (${_short(e)}), so the phone\'s alarm wakes you at ${_hm(plan.endMs)}.');
     }
-    s.push(row, missing: missing);
-  }
-
-  void _onStage(LiveStage st) {
-    if (finished) return;
-    _latest = st.stage;
-    final start = startUnix ?? 0;
-    final wake = rules.stage(st, nowMs: _now().millisecondsSinceEpoch, epochStartMs: (start + st.epoch * 30) * 1000);
-    if (wake != null) _woke(wake);
   }
 
   void _woke(AlarmWake w) {
@@ -225,11 +226,12 @@ class LiveAlarm implements AlarmWatch {
     }
   }
 
-  void _onChange() {
+  @override
+  void modelChanged() {
     final s = _stager;
     if (s == null || s.mode == _modeSaid) return;
     _modeSaid = s.mode;
-    if (s.mode == LiveMode.light) _events.add('smart alarm: sleep model 1 run: ${s.why ?? ''}');
+    if (s.mode == LiveMode.light) _events.add('smart alarm: sleep model 1 run: ${_why(s) ?? ''}');
     _save();
   }
 
@@ -250,9 +252,12 @@ class LiveAlarm implements AlarmWatch {
     }
     final s = _stager;
     if (s != null && s.mode == LiveMode.timer) {
-      off(s.why ?? 'The sleep model stopped, so the phone\'s alarm wakes you at ${_hm(plan.endMs)}.');
+      off(_why(s) ?? 'The sleep model stopped, so the phone\'s alarm wakes you at ${_hm(plan.endMs)}.');
     }
   }
+
+  /// The model's sentence for stepping down or stopping, ending in what takes over here.
+  String? _why(LiveStager s) => modelWhy(s, 'the phone\'s alarm wakes you at ${_hm(plan.endMs)}');
 
   /// Switches the model off for the night ([why]: a sentence); the phone's alarm stays.
   void off(String why) {
@@ -264,9 +269,10 @@ class LiveAlarm implements AlarmWatch {
     unawaited(_freeModel());
   }
 
+  /// Lets the model go: the scorer frees it unless the lucid cues still use it.
   Future<void> _freeModel() async {
     try {
-      await _stager?.close();
+      await scorer.leave(this);
     } catch (_) {}
   }
 
@@ -289,20 +295,21 @@ class LiveAlarm implements AlarmWatch {
     try {
       final s = _stager, w = rules.wake, times = s?.callTimes;
       final start = startUnix;
-      final n = s == null ? 0 : s.stages.isEmpty ? 0 : s.stages.last.epoch + 1;
-      final letters = List.filled(n, '.');
-      for (final x in s?.stages ?? const <LiveStage>[]) {
-        letters[x.epoch] = _stageChar[x.stage] ?? '-';
-      }
       st.write(plan.endMs, {
         'plan': plan.toJson(),
         'phase': _phase.name,
         'model_from_ms': _modelFrom,
-        'epochs_from_ms': start == null ? null : start * 1000,
-        'stages': letters.join(),
+        'epochs_from_ms': start == null ? null : (start + (_firstEpoch ?? 0) * 30) * 1000,
+        'stages': _letters.join(),
         'model': s == null
             ? null
-            : {'mode': s.mode.name, 'why': s.why, 'calls': s.calls.length, 'median_ms': times?.median, 'max_ms': times?.max},
+            : {
+                'mode': s.mode.name,
+                'why': _why(s),
+                'calls': s.calls.length,
+                'median_ms': times?.median,
+                'max_ms': times?.max,
+              },
         'wake': w == null
             ? null
             : {
@@ -316,13 +323,6 @@ class LiveAlarm implements AlarmWatch {
         'off': _off,
       });
     } catch (_) {}
-  }
-
-  /// `datetime.fromtimestamp(t).replace(microsecond=0)`, as the night's pass starts a night.
-  static int _wholeSecond(double t) {
-    var whole = t.floor();
-    if (roundHalfEven((t - whole) * 1e6) >= 1000000) whole += 1;
-    return whole;
   }
 }
 
