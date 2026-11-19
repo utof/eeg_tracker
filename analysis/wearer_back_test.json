@@ -1,0 +1,219 @@
+{
+ "what": "made-up people (no one's data); see validate_wearer.py's docstring for the model",
+ "rules": {
+  "n_enrol": 10,
+  "min_days": 5,
+  "profile_max": 20,
+  "threshold": 2.5,
+  "floors": {
+   "iaf": 0.25,
+   "alpha": 0.08,
+   "slope": 0.1
+  }
+ },
+ "people": 400,
+ "days": 180,
+ "seed": 1,
+ "icc_lab": {
+  "iaf": 0.84,
+  "alpha": 0.87,
+  "slope": 0.6
+ },
+ "between_sd": {
+  "iaf": 0.8,
+  "alpha": 0.3,
+  "slope": 0.2
+ },
+ "results": [
+  {
+   "headband": "lab",
+   "within_sd": {
+    "iaf": 0.349,
+    "alpha": 0.116,
+    "slope": 0.163
+   },
+   "false_questions_share": 0.0032,
+   "false_questions_a_month": 0.097,
+   "people_with_a_false_question": 0.395,
+   "people_with_one_in_first_8_weeks": 0.16,
+   "others_caught": 0.349,
+   "others_missed": 0.651,
+   "counts": {
+    "own_checked": 62000,
+    "own_flagged": 200,
+    "others": 6000,
+    "others_caught": 2093,
+    "others_while_learning": 0
+   }
+  },
+  {
+   "headband": "dry",
+   "within_sd": {
+    "iaf": 0.524,
+    "alpha": 0.174,
+    "slope": 0.245
+   },
+   "false_questions_share": 0.0069,
+   "false_questions_a_month": 0.206,
+   "people_with_a_false_question": 0.67,
+   "people_with_one_in_first_8_weeks": 0.31,
+   "others_caught": 0.193,
+   "others_missed": 0.807,
+   "counts": {
+    "own_checked": 62000,
+    "own_flagged": 425,
+    "others": 6000,
+    "others_caught": 1156,
+    "others_while_learning": 0
+   }
+  }
+ ],
+ "grid_lab": [
+  {
+   "n_enrol": 5,
+   "min_days": 2,
+   "threshold": 2.0,
+   "false_questions_a_month": 0.441,
+   "people_with_one_in_first_8_weeks": 0.53,
+   "others_caught": 0.569
+  },
+  {
+   "n_enrol": 5,
+   "min_days": 2,
+   "threshold": 2.5,
+   "false_questions_a_month": 0.12,
+   "people_with_one_in_first_8_weeks": 0.16,
+   "others_caught": 0.346
+  },
+  {
+   "n_enrol": 5,
+   "min_days": 2,
+   "threshold": 3.0,
+   "false_questions_a_month": 0.036,
+   "people_with_one_in_first_8_weeks": 0.03,
+   "others_caught": 0.182
+  },
+  {
+   "n_enrol": 10,
+   "min_days": 5,
+   "threshold": 2.0,
+   "false_questions_a_month": 0.434,
+   "people_with_one_in_first_8_weeks": 0.5,
+   "others_caught": 0.569
+  },
+  {
+   "n_enrol": 10,
+   "min_days": 5,
+   "threshold": 2.5,
+   "false_questions_a_month": 0.114,
+   "people_with_one_in_first_8_weeks": 0.12,
+   "others_caught": 0.346
+  },
+  {
+   "n_enrol": 10,
+   "min_days": 5,
+   "threshold": 3.0,
+   "false_questions_a_month": 0.033,
+   "people_with_one_in_first_8_weeks": 0.01,
+   "others_caught": 0.182
+  },
+  {
+   "n_enrol": 14,
+   "min_days": 7,
+   "threshold": 2.0,
+   "false_questions_a_month": 0.435,
+   "people_with_one_in_first_8_weeks": 0.48,
+   "others_caught": 0.569
+  },
+  {
+   "n_enrol": 14,
+   "min_days": 7,
+   "threshold": 2.5,
+   "false_questions_a_month": 0.113,
+   "people_with_one_in_first_8_weeks": 0.1,
+   "others_caught": 0.346
+  },
+  {
+   "n_enrol": 14,
+   "min_days": 7,
+   "threshold": 3.0,
+   "false_questions_a_month": 0.034,
+   "people_with_one_in_first_8_weeks": 0.01,
+   "others_caught": 0.182
+  }
+ ],
+ "grid_dry": [
+  {
+   "n_enrol": 5,
+   "min_days": 2,
+   "threshold": 2.0,
+   "false_questions_a_month": 0.767,
+   "people_with_one_in_first_8_weeks": 0.78,
+   "others_caught": 0.389
+  },
+  {
+   "n_enrol": 5,
+   "min_days": 2,
+   "threshold": 2.5,
+   "false_questions_a_month": 0.244,
+   "people_with_one_in_first_8_weeks": 0.34,
+   "others_caught": 0.188
+  },
+  {
+   "n_enrol": 5,
+   "min_days": 2,
+   "threshold": 3.0,
+   "false_questions_a_month": 0.084,
+   "people_with_one_in_first_8_weeks": 0.12,
+   "others_caught": 0.067
+  },
+  {
+   "n_enrol": 10,
+   "min_days": 5,
+   "threshold": 2.0,
+   "false_questions_a_month": 0.759,
+   "people_with_one_in_first_8_weeks": 0.76,
+   "others_caught": 0.389
+  },
+  {
+   "n_enrol": 10,
+   "min_days": 5,
+   "threshold": 2.5,
+   "false_questions_a_month": 0.234,
+   "people_with_one_in_first_8_weeks": 0.29,
+   "others_caught": 0.188
+  },
+  {
+   "n_enrol": 10,
+   "min_days": 5,
+   "threshold": 3.0,
+   "false_questions_a_month": 0.075,
+   "people_with_one_in_first_8_weeks": 0.06,
+   "others_caught": 0.067
+  },
+  {
+   "n_enrol": 14,
+   "min_days": 7,
+   "threshold": 2.0,
+   "false_questions_a_month": 0.751,
+   "people_with_one_in_first_8_weeks": 0.74,
+   "others_caught": 0.389
+  },
+  {
+   "n_enrol": 14,
+   "min_days": 7,
+   "threshold": 2.5,
+   "false_questions_a_month": 0.23,
+   "people_with_one_in_first_8_weeks": 0.24,
+   "others_caught": 0.188
+  },
+  {
+   "n_enrol": 14,
+   "min_days": 7,
+   "threshold": 3.0,
+   "false_questions_a_month": 0.075,
+   "people_with_one_in_first_8_weeks": 0.05,
+   "others_caught": 0.067
+  }
+ ]
+}
