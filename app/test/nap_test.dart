@@ -349,6 +349,22 @@ void main() {
       c.dispose();
     });
 
+    test('Stop while the sound starts: the sound that just started is stopped too (no engine left open)', () async {
+      final band = DriftBand((t) => 1);
+      final sound = _GatedNapSound();
+      final c = controller(band, sound);
+      final started = c.start(lengthMin: 20);
+      await until(c, () => sound.asked);
+      await c.stop();
+      sound.gate.complete();
+      await started;
+      expect(sound.started, isTrue);
+      expect(sound.stopped, isTrue, reason: 'the engine opened during Stop is closed');
+      expect(c.stage, NapStage.setup);
+      expect(band.calls.last, 'disconnect');
+      c.dispose();
+    });
+
     test('the drift-off detector\'s states reach the screen', () async {
       final c = controller(DriftBand((t) => t < 90 ? 1 : 0.3), SilentNapSound());
       await c.start(lengthMin: 20);
@@ -360,4 +376,17 @@ void main() {
       c.dispose();
     });
   });
+}
+
+/// A nap sound whose start waits for the test.
+class _GatedNapSound extends SilentNapSound {
+  final Completer<void> gate = Completer<void>();
+  bool asked = false;
+
+  @override
+  Future<void> start() async {
+    asked = true;
+    await gate.future;
+    await super.start();
+  }
 }

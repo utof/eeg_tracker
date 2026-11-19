@@ -208,7 +208,10 @@ class DreamController extends ChangeNotifier {
         return await _fail('The sound did not start ($e), so the questions could not be heard.');
       }
       _sound = sound;
-      if (_ended) return await _release();
+      if (_ended) {
+        await sound.stop(); // Stop came during its start: _finish could not stop it
+        return await _release();
+      }
       final st = store;
       _prompts = {for (final k in PromptKind.values) k.name: st?.promptPath(k) == null ? 'tone' : 'own'};
       final earlier = st?.list() ?? const <DreamSession>[];

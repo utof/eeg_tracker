@@ -232,7 +232,10 @@ class NapController extends ChangeNotifier {
         return await _fail('The sound did not start ($e), so the nap could not wake you.');
       }
       _sound = sound;
-      if (_ended) return await _release();
+      if (_ended) {
+        await sound.stop(); // Stop came during its start: _finish could not stop it
+        return await _release();
+      }
       _openWriter(link.name);
       _seen = Detectors(onSecond: _onSecond);
       final hf = handsFree;

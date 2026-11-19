@@ -528,6 +528,21 @@ void main() {
       c.dispose();
     });
 
+    test('Stop while the sound starts: the sound that just started is stopped too (no engine left open)', () async {
+      final band = DriftBand((_) => 1), sound = _GatedDreamSound();
+      final c = controller(band, FakeMic(spoken), sound);
+      final started = c.start(rounds: 3);
+      await until(c, () => sound.asked);
+      await c.stop();
+      sound.gate.complete();
+      await started;
+      expect(sound.started, isTrue);
+      expect(sound.stopped, isTrue, reason: 'the engine opened during Stop is closed');
+      expect(c.stage, DreamStage.setup);
+      expect(band.calls.last, 'disconnect');
+      c.dispose();
+    });
+
     test('45 minutes after lights off the session ends even with the headband silent', () async {
       var shift = Duration.zero;
       final band = DriftBand((_) => 1), mic = FakeMic(spoken), sound = SilentDreamSound();
@@ -561,4 +576,17 @@ void main() {
       none.dispose();
     });
   });
+}
+
+/// A dream sound whose start waits for the test.
+class _GatedDreamSound extends SilentDreamSound {
+  final Completer<void> gate = Completer<void>();
+  bool asked = false;
+
+  @override
+  Future<void> start() async {
+    asked = true;
+    await gate.future;
+    await super.start();
+  }
 }
