@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import '../meditation/store.dart';
 import '../morning/store.dart';
 import '../phone.dart';
-import '../sleep/report.dart';
 import '../training/control.dart' show SessionKind;
 import '../sharp/page.dart' show sharpTrendsLine;
 import '../sharp/store.dart';
@@ -16,6 +15,7 @@ import '../trends/trends.dart';
 import '../unusual/card.dart';
 import '../unusual/store.dart';
 import '../wearer/check.dart' show answerSomeoneElse;
+import '../wearer/wearer.dart' show ownNightReports;
 import 'evidence_sheet.dart';
 import 'experiments_screen.dart';
 import 'experiments_view.dart' show experimentLine;
@@ -25,12 +25,10 @@ import 'unusual_view.dart';
 
 /// Everything the trends need, read from the app's folders (a missing folder is simply empty). Nights and check-ins
 /// the owner said someone else wore the headband for are left out ("Was this you?", DECISIONS 377): the trends,
-/// the unusual card, the experiments and the check-in's own result all read them through here.
+/// the unusual card, the experiments and the check-in's own result all read them through here (Sharp hours reads
+/// the same nights through [ownNightReports]).
 TrendInputs readTrendInputs(String recordingsDir) => (
-  nights: [
-    for (final r in NightReportStore(nightsDirFor(recordingsDir)).all())
-      if (r.wearerAnswer != answerSomeoneElse) r,
-  ],
+  nights: ownNightReports(recordingsDir),
   mornings: [
     for (final m in MorningStore(morningsDirFor(recordingsDir)).list())
       if (m.wearerAnswer != answerSomeoneElse) m,

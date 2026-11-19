@@ -14,6 +14,13 @@ export 'store.dart' show WearerStore, wearerDirFor;
 
 String _key(String kind, String id) => '$kind:$id';
 
+/// The scored nights' reports without those the owner said someone else wore (DECISIONS 377): what the trends, the
+/// unusual card, the experiments and Sharp hours (its wake-up times and sleep pressure) read. Nothing is deleted.
+List<SleepReport> ownNightReports(String recordingsDir) => [
+  for (final r in NightReportStore(nightsDirFor(recordingsDir)).all())
+    if (r.wearerAnswer != answerSomeoneElse) r,
+];
+
 /// A night (with a `wearer_signal`: scored since the check exists) or a check-in as the check sees it.
 List<WearerRecording> wearerRecordings(List<SleepReport> nights, List<MorningRecord> mornings) => [
   for (final r in nights)

@@ -12,7 +12,7 @@ import '../sharp/page.dart';
 import '../sharp/prompts.dart';
 import '../sharp/schedule.dart';
 import '../sharp/store.dart';
-import '../sleep/report.dart';
+import '../wearer/wearer.dart' show ownNightReports;
 import 'evidence_sheet.dart';
 import 'sharp_hours_view.dart';
 import 'sharp_rating_screen.dart';
@@ -78,7 +78,8 @@ class _SharpHoursScreenState extends State<SharpHoursScreen> {
         ratings: store.ratings(),
         reactions: store.reactions(),
         events: store.promptEvents(),
-        reports: NightReportStore(nightsDirFor(_dir!)).all(),
+        // the wake-ups and sleep pressure come from the owner's own nights (not one someone else wore, DECISIONS 377)
+        reports: ownNightReports(_dir!),
         now: _now,
         seed: _seed,
         notificationsOn: notifications,

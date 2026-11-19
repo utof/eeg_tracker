@@ -474,8 +474,8 @@ later recording looks clearly different, so a borrowed headband does not end up 
   it.
 - When a recording looks clearly different, the page leads with "This doesn't look like your usual brain signal. Was
   it you?", what differed, and two answers. **Yes, it was me** adds it to what the check knows about you;
-  **Someone else** keeps that night or check-in out of your trends, the unusual card and experiments (written into
-  its own file; nothing is deleted). **Undo** takes either back.
+  **Someone else** keeps that night or check-in out of your trends, the unusual card and experiments, and that night
+  out of Sharp hours' wake-up times (written into its own file; nothing is deleted). **Undo** takes either back.
 - **Someone else wore it** is under every other recording too: the check notices only a clearly different signal
   (on made-up people 2 to 4 in 10 other wearers), so when you know someone borrowed the headband, say so yourself.
 - It asked about the person's own recordings about once in 5 to 10 months of daily recordings on made-up people. A

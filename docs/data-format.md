@@ -369,7 +369,7 @@ In a night's report (`files/nights/<date>.report.json`), written by the phone's 
 | Field | Meaning |
 |---|---|
 | `wearer_signal` | `null` for an unscored night or when the night pass did not run; else `version` 1, `from_s` (Lights off, seconds from `data_start`, a whole epoch; `null` without a Lights off marker), `epochs` (the 30 s epochs used: scored awake, nothing filled in, among the 20 from Lights off), `clean_s` (clean seconds, the smaller of O1 and O2), `iaf_hz`, `alpha_uv2`, `slope` (O1 and O2 combined, the morning check-in's rules), `why` (`null` when usable, else `no lights off`, `too little clean signal` (under 60 s) or `no alpha peak`). Reports scored before 2026-11-19 have no such field and are not part of the check |
-| `wearer` | only once answered: `answer` (`me` or `someone else`) and `at`; a rescored night keeps it. A night marked `someone else` is left out of the trends, the unusual card and experiments; the file is never deleted |
+| `wearer` | only once answered: `answer` (`me` or `someone else`) and `at`; a rescored night keeps it. A night marked `someone else` is left out of the trends, the unusual card, experiments and Sharp hours' wake-up times; the file is never deleted |
 
 A check-in's numbers come from its result's `back` (`iaf_hz`, `alpha_ec_uv2`, `aperiodic_slope_ec`) when both back
 channels have `clean_s_ec` of 60 s or more; its answer is the result's `wearer` (above).

@@ -186,6 +186,8 @@ void main() {
       final inputs = readTrendInputs(recordings.path);
       expect(inputs.nights.map((r) => r.nightOf), ['2026-11-19', '2026-11-17']);
       expect(inputs.mornings.map((m) => m.start), [b]);
+      // Sharp hours' wake-ups and sleep pressure read the same nights
+      expect(ownNightReports(recordings.path).map((r) => r.nightOf), ['2026-11-19', '2026-11-17']);
     });
   });
 
