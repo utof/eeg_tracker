@@ -12,6 +12,7 @@ import '../trends/trends.dart';
 import 'evidence_sheet.dart';
 import 'experiment_setup.dart';
 import 'experiments_view.dart';
+import 'sharp_hours_screen.dart' show readSharpDayNumbers;
 import 'trends_screen.dart' show readTrendInputs;
 
 /// The running experiment (else the newest finished one) for a one-line note on other screens.
@@ -63,7 +64,7 @@ class _ExperimentsScreenState extends State<ExperimentsScreen> {
       ExperimentPage? page;
       if (shown != null) {
         final early = _early && !shown.open;
-        final results = shown.open || early ? resultsFor(shown, dailySeries(readTrendInputs(_dir!)), early: early) : null;
+        final results = shown.open || early ? resultsFor(shown, dailySeries(readTrendInputs(_dir!), extra: readSharpDayNumbers(_dir!)), early: early) : null;
         page = ExperimentPage(state: shown, now: now, results: results, early: early);
       }
       if (!mounted) return;

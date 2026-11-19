@@ -2,6 +2,7 @@ package io.github.utof.eeg_tracker
 
 import android.app.Activity
 import android.content.Intent
+import android.provider.Settings
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -14,6 +15,10 @@ class MainActivity : FlutterActivity() {
     /** Export data (DataExport.kt): the copier, and the call waiting for the folder picker. */
     private var dataExport: DataExport? = null
     private var pendingPick: MethodChannel.Result? = null
+
+    /** The sharp-hours question this Activity was opened from, until the Dart side takes it (SharpPrompts.kt). */
+    private var sharpLaunch: Map<String, Any>? = null
+    private var sharpChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -56,6 +61,40 @@ class MainActivity : FlutterActivity() {
             }
         }
         SessionService.onStopTapped = { runOnUiThread { session.invokeMethod("stopTapped", null) } }
+        // The sharp-hours questions (SharpPrompts.kt): "arm" keeps the moments ahead, "takeLaunch" hands over the
+        // question a notification tap opened (once), "open" tells the Dart side a tap came while the app ran.
+        takeSharpIntent(intent)
+        sharpChannel = MethodChannel(messenger, "eeg_tracker/sharp").apply {
+            setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "arm" -> {
+                            val at = (call.argument<List<Number>>("at") ?: emptyList()).map { it.toLong() }
+                            val test = call.argument<List<Boolean>>("test") ?: emptyList()
+                            SharpPrompts.arm(applicationContext, at, test)
+                            result.success(null)
+                        }
+                        "takeLaunch" -> {
+                            result.success(sharpLaunch)
+                            sharpLaunch = null
+                        }
+                        "status" -> result.success(mapOf("notifications" to SharpPrompts.notificationsOn(applicationContext)))
+                        "openChannelSettings" -> {
+                            SharpPrompts.channel(applicationContext)
+                            startActivity(
+                                Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                                    .putExtra(Settings.EXTRA_CHANNEL_ID, SharpPrompts.CHANNEL),
+                            )
+                            result.success(true)
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (e: Exception) {
+                    result.error("sharp", e.message ?: e.javaClass.simpleName, null)
+                }
+            }
+        }
         // Meditation and the dream catcher keep the screen on while they run: they live in this Activity, and a
         // locked phone could freeze them (DECISIONS rows 75 and 110). The dream catcher also dims this window to
         // the lowest brightness while you lie in bed; "off" hands the brightness back to the phone's setting.
@@ -65,6 +104,7 @@ class MainActivity : FlutterActivity() {
                 "keepScreenOn" -> runOnUiThread {
                     if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    SharpPrompts.screenHeld = on // every session screen keeps the screen on: no question then
                     result.success(null)
                 }
                 "dim" -> runOnUiThread {
@@ -78,8 +118,30 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /** A notification tap while the app runs (launchMode singleTop). */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (takeSharpIntent(intent)) sharpChannel?.invokeMethod("open", null)
+    }
+
+    /** Keeps a sharp-hours question from [intent] for the Dart side; not when Android replays it from Recents. */
+    private fun takeSharpIntent(intent: Intent?): Boolean {
+        if (intent?.action != SharpPrompts.ACTION_OPEN || !intent.hasExtra(SharpPrompts.EXTRA_PLANNED)) return false
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return false
+        sharpLaunch = mapOf(
+            "planned" to intent.getLongExtra(SharpPrompts.EXTRA_PLANNED, 0L),
+            "shown" to intent.getLongExtra(SharpPrompts.EXTRA_SHOWN, 0L),
+            "test" to intent.getBooleanExtra(SharpPrompts.EXTRA_TEST, false),
+        )
+        intent.removeExtra(SharpPrompts.EXTRA_PLANNED) // taken once, also if the Activity is made again
+        return true
+    }
+
     /** The sessions live in this Activity's Flutter engine: without it nothing is left to keep alive. */
     override fun onDestroy() {
+        SharpPrompts.screenHeld = false
+        sharpChannel = null
         SessionService.onStopTapped = null
         SessionService.release(applicationContext)
         super.onDestroy()

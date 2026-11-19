@@ -102,6 +102,11 @@ hands-free calibration is a page of its own with the six tries on top, the instr
 lanes and the one action pinned (Start, Stop, then Done or Try again).
 Self-experiments (from Trends) is a page per experiment: status, today's task, "did you keep to it?", the day bill,
 the answer's place, Kept honest; its setup is a page of choices with Start tomorrow pinned.
+Sharp hours (from Trends; the assistant's proposal) is one page: a muted sentence saying whose idea it is, the switch
+row, Awake and A day as label-left / value-right rows, the delivery line, Collecting with the collection ledger, By the
+hour (chips, then the ratings' and the reaction times' charts), Today, Your data; Rate now pinned. Its question page
+shows one decision at a time: the question at headlineSmall and five full-width 64 dp rows (5 Very sharp at the top);
+then the reaction test, with Skip outlined until a test is done and Done filled after.
 
 ## Elevation & Depth
 
@@ -201,6 +206,14 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   ink check mark and an ink-muted outline). "Back in your usual range" and "Paused until ..." (with a Resume now text
   button) take the same place. No colour means anything here; while there is a card the Morning section on the night
   screen adds one bodyLarge ink line above its buttons.
+- **Collection ledger** (sharp hours): the watch strip's own cells counting toward the first pattern: 60 answer cells
+  in three rows of 20 and 21 day cells in one row, a wider gap every five, filled `saved` as answers and days come in,
+  `track` while empty; a muted label left and "26 of 60" right. Gone once the pattern opens.
+- **Sharp-hours chart:** one column per block (2 clock hours, 2 hours since waking, a quarter of the sleep-pressure
+  scale) on the `track` ground, the two worded ends at the left (Very sharp / Foggy, or quicker / slower), block edges
+  as ticks under it; answers as ink dots side by side per level, so a count reads as a row; once the pattern opens the
+  dots turn ink-muted, each block with enough answers gets its range as a `rule` band and its mean as an ink tick, and
+  the named best block (or two) is outlined in ink-muted. The sentence under it says the same in words.
 - **Buttons:** one filled button per screen: Start night on the night screen (Lights off while a night records), Start on the meditation screen, and on
   each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before
   stopping, except in alpha-theta, where stopping must be instant. Session faces (dream catcher, sound for states)

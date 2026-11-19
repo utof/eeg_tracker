@@ -53,6 +53,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
+    <!-- The sharp-hours questions (off unless switched on; DECISIONS rows 281-283): inexact alarms that may ring
+         in Doze need no permission, and they never use the smart alarm's exact alarms above: a few minutes' delay
+         does not matter. Re-armed after a phone restart (RECEIVE_BOOT_COMPLETED, above). -->
+
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
     <!-- No backup of any kind: recordings and night state are EEG (DECISIONS row 57). -->
@@ -124,6 +128,20 @@
             android:launchMode="singleInstance"
             android:taskAffinity="io.github.utof.eeg_tracker.alarm"
             android:theme="@style/NormalTheme" />
+
+        <!-- The sharp-hours questions (SharpPrompts.kt): the app's own alarms and notification buttons, and the
+             re-arm after a restart or an update (system broadcasts only). -->
+        <receiver
+            android:name=".SharpPromptReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".SharpBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

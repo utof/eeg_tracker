@@ -19,6 +19,13 @@ const int earlierDays = 7;
 
 String _plural(int n, String one, String many) => n == 1 ? '1 $one' : '$n $many';
 
+/// The measures with no value in 14 days, lower case, for "Nothing yet for ...". The sharp-hours numbers are left
+/// out: the log is a proposal that is off until switched on, so its absence is not news.
+List<String> missingMeasures(TrendsModel m) => [
+  for (final r in m.rows)
+    if (!r.hasData && r.spec.group != TrendGroup.day) r.spec.label.toLowerCase(),
+];
+
 /// The page's first lines: what exists, and while it matters, when "usual" and arrows begin.
 String trendsSummary(TrendsModel m) {
   if (m.daysWithData == 0) return 'Nothing recorded yet. Your usual shows after $usualMinDays days, arrows after $arrowMinDays.';
@@ -45,12 +52,25 @@ String pressureHeadline(PressureModel p, DateTime now) {
 }
 
 class TrendsView extends StatelessWidget {
-  const TrendsView({super.key, required this.model, this.onInfo, this.onExperiments, this.experimentLine, this.unusual});
+  const TrendsView({
+    super.key,
+    required this.model,
+    this.onInfo,
+    this.onExperiments,
+    this.experimentLine,
+    this.unusual,
+    this.onSharp,
+    this.sharpLine,
+  });
   final TrendsModel model;
   final VoidCallback? onInfo;
 
   /// The "Unusual for you" section (unusual_view.dart), right after the summary line; null: none.
   final Widget? unusual;
+
+  /// Opens the sharp-hours page (the assistant's proposal, DECISIONS rows 280-289); the section shows only with it.
+  final VoidCallback? onSharp;
+  final String? sharpLine;
 
   /// Opens the self-experiments page; the section shows only with it. [experimentLine]: today's task or where the
   /// experiment stands (experiments_view.dart), null without one.
@@ -69,10 +89,7 @@ class TrendsView extends StatelessWidget {
       for (final r in withData)
         if (r.line.where((v) => v != null).length >= 2) r,
     ];
-    final none = [
-      for (final r in m.rows)
-        if (!r.hasData) r.spec.label.toLowerCase(),
-    ];
+    final none = missingMeasures(m);
     final earlier = [
       for (final d in lastDays(addDays(m.today, -1), earlierDays).reversed)
         if (m.rows.any((r) => r.line[lineDays - 1 - daysBetween(d, m.today)] != null)) d,
@@ -142,6 +159,12 @@ class TrendsView extends StatelessWidget {
               icon: const Icon(Icons.science_outlined),
               label: const Text('Experiments'),
             ),
+          ],
+          if (onSharp != null) ...[
+            const SectionHeading('Sharp hours'),
+            Para(sharpLine ?? '', color: Night.inkMuted, top: 0),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(onPressed: onSharp, icon: const Icon(Icons.schedule), label: const Text('Sharp hours')),
           ],
           const SectionHeading("Tomorrow's sleepiness"),
           if (m.forecast.shown) ...[

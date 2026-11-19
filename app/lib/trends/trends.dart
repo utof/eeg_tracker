@@ -1,6 +1,6 @@
-// The trends page's content from the phone's own files (DECISIONS rows 120-129, 155): one number per day per
+// The trends page's content from the phone's own files (DECISIONS rows 120-129, 155, 287): one number per day per
 // measure, from the sleep reports (files/nights; jaw muscle bursts from their extras), the morning check-ins
-// (files/mornings) and the meditation and alpha-theta reports; each with yesterday's value ("same as yesterday"), your
+// (files/mornings), the sharp-hours log (files/sharp-hours) and the meditation and alpha-theta reports; each with yesterday's value ("same as yesterday"), your
 // usual and an arrow when the day is beyond your normal spread (usual.dart); the last 14 days as a line; sleep
 // pressure from the sleep log (pressure.dart); and the hidden forecast (forecast.dart). Plain Dart: the screen only
 // lays it out.
@@ -17,7 +17,8 @@ import 'usual.dart';
 /// Days a line shows, and how old the newest value may be to be shown as "now".
 const int lineDays = 14;
 
-enum TrendGroup { sleep, morning, practice, noted }
+/// [day]: the sharp-hours log's numbers (DECISIONS row 287), shown only once something is rated.
+enum TrendGroup { sleep, morning, day, practice, noted }
 
 class MeasureSpec {
   const MeasureSpec({
@@ -154,6 +155,28 @@ final List<MeasureSpec> measureSpecs = [
     note: 'Alpha with eyes closed over eyes open.',
   ),
   MeasureSpec(
+    id: 'sharp',
+    label: 'Sharpness in the day',
+    group: TrendGroup.day,
+    scale: Scale.meanRating,
+    format: (v) => '${v.toStringAsFixed(1)}\u00a0of\u00a05',
+    min: 1,
+    max: 5,
+    up: 'sharper than usual',
+    down: 'less sharp than usual',
+    note: 'The mean of the day\'s sharp-hours ratings.',
+  ),
+  MeasureSpec(
+    id: 'dayrt',
+    label: 'Reaction time in the day',
+    group: TrendGroup.day,
+    scale: Scale.reaction,
+    format: (v) => '${v.round()}\u00a0ms',
+    up: 'slower than usual',
+    down: 'quicker than usual',
+    note: 'The middle of the day\'s sharp-hours reaction tests.',
+  ),
+  MeasureSpec(
     id: 'settled',
     label: 'Settled in meditation',
     group: TrendGroup.practice,
@@ -195,9 +218,16 @@ DateTime finalWake(SleepReport r) {
   return p.isEmpty ? r.dataEnd : p.map((x) => x.end).reduce((a, b) => a.isAfter(b) ? a : b);
 }
 
-/// Day -> value per measure id.
-Map<String, Map<String, double>> dailySeries(TrendInputs inputs) {
+/// Day -> value per measure id. [extra]: day numbers worked out elsewhere, by measure id (the sharp-hours log's
+/// `sharp` and `dayrt`, sharp/hours.dart); ids that are not measures are ignored.
+Map<String, Map<String, double>> dailySeries(TrendInputs inputs, {Map<String, Map<String, double>> extra = const {}}) {
   final out = {for (final m in measureSpecs) m.id: <String, double>{}};
+  for (final MapEntry(key: id, value: days) in extra.entries) {
+    out[id]?.addAll({
+      for (final MapEntry(key: d, value: v) in days.entries)
+        if (v.isFinite) d: v,
+    });
+  }
   // jaw muscle bursts an hour asleep (the report's extras, version 2): the night's own number, or over the hours
   // asleep of all the day's nights together
   final jaw = <String, List<ExtrasAsleep>>{};
@@ -301,9 +331,9 @@ class TrendsModel {
   ];
 }
 
-TrendsModel buildTrends(TrendInputs inputs, DateTime now) {
+TrendsModel buildTrends(TrendInputs inputs, DateTime now, {Map<String, Map<String, double>> extra = const {}}) {
   final today = dayKey(now);
-  final series = dailySeries(inputs);
+  final series = dailySeries(inputs, extra: extra);
   final days = lastDays(today, lineDays);
   final rows = <TrendRow>[];
   for (final spec in measureSpecs) {

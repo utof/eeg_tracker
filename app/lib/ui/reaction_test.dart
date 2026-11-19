@@ -9,7 +9,15 @@ import '../alphatheta/rules.dart';
 import 'theme.dart';
 
 class ReactionPanel extends StatefulWidget {
-  const ReactionPanel({super.key, required this.onDone, this.lengthS = 60, this.seed, this.onTest});
+  const ReactionPanel({
+    super.key,
+    required this.onDone,
+    this.lengthS = 60,
+    this.seed,
+    this.onTest,
+    this.filledStart = false,
+    this.finished,
+  });
 
   /// The median reaction (ms), or null with too few taps.
   final ValueChanged<int?> onDone;
@@ -18,6 +26,14 @@ class ReactionPanel extends StatefulWidget {
   final ValueChanged<ReactionTest>? onTest;
   final int lengthS;
   final int? seed;
+
+  /// Start drawn as the page's one filled, full-width step (the sharp-hours question, where the test is the step
+  /// forward); "Test again" stays a text button.
+  final bool filledStart;
+
+  /// A test already finished, shown as the panel shows it after a run (renders of the step after a test).
+  @visibleForTesting
+  final ReactionTest? finished;
 
   @override
   State<ReactionPanel> createState() => _ReactionPanelState();
@@ -31,6 +47,17 @@ class _ReactionPanelState extends State<ReactionPanel> {
   bool _dot = false;
   int? _result;
   bool _done = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final f = widget.finished;
+    if (f != null) {
+      _test = f;
+      _done = true;
+      _result = f.median;
+    }
+  }
 
   void _start() {
     _end?.cancel();
@@ -140,7 +167,10 @@ class _ReactionPanelState extends State<ReactionPanel> {
           words,
           style: text.bodyMedium?.copyWith(color: Night.inkMuted, fontFeatures: tabular),
         ),
-        if (!running)
+        if (!running && !_done && widget.filledStart) ...[
+          const SizedBox(height: 8),
+          FilledButton.icon(onPressed: _start, icon: const Icon(Icons.play_arrow_rounded), label: const Text('Start the test')),
+        ] else if (!running)
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
