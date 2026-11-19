@@ -1000,6 +1000,9 @@ no beat is proven to put your brain into a state.
 3. Pick a sound: Rain, Pink noise, Brown noise or Ocean. Under **Beat** leave **No beat**, or add Pulsed noise,
    Isochronic tones or Binaural beats (headphones in both ears). On some days use No beat on purpose: it is just as
    loud, so you can compare.
+   Under the beat's explanation one line says where the sound goes now (the phone's speaker, wired or Bluetooth
+   headphones). It turns amber only for **Binaural beats** on the phone's speaker: there you hear no beat, so put
+   stereo headphones on or pick another beat. Bluetooth's delay does not matter for these sounds.
 4. Tap **Listen** and set the phone's volume low with its buttons. Pick the length.
 5. **Headband**: **Measure** (headband on and switched on) or **Sound only**. For **Fall asleep** with the headband,
    choose what happens when the sound has stopped: **Record the night** (the night recording starts by itself) or
@@ -1174,6 +1177,8 @@ the gesture: the app waits for 2 quiet seconds first, so chewing, talking or loo
    sitting up): 30 seconds still, then on each low tone clench twice (short and firm, about a second apart), three
    times, and on each rising tone look far left, then far right, then back (eyes only), three times. Two lanes show
    your jaw and your eyes as you do it, and each try's cell fills when it was seen.
+   **Stop** works at any moment, also while it is still looking for the headband; Stop then Start again begins a
+   fresh calibration (the first search can no longer spoil it).
 3. The result says which gestures work (caught at least 2 of 3), each try in words, and the levels it set. Only the
    gestures that work are used; **Calibrate again** any time.
 

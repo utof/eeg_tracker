@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../detectors/drift_off.dart' show DriftState;
 import '../recorder/contact.dart';
 import '../recorder/nights.dart' show nightLabel;
+import '../sound/audio_route.dart';
 import '../states/controller.dart' show SoundStage;
 import '../states/presets.dart';
 import '../states/readout.dart' show ReadSummary;
@@ -55,6 +56,7 @@ class StatesViewModel {
     this.test,
     this.testResults,
     this.soundLocked = false,
+    this.route = AudioRoute.unknown,
   });
 
   final SoundStage stage;
@@ -109,6 +111,9 @@ class StatesViewModel {
 
   /// Today is a day of the chosen state's fair test: its sound and length are drawn, not chosen.
   final bool soundLocked;
+
+  /// Where the sound goes now (sound/audio_route.dart).
+  final AudioRoute route;
 
   bool get face => stage.index >= SoundStage.connecting.index && stage.index <= SoundStage.ending.index;
   bool get measuring => headbandUse == HeadbandUse.used;
@@ -302,6 +307,7 @@ class StatesView extends StatelessWidget {
               disabled: {if (m.plan.bed == Bed.none) Beat.none}, locked: m.soundLocked),
           const SizedBox(height: 12),
           Text(beatWhy[m.plan.beat]!, style: muted),
+          _routeNote(m),
           const SizedBox(height: 8),
           ClipRow(
             title: 'Listen',
@@ -344,8 +350,9 @@ class StatesView extends StatelessWidget {
           const SectionHeading('Before you start'),
           const _Note(Icons.volume_down_outlined, 'Keep the volume low: set it with Listen. Never while driving.'),
           const _Note(
-            Icons.headphones_outlined,
-            'Binaural beats need headphones. For sleep, the phone\'s speaker is kinder than earbuds all night.',
+            Icons.bedtime_outlined,
+            'For a whole night, earbuds are the harder choice: the phone\'s speaker beside you is kinder (binaural '
+            'beats do not work there).',
           ),
           const _Note(
             Icons.dark_mode_outlined,
@@ -381,6 +388,12 @@ class StatesView extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// Where the sound goes now; amber only for a binaural beat on the phone's speaker (DECISIONS 470).
+  Widget _routeNote(StatesViewModel m) {
+    final r = stateRouteNote(m.route, binaural: m.plan.beat == Beat.binaural);
+    return _Note(r.warn ? Icons.headphones_outlined : Icons.volume_up_outlined, r.text, color: r.warn ? Night.caution : null);
   }
 
   Widget _status(BuildContext context) {
@@ -650,20 +663,23 @@ ButtonStyle _segmentStyle(bool locked) {
 }
 
 class _Note extends StatelessWidget {
-  const _Note(this.icon, this.text, {this.onTap});
+  const _Note(this.icon, this.text, {this.onTap, this.color});
   final IconData icon;
   final String text;
   final VoidCallback? onTap;
 
+  /// Amber for a warning (null: the muted ink).
+  final Color? color;
+
   @override
   Widget build(BuildContext context) {
-    final style = Theme.of(context).textTheme.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4);
+    final style = Theme.of(context).textTheme.bodyLarge?.copyWith(color: color ?? Night.inkMuted, height: 1.4);
     final row = Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 22, color: Night.inkMuted),
+          Icon(icon, size: 22, color: color ?? Night.inkMuted),
           const SizedBox(width: 14),
           Expanded(child: Text(text, style: style)),
         ],

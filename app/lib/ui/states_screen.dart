@@ -15,6 +15,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'hands_free_screen.dart' show activeGestures;
+import '../sound/audio_route.dart';
 import '../sound/soloud_gesture_tone.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -60,6 +61,7 @@ class _StatesScreenState extends State<StatesScreen> {
     startNight: _startNight,
     keeper: PhoneSessionKeeper(),
     gestureTone: SoloudGestureTone.new,
+    audioRoute: PhoneAudioRoute(),
   );
   SoundState _state = SoundState.asleep;
   Bed _bed = presets[SoundState.asleep]!.bed;
@@ -99,6 +101,7 @@ class _StatesScreenState extends State<StatesScreen> {
   void initState() {
     super.initState();
     _c.addListener(_changed);
+    _c.watchRoute(); // the setup says where the sound goes as soon as it changes
     unawaited(_prepare());
   }
 
@@ -455,6 +458,7 @@ class _StatesScreenState extends State<StatesScreen> {
       test: _test,
       testResults: active ? null : _answer,
       soundLocked: _locked && !active,
+      route: c.route,
     );
     return Listener(
       onPointerDown: (_) => _undim(),

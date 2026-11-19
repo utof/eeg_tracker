@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../recorder/chunk_writer.dart' show fileStem;
+import '../sound/audio_route.dart';
 import 'presets.dart';
 import 'readout.dart';
 
@@ -75,6 +76,7 @@ class SoundSession {
     this.night,
     this.rating,
     this.trial,
+    this.audioRoute,
   });
 
   static const int version = 1;
@@ -131,6 +133,9 @@ class SoundSession {
   /// The fair test this session was played for (null: none, or a file from before fair tests).
   final TrialTag? trial;
 
+  /// Where the sound went at the start (null: not known; changes are in [events]); sound/audio_route.dart.
+  final AudioRoute? audioRoute;
+
   String get stem => fileStem(start);
   String get fileName => '$stem.sound.json';
 
@@ -156,6 +161,7 @@ class SoundSession {
     'night': night,
     'rating': rating,
     if (trial != null) 'trial': trial!.toJson(),
+    if (audioRoute != null) 'audio': audioRoute!.toJson(),
   };
 
   static SoundSession? fromJson(Object? j) {
@@ -203,6 +209,7 @@ class SoundSession {
       night: night as String?,
       rating: rating as int?,
       trial: trial,
+      audioRoute: j['audio'] is Map ? AudioRoute.fromMap(j['audio']) : null,
     );
   }
 }

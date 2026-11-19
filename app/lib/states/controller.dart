@@ -39,6 +39,7 @@ import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
 import '../session_clock.dart';
 import '../session_keeper.dart';
+import '../sound/audio_route.dart';
 import '../sound/gesture_tone.dart';
 import '../sound/state_sound.dart';
 import 'presets.dart';
@@ -81,6 +82,8 @@ class StatesController extends ChangeNotifier {
     this.keeper,
     this.timing = const StatesTiming(),
     this.gestureTone,
+    this.audioRoute,
+    this.routeTimeout = const Duration(seconds: 2),
     DateTime Function()? clock,
     Duration Function()? monotonic,
   }) : _makeSound = sound,
@@ -102,6 +105,13 @@ class StatesController extends ChangeNotifier {
 
   /// A call or another app has the sound now ([audioFocus]): the sound is paused until it is back.
   bool _interrupted = false;
+
+  /// Where the sound goes (null: not known, nothing recorded); [route] is the latest answer (DECISIONS 470).
+  final AudioRouteSource? audioRoute;
+  final Duration routeTimeout;
+  AudioRoute route = AudioRoute.unknown;
+  AudioRoute? _routeAtStart;
+  StreamSubscription<AudioRoute>? _routeSub;
 
   /// Where sessions are kept (null: nothing saved).
   SoundStore? store;
@@ -227,6 +237,9 @@ class StatesController extends ChangeNotifier {
     this.thenNight = thenNight && useHeadband && plan.state == SoundState.asleep;
     headband = useHeadband ? HeadbandUse.used : why;
     _set(useHeadband ? SoundStage.connecting : SoundStage.starting, useHeadband ? 'Looking for the headband.' : '');
+    await _readRoute();
+    if (!_live(run)) return;
+    _routeAtStart = audioRoute == null ? null : route;
     await _keep(plan, useHeadband, run);
     if (!_live(run)) return; // stopped meanwhile
     if (!useHeadband) return _soundOnly(why, '');
@@ -263,6 +276,33 @@ class StatesController extends ChangeNotifier {
     } catch (e) {
       await _fail('Could not start: $e', run);
     }
+  }
+
+  /// Follows where the sound goes (the setup's line, the session's record) until [dispose].
+  void watchRoute() {
+    final src = audioRoute;
+    if (src == null || _routeSub != null) return;
+    _routeSub = src.changes.listen(_onRoute, onError: (Object _) {});
+    unawaited(src.current().then(_onRoute, onError: (Object _) {}));
+  }
+
+  /// The route right before a session (unknown when the phone does not answer in [routeTimeout]).
+  Future<void> _readRoute() async {
+    final src = audioRoute;
+    if (src == null) return;
+    watchRoute();
+    try {
+      route = await src.current().timeout(routeTimeout);
+    } catch (_) {
+      route = AudioRoute.unknown;
+    }
+  }
+
+  void _onRoute(AudioRoute r) {
+    if (_disposed || r == route) return;
+    route = r;
+    if (_lightsOffAt != null && active) _event('audio route: ${routeWords(r)}');
+    _notify();
   }
 
   /// Asks the keeper to hold this session, so the phone can be locked; Stop on its notification ends the session.
@@ -683,6 +723,7 @@ class StatesController extends ChangeNotifier {
       engine: _sound?.info() ?? const {},
       night: night,
       trial: _trial,
+      audioRoute: _routeAtStart,
     );
   }
 
@@ -759,6 +800,8 @@ class StatesController extends ChangeNotifier {
   void dispose() {
     if (active) unawaited(_finish(SoundEnd.stopped));
     _disposed = true;
+    unawaited(_routeSub?.cancel());
+    _routeSub = null;
     super.dispose();
   }
 }
