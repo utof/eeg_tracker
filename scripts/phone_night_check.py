@@ -87,6 +87,7 @@ RULES = [(k, re.compile(p)) for k, p in [
     ("stream_restarted", r"stream restarted(?:, battery \S+%)?"),  # P L
     ("stream_restart_failed", r"stream restart failed: .*"),  # P L
     ("still_no_data", r"still no data; (?P<what>reconnecting|exiting so record_night\.sh starts a fresh recorder)"),
+    ("mending", r"no data; the headband is mending the link itself \(check \d+\)"),  # P with our own connection
     ("out_of_range", r"headband out of range; (?:saving|leaving it without SDK calls)"),  # P
     ("laptop_drop", r"headband (?P<state>\S+); saving and exiting so record_night\.sh starts a fresh recorder"),  # L
     ("packets_end", r"end of night, packets: " + _COUNTS),  # P: Stop was pressed
@@ -123,6 +124,9 @@ RULES = [(k, re.compile(p)) for k, p in [
     ("start_failed", r"start failed \(\d+/\d+\): .*"),  # P L
     ("no_start", r"the signal would not start; reconnecting"),  # P
     ("error", r"unexpected error: .*"),  # P
+    # P: an IO or store error ends one run, never the night (DECISIONS 390): storage full, a broken night store
+    ("error", r"the run ended on an unexpected error: .*; the night goes on|could not save the newest data: .*|"
+              r"could not save the night state: .*; the recording goes on"),
     # P: the night's live helpers and their markers (the drift-off detector and hands-free, rows 182 and 247; the
     # smart alarm, 230-236; the lucid cues, 300-309; their one sleep model, 330) and Share on Wi-Fi (220-229). Their
     # problems (a helper stopped, or could not start or ring) are listed under "helpers"; the rest is information.
@@ -132,7 +136,7 @@ RULES = [(k, re.compile(p)) for k, p in [
 HELPER_PROBLEM = re.compile(r"\bstopped(?: by an error)?: |could not")
 PHONE_ONLY = {"phone_settings", "phone_battery", "battery_summary", "try", "reconnected", "service_restart",
               "prev_exit", "direct_off", "drop", "packets", "packets_end", "stuck", "out_of_range", "answered_out",
-              "no_start", "error"}
+              "no_start", "error", "mending"}
 LAPTOP_ONLY = {"live_page", "info", "laptop_drop", "laptop_stuck", "contact_recheck", "reconnected_old",
                "reconnect_failed_old", "lost_ble"}
 STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?) (.*)$")
@@ -491,6 +495,9 @@ def explain(br: Break, evs: list[Event], empty_runs: int) -> None:
     elif kinds & {"stall", "own_stall"}:
         cat = cat or "drop"
         parts.append("stall (no data, stream restarted)")
+    elif "mending" in kinds:
+        cat = cat or "drop"
+        parts.append("stall (no data; the headband mended the link itself)")
     if "service_restart" in kinds:
         exits = sorted({e.g["reason"] for e in evs if e.kind == "prev_exit"})
         why = f" (the process ended: {', '.join(exits)})" if exits else ""

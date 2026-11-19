@@ -348,6 +348,11 @@ PHONE_LINES = [
     "start failed (1/10): Exception: x",
     "the signal would not start; reconnecting",
     "unexpected error: StateError",
+    # an IO or store error ends one run, never the night (the night pipeline review, DECISIONS 390-391)
+    "the run ended on an unexpected error: FileSystemException: x; the night goes on",
+    "could not save the newest data: FileSystemException: x",
+    "could not save the night state: StateError; the recording goes on",
+    "no data; the headband is mending the link itself (check 1)",
 ] + [  # the night's live helpers, their markers and Share on Wi-Fi (app-line, DECISIONS 182-330)
     "drift-off detector on; lights off counts from the first sample until Lights off",
     "drift-off detector off after the restart; it starts again at Lights off",
