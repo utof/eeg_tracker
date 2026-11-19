@@ -354,7 +354,7 @@ class TaskView extends StatelessWidget {
           const _Row3('', 'Evening', 'Morning', head: true),
           _Row3('Placed close, of ${TaskRule.objects}', '${n.closeEvening}', '${n.closeMorning}'),
           _Row3(
-            'Distance on average, % of the board',
+            'Distance on average, % of the board\'s width',
             boardPercent(n.distEvening).replaceAll(' %', ''),
             boardPercent(n.distMorning).replaceAll(' %', ''),
             last: true,
@@ -600,6 +600,9 @@ class MemoryBoard extends StatelessWidget {
 /// The place ring's radius on a board [w] wide: just outside the icon (a tenth of the width) by 3 dp.
 double boardRing(double w) => w * 0.05 + 3;
 
+/// A tap's dot.
+const double dot = 4;
+
 class _BoardPainter extends CustomPainter {
   _BoardPainter(this.marks, this.w);
   final List<BoardMark> marks;
@@ -620,32 +623,34 @@ class _BoardPainter extends CustomPainter {
       canvas.drawLine(Offset(0, size.height * i / 5), Offset(size.width, size.height * i / 5), grid);
     }
     Offset o(BoardPoint p) => Offset(p.x * w, p.y * w);
+    // a dot keeps its whole radius on the board
+    Offset inside(Offset p) => Offset(p.dx.clamp(dot, size.width - dot), p.dy.clamp(dot, size.height - dot));
     final ring = boardRing(w);
+    final line = Paint()
+      ..color = Night.inkMuted
+      ..strokeWidth = 1.5;
+    final ink = Paint()..color = Night.ink;
+    // lines and dots first; then a `track` disc under each object, so a line passes under any object it crosses;
+    // then the places' light rings
     for (final m in marks) {
       switch (m.kind) {
         case 2:
-          final a = o(m.at), b = o(m.to!), d = b - a;
+          final a = o(m.at), b = inside(o(m.to!)), d = b - a;
           if (d.distance <= ring) break; // put right on its place: the ring says it
-          canvas.drawLine(
-            a + d / d.distance * ring,
-            b,
-            Paint()
-              ..color = Night.inkMuted
-              ..strokeWidth = 1.5,
-          );
-          canvas.drawCircle(b, 4, Paint()..color = Night.ink);
+          canvas.drawLine(a + d / d.distance * ring, b, line);
+          canvas.drawCircle(b, dot, ink);
         case 1:
-          canvas.drawCircle(o(m.at), 4, Paint()..color = Night.ink);
-        case 3:
-          canvas.drawCircle(
-            o(m.at),
-            ring,
-            Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 1.5
-              ..color = Night.inkMuted,
-          );
+          canvas.drawCircle(inside(o(m.at)), dot, ink);
       }
+    }
+    final disc = Paint()..color = Night.track;
+    final rim = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = Night.rule;
+    for (final m in marks) {
+      if (m.kind == 0) canvas.drawCircle(o(m.at), ring - 1, disc);
+      if (m.kind == 3) canvas.drawCircle(o(m.at), ring, rim);
     }
   }
 

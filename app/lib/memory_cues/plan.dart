@@ -59,7 +59,8 @@ class MemorySealed {
   final List<int> sounds;
 
   /// Night [index]'s coin: the first byte of SHA-256("salt:sound:index"), under 128 is sound 0.
-  static int coin(String salt, int index) => sha256.convert(utf8.encode('$salt:sound:$index')).bytes.first < 128 ? 0 : 1;
+  static int coin(String salt, int index) =>
+      sha256.convert(utf8.encode('$salt:sound:$index')).bytes.first < 128 ? 0 : 1;
 
   /// Night [index] (from 0): its arm; nights after the planned ones all have sound.
   MemoryArm armOf(int index) => index >= 0 && index < arms.length ? arms[index] : MemoryArm.sound;
@@ -185,6 +186,7 @@ class MemoryResults {
     required this.heard,
     required this.otherHalf,
     required this.arousalShare,
+    required this.heardShare,
     required this.cueMoments,
     required this.unanswered,
   });
@@ -208,6 +210,9 @@ class MemoryResults {
 
   /// Cue moments followed by an arousal, as a share: (sound nights, silent nights); null without cue moments.
   final (double?, double?) arousalShare;
+
+  /// Mornings with a sound heard (yes, or it woke me), as a share of the answered mornings: (sound, silent nights).
+  final (double?, double?) heardShare;
 
   /// Mean cue moments a night: (sound nights, silent nights).
   final (double?, double?) cueMoments;
@@ -313,6 +318,13 @@ MemoryResults? memoryResults({
       return moments == 0 ? null : ns.fold(0, (a, n) => a + n.arousedMoments) / moments;
     }),
     cueMoments: perKind((ns) => ns.isEmpty ? null : ns.fold(0, (a, n) => a + n.cueMoments) / ns.length),
+    heardShare: perKind((ns) {
+      final answered = [
+        for (final n in ns)
+          if (n.tested && n.heard != null) n,
+      ];
+      return answered.isEmpty ? null : answered.fold(0, (a, n) => a + n.heardValue) / answered.length;
+    }),
     unanswered: shown.length - tested.length,
   );
 }

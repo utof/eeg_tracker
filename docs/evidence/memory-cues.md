@@ -63,6 +63,9 @@ The effect is small in the lab and several careful recent studies found none; a 
   sound every 10 s at most, 120 a night, 3 dB under the loudness you tapped and never louder. A stir after a sound
   (awake, or 3 seconds of movement, within 30 s) makes it 3 dB quieter and pauses 5 minutes; after 3 stirs, no more
   sounds that night. The recording and the smart alarm never depend on it.
+- On the owner's recorded night (no sound was played) the rule would have given 120 sound moments in one 35-minute
+  stretch, all in what the full-night scoring calls light or deep sleep (93 deep), none within 3.5 minutes of an awake
+  epoch; on a restless late-morning sleep 34, all light sleep, 4 of them within 2 minutes of waking.
 - Morning: the same board, no help and no sound, and "did you hear a sound in the night?". The page shows the board
   with a line from each object's place to where you put it, and the numbers against the evening.
 - The self-test: in each block of 4 nights 2 have sound; each night a coin picks the half whose sound plays; both

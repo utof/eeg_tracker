@@ -297,7 +297,7 @@ class MemoryView extends StatelessWidget {
       rows.addAll([
         LogValueRow(label: 'Placed close', value: '$ce, then $cm of ${TaskRule.objects}'),
         LogValueRow(
-          label: 'Distance on average, % of the board',
+          label: 'Distance on average, % of the board\'s width',
           value:
               '${boardPercent(meanError(s, s.evening)).replaceAll(' %', '')}, then '
               '${boardPercent(meanError(s, mo.taps)).replaceAll(' %', '')}',
@@ -318,7 +318,7 @@ class MemoryView extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           r.off != null
-              ? 'That night the cues were switched off early; the night\'s log says why.'
+              ? 'That night the cues stopped early: ${_offReason(r.off!)}.'
               : 'Cue moments are the same on silent nights, so they do not tell whether a sound played. "Then" is this '
                     'morning against last evening: forgetting overnight is normal.',
           style: muted,
@@ -330,6 +330,22 @@ class MemoryView extends StatelessWidget {
           ),
       ],
     );
+  }
+
+  /// The engine's sentence for why the cues went off, told of a past night.
+  static String _offReason(String off) {
+    const reasons = [
+      ('sleep model stopped', 'the sleep model failed or was too slow'),
+      ('not running', 'the sleep model was not running'),
+      ('ended while the sleep model ran', 'the app had ended while the sleep model ran'),
+      ('cue rule failed', 'the cue rule failed'),
+      ('DIY board', 'the DIY board was recording, and the sleep model reads the BrainBit'),
+      ('recorder stopped them', 'the recorder\'s guard switched them off (too slow or too much memory)'),
+    ];
+    for (final (key, words) in reasons) {
+      if (off.contains(key)) return words;
+    }
+    return 'the night\'s log in Export data says why';
   }
 
   Widget _test(BuildContext context) {
@@ -402,8 +418,8 @@ class MemoryResultsView extends StatelessWidget {
         if (p != null)
           Text(
             'On ${p.live} ${p.live == 1 ? 'night' : 'nights'} with sound, the half whose sound played drifted '
-            '${(p.diff.abs() * 100).toStringAsFixed(1)} % of the board\'s width ${p.diff >= 0 ? 'less' : 'more'} than '
-            'the other half (p = ${p.p < 0.001 ? '< 0.001' : p.p.toStringAsFixed(p.p < 0.01 ? 3 : 2)}, '
+            '${(p.diff.abs() * 100).toStringAsFixed(1)}\u00a0% of the board\'s width ${p.diff >= 0 ? 'less' : 'more'} '
+            'than the other half (p\u00a0=\u00a0${p.p < 0.001 ? '<\u00a00.001' : p.p.toStringAsFixed(p.p < 0.01 ? 3 : 2)}, '
             '${p.exact ? 'every way' : '${p.orders} ways'} the coins could have fallen). Tested.',
             style: text.bodyLarge?.copyWith(height: 1.4),
           ),
@@ -415,7 +431,7 @@ class MemoryResultsView extends StatelessWidget {
         _Row3('Nights with both tests', '${r.soundNights.nights}', '${r.silentNights.nights}', last: true),
         const SizedBox(height: 12),
         Text(
-          'Also tested, no verdict: a sound heard in the night ${_heard(r.heard)}; the other half drifted '
+          'Also tested, no verdict: a sound heard in the night ${_heard(r.heard, r.heardShare)}; the other half drifted '
           '${_other(r.otherHalf)}. Seen together, not tested: stirs after a cue moment '
           '${_share(r.arousalShare.$1)} on sound nights, ${_share(r.arousalShare.$2)} on silent ones (the same moments '
           'without sound).',
@@ -446,20 +462,22 @@ class MemoryResultsView extends StatelessWidget {
     );
   }
 
-  static String _share(double? v) => v == null ? '-' : '${(v * 100).round()} %';
+  static String _share(double? v) => v == null ? '-' : _pc(v);
 
-  static String _p(PermutationResult t) => 'p = ${t.p.toStringAsFixed(2)}';
+  static String _p(PermutationResult t) => 'p\u00a0=\u00a0${t.p.toStringAsFixed(2)}';
 
-  /// Mornings with a sound heard, sound nights against silent ones, in percentage points of mornings.
-  static String _heard(PermutationResult? t) => t == null
+  static String _pc(double v) => '${(v * 100).round()}\u00a0%';
+
+  /// Mornings with a sound heard: the two shares, sound nights and silent nights.
+  static String _heard(PermutationResult? t, (double?, double?) shares) =>
+      t == null || shares.$1 == null || shares.$2 == null
       ? '(not enough nights)'
-      : 'on ${(t.diff.abs() * 100).round()} % ${t.diff >= 0 ? 'more' : 'fewer'} mornings after nights with sound '
-            '(${_p(t)})';
+      : 'on ${_pc(shares.$1!)} of mornings after nights with sound, ${_pc(shares.$2!)} after silent ones (${_p(t)})';
 
   /// The other half's drift, sound nights against silent ones.
   static String _other(PermutationResult? t) => t == null
       ? '(not enough nights)'
-      : '${(t.diff.abs() * 100).toStringAsFixed(1)} % of the width ${t.diff >= 0 ? 'more' : 'less'} on nights with sound '
+      : '${(t.diff.abs() * 100).toStringAsFixed(1)}\u00a0% of the width ${t.diff >= 0 ? 'more' : 'less'} on nights with sound '
             'than on silent ones (${_p(t)})';
 }
 

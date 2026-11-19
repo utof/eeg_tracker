@@ -15,14 +15,7 @@ MemoryNight night(MemorySealed s, int index, {required double played, required d
   final evening = [0.2, 0.2], morning = [0.2, 0.2];
   morning[p] = 0.2 + played;
   morning[1 - p] = 0.2 + other;
-  return MemoryNight(
-    index: index,
-    cueMoments: 40,
-    arousedMoments: 2,
-    evening: evening,
-    morning: morning,
-    heard: heard,
-  );
+  return MemoryNight(index: index, cueMoments: 40, arousedMoments: 2, evening: evening, morning: morning, heard: heard);
 }
 
 void main() {
@@ -104,7 +97,12 @@ void main() {
       var n = 0;
       final nights = [
         for (var i = 0; i < 12; i++)
-          night(sealed, i, played: 0.05 + ((sealed.armOf(i) == MemoryArm.sound ? n++ : 0).isEven ? 0.02 : -0.02), other: 0.05),
+          night(
+            sealed,
+            i,
+            played: 0.05 + ((sealed.armOf(i) == MemoryArm.sound ? n++ : 0).isEven ? 0.02 : -0.02),
+            other: 0.05,
+          ),
       ];
       final r = results(nights)!;
       expect(r.verdict, MemoryVerdict.notClear);
@@ -142,6 +140,7 @@ void main() {
       ];
       final r = results(nights)!;
       expect(r.heard!.diff, closeTo(1.0, 1e-9));
+      expect(r.heardShare, (1.0, 0.0));
       expect(r.arousalShare.$1, closeTo(2 / 40, 1e-9));
       expect(r.arousalShare.$2, closeTo(2 / 40, 1e-9));
     });
