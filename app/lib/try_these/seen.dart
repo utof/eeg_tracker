@@ -26,6 +26,7 @@ const Map<String, SeenCheck> seenChecks = {
   'lucid': _lucid,
   'alpha-theta': _alphaTheta,
   'experiment': _experiment,
+  'sound-test': _soundTest,
   'replay': _replay,
   'sharp': _sharp,
   'diy-board': _diyBoard,
@@ -179,6 +180,16 @@ String? _experiment(Directory files) {
   if (!d.existsSync()) return null;
   for (final e in d.listSync().whereType<Directory>()) {
     if (File('${e.path}/plan.json').existsSync()) return 'An experiment started.';
+  }
+  return null;
+}
+
+/// A fair test of two sounds frozen (files/sound-states/plans/<id>/plan.json, lib/states/trial_store.dart).
+String? _soundTest(Directory files) {
+  final d = Directory('${files.path}/sound-states/plans');
+  if (!d.existsSync()) return null;
+  for (final e in d.listSync().whereType<Directory>()) {
+    if (File('${e.path}/plan.json').existsSync()) return 'A fair test of two sounds started.';
   }
   return null;
 }

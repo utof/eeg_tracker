@@ -495,6 +495,28 @@ const List<TryCard> tryCards = [
     auto: true,
   ),
   TryCard(
+    id: 'sound-test',
+    group: TryGroup.weeks,
+    title: 'A fair test of two sounds',
+    what: 'The app picks which of two bedtime sounds plays each night for 4 weeks, then says which got you asleep sooner.',
+    takes: '2 minutes, then 4 weeks of bedtimes',
+    steps: [
+      'Open Sound, pick Fall asleep, scroll to A fair test and tap Plan a fair test.',
+      'Keep Pink noise, no beat and Pink noise, pulsed noise, 30 min, 4 weeks. Tap Start tomorrow.',
+      'Every bedtime: Sound, Fall asleep (the sound is already drawn), Measure, Record the night, Start.',
+    ],
+    tell: [
+      'Was today\'s sound easy to see, and did the locked chips make sense?',
+      'After a week: does What works for you count the nights?',
+      'Any night it said the detector did not see you fall asleep although you slept.',
+    ],
+    opens: TryOpen.sound,
+    readme: [TryRef('Sound for states', 'a fair test of two sounds')],
+    evidence: 'sound-for-states',
+    weakEvidence: true,
+    auto: true,
+  ),
+  TryCard(
     id: 'replay',
     group: TryGroup.weeks,
     title: 'Replay check',

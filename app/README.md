@@ -936,6 +936,20 @@ Files, app-private: `files/sound-states/<time>.sound.json` (the sound, timings, 
 `docs/data-format.md`). Only **Fall asleep** with the headband keeps its EEG, as a normal recording in
 `files/recordings/` with the sound's events as markers, so it is part of that night's sleep report and export.
 
+**What works for you.** Under the settings, the page compares the sounds you played for the chosen state: the
+minutes to fall asleep (the drift-off detector, else that night's sleep report; still awake at 45 minutes counts as
+45), alpha against the quiet minute for **Relax**, slow waves (drowsiness) for **Break**, and your 1-5 answer for
+**Focus** and **Wake up** (weak: you knew what played). A sound shows its median and the middle half of its sessions
+once 14 sessions have a number; until then its cells count toward 14. This is seen together, not tested: you chose
+the sound.
+
+**A fair test.** **Plan a fair test** lets the app choose between two sounds of one state for 4, 6 or 8 weeks: each
+day draws one of them (shuffled blocks of 4 days, like the self-experiments), and that day the state plays it (the
+sound and length are locked, with a line saying so). The plan is frozen before day 1, which is tomorrow
+(`files/sound-states/plans/<id>/`). One session a day counts, the first with a number. The answer opens the day after
+the last number can come in, tested with the self-experiments' randomisation test and worded the same way ("likely
+real for you", "little or no effect for you", "not clear yet"). **Stop this test** opens it early, marked as stopped.
+
 ### Owner step: the first sound sessions (15 minutes, then one bedtime)
 
 Nothing of this has been heard on a phone yet: not the levels, the beds, the beats, or the stop when asleep.
@@ -952,6 +966,21 @@ Nothing of this has been heard on a phone yet: not the levels, the beds, the bea
      felt?
    - Did the dim black screen bother you? (You can lock the phone now: see the next owner step.)
    - The session file's `stalls` (0 is right; the assistant can read it from an exported night or over USB).
+
+### Owner step: a fair test of two sounds (2 minutes, then 4 weeks of bedtimes)
+
+Nothing of this has run on a phone yet. A clear difference takes 3 to 6 weeks; a 2-minute difference in falling
+asleep is barely seen in a month.
+
+1. Open **Sound**, pick **Fall asleep**, scroll to **A fair test** and tap **Plan a fair test**.
+2. Keep **Pink noise, no beat** as the first sound and **Pink noise, pulsed noise** as the second, 30 min, 4 weeks.
+   Tap **Start tomorrow**.
+3. Every bedtime from tomorrow: **Sound**, **Fall asleep** (the sound is already drawn), **Measure**, **Record the
+   night**, **Start**. A night you cannot is simply left out.
+4. Tell the assistant:
+   - Was today's sound easy to see, and did the locked chips make sense?
+   - After a week: does **What works for you** count the nights (its cells toward 14)?
+   - Any night the result said the detector did not see you fall asleep although you slept.
 
 ## Sessions with the phone locked
 
