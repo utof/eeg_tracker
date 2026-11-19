@@ -498,6 +498,57 @@ Nothing of this has run on a phone yet: not the model's speed, the wake sound's 
    - Whether the dim screen or the headband bothered you lying down.
 3. Later, Export data: the laptop can then score the nap in full and compare it with what the phone saw live.
 
+## Lucid dream cues (off unless you turn them on)
+
+Soft sounds in dream sleep to help you notice that you are dreaming: an evening practice pairs a cue (three soft
+rising tones) with "am I dreaming?", and in the second half of the night the night recorder plays the same cue when
+the headband reads dream sleep. An experiment: the evidence is weak, and sounds can disturb sleep. The **i** button
+says what the research shows (`docs/evidence/lucid-cues.md`); the page says who should not use it.
+
+1. On the main screen, between nights, scroll to **Lucid dreams** and tap it. Read **Who should not use it**, then
+   **Turn on**. The first time this opens the practice, because the cues need your loudness.
+2. Each evening, in bed, as you will sleep (earbuds in, or the phone where it will lie): **Start practice**. The cue
+   plays every 3 seconds from very quiet, a little louder each time: tap **I hear it** as soon as you hear it. Then 4
+   cues with words to read (am I dreaming? notice your body, your breathing; if it is a dream, look left-right-left-
+   right, twice) and 12 with your eyes closed, about 15 minutes, the screen black and dim. Keep the media volume where
+   it is now.
+3. **Start night** as usual, and tap **Lights off** when you settle: the cues may play from 4.5 hours after it, only
+   in dream sleep with your eyes moving and you lying still, never in deep sleep; at most 10 in a dream and 30 a
+   night, a little louder each time; a stir makes them quieter and pauses them.
+4. If you notice you are dreaming: stay calm and look left-right-left-right, twice, wide.
+5. In the morning the page asks three questions (lucid? heard the sound? how much do you remember?) and shows last
+   night on its clock: when the cue moments were, any stirs after them, and any eye signals found in the night (and
+   double jaw clenches, once hands-free is calibrated).
+6. The test: in each block of 4 nights, 2 are silent on purpose and nobody tells you which; everything else is the
+   same, so the page cannot tell you either. After 12 nights it shows whether nights with sound gave more lucid
+   mornings than silent ones, "tested" apart from what is only "seen together". Expect "not clear": one person and a
+   few nights rarely show more.
+
+Files, app-private: `files/lucid/` (the settings, practice and night records, the morning answers and signals, the
+sealed order of the nights; docs/data-format.md "Lucid dream cues"). Export data takes them; please do not open
+`sealed.json` or `plays.jsonl` on the laptop before the results open. The cue moments are markers in the night's
+recording, the same on silent nights.
+
+### Owner step: the first week (15 minutes an evening, 1 minute a morning)
+
+Nothing of this has run on a phone or a head yet: not the loudness, the model running half the night inside the
+recorder, or the eye-signal finder.
+
+1. The first evening: in bed, open **Lucid dreams**, **Turn on**, do the practice to the end. Then Start night and
+   Lights off as usual.
+2. While awake with the headband on, once, make the eye signal on purpose (left-right-left-right, twice, wide, eyes
+   closed) a few times a minute apart, and note the times: the morning search should find them (they show as "other"
+   signals, not in dream sleep). This is the first real signal on this headband.
+3. Each morning answer the three questions before anything else.
+4. After the first night tell the assistant:
+   - Whether you heard the practice's first cues at the level you tapped, and whether the night woke you (the page's
+     "A stir after a cue" and your answer).
+   - The night's `.log` end line `lucid cues: ... s of the recorder's time`, and any line starting `lucid cues stopped`
+     or `lucid cues off`.
+   - The phone's battery drain that night against a night without the cues.
+5. Export data after a few nights: the laptop can replay the cue rule on your nights (`analysis/lucid_cues.py`) and
+   check the eye signals you made in step 2 (`analysis/lucid_signals.py`).
+
 ## Sound for states
 
 Calm sound to help you fall asleep, relax, focus, take a break or wake up. A beat is an optional extra. With the

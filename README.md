@@ -72,6 +72,14 @@ calibration for your own head. The rules: `analysis/hands_free.py` (the referenc
 (the phone's line-by-line port); false triggers on a recorded night in [docs/detectors.md](docs/detectors.md); how
 to use it and the owner step in [app/README.md](app/README.md) ("Hands-free controls").
 
+**Lucid dream cues** (phone app, off unless turned on; an experiment, evidence weak): an evening practice pairs a
+soft cue with "am I dreaming?"; in the second half of the night the night recorder plays it when the live sleep
+model reads dream sleep with the eyes moving, within strict limits, and stops on any stir. In the morning three
+questions and a search of the night for left-right-left-right eye signals. Some nights are silent on purpose, so
+after 12 nights the app can test whether the sound did anything for you. Rule and signal finder:
+`analysis/lucid_cues.py`, `analysis/lucid_signals.py` (Python references, line-by-line Dart ports in `app/lib/lucid/`);
+how to use it and the owner step in [app/README.md](app/README.md) ("Lucid dream cues").
+
 **Why we believe each feature (evidence notes).** Every feature has a short note in
 [docs/evidence/](docs/evidence/README.md): what the research says, where the data supports it and where it does
 not, how the app uses it, the sources, and the libraries and models with their licences. Each carries one grade
