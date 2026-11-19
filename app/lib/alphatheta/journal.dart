@@ -147,27 +147,46 @@ class AtJournal {
   AtProfile profile = const AtProfile();
   List<AtEntry> entries = [];
 
-  /// Reads the notebook; a missing or damaged file starts empty (screening again: safer than trusting it).
+  /// Why the mode is paused when the notebook is there but cannot be read.
+  static const String damagedWhy =
+      'its notebook could not be read (a copy was kept as journal.json.damaged), so a pause or an answer in it may be '
+      'lost.';
+
+  /// Reads the notebook; a missing file starts empty. A file that is there but cannot be read also starts empty
+  /// (screening again: safer than trusting it), keeps a copy (`journal.json.damaged`, the first one) and pauses the
+  /// mode: a safety pause that was in it must not be lifted by the damage.
   void load() {
+    if (!_file.existsSync()) return;
     try {
       final j = jsonDecode(_file.readAsStringSync());
-      if (j is! Map) return;
+      if (j is! Map) throw const FormatException('not a notebook');
       profile = AtProfile.fromJson(j['profile']);
       final e = j['entries'];
       entries = [
         if (e is List)
           for (final x in e) ?AtEntry.fromJson(x),
       ];
-    } on FileSystemException {
-      return;
-    } on FormatException {
-      return;
+    } on Exception {
+      _damaged();
     }
   }
 
+  void _damaged() {
+    profile = const AtProfile(pausedWhy: damagedWhy);
+    entries = [];
+    try {
+      final copy = File('${_file.path}.damaged');
+      if (!copy.existsSync()) _file.copySync(copy.path);
+    } on FileSystemException {
+      // nothing more to keep: the pause still stands
+    }
+  }
+
+  /// Written to a new file and renamed over the old one: storage full or a kill mid-write leaves the old notebook.
   void save() {
     dir.createSync(recursive: true);
-    _file.writeAsStringSync(
+    final tmp = File('${_file.path}.tmp');
+    tmp.writeAsStringSync(
       const JsonEncoder.withIndent(' ').convert({
         'version': 1,
         'profile': profile.toJson(),
@@ -175,6 +194,7 @@ class AtJournal {
       }),
       flush: true,
     );
+    tmp.renameSync(_file.path);
   }
 
   /// Sessions that ran to their full length (the length rule and the dose count these).

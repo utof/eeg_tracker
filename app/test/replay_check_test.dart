@@ -178,6 +178,29 @@ void main() {
     expect(next.donors, isNot(contains('s0')));
   });
 
+  test('store: records and settings are written as a new file and renamed (a cut write never empties them)', () {
+    final dir = Directory.systemTemp.createTempSync('check');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final store = CheckStore(dir, SessionKind.meditation)..freeze(DateTime(2026, 11, 18));
+    store.add(rec(0, Arm.live));
+    final f = File('${store.dir.path}/records.json'), before = f.readAsStringSync();
+    final open = f.openSync(); // the file as it was: a write in place would change what this reads
+    addTearDown(open.closeSync);
+    store.add(rec(1, Arm.replay));
+    expect(utf8.decode(open.readSync(1 << 20)), before, reason: 'the old records were never truncated');
+    expect(store.records.length, 2);
+    final settings = SettingsStore(dir)..save(const TrainingSettings(replayCheck: true));
+    final s = File('${dir.path}/settings.json'), old = s.openSync();
+    addTearDown(old.closeSync);
+    settings.save(const TrainingSettings());
+    expect(utf8.decode(old.readSync(1 << 10)), contains('true'));
+    expect(settings.load().replayCheck, isFalse);
+    expect(
+      [for (final e in [...dir.listSync(), ...store.dir.listSync()]) e.path].where((p) => p.endsWith('.tmp')),
+      isEmpty,
+    );
+  });
+
   test('reveal: locked until 12 sessions, then only whole sets; a schedule edit shows', () {
     final dir = Directory.systemTemp.createTempSync('check');
     addTearDown(() => dir.deleteSync(recursive: true));

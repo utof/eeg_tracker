@@ -174,6 +174,37 @@ void main() {
     expect(back.profile.paused, isFalse, reason: 'the check-in does not re-read the old after-session answers');
   });
 
+  test('notebook: written as a new file and renamed, so a cut write never empties the old one', () {
+    final dir = Directory.systemTemp.createTempSync('at');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final j = AtJournal(dir)..load();
+    j.profile = j.profile.copyWith(screened: DateTime(2026, 11, 18), consented: DateTime(2026, 11, 18), pausedWhy: 'old');
+    j.save();
+    final f = File('${dir.path}/journal.json'), before = f.readAsStringSync();
+    final open = f.openSync(); // the file as it was: a write in place would change what this reads
+    addTearDown(open.closeSync);
+    j.profile = j.profile.copyWith(resume: true);
+    j.save();
+    expect(utf8.decode(open.readSync(1 << 20)), before, reason: 'the old file was never truncated');
+    expect((AtJournal(dir)..load()).profile.paused, isFalse);
+    expect(dir.listSync().map((e) => e.uri.pathSegments.last), ['journal.json'], reason: 'no temporary file left');
+  });
+
+  test('notebook: a file that is there but cannot be read keeps a copy and pauses the mode', () {
+    final dir = Directory.systemTemp.createTempSync('at');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final f = File('${dir.path}/journal.json')..writeAsStringSync('{"version": 1, "profile": {"pausedWhy": "dist');
+    final j = AtJournal(dir)..load();
+    expect(j.profile.paused, isTrue, reason: 'a pause that may have been in the lost file is not lifted');
+    expect(j.profile.pausedWhy, contains('could not be read'));
+    expect(File('${dir.path}/journal.json.damaged').readAsStringSync(), f.readAsStringSync(), reason: 'a copy is kept');
+    f.writeAsStringSync(''); // emptied by a cut write of the old code
+    expect((AtJournal(dir)..load()).profile.paused, isTrue);
+    expect(File('${dir.path}/journal.json.damaged').readAsStringSync(), isNotEmpty, reason: 'the first copy is kept');
+    f.deleteSync();
+    expect((AtJournal(dir)..load()).profile.paused, isFalse, reason: 'no notebook yet: a fresh start');
+  });
+
   test('rewards: 1 s above, at most one per band every 2.5 s, theta wins a tie, gates give none', () {
     final r = AtRewards();
     final out = <String?>[];
