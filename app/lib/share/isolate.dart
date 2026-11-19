@@ -15,8 +15,10 @@ import 'server.dart';
 /// How often the server looks for a changed Wi-Fi address (a new lease, another network).
 const Duration _addressCheck = Duration(seconds: 60);
 
-/// The other host (the app, or the recorder) may still hold the port for a moment at a hand-over.
-const int _bindTries = 10;
+/// The other host (the app, or the recorder) may still hold the port at a hand-over: for a moment after Stop, and up
+/// to a minute when the night starts from another screen (the dream catcher's or sound's "Record the night"), since
+/// the night screen lets go of the app's server at its once-a-minute sync. So tries cover 80 s.
+const int _bindTries = 40;
 const Duration _bindWait = Duration(seconds: 2);
 
 /// What a host passes to the isolate. A plain list crosses the isolate border.
