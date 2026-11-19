@@ -76,4 +76,6 @@ The other numbers (45 min spacing, +15 back-off, 3 / 5 min gaps, 30 min break wi
    typing may mark fatigue for you. Personal pattern only; not validated.
 3. **EEG drowsiness trend** from the headband while you work: rising slow waves and alpha at O1/O2 after a
    per-person calibration. No validated EEG break detector exists for these 4 dry electrodes, so this would
-   be a trend you can look at, not a verdict.
+   be a trend you can look at, not a verdict. **Built on the phone (2026-11-19)** as the work session
+   (`app/README.md`, "Work session"; DECISIONS 440-449): the same hint rules on the time the headband is worn, plus
+   a hint when drowsiness (eyes-open alpha and still eyes) stays up, and a 1-5 tap with each hint.

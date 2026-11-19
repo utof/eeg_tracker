@@ -1049,6 +1049,50 @@ asleep is barely seen in a month.
    - After a week: does **What works for you** count the nights (its cells toward 14)?
    - Any night the result said the detector did not see you fall asleep although you slept.
 
+## Work session
+
+Wear the headband while you work: the phone watches for heavy eyelids (drowsiness) and suggests a break now and then,
+on the laptop's break-hint rules (`docs/break-hints.md`). The **i** button shows what the research says
+(`docs/evidence/work-session.md`): drowsiness is usable with these electrodes, "mental fatigue" without sleepiness is
+not measured.
+
+1. Between nights, on the main screen scroll to **Work** and tap **Work session**. Start when you feel fresh: the
+   first minutes are your awake baseline. **Start with 1 minute eyes closed** is optional (it helps tell closed eyes
+   from heavy eyelids later).
+2. **Start work session**. After the connection, work as usual: 1 minute of settling in, then 3 minutes of baseline
+   ("Calibrating"). Then the big word says **Alert**, **Getting drowsy**, **Drowsy** or **Not sure** (too noisy:
+   talking, chewing, moving), from the last 5 minutes against your baseline. **The last hour** shows twelve 5-minute
+   cells (empty alert, half full getting drowsy, full drowsy).
+3. Lock the phone if you like: the session goes on (a card with Stop on the lock screen) and the chime still sounds.
+4. A **hint**: a soft two-note chime, and the words on the screen and the lock-screen card: after 60 minutes worn
+   (plus 15 for each hint you let pass), or when drowsiness read up for most of the last 6 minutes, or your eyes were
+   closed for 3 of them. At most 4 a day, 45 minutes apart, none 23:00-08:00. Answer **On a break**, **Snooze 20
+   min** or **Not now**; tap how sharp you feel (1 Foggy to 5 Very sharp) if you can.
+5. **On a break** when you get up, **Back** when you return (taking the headband off for 5 minutes counts too). Some
+   minutes after Back the screen says whether drowsiness went down.
+6. **Stop** at the end: the session's totals and its hints.
+
+Files, app-private, exported by Export data: `files/work-sessions/<time>.work.json` (written every 5 minutes and at
+Stop; every 30 s the numbers behind the level, the hints, breaks, taps and connection events; no raw EEG;
+`docs/data-format.md`, "Work sessions"). On the laptop, `cd app && dart run tool/work_check.dart RECORDINGS PREFIX
+SLEEP.json HH:MM:SS-HH:MM:SS[@HH:MM:SS]` replays recorded data through the same rules.
+
+### Owner step: wear it while you work (2 minutes to start, then a working day)
+
+Nothing of this has run on a phone or at a desk yet: not the level on a working day, the hints' rate, the chime's
+volume, the locked phone over hours, or the headband's comfort.
+
+1. A working day with no night recording: headband on when you feel fresh, **Work session**, **Start work session**,
+   work as usual for 4 minutes, then lock the phone if you like.
+2. Use **On a break** / **Back** when you get up; answer the hints; tap how sharp you feel when you can.
+3. Tell the assistant:
+   - Did "getting drowsy" or "drowsy" come when you felt heavy-eyed, and stay away when you felt fine (including
+     long stretches of focus)?
+   - Were the hints too many, too few or about right; was the chime soft enough?
+   - Did it keep going with the phone locked; the phone's and the headband's battery at the start and the end.
+   - Was the headband comfortable after an hour, two, four?
+4. Later, Export data: the laptop can then compare your taps with the level.
+
 ## Sessions with the phone locked
 
 Sound for states, meditation, alpha-theta and the dream catcher go on when the phone is locked (since 2026-11-19,
