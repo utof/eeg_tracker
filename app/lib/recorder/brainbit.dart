@@ -43,6 +43,12 @@ class SdkFinder implements HeadbandFinder {
       // A second more, so a second headband nearby can be told apart by signal strength.
       if (seen.isNotEmpty) await Future<void>.delayed(const Duration(seconds: 1));
       await scanner.stop();
+    } catch (_) {
+      // No sensor was made from this scanner, so it is safe to close: a failed scan (Bluetooth off, the SDK lost
+      // its scanner) must not leave a scanner, or a running scan, behind every 10 s all night.
+      unawaited(scanner.stop().then((_) {}, onError: (Object _) {}));
+      scanner.dispose();
+      rethrow;
     } finally {
       await sub.cancel();
     }
