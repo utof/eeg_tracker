@@ -98,6 +98,8 @@ class SettingsView extends StatelessWidget {
     this.onWearerInfo,
     this.studyOn,
     this.onStudy,
+    this.autoStart,
+    this.onAutoStart,
   });
 
   final SettingsViewModel model;
@@ -110,6 +112,10 @@ class SettingsView extends StatelessWidget {
   /// The study reminders' switch (null while it is not known) and the page that holds them.
   final bool? studyOn;
   final VoidCallback? onStudy;
+
+  /// "When I put the headband on" (lib/auto): its choices in words, and the page that holds them.
+  final String? autoStart;
+  final VoidCallback? onAutoStart;
 
   @override
   Widget build(BuildContext context) {
@@ -128,6 +134,19 @@ class SettingsView extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(24, 4, 24, 32),
         children: [
+          if (onAutoStart != null) ...[
+            ListTile(
+              onTap: onAutoStart,
+              contentPadding: EdgeInsets.zero,
+              title: Text('When I put the headband on', style: text.titleLarge),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(autoStart ?? '', style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4)),
+              ),
+              trailing: const Icon(Icons.chevron_right, color: Night.inkMuted),
+            ),
+            const Divider(height: 24),
+          ],
           if (onStudy != null) ...[
             ListTile(
               onTap: onStudy,
