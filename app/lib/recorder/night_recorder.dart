@@ -190,6 +190,9 @@ class NightRecorder {
   final Completer<void> _done = Completer<void>();
   bool _endNight = true;
   ChunkWriter? _writer;
+
+  /// The run whose samples are already in the night's count ([_count]); a save does not add them again.
+  ChunkWriter? _counted;
   int _misses = 0;
 
   /// Log lines waiting for the next run's `.log` (no closed run of tonight to put them in), with their times.
@@ -299,7 +302,12 @@ class NightRecorder {
     _live.release();
     await _closeScorer().timeout(const Duration(seconds: 5), onTimeout: () {});
     await _done.future.timeout(timing.stopTimeout, onTimeout: () {});
-    _writer?.close();
+    final w = _writer;
+    if (w != null && !w.isClosed) {
+      // the run did not end in time (an SDK call still blocks): its files are closed here, and counted
+      w.close();
+      _count(w);
+    }
     await _save();
   }
 
@@ -1159,7 +1167,7 @@ class NightRecorder {
   /// Closes a run. Data first; SDK calls only for a headband that is still in range.
   Future<_End> _finish(Headband band, ChunkWriter w, _End end, bool Function() lost) async {
     _syncQuietly(w);
-    _night = _night.copyWith(samples: _night.samples + w.samplesWritten);
+    _count(w);
     _status = _status.copyWith(nightSamples: _night.samples);
     _logPackets(w);
     w.log('total samples ${w.samplesWritten}, ${(w.samplesWritten / sampleRateHz / 60).toStringAsFixed(1)} min');
@@ -1255,7 +1263,7 @@ class NightRecorder {
   Future<void> _stuck(SdkStuck e, ChunkWriter? w) async {
     if (w != null && !w.isClosed) {
       _syncQuietly(w);
-      _night = _night.copyWith(samples: _night.samples + w.samplesWritten);
+      _count(w);
       w.log('$e; saved${_stopping ? '' : ', restarting the app process'}');
       w.close();
     }
@@ -1263,6 +1271,14 @@ class NightRecorder {
     if (_stopping) return;
     _set(_status.copyWith(phase: Phase.reconnecting, note: 'Bluetooth stuck; restarting the recorder'));
     await onStuck(e.toString());
+  }
+
+  /// Adds a run's samples to the night's count, once whichever way the run ends (closed by the loop, by a stuck SDK
+  /// call, or by a Stop that could not wait for it).
+  void _count(ChunkWriter w) {
+    if (identical(_counted, w)) return;
+    _counted = w;
+    _night = _night.copyWith(samples: _night.samples + w.samplesWritten);
   }
 
   /// [ChunkWriter.sync] where a failure (storage full) must not stop what follows: the headband is still let go
@@ -1382,7 +1398,7 @@ class NightRecorder {
 
   Future<void> _saveNow() async {
     final w = _writer;
-    final live = w == null || w.isClosed ? 0 : w.samplesWritten;
+    final live = w == null || w.isClosed || identical(w, _counted) ? 0 : w.samplesWritten;
     try {
       await store
           .save(

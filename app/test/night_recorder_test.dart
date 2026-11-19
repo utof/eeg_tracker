@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:eeg_tracker/alarm/rule.dart';
 import 'package:eeg_tracker/recorder/battery.dart';
@@ -682,6 +683,72 @@ void main() {
     await running;
   });
 
+  test('the saved sample count never counts a run twice (a save while the run is being closed)', () async {
+    final saves = _KeepingStore();
+    final first = _SlowBand('a');
+    late final NightRecorder r;
+    first.onStop = () => r.lightsOff(); // a save from outside the loop, while the run is closed
+    r = NightRecorder(
+      finder: FakeFinder([first]),
+      dir: dir,
+      store: saves,
+      onStatus: statuses.add,
+      onStuck: (r) async => stuck.add(r),
+      timing: fast,
+      watch: null,
+    );
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    first.sending = false; // a stall: the run ends with the headband still in range, so it is stopped properly
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await r.stop();
+    await running;
+
+    final total = f32Records(files('f32').single);
+    expect(total, greaterThan(0));
+    expect(files('log').single.readAsStringSync(), contains('still no data; reconnecting'));
+    expect(saves.saved.map((s) => s.samples).reduce(max), lessThanOrEqualTo(total));
+    expect(saves.state.samples, total);
+  });
+
+  test('Stop that cannot wait for the run still saves its samples, counted once', () async {
+    const slowSdk = RecorderTiming(
+      tick: Duration(milliseconds: 10),
+      ticksPerCheck: 5,
+      scanFor: Duration(milliseconds: 20),
+      contactFor: Duration(milliseconds: 20),
+      settle: Duration(milliseconds: 5),
+      retryWait: Duration(milliseconds: 5),
+      sdkTimeout: Duration(seconds: 1),
+      connectTimeout: Duration(milliseconds: 300),
+      stopTimeout: Duration(milliseconds: 100), // on the phone 20 s, under the SDK's 30 s
+      phoneLogEvery: Duration(minutes: 1),
+    );
+    final band = _SlowBand('a');
+    final r = NightRecorder(
+      finder: FakeFinder([band]),
+      dir: dir,
+      store: store,
+      onStatus: statuses.add,
+      onStuck: (r) async => stuck.add(r),
+      timing: slowSdk,
+      watch: null,
+    );
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    band.hangBattery = true; // the next 10 s check blocks in the battery read
+    final reads = band.calls.where((c) => c == 'battery').length;
+    while (band.calls.where((c) => c == 'battery').length == reads) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+    await r.stop();
+    final records = f32Records(files('f32').single);
+    expect(records, greaterThan(0));
+    expect(store.state.samples, records, reason: 'Stop closed the files, so the saved night must hold their samples');
+    await running;
+    expect(store.state.samples, records);
+  });
+
   test('packet accounting: a restarted process continues the night\'s counts; a new run is not compared', () async {
     store.state = const NightState(
       active: true,
@@ -726,5 +793,39 @@ class _OrderStore implements NightStore {
     if (delays.isNotEmpty) delays = delays.sublist(1);
     await Future<void>.delayed(wait);
     state = s;
+  }
+}
+
+/// Keeps every state saved.
+class _KeepingStore extends MemoryNightStore {
+  final List<NightState> saved = [];
+
+  @override
+  Future<void> save(NightState s) async {
+    saved.add(s);
+    await super.save(s);
+  }
+}
+
+/// [onStop] runs as the signal is stopped, which takes a moment; with [hangBattery] the battery read never returns.
+class _SlowBand extends FakeBand {
+  _SlowBand(super.label);
+  void Function()? onStop;
+  bool hangBattery = false;
+
+  @override
+  Future<void> stopSignal() async {
+    onStop?.call();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    await super.stopSignal();
+  }
+
+  @override
+  Future<int> battery() async {
+    if (hangBattery) {
+      calls.add('battery');
+      await Completer<void>().future;
+    }
+    return super.battery();
   }
 }
