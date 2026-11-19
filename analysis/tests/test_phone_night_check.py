@@ -125,6 +125,22 @@ def test_a_good_night(tmp_path: Path) -> None:
     assert "Nothing to fix" in pnc.render(s) or s["fixes"]
 
 
+def test_a_helper_that_stopped_is_listed_and_the_rest_is_information(tmp_path: Path) -> None:
+    run = PhoneRun(T, seconds=600, night_end=True,
+                   head=["drift-off detector on; lights off counts from the first sample until Lights off",
+                         "lights off"],
+                   after=[(1, "drift-off detector: 0.40 s of work for 0.17 h of signal (2.40 s an hour)"),
+                          (2, "smart alarm stopped: StateError; the phone's alarm still rings at 07:30; the recording "
+                              "goes on"),
+                          (3, "sharing on Wi-Fi off")])
+    write_run(tmp_path / "recordings", run)
+    s = pnc.check(tmp_path, NIGHT, signal=False)
+    assert s["unknown"] == []
+    assert [text for _, text in s["helpers"]] == [
+        "smart alarm stopped: StateError; the phone's alarm still rings at 07:30; the recording goes on"]
+    assert "  helpers       " in pnc.render(s)
+
+
 def test_too_short_a_night_is_not_trustworthy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pnc, "MIN_NIGHT_H", 2.0)
     write_run(tmp_path / "recordings", PhoneRun(T, seconds=120, night_end=True))
@@ -332,6 +348,44 @@ PHONE_LINES = [
     "start failed (1/10): Exception: x",
     "the signal would not start; reconnecting",
     "unexpected error: StateError",
+] + [  # the night's live helpers, their markers and Share on Wi-Fi (app-line, DECISIONS 182-330)
+    "drift-off detector on; lights off counts from the first sample until Lights off",
+    "drift-off detector off after the restart; it starts again at Lights off",
+    "drift-off detector could not start: StateError",
+    "drift-off detector stopped: it took 2.4 % of the time (over 2.0 %); the recording goes on",
+    "drift-off detector: 1.20 s of work for 7.50 h of signal (0.16 s an hour), then stopped",
+    "drift-off: eyes-closed baseline done",
+    "drift-off: probably asleep, onset 23:41",
+    "lights off",
+    "hands-free on: a double clench marks a moment (never while probably asleep)",
+    "hands-free: moment (double clench)",
+    "hands-free: 2 moments marked, 1 double clenches ignored while probably asleep",
+    "smart alarm set: wake by 07:30, window from 07:00; the sleep model starts at 06:00",
+    "smart alarm: the app process ended while the sleep model ran, so the model stays off tonight; the phone's alarm "
+    "still rings at 07:30",
+    "smart alarm: sleep model on (window 30 min)",
+    "smart alarm: wake, light sleep (N1 at 07:12:30, read 1 min behind; 18 min before 07:30)",
+    "smart alarm: could not ring early (StateError); the phone's alarm rings at 07:30",
+    "smart alarm: the sleep model could not start: StateError; the phone's alarm rings at 07:30",
+    "smart alarm stopped: StateError; the phone's alarm still rings at 07:30; the recording goes on",
+    "smart alarm: turned off",
+    "smart alarm: sleep model 1.84 s of the recorder's time over 92.0 min",
+    "smart alarm and lucid cues, one sleep model: 3.10 s of the recorder's time over 240.5 min",
+    "smart alarm and lucid cues stopped: too slow; the phone's alarm still rings at 07:30; the recording goes on",
+    "lucid cues on: night 3 of the test; cues from 03:30, the sleep model from 03:00",
+    "lucid cues from 03:45 (4.5 h after Lights off)",
+    "lucid cue 2 (dream sleep 0.81, +3 dB)",
+    "lucid cues off: No loudness is set yet: do the evening practice first.",
+    "lucid cues could not start: StateError; the recording goes on",
+    "lucid cues stopped: StateError; the recording goes on",
+    "lucid cues: 2.05 s of the recorder's time over 180.0 min",
+    "live sleep model on for the lucid cues (load 1 tonight)",
+    "live sleep model: shared with the smart alarm (no second copy)",
+    "live sleep model off, done (240 calls, median 0.4 s)",
+    "live sleep model stopped: over its memory; the recording goes on",
+    "sharing on Wi-Fi on: 192.168.1.23:8765",
+    "sharing on Wi-Fi off",
+    "sharing on Wi-Fi stopped by an error: SocketException",
 ]
 OWN_LINES = [  # our own connection's notes (app/lib/headband/own/), in the same .log
     "driver own Bluetooth LE (lib/headband/own, universal_ble); service 6e400001; device {}; mtu 517",

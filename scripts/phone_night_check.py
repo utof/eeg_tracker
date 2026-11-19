@@ -123,7 +123,13 @@ RULES = [(k, re.compile(p)) for k, p in [
     ("start_failed", r"start failed \(\d+/\d+\): .*"),  # P L
     ("no_start", r"the signal would not start; reconnecting"),  # P
     ("error", r"unexpected error: .*"),  # P
+    # P: the night's live helpers and their markers (the drift-off detector and hands-free, rows 182 and 247; the
+    # smart alarm, 230-236; the lucid cues, 300-309; their one sleep model, 330) and Share on Wi-Fi (220-229). Their
+    # problems (a helper stopped, or could not start or ring) are listed under "helpers"; the rest is information.
+    ("helper", r"(?P<text>(?:drift-off(?: detector)?|hands-free(?: on)?|smart alarm(?: and lucid cues)?|"
+               r"lucid cues?|live sleep model|sharing on Wi-Fi)[ :,;(].*|lights off)"),
 ]]
+HELPER_PROBLEM = re.compile(r"\bstopped(?: by an error)?: |could not")
 PHONE_ONLY = {"phone_settings", "phone_battery", "battery_summary", "try", "reconnected", "service_restart",
               "prev_exit", "direct_off", "drop", "packets", "packets_end", "stuck", "out_of_range", "answered_out",
               "no_start", "error"}
@@ -736,6 +742,7 @@ def analyse(runs: list[Run], source: str, name: str, report_dirs: list[Path], si
         restarts=[e for e in evs if e.kind == "service_restart"],
         exits=[e for e in evs if e.kind == "prev_exit"],
         direct_off=any(e.kind == "direct_off" for e in evs),
+        helpers=[(e.t, scrub(e.g["text"])) for e in evs if e.kind == "helper" and HELPER_PROBLEM.search(e.g["text"])],
         killed=[r for r in runs if not r.closed and r.events and r is not runs[-1]],
         last_closed=runs[-1].closed,
         last_line=evs[-1].t if evs else st[-1].t1,
@@ -1025,6 +1032,10 @@ def render(s: dict) -> str:
                                          "no Stop line in the log"))
     elif s["laptop_stop"]:
         out.append(f"  stop          last 'stopped' line at {hm(s['laptop_stop'])}")
+    if s["helpers"]:
+        more = len(s["helpers"]) - 3
+        out.append("  helpers       " + "; ".join(f"{hm(t)} {text[:90]}" for t, text in s["helpers"][:3])
+                   + (f"; and {more} more" if more > 0 else ""))
     out += ["", "Battery"]
     ph, band = s["battery"]["phone"], s["battery"]["band"]
     if ph:
