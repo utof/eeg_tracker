@@ -134,15 +134,21 @@ class Sealed {
 }
 
 /// The frozen plan, saved with its hash before the first randomised session (the research's pre-registration).
+/// [version] 2 (plans frozen from 2026-11-19 on) adds meditation's silent minutes as a secondary measure
+/// (DECISIONS 423); a version-1 plan keeps its own text, so its saved hash still agrees.
 class CheckPlan {
-  const CheckPlan({required this.kind, required this.frozen, required this.allocationSha256});
+  const CheckPlan({required this.kind, required this.frozen, required this.allocationSha256, this.version = 2});
 
   final SessionKind kind;
   final DateTime frozen;
   final String allocationSha256;
+  final int version;
+
+  /// The plan names the silent minutes as a measure (only those are ever tested).
+  bool get testsSilent => version >= 2 && kind == SessionKind.meditation;
 
   Map<String, Object?> toJson() => {
-    'version': 1,
+    'version': version,
     'kind': kind.name,
     'frozen': frozen.toIso8601String(),
     'design':
@@ -169,6 +175,10 @@ class CheckPlan {
       'how in control of the sound (1-5)',
       'how random the sound seemed (1-5)',
       'probably-asleep minutes',
+      if (testsSilent)
+        'the silent minutes after the sound (2 min, eyes closed, no sound): mean log10 alpha minus the same '
+            'session\'s silent eyes-closed median, on awake clean steps, with at least 60 s counted; live minus '
+            'replay, with the same within-block permutation test',
     ],
     'exclusions':
         'a session with over ${(100 * 0.3).round()} % of its run asleep, gated or without signal is '
@@ -186,11 +196,11 @@ class CheckPlan {
   String get sha => sha256Hex(canonicalJson(toJson()));
 
   static CheckPlan? fromJson(Object? j) {
-    if (j is! Map || j['version'] != 1) return null;
+    if (j is! Map || (j['version'] != 1 && j['version'] != 2)) return null;
     final kind = SessionKind.byName(j['kind']), frozen = DateTime.tryParse('${j['frozen']}');
     final a = j['allocationSha256'];
     if (kind == null || frozen == null || a is! String || a.length != 64) return null;
-    return CheckPlan(kind: kind, frozen: frozen, allocationSha256: a);
+    return CheckPlan(kind: kind, frozen: frozen, allocationSha256: a, version: j['version'] as int);
   }
 }
 
@@ -243,6 +253,7 @@ class CheckRecord {
     this.donors = const [],
     required this.runS,
     required this.outcome,
+    this.silent,
     required this.excludedShare,
     required this.asleepS,
     this.ratings,
@@ -255,6 +266,9 @@ class CheckRecord {
   final List<String> donors;
   final double runS;
   final double? outcome;
+
+  /// Meditation: the silent minutes' number (meditation/silent_block.dart); null without them.
+  final double? silent;
   final double excludedShare;
   final double asleepS;
   final CheckRatings? ratings;
@@ -270,6 +284,7 @@ class CheckRecord {
     donors: donors,
     runS: runS,
     outcome: outcome,
+    silent: silent,
     excludedShare: excludedShare,
     asleepS: asleepS,
     ratings: r,
@@ -283,6 +298,7 @@ class CheckRecord {
     'donors': donors,
     'runS': runS,
     'outcome': outcome,
+    if (silent != null) 'silent': silent,
     'excludedShare': excludedShare,
     'asleepS': asleepS,
     if (ratings != null) 'ratings': ratings!.toJson(),
@@ -293,7 +309,7 @@ class CheckRecord {
     final index = j['index'], stem = j['stem'], start = DateTime.tryParse('${j['start']}');
     final arm = Arm.values.where((a) => a.name == j['arm']).firstOrNull;
     final runS = j['runS'], outcome = j['outcome'], ex = j['excludedShare'], asleep = j['asleepS'];
-    final donors = j['donors'];
+    final donors = j['donors'], silent = j['silent'];
     if (index is! int || index < 0 || stem is! String || start == null || arm == null) return null;
     if (runS is! num || ex is! num || ex < 0 || ex > 1 || asleep is! num) return null;
     if (outcome != null && (outcome is! num || !outcome.isFinite)) return null;
@@ -309,6 +325,7 @@ class CheckRecord {
       ],
       runS: runS.toDouble(),
       outcome: (outcome as num?)?.toDouble(),
+      silent: silent is num && silent.isFinite ? silent.toDouble() : null,
       excludedShare: ex.toDouble(),
       asleepS: asleep.toDouble(),
       ratings: j.containsKey('ratings') ? CheckRatings.fromJson(j['ratings']) : null,

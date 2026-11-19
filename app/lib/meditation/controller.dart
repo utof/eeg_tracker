@@ -25,6 +25,11 @@
 // Hands-free (DECISIONS 244-246): with the owner's switch on, a double clench in a meditation pauses the sound (the
 // bed fades, no bells) and the next brings it back; a look left then right, and any gesture in alpha-theta, marks a
 // moment in the session log. Never while the drift-off detector says probably asleep.
+// The silent minutes (silent_block.dart, DECISIONS 420): a meditation's length is its time with sound; then a cue,
+// the sound fades out, and the headband goes on measuring for [silentBlock] (eyes still closed). The core keeps
+// running (its log replays as before); the log marks where the sound stopped, so a replay of this session in the
+// replay check plays only the time with sound. Stop in the silent minutes keeps the session whole. Alpha-theta has
+// none yet (its own after-session steps come first).
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -50,6 +55,8 @@ import '../training/check_store.dart';
 import '../training/control.dart';
 import '../training/outcome.dart';
 import '../training/replay.dart';
+import 'learning.dart';
+import 'silent_block.dart';
 import 'store.dart';
 import 'tracker.dart';
 
@@ -141,6 +148,7 @@ class MeditationController extends ChangeNotifier {
     this.checkStore,
     this.timing = const MeditationTiming(),
     this.gestureTone,
+    this.silentBlock = silentBlockLength,
     DateTime Function()? clock,
   }) : _makeSound = sound,
        _makeAtSound = alphaThetaSound ?? SilentSessionSound.new,
@@ -152,6 +160,9 @@ class MeditationController extends ChangeNotifier {
 
   /// The hands-free confirmation tone (null: none).
   final GestureTone Function()? gestureTone;
+
+  /// How long a meditation's silent minutes last after its time with sound (zero: none).
+  final Duration silentBlock;
 
   /// The owner's calibrated gestures while the hands-free switch is on (set by the screen); null: off.
   GestureSettings? handsFree;
@@ -204,6 +215,13 @@ class MeditationController extends ChangeNotifier {
   List<MeditationSummary> earlier = const [];
   String comparison = '';
 
+  /// After a meditation: the learning verdict over every saved meditation (learning.dart).
+  Learning? learning;
+
+  /// Where the replay check's results are kept, toggle on or off (set by the screen): the learning verdict shows
+  /// its test of the silent minutes once a set is revealed.
+  CheckStore? checkResults;
+
   /// A headband was left out of range (the finder must not dispose its scanner then).
   bool get leftLost => _link?.leftLost ?? false;
 
@@ -213,9 +231,15 @@ class MeditationController extends ChangeNotifier {
   /// Alpha-theta: what the session adds to the report.
   AtTally? get tally => _tally;
 
-  /// Seconds of signal since calibration ended.
+  /// Seconds of signal since calibration ended (the time with sound).
   double get runSeconds => _tracker?.runSeconds ?? 0;
   int get secondsLeft => math.max(0, (length.inMilliseconds / 1000 - runSeconds).ceil());
+
+  /// This session's silent minutes (zero for alpha-theta), and how far they are.
+  Duration silentLength = Duration.zero;
+  bool get inSilentBlock => _silent != null && !_ended;
+  double get silentSeconds => _silent?.seconds ?? 0;
+  int get silentSecondsLeft => math.max(0, (silentLength.inMilliseconds / 1000 - silentSeconds).ceil());
   int get bells => _tracker?.bells ?? 0;
   bool get active => stage.index >= Stage.connecting.index && stage.index <= Stage.ending.index;
 
@@ -244,6 +268,7 @@ class MeditationController extends ChangeNotifier {
   double _wokeAt = -1e9;
   bool _replayFailed = false;
   MeditationTracker? _tracker;
+  SilentMeter? _silent;
   Detectors? _seen;
   DriftOff? _drift;
   HandsFree? _hands;
@@ -266,6 +291,7 @@ class MeditationController extends ChangeNotifier {
     if (active) return;
     _reset(sessionLength);
     this.kind = kind;
+    silentLength = kind == SessionKind.meditation ? silentBlock : Duration.zero;
     _set(Stage.connecting, 'Looking for the headband.');
     try {
       await _prepareCheck(sessionLength);
@@ -305,6 +331,7 @@ class MeditationController extends ChangeNotifier {
       s.log.note({
         'app': 'eeg_tracker ${kind.name}',
         'lengthS': sessionLength.inSeconds,
+        if (silentLength > Duration.zero) 'silentS': silentLength.inSeconds,
         'headband': link.name,
         if (_slot != null) 'check': _checkInfo(),
       });
@@ -373,6 +400,7 @@ class MeditationController extends ChangeNotifier {
     asleepGuard = false;
     checkStatus = null;
     _tracker = null;
+    _silent = null;
     _seen = null;
     _drift = null;
     _hands = null;
@@ -391,6 +419,7 @@ class MeditationController extends ChangeNotifier {
     soundNote = null;
     saveNote = null;
     report = null;
+    learning = null;
     contact = const {};
     comparison = '';
   }
@@ -465,6 +494,8 @@ class MeditationController extends ChangeNotifier {
       final left = (Cal.closedS - (r.n - _closedFromN) / fs).ceil();
       calNeedsClean = left <= 0;
       calSecondsLeft = left > 0 ? left : _session!.calibrationCleanLeft.ceil();
+    } else if (r.phase == 'run' && _silent != null) {
+      _silentStep(r);
     } else if (r.phase == 'run' && live != null) {
       final drift = driftState, asleep = drift == DriftState.asleep, at = kind == SessionKind.alphaTheta;
       // the same gates act whether the sound is live or replayed; in alpha-theta sleep is one of them
@@ -477,8 +508,26 @@ class MeditationController extends ChangeNotifier {
       _outcome?.add(r, _session?.baseline, drift: drift);
       _tally?.add(r, played, asleep: asleep, alpha: _engine?.alpha, theta: _engine?.theta);
       chip = tracker.chip;
-      if (tracker.done) unawaited(_finish(complete: true));
+      if (tracker.done) silentLength > Duration.zero ? _startSilent(r) : unawaited(_finish(complete: true));
     }
+  }
+
+  /// The time with sound is over: a cue, the bed fades out, and the silent minutes begin (nothing plays in them).
+  void _startSilent(StepResult r) {
+    _silent = SilentMeter();
+    _sound?.cue();
+    _sound?.bed(on: false);
+    _session?.log.note({
+      'silentBlock': {'fromN': r.n, 'lengthS': silentLength.inSeconds},
+    });
+    _notify();
+  }
+
+  void _silentStep(StepResult r) {
+    final m = _silent!, drift = driftState;
+    m.add(r, _session?.baseline, drift: drift);
+    chip = momentOf(r, drift: drift)?.moment ?? chip;
+    if (m.seconds >= silentLength.inMilliseconds / 1000 - 1e-9) unawaited(_finish(complete: true));
   }
 
   /// Alpha-theta's sleep guard: "probably asleep" fades the bed (over 10 s) and plays the rising wake cue, again
@@ -514,7 +563,7 @@ class MeditationController extends ChangeNotifier {
   void _gesture(GestureKind g) {
     final s = _session;
     if (_ended || s == null) return;
-    if (g == GestureKind.clench && kind == SessionKind.meditation && stage == Stage.running) {
+    if (g == GestureKind.clench && kind == SessionKind.meditation && stage == Stage.running && _silent == null) {
       paused = !paused;
       _sound?.bed(on: !paused);
       s.log.note({'event': 'hands-free: ${paused ? 'sound paused' : 'sound back'} (${gestureWord(g)})', 'n': s.n});
@@ -537,7 +586,7 @@ class MeditationController extends ChangeNotifier {
     final now = _now(), last = _lastData;
     final quiet = now.difference(last ?? _signalAt ?? now);
     if (quiet > timing.noDataAfter) {
-      if (!_quiet) {
+      if (!_quiet && _silent == null) {
         _quiet = true;
         final t = mapState(z: null, jaw: null, quality: 'none', veto: null);
         _sound?.play((level: kind == SessionKind.meditation ? t.calm : AtRule.startMix, rough: 0, reward: null, gated: true));
@@ -595,7 +644,7 @@ class MeditationController extends ChangeNotifier {
     final outcome = _outcome;
     final summary = t.summary(
       start: start,
-      complete: complete,
+      complete: complete || t.done, // Stop in the silent minutes: the time with sound was reached
       iafHz: s.iaf,
       note: s.note,
       logFile: '$stem.session.json',
@@ -604,6 +653,7 @@ class MeditationController extends ChangeNotifier {
       outcome: outcome?.value,
       excludedShare: outcome == null ? null : (outcome.excludedShare * 1000).round() / 1000,
       at: _tally?.toJson(),
+      silent: _silent?.block(silentLength.inSeconds.toDouble()),
     );
     _seen?.finish();
     s.log.note({'sound': sound?.info(), 'end': complete ? 'length reached' : 'stopped', 'runS': t.runSeconds});
@@ -633,9 +683,19 @@ class MeditationController extends ChangeNotifier {
       }
     }
     comparison = compareWithEarlier(summary, earlier).line;
+    if (kind == SessionKind.meditation) learning = learningVerdict([...earlier, summary], tested: _silentTest());
     report = summary;
     _keepCheckRecord(summary, stem);
     _set(kind == SessionKind.alphaTheta || asksGuess ? Stage.rating : Stage.report, '');
+  }
+
+  /// The replay check's revealed test of the silent minutes (null before a set is revealed, or without one).
+  SilentTest? _silentTest() {
+    try {
+      return silentTestOf((checkStore ?? checkResults)?.reveal());
+    } catch (_) {
+      return null; // the results could not be read: the verdict stands without them
+    }
   }
 
   /// A randomised session goes into the check's records right away (before the answers), so every session is
@@ -653,6 +713,7 @@ class MeditationController extends ChangeNotifier {
         donors: played == Arm.replay ? slot.donors : const [],
         runS: summary.runS,
         outcome: summary.outcome,
+        silent: summary.silent?.alpha,
         excludedShare: summary.excludedShare ?? 1,
         asleepS: (_tally?.asleepS ?? summary.drowsyS),
       ));

@@ -28,8 +28,9 @@ typedef Control = ({double level, double rough, String? reward, bool gated});
 const Set<String> rewardNames = {'bell', 'chime', 'gong'};
 
 /// The run part of a saved session log (SessionLog.toJson()) as a control stream: for meditation the core's
-/// step lines after its 'calibration' line, for alpha-theta its 'at' lines. Throws [FormatException] when the
-/// file is not a session of that kind.
+/// step lines after its 'calibration' line, up to where the sound stopped for the silent minutes (the app's
+/// 'silentBlock' note; meditation/silent_block.dart), for alpha-theta its 'at' lines. Throws [FormatException]
+/// when the file is not a session of that kind.
 List<Control> controlStream(Map<String, Object?> saved, SessionKind kind) {
   final lines = saved['lines'], header = saved['header'];
   if (lines is! List || header is! Map) throw const FormatException('not a session file');
@@ -38,6 +39,7 @@ List<Control> controlStream(Map<String, Object?> saved, SessionKind kind) {
     throw FormatException('a ${protocol is String ? protocol : '?'} session, not ${kind.name}');
   }
   final out = <Control>[];
+  final soundUntil = _silentFrom(saved['info']);
   var run = false;
   for (final e in lines) {
     if (e is! Map) continue;
@@ -45,6 +47,8 @@ List<Control> controlStream(Map<String, Object?> saved, SessionKind kind) {
     if (kind == SessionKind.meditation) {
       if (type == 'calibration') run = true;
       if (!run || type != 'step') continue;
+      final n = e['n'];
+      if (soundUntil != null && n is int && n > soundUntil) break;
       out.add((
         level: _unit(e['calm']),
         rough: _unit(e['rough']),
@@ -62,6 +66,17 @@ List<Control> controlStream(Map<String, Object?> saved, SessionKind kind) {
     }
   }
   return out;
+}
+
+/// The sample after which the sound stopped for the silent minutes, or null (none in this session).
+int? _silentFrom(Object? info) {
+  if (info is! List) return null;
+  for (final i in info) {
+    if (i is! Map) continue;
+    final b = i['silentBlock'];
+    if (b is Map && b['fromN'] is int) return b['fromN'] as int;
+  }
+  return null;
 }
 
 double _unit(Object? v) {
