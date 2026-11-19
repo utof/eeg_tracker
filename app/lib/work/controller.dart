@@ -177,30 +177,41 @@ class WorkController extends ChangeNotifier {
   final List<Map<String, Object?>> _epochs = [];
   final List<Map<String, Object?>> _events = [];
 
+  /// The number of the latest start: a start that Stop or a newer start overtook touches nothing of the session
+  /// (DECISIONS 450).
+  int _run = 0;
+  bool _live(int run) => run == _run && !_ended;
+
   /// Connects, checks contact and starts: the eyes-closed minute first when [eyesClosedMinute].
   Future<void> start({bool eyesClosedMinute = false}) async {
     if (active) return;
     _reset();
+    final run = ++_run;
     _set(WorkStage.connecting, 'Looking for the headband.');
     try {
       final link = BandLink(finder: finder, timing: timing.link, onBatch: _onBatch, onEvent: _onLinkEvent, clock: _now);
       _link = link;
-      if (!await link.connect(onFound: (name) => _set(WorkStage.connecting, 'Found $name. Connecting.'))) {
-        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?');
+      void found(String name) => _live(run) ? _set(WorkStage.connecting, 'Found $name. Connecting.') : null;
+      if (!await link.connect(onFound: found)) {
+        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?', run);
       }
-      if (_ended) return await link.close();
+      if (!_live(run)) return await link.close();
       _set(WorkStage.contact, 'Checking contact. Keep still for a few seconds.');
-      contact = await link.contact();
-      if (_ended) return await link.close();
+      final ohms = await link.contact();
+      if (!_live(run)) return await link.close();
+      contact = ohms;
       final now = _now();
       startedAt = now;
       _planner = BreakPlanner(earlier: _earlierHints(now));
       _seen = Detectors(onSecond: _onSecond);
       if (!eyesClosedMinute) _drowsy = WorkDrowsiness(onEpoch: _onEpoch);
       await link.startSignal();
+      if (!_live(run)) return await link.close(); // Stop came while the stream started
       _lastData = null;
       _ticker = Timer.periodic(timing.tick, (_) => _tick());
-      kept = await keeper.hold(_keep());
+      final held = await keeper.hold(_keep());
+      if (!_live(run)) return await link.close(); // Stop came while the service was being held
+      kept = held;
       keeper.onStop = () => unawaited(stop());
       _heldAt = _now();
       if (eyesClosedMinute) {
@@ -211,9 +222,12 @@ class WorkController extends ChangeNotifier {
         _set(WorkStage.calibrating, '');
       }
     } on TimeoutException catch (e) {
-      await _fail('The headband did not answer (${e.message ?? 'timeout'}). Switch it off and on, then try again.');
+      await _fail(
+        'The headband did not answer (${e.message ?? 'timeout'}). Switch it off and on, then try again.',
+        run,
+      );
     } catch (e) {
-      await _fail('Could not start: $e');
+      await _fail('Could not start: $e', run);
     }
   }
 
@@ -237,7 +251,8 @@ class WorkController extends ChangeNotifier {
     } else {
       text = 'Calibrating';
     }
-    return KeepSpec(title: 'Work session', text: text, headband: true);
+    // no audio focus: only a short chime plays now and then, and music or a podcast while working goes on (row 468)
+    return KeepSpec(title: 'Work session', text: text, headband: true, focus: false);
   }
 
   void _reset() {
@@ -442,21 +457,27 @@ class WorkController extends ChangeNotifier {
     _ended = true;
     _ticker?.cancel();
     if (connecting) {
+      final link = _link;
       _set(WorkStage.setup, 'Stopped.');
+      await link?.close(); // a search still running lets go of what it brings
       await keeper.release();
       return;
     }
     _set(WorkStage.ending, 'Stopping.');
     final p = _planner;
     if (p != null && p.onBreak) p.endBreak(_now());
+    // the file first: the headband's release can take its deadlines, and once the service is let go a locked phone
+    // may freeze the app (as the nap, DECISIONS 460 and 463)
+    _save(_now(), end: true);
     await _link?.close();
     await keeper.release();
     await sound.stop();
-    _save(_now(), end: true);
     _set(WorkStage.done, '');
   }
 
-  Future<void> _fail(String why) async {
+  /// [run]: the start that failed; one that Stop or a newer start overtook changes nothing (Stop let its headband go).
+  Future<void> _fail(String why, int run) async {
+    if (run != _run) return;
     final stopped = _ended;
     _ended = true;
     _ticker?.cancel();

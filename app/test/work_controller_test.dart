@@ -1,6 +1,7 @@
 // A work session end to end on a synthetic headband with a clock of its own (DECISIONS 440-449): calibration,
 // the level, a drowsy hint with its chime and lock-screen words, a break, Stop and the saved file.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -16,6 +17,7 @@ import 'package:eeg_tracker/work/store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fast_band.dart' show OneFinder, until;
+import 'support/gates.dart';
 
 enum Mode { awake, drowsy, eyesClosed, off }
 
@@ -234,6 +236,103 @@ void main() {
     expect(slow.stage, WorkStage.setup);
   });
 
+  WorkController gated(HeadbandFinder finder, WorkBand band, SessionKeeper keeper) => WorkController(
+    finder: finder,
+    keeper: keeper,
+    store: WorkStore(Directory('${tmp.path}/work-sessions')),
+    timing: const WorkTiming(link: fastLink, tick: Duration(milliseconds: 4), noDataAfter: Duration(seconds: 3)),
+    clock: band.now,
+  );
+
+  test('Stop, then Start again while the first search runs: the first search ending touches nothing (row 450)', () async {
+    final band = WorkBand(start: DateTime(2026, 11, 19, 10).millisecondsSinceEpoch / 1000);
+    final finder = GateFinder(), keeper = FakeSessionKeeper();
+    final c = gated(finder, band, keeper);
+    final first = c.start();
+    await until(() => finder.finds.length == 1);
+    await c.stop();
+    final second = c.start();
+    await until(() => finder.finds.length == 2);
+    finder.finds[1].complete(band);
+    await second;
+    expect(c.stage, WorkStage.calibrating);
+    finder.finds[0].complete(null); // the first search ends: "not found"
+    await first;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(c.stage, isNot(WorkStage.failed), reason: c.message);
+    expect(c.active, isTrue);
+    expect(keeper.held, isTrue, reason: 'the new session keeps its service');
+    await c.stop();
+    expect(c.stage, WorkStage.done);
+    c.dispose();
+  });
+
+  test('Stop while the stream is being started: the session stays stopped and lets the headband go (row 450)', () async {
+    final inner = WorkBand(start: DateTime(2026, 11, 19, 10).millisecondsSinceEpoch / 1000), band = SlowStart(inner);
+    final keeper = FakeSessionKeeper();
+    final c = gated(OneFinder(band), inner, keeper);
+    final started = c.start();
+    await until(() => band.asked);
+    await c.stop();
+    band.gate.complete();
+    await started;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(c.stage, WorkStage.setup);
+    expect(c.active, isFalse);
+    expect(keeper.held, isFalse);
+    expect(band.disconnected, isTrue);
+    c.dispose();
+  });
+
+  test('Stop while the service is being held: the session stays stopped and lets the headband go (row 450)', () async {
+    final band = WorkBand(start: DateTime(2026, 11, 19, 10).millisecondsSinceEpoch / 1000);
+    final keeper = GateKeeper();
+    final c = gated(OneFinder(band), band, keeper);
+    final started = c.start();
+    await until(() => keeper.holds.length == 1);
+    await c.stop();
+    keeper.holds[0].complete(true);
+    await started;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(c.stage, WorkStage.setup);
+    expect(c.active, isFalse);
+    final at = band.clockS;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(band.clockS, at, reason: 'the stream was stopped');
+    c.dispose();
+  });
+
+  test('the work session leaves other apps their sound: music or a podcast plays on (DECISIONS 468)', () async {
+    final band = WorkBand(start: DateTime(2026, 11, 19, 10).millisecondsSinceEpoch / 1000);
+    final keeper = FakeSessionKeeper();
+    final c = make(band, keeper: keeper);
+    await c.start();
+    expect(keeper.spec!.focus, isFalse, reason: 'only a short chime plays, now and then');
+    c.takeBreak(); // held again with other words
+    expect(keeper.spec!.text, 'On a break');
+    expect(keeper.spec!.focus, isFalse);
+    await c.stop();
+    c.dispose();
+  });
+
+  test('Stop writes the final file before letting go of the headband and the service', () async {
+    final band = WorkBand(start: DateTime(2026, 11, 19, 10).millisecondsSinceEpoch / 1000);
+    final dir = Directory('${tmp.path}/work-sessions');
+    Map<String, Object?>? atRelease;
+    final keeper = _WatchKeeper(() {
+      final files = dir.listSync().whereType<File>().where((f) => f.path.endsWith('.work.json')).toList();
+      atRelease = files.isEmpty ? null : jsonDecode(files.single.readAsStringSync()) as Map<String, Object?>;
+    });
+    final c = make(band, keeper: keeper);
+    await c.start();
+    await until(() => band.clockS > 90);
+    await c.stop();
+    expect(atRelease?['ended'], 'stopped', reason: 'a locked phone may freeze the app once the service is let go');
+    expect(atRelease?['headband'], 'BrainBit W', reason: 'not blank: the headband was still held');
+    expect(c.last!['headband'], 'BrainBit W');
+    c.dispose();
+  });
+
   test('words: the hint lines and the after-break line', () {
     final h = WorkHint(at: DateTime(2026), reason: HintReason.stretch, activeMin: 75.4, thresholdMin: 60, level: DrowsyLevel.alert);
     expect(hintTitle(h), "You've been at it for 1 h 15 min. A few minutes away from the screen?");
@@ -256,4 +355,16 @@ class _NoFinder implements HeadbandFinder {
 
   @override
   Future<Headband> connectDirect(BandId id) async => throw StateError('none');
+}
+
+/// A keeper that looks at the files when it is let go.
+class _WatchKeeper extends FakeSessionKeeper {
+  _WatchKeeper(this.onRelease);
+  final void Function() onRelease;
+
+  @override
+  Future<void> release() async {
+    if (held) onRelease();
+    await super.release();
+  }
 }
