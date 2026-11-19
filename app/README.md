@@ -431,11 +431,32 @@ needs for the whole night; then it scores every hour with the whole night's weig
 on an 8-minute grid, which the model's own halving of the signal needs. On the three recorded nights the phone now
 gives the laptop's stage for every scored 30 seconds, and the same totals (night of 2026-11-17: asleep 387 min,
 deep 42.5, dream 114; before 382.5, 42 and 105.5). The model takes longer (laptop: 30 instead of 17 s for a 12.9-hour night; emulator:
-the whole scoring 99 instead of 69 s); memory per hour is the same. Nights the phone scored before this update are scored once more the next time the app opens
-(their report names the old model). Details: DECISIONS rows 260-264, `analysis/two_pass.py`.
+the whole scoring 99 instead of 69 s); memory per hour is the same. Details: DECISIONS rows 260-264,
+`analysis/two_pass.py`. (Until 2026-11-20 every night the phone had scored before this change was scored again after
+the update; no longer, see below.)
+
+**After an app update (since 2026-11-20, DECISIONS rows 580-589).** A night that has its report is never scored again
+by itself, whatever the update: only new data for that night (10+ minutes more, a file gone) scores it again. A
+report from an earlier version of the scorer stays as it is; at the bottom of its page the app says "An earlier
+version of the app scored this night" with **Score again**, which takes a few minutes and gives the current model's
+stages. What you see:
+
+- After an update (or after Android closed the app) while a night was being scored: about 45 seconds after you open
+  the app, the Sleep section says "Scoring the night of ...: Preparing the recording to go on from 40 %", then
+  "Sleep model 40 % (run 2 of 3)" and on from there. Nothing done before is done again except the preparation
+  (a minute or two). The percentage counts the model's steps.
+- The scoring always waits about 45 seconds after the app opens or comes back, so the screen and Share on Wi-Fi
+  answer first. It stops when you press **Start night** or start a session (meditation, check-in, work session, nap,
+  ...), and goes on after them from where it was. While the laptop copies files over Share on Wi-Fi it says
+  "Waiting while the laptop copies files" and goes on after.
+- "Scoring this night stopped before it finished" with **Try again** now appears only when the app closed three times
+  in a row before the model's first step (most likely memory), or when the scoring failed with a reason; **Try
+  again** goes on from the saved progress.
+- Between nights the scoring and Share on Wi-Fi run only while the app is open on screen: Android may freeze an app
+  in the background (DECISIONS row 589). Leave the app open on the main screen until the time asleep appears.
 
 The night extras come from the shared detectors (`lib/detectors/`), run over the same samples in a second background
-isolate while the model works: the note under the totals says how much of your sleep was read through noise; a
+isolate after the model (one heavy step at a time, DECISIONS row 583): the note under the totals says how much of your sleep was read through noise; a
 **Signal** line under the chart marks noisy stretches (amber dots) and stretches with no usable electrode (solid
 amber); **Jaw and movement** gives jaw-muscle bursts and movements per hour asleep with the earlier nights' jaw numbers
 (a trend, not a teeth-grinding test; its **i** shows `docs/evidence/jaw-and-blinks.md`) and the night hour by hour;
@@ -446,8 +467,9 @@ report is missing or 10+ minutes behind, and never while a night records.
   `scripts/sleep_report.py`, the night extras as `analysis/night_extras.py`, the report file),
   `lib/ui/sleep_*.dart`. Models: `assets/models/` (see its README
   for how they were made and checked). Reports: `files/nights/<date>.report.json` (`docs/data-format.md`).
-- If scoring stops (for example the phone runs out of memory), the main screen says so and offers **Try again**;
-  it does not retry by itself.
+- If the app closes while scoring (an update, Android), the scoring goes on from its last saved step the next time
+  the app is open (`files/cache/scoring/<night>.progress`, never exported); after three closes in a row before the
+  model's first step, or a failure, the main screen says so and offers **Try again** (DECISIONS rows 581-582).
 - ONNX Runtime cannot run inside `flutter test`, so the models are checked in Python:
   `uv run --project analysis --group onnx --with pytest pytest analysis/tests/test_anysleep_onnx.py` (from the
   repo root), and on a recorded night with `scripts/export_anysleep_onnx.py --check-only --night ...`.
@@ -459,11 +481,12 @@ prepare and 30 s for the model (two passes); a phone is likely 3-10 times slower
 
 1. Record a night as usual (or use the first real one). In the morning press **Stop** and leave the app open on
    the main screen, phone on the charger or not (write down which).
-2. Note the clock time. The Sleep section says "Scoring the night of ...: Preparing the recording", then "Sleep
-   model, run 1 of 3, part 1 of 26" and so on (13 parts, each twice).
+2. Note the clock time. After about 45 seconds the Sleep section says "Scoring the night of ...: Preparing the
+   recording", then "Sleep model 0 % (run 1 of 3)" up to "Sleep model 97 % (run 3 of 3)", then "Counting jaw,
+   movement and signal" (the detectors' pass, after the model).
 3. When the time asleep appears, note the clock time again; open **Sleep report**: the line at the bottom says
-   "Scored on this phone in ..." (that is the measured time). If "Counting jaw, movement and signal" showed after
-   the model's last part, note for how long: that is the detectors' pass running behind the model.
+   "Scored on this phone in ..." (that is the measured working time, over every go if the app was closed in
+   between). Note how long "Counting jaw, movement and signal" showed.
 4. Tell the assistant: hours recorded, the time it took, and whether the phone got warm or the app closed. If it
    says scoring stopped, tap **Try again** once and report what happens. With USB debugging on, also send
    `adb shell dumpsys meminfo io.github.utof.eeg_tracker | head -40` taken during "Sleep model, run 2 of 3".
@@ -1460,7 +1483,10 @@ on the sheet shuts out every laptop that has the old one.
 
 **It cannot hurt the recording.** The server runs apart from the recorder, which only hands it copies of the samples
 and never waits for it. If the server fails, sharing goes off with one line in the night's log and the night goes on
-(DECISIONS row 221; tested with servers that crash and hang).
+(DECISIONS row 221; tested with servers that crash and hang). An error inside the server itself no longer stops it:
+it is written to the log and the server goes on answering (row 587). The SHA-256 the laptop's list needs are kept
+between app updates, so the first list after an update takes seconds, not minutes (row 585). The night's sleep
+scoring waits while the laptop copies (row 583).
 
 ### Owner step: switch it on before a night (2 minutes; the first night doubles as the phone test)
 
