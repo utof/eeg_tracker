@@ -6,6 +6,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../wearer/check.dart' show nightSignal, wearerAnswerIn;
 import 'drift.dart';
 import 'extras.dart';
 import 'periods.dart';
@@ -13,6 +14,8 @@ import 'periods.dart';
 /// Of the report file; a report of another version is rebuilt (the laptop's rule). 2: adds `extras` (jaw,
 /// movement and signal quality from the shared detectors), so older nights are scored again once. Since
 /// 2026-11-19 also `drift_off` (drift.dart), added without a new version: a version-2 report without it is rebuilt.
+/// Also since 2026-11-19 `wearer_signal` ("Was this you?", wearer/check.dart), added without a rebuild: an older
+/// night is simply not part of that check; and `wearer`, the owner's answer, which a rebuilt report keeps.
 const int reportVersion = 2;
 const String reportNote = 'first guess; the scorer is not yet validated on this headband';
 
@@ -107,6 +110,9 @@ class SleepReport {
   /// older reports, unscored nights or when the detector failed (`drift_off_error` says why).
   DriftResult? get driftOff => DriftResult.read(json['drift_off']);
 
+  /// The owner's answer to "Was this you?" (`me` or `someone else`), or null (wearer/wearer.dart).
+  String? get wearerAnswer => wearerAnswerIn(json);
+
   /// The `.f32` files and sizes the report was made from.
   Map<String, int> get inputs => {
     for (final i in (json['inputs'] as List? ?? const []).whereType<Map<String, dynamic>>())
@@ -188,6 +194,7 @@ Map<String, dynamic> buildReport({
         'extras_error': extrasError,
         'drift_off': null,
         'drift_off_error': null,
+        'wearer_signal': null,
       });
   }
   // the laptop takes the confidence from probabilities rounded to 3 decimals (sleep.json)
@@ -241,6 +248,14 @@ Map<String, dynamic> buildReport({
       driftWhyNot = '$e';
     }
   }
+  Map<String, Object?>? wearer;
+  if (seen != null) {
+    try {
+      wearer = nightSignal(seen.wearer, stages);
+    } on Object {
+      wearer = null; // the check is never worth losing the night: it is simply not checked
+    }
+  }
   final gaps = stages.where((s) => s == gapStage).length;
   return rep
     ..addAll({
@@ -266,6 +281,7 @@ Map<String, dynamic> buildReport({
       'extras_error': whyNot,
       'drift_off': drift,
       'drift_off_error': driftWhyNot,
+      'wearer_signal': wearer,
     });
 }
 

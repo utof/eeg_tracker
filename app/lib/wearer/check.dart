@@ -41,6 +41,12 @@ const String answerMe = 'me', answerSomeoneElse = 'someone else';
 
 typedef WearerSignal = Map<String, double>;
 
+/// The owner's answer kept in a night report or a check-in result (its `wearer` object: `answer`, `at`), or null.
+String? wearerAnswerIn(Map<String, Object?> json) {
+  final w = json['wearer'];
+  return w is Map && w['answer'] is String ? w['answer'] as String : null;
+}
+
 double? _num(Object? v) => v is num && v.isFinite ? v.toDouble() : null;
 
 double _log10(double v) => math.log(v) / math.ln10;
@@ -265,6 +271,15 @@ class WearerVerdict {
   };
 }
 
+/// Whether a judged recording joins the profile: while learning unless someone else wore the headband; once it
+/// speaks, when it looked like you (unless someone else) or when you said it was you.
+bool joinsProfile(WearerState state, String? answer) => switch (state) {
+  WearerState.unchecked => false,
+  WearerState.learning => answer != answerSomeoneElse,
+  WearerState.likeYou => answer != answerSomeoneElse,
+  WearerState.notLikeYou => answer == answerMe,
+};
+
 /// Every recording in time order (ties by id), each against the profile of the earlier accepted ones of its kind.
 List<WearerVerdict> judgeWearer(List<WearerRecording> recordings) {
   final out = <WearerVerdict>[];
@@ -282,10 +297,8 @@ List<WearerVerdict> judgeWearer(List<WearerRecording> recordings) {
       out.add(WearerVerdict(id: r.id, kind: r.kind, state: WearerState.unchecked, why: r.why, have: acc.length, days: dd.length));
       continue;
     }
-    bool join;
     if (acc.length < enrolN || dd.length < enrolDays) {
       out.add(WearerVerdict(id: r.id, kind: r.kind, state: WearerState.learning, have: acc.length, days: dd.length));
-      join = r.answer != answerSomeoneElse;
     } else {
       final prof = acc.length > profileMax ? acc.sublist(acc.length - profileMax) : acc;
       final (d, z) = wearerDistance(prof, s);
@@ -306,9 +319,8 @@ List<WearerVerdict> judgeWearer(List<WearerRecording> recordings) {
         usual: {for (final f in wearerFeatures) f: _mean([for (final p in prof) p[f]!])},
         biggest: biggest,
       ));
-      join = r.answer == answerMe || (state == WearerState.likeYou && r.answer != answerSomeoneElse);
     }
-    if (join) {
+    if (joinsProfile(out.last.state, r.answer)) {
       acc.add(s);
       dd.add(r.day);
     }

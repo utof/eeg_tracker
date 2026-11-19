@@ -146,6 +146,9 @@ class SleepScorer {
           extrasError: whyNot,
         );
       }
+      // the owner's "Was this you?" answer belongs to the night, not to this scoring: read just before the write
+      final answered = store.read(night.name)?.json['wearer'];
+      if (answered != null) rep['wearer'] = answered;
       store.write(rep);
       marker.deleteSync();
       return SleepReport(rep);
