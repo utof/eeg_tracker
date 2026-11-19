@@ -8,21 +8,29 @@ import 'dart:math' as math;
 
 import 'package:eeg_tracker/detectors/detectors.dart';
 import 'package:eeg_tracker/detectors/gestures.dart';
+import 'package:eeg_tracker/dream/audio.dart';
 import 'package:eeg_tracker/dream/band_link.dart';
+import 'package:eeg_tracker/dream/controller.dart';
+import 'package:eeg_tracker/dream/store.dart';
 import 'package:eeg_tracker/export/store.dart' show isExported;
 import 'package:eeg_tracker/feedback/demo.dart';
 import 'package:eeg_tracker/handsfree/live.dart';
+import 'package:eeg_tracker/meditation/controller.dart';
+import 'package:eeg_tracker/nap/audio.dart';
+import 'package:eeg_tracker/nap/controller.dart';
 import 'package:eeg_tracker/handsfree/store.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart' show Sample;
 import 'package:eeg_tracker/recorder/headband.dart';
+import 'package:eeg_tracker/sound/feedback_sound.dart';
 import 'package:eeg_tracker/sound/gesture_tone.dart';
 import 'package:eeg_tracker/sound/state_sound.dart';
 import 'package:eeg_tracker/states/controller.dart';
 import 'package:eeg_tracker/states/presets.dart';
 import 'package:eeg_tracker/states/store.dart';
+import 'package:eeg_tracker/training/control.dart' show SessionKind;
 import 'package:flutter_test/flutter_test.dart';
 
-import 'dream_test.dart' show OneFinder;
+import 'dream_test.dart' show FakeMic, OneFinder, spoken;
 
 const fs = 250;
 
@@ -45,8 +53,11 @@ class DrawnGlance extends Drawn {
 
 /// The demo signal (eyes closed, no blinks or jaw bursts) with gestures drawn on it; 1 s of signal a millisecond.
 class GestureBand implements Headband {
-  GestureBand(this.drawn);
+  GestureBand(this.drawn, {this.eyes});
   final List<Drawn> drawn;
+
+  /// 'open' or 'closed' at a second of signal (closed throughout by default).
+  final String Function(double t)? eyes;
   final DemoSignal demo = DemoSignal(3)
     ..eyes = 'closed'
     ..blinks = false
@@ -78,7 +89,9 @@ class GestureBand implements Headband {
   double _g() => (_r.nextDouble() + _r.nextDouble() + _r.nextDouble() - 1.5) * 2;
 
   List<double> _row() {
-    final t = demo.t, row = demo.next(1).single;
+    final t = demo.t;
+    demo.eyes = eyes?.call(t) ?? 'closed';
+    final row = demo.next(1).single;
     for (final d in drawn) {
       final s = t - d.atS;
       switch (d) {
@@ -147,12 +160,15 @@ Future<void> until(bool Function() done, String what, {Duration max = const Dura
   }
 }
 
+/// One JSON line's text field.
+String _text(String line, [String key = 'text']) => (jsonDecode(line) as Map<String, Object?>)[key]! as String;
+
 /// Rows of the demo signal with [drawn] gestures, through detectors with a hands-free helper.
-List<GestureKind> heardOn(List<Drawn> drawn, double seconds, {bool Function()? asleep, HandsFree? Function(void Function(GestureKind))? make}) {
+List<GestureKind> heardOn(List<Drawn> drawn, double seconds, {bool Function()? asleep, HandsFree Function(void Function(GestureKind))? make}) {
   final band = GestureBand(drawn), heard = <GestureKind>[];
   final d = Detectors();
   final h = make?.call(heard.add) ?? HandsFree(calibrated, onGesture: heard.add, asleep: asleep);
-  h?.attach(d);
+  h.attach(d);
   for (var i = 0; i < seconds * fs; i++) {
     d.push(band._row());
   }
@@ -193,7 +209,7 @@ void main() {
       expect(s.load().active!.clenchX, 15);
       s.setOn(false, DateTime(2026, 11, 19, 22));
       expect(s.load().active, isNull);
-      final events = [for (final l in File('${root.path}/hands-free/events.jsonl').readAsLinesSync()) jsonDecode(l)['event']];
+      final events = [for (final l in File('${root.path}/hands-free/events.jsonl').readAsLinesSync()) _text(l, 'event')];
       expect(events, ['switched on', 'calibrated: double clench 3 of 3 (on), look left then right 2 of 3 (on)', 'switched off']);
     });
 
@@ -279,6 +295,135 @@ void main() {
       await until(() => c.seconds > 85, '85 s');
       await c.stop();
       expect([sound.pauses, tone.played], [isEmpty, isEmpty]);
+      c.dispose();
+    });
+  });
+
+  group('meditation', () {
+    const medFast = MeditationTiming(
+      contactFor: Duration(milliseconds: 5),
+      settle: Duration.zero,
+      tick: Duration(milliseconds: 20),
+      reconnectWaits: [Duration(milliseconds: 5)],
+      endRingOut: Duration.zero,
+    );
+    String eyes(double t) => t < 30 ? 'open' : 'closed';
+
+    Future<(MeditationController, SilentSound, List<String>)> session(SessionKind kind, List<Drawn> drawn) async {
+      final band = GestureBand(drawn, eyes: eyes), sound = SilentSound(), events = <String>[];
+      final c = MeditationController(finder: OneFinder(band), sound: () => sound, timing: medFast, gestureTone: SilentGestureTone.new)
+        ..handsFree = calibrated;
+      var bedOff = false;
+      c.addListener(() {
+        if (c.paused != bedOff) {
+          bedOff = c.paused;
+          events.add('paused ${c.paused}, bed ${sound.bedOn}, bells ${sound.bells}');
+        }
+      });
+      await c.start(const Duration(minutes: 2), kind: kind);
+      final end = DateTime.now().add(const Duration(seconds: 30));
+      while (c.stage != Stage.report && c.stage != Stage.rating && c.stage != Stage.setup) {
+        if (DateTime.now().isAfter(end)) fail('stuck in ${c.stage}');
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      return (c, sound, events);
+    }
+
+    List<String> noted(MeditationController c) => [
+      for (final i in c.session!.log.info)
+        if (i['event'] case final String e when e.startsWith('hands-free')) e,
+    ];
+
+    test('a double clench pauses the bed and the bells, the next brings them back; a glance is a moment', () async {
+      final (c, sound, events) = await session(SessionKind.meditation, const [DrawnClench(120), DrawnGlance(140), DrawnClench(160)]);
+      expect(noted(c), ['hands-free: sound paused (double clench)', 'hands-free: moment (look left then right)', 'hands-free: sound back (double clench)']);
+      expect(events.first, startsWith('paused true, bed false'));
+      expect(events.last, startsWith('paused false, bed true'));
+      final info = c.session!.log.info.firstWhere((i) => i.containsKey('handsFree'))['handsFree']! as Map;
+      expect(info['heard'], 3);
+      c.dispose();
+    });
+
+    test('alpha-theta: a double clench only marks a moment', () async {
+      final (c, sound, _) = await session(SessionKind.alphaTheta, const [DrawnClench(120)]);
+      expect(noted(c), ['hands-free: moment (double clench)']);
+      expect(c.paused, isFalse);
+      c.dispose();
+    });
+  });
+
+  group('dream catcher', () {
+    test('"were you drifting?": a double clench answers Drifting, a look left then right Awake', () async {
+      final band = GestureBand([]);
+      final recordings = Directory('${root.path}/recordings');
+      final store = DreamStore(dreamDirFor(recordings.path)), tone = SilentGestureTone();
+      final c = DreamController(
+        finder: OneFinder(band),
+        sound: SilentDreamSound.new,
+        mic: FakeMic(spoken),
+        store: store,
+        recordingsDir: recordings,
+        timing: const DreamTiming(
+          link: LinkTiming(contactFor: Duration(milliseconds: 5), settle: Duration.zero, reconnectWaits: [Duration(milliseconds: 5)]),
+          tick: Duration(milliseconds: 20),
+          tapWindow: Duration(seconds: 5),
+          wakeRingOut: Duration.zero,
+        ),
+        random: () => 0,
+        gestureTone: () => tone,
+      )..handsFree = calibrated;
+      var asked = 0;
+      c.addListener(() {
+        if (c.stage == DreamStage.checking && asked < c.roundsDone + 1) {
+          asked = c.roundsDone + 1;
+          final t = band.demo.t + 0.5;
+          band.drawn.add(asked == 1 ? DrawnClench(t) : DrawnGlance(t));
+        }
+      });
+      await c.start(rounds: 2);
+      await until(() => c.stage == DreamStage.done, 'the end', max: const Duration(seconds: 60));
+      expect([for (final r in c.last!.rounds) r.drifting], [true, false]);
+      expect(tone.played, [GestureKind.clench, GestureKind.glance]);
+      final marks = [
+        for (final l in File('${recordings.path}/${c.last!.recording}.markers.jsonl').readAsLinesSync())
+          if (_text(l).startsWith('hands-free')) _text(l),
+      ];
+      expect(marks, [
+        'hands-free: drifting (double clench)',
+        'hands-free: awake (look left then right)',
+        'hands-free: 2 gestures acted on, 0 ignored while probably asleep',
+      ]);
+      c.dispose();
+    });
+  });
+
+  group('nap coach', () {
+    test('a gesture marks a moment in the nap\'s recording', () async {
+      final band = GestureBand([const DrawnClench(100), const DrawnGlance(110)]);
+      final recordings = Directory('${root.path}/recordings');
+      final c = NapController(
+        finder: OneFinder(band),
+        sound: SilentNapSound.new,
+        recordingsDir: recordings,
+        timing: const NapTiming(
+          link: LinkTiming(contactFor: Duration(milliseconds: 5), settle: Duration.zero, reconnectWaits: [Duration(milliseconds: 5)]),
+          tick: Duration(milliseconds: 20),
+        ),
+        gestureTone: SilentGestureTone.new,
+      )..handsFree = calibrated;
+      await c.start(lengthMin: 20);
+      List<String> marks() {
+        final f = recordings.listSync().whereType<File>().where((f) => f.path.endsWith('.markers.jsonl')).firstOrNull;
+        return [for (final l in f?.readAsLinesSync() ?? const <String>[]) _text(l)];
+      }
+
+      await until(() => c.seconds > 120, '120 s');
+      await c.stop();
+      expect(marks().where((m) => m.startsWith('hands-free')), [
+        'hands-free: moment (double clench)',
+        'hands-free: moment (look left then right)',
+        'hands-free: 2 gestures acted on, 0 ignored while probably asleep',
+      ]);
       c.dispose();
     });
   });

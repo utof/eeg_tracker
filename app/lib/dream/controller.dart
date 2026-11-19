@@ -10,6 +10,11 @@
 // seconds give the eyes-closed baseline. RoundPlan (rounds.dart) says when to ask; VoiceGate (voice.dart) when an
 // answer is over.
 //
+// Hands-free (DECISIONS 244-246): with the owner's switch on, "were you drifting?" can be answered without a tap: a
+// double clench is Drifting (a nod), a look left then right is Awake (a shake of the head); at any other time either
+// gesture marks a moment. Off while the drift-off detector says probably asleep, except while the question waits
+// for its answer: the question has just woken you.
+//
 // Time: seconds after lights off are the larger of the samples received (holes held at their length) and the
 // clock, so a test can stream a session in a fraction of a second, and a headband out of range does not stop the
 // timers or the 45-minute cap.
@@ -22,11 +27,14 @@ import 'package:flutter/foundation.dart';
 
 import '../detectors/detectors.dart';
 import '../detectors/drift_off.dart';
+import '../detectors/gestures.dart';
 import '../feedback/features.dart' show fs;
+import '../handsfree/live.dart';
 import '../meditation/controller.dart' show gapPauseS, gapSamples;
 import '../recorder/chunk_writer.dart';
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
+import '../sound/gesture_tone.dart';
 import 'audio.dart';
 import 'band_link.dart';
 import 'rounds.dart';
@@ -78,6 +86,7 @@ class DreamController extends ChangeNotifier {
     this.recordingsDir,
     this.startNight,
     this.timing = const DreamTiming(),
+    this.gestureTone,
     DateTime Function()? clock,
     double Function()? random,
   }) : _makeSound = sound,
@@ -87,6 +96,12 @@ class DreamController extends ChangeNotifier {
   final HeadbandFinder finder;
   final DreamSound Function() _makeSound;
   final Mic mic;
+
+  /// The hands-free confirmation tone (null: none).
+  final GestureTone Function()? gestureTone;
+
+  /// The owner's calibrated gestures while the hands-free switch is on (set by the screen); null: off.
+  GestureSettings? handsFree;
 
   /// Where sessions and your prompts are kept (null: nothing saved, the tones play).
   DreamStore? store;
@@ -200,6 +215,7 @@ class DreamController extends ChangeNotifier {
       _plan = RoundPlan(rounds: rounds, firstTimerS: dreamFallbackS(earlierLatenciesMin(earlier), _random()), random: _random);
       _openWriter(link.name);
       _seen = Detectors(onSecond: _onSecond);
+      _listen(_seen!);
       _drift = DriftOff(0); // lights off: the first sample
       _lightsOffAt = _now();
       await link.startSignal();
@@ -236,6 +252,7 @@ class DreamController extends ChangeNotifier {
     _recording = null;
     _seen = null;
     _drift = null;
+    _hands = null;
     _plan = null;
     _lightsOffAt = null;
     _rounds.clear();
@@ -309,6 +326,35 @@ class DreamController extends ChangeNotifier {
         w.close();
       } catch (_) {}
       _writer = null;
+    }
+  }
+
+  // ---- hands-free ----
+
+  HandsFree? _hands;
+
+  void _listen(Detectors seen) {
+    final s = handsFree;
+    if (s == null) return;
+    _hands = HandsFree(
+      s,
+      onGesture: _gesture,
+      tone: gestureTone?.call(),
+      asleep: () => stage != DreamStage.checking && _drift?.state == DriftState.asleep,
+    )..attach(seen);
+  }
+
+  /// While "were you drifting?" waits: a double clench answers Drifting, a look left then right Awake. Otherwise a
+  /// moment.
+  void _gesture(GestureKind kind) {
+    if (_ended) return;
+    final t = _tap;
+    if (stage == DreamStage.checking && t != null && !t.isCompleted) {
+      final yes = kind == GestureKind.clench;
+      _mark('hands-free: ${yes ? 'drifting' : 'awake'} (${gestureWord(kind)})');
+      drifting(yes);
+    } else {
+      _mark('hands-free: moment (${gestureWord(kind)})');
     }
   }
 
@@ -527,6 +573,8 @@ class DreamController extends ChangeNotifier {
       _sound?.wake();
       await Future<void>.delayed(timing.wakeRingOut);
     }
+    final h = _hands;
+    if (h != null) _mark('hands-free: ${h.heard} gestures acted on, ${h.ignoredAsleep} ignored while probably asleep');
     _mark('dream catcher: end ($why)');
     _seen?.finish();
     _closeWriter();

@@ -10,6 +10,9 @@
 // always ends the nap, so it works on the timer alone when the model is too slow or the signal is lost, and the
 // screen says so. The night recorder's service is never touched (row 177).
 //
+// Hands-free (DECISIONS 244-246): with the owner's switch on, a double clench or a look left then right marks a
+// moment in the nap's recording, with a soft tone; never while the drift-off detector says probably asleep.
+//
 // Time: seconds after lights off are the larger of the samples received (holes held at their length) and the clock,
 // so a test can stream a nap in a fraction of a second, and a headband out of range does not stop the timer.
 import 'dart:async';
@@ -21,13 +24,16 @@ import 'package:flutter/foundation.dart';
 
 import '../detectors/detectors.dart';
 import '../detectors/drift_off.dart';
+import '../detectors/gestures.dart';
 import '../dream/band_link.dart';
 import '../feedback/features.dart' show fs;
+import '../handsfree/live.dart';
 import '../meditation/controller.dart' show gapPauseS, gapSamples;
 import '../recorder/chunk_writer.dart';
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
 import '../sleep/live_stager.dart';
+import '../sound/gesture_tone.dart';
 import '../sleep/periods.dart' show gapStage;
 import 'audio.dart';
 import 'rules.dart';
@@ -85,12 +91,20 @@ class NapController extends ChangeNotifier {
     this.mayRunModel,
     this.scale = scaleInBackground,
     this.timing = const NapTiming(),
+    this.gestureTone,
     DateTime Function()? clock,
   }) : _makeSound = sound,
        _now = clock ?? DateTime.now;
 
   final HeadbandFinder finder;
   final NapSound Function() _makeSound;
+
+  /// The hands-free confirmation tone (null: none).
+  final GestureTone Function()? gestureTone;
+
+  /// The owner's calibrated gestures while the hands-free switch is on (set by the screen); null: off.
+  GestureSettings? handsFree;
+  HandsFree? _hands;
 
   /// The sleep model for a session (null: the timer alone, e.g. the app's folder is unknown).
   LiveModel Function()? model;
@@ -217,6 +231,15 @@ class NapController extends ChangeNotifier {
       if (_ended) return await _release();
       _openWriter(link.name);
       _seen = Detectors(onSecond: _onSecond);
+      final hf = handsFree;
+      if (hf != null) {
+        _hands = HandsFree(
+          hf,
+          onGesture: (k) => _ended ? null : _mark('hands-free: moment (${gestureWord(k)})'),
+          tone: gestureTone?.call(),
+          asleep: () => _drift?.state == DriftState.asleep,
+        )..attach(_seen!);
+      }
       _drift = DriftOff(0); // lights off: the first sample
       _rules = NapRules(lengthS: lengthMin * 60);
       final m = model;
@@ -267,6 +290,7 @@ class NapController extends ChangeNotifier {
     _writer = null;
     _recording = null;
     _seen = null;
+    _hands = null;
     _drift = null;
     _stager = null;
     _rules = null;
@@ -494,6 +518,8 @@ class NapController extends ChangeNotifier {
     }
     end = why;
     final endS = _t();
+    final h = _hands;
+    if (h != null) _mark('hands-free: ${h.heard} gestures acted on, ${h.ignoredAsleep} ignored while probably asleep');
     _mark('nap coach: end (${why.name})');
     _seen?.finish();
     _closeWriter();
