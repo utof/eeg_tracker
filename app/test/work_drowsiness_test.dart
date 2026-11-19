@@ -153,6 +153,22 @@ void main() {
     expect(d.baseline!.alpha, closeTo(10, 1e-9), reason: 'the closed-eyes epoch stayed out of the baseline');
   });
 
+  test('after the baseline, the eyes-closed line is the geometric middle of open and closed alpha, at least 2x', () {
+    // the owner's check-in: eyes closed gave 2.5x the eyes-open alpha; 3x alone would never see his closed eyes
+    final d = WorkDrowsiness(closedAlpha: 25);
+    feed(d, cal * ep, blinkEvery: 10, moveEvery: 7);
+    feed(d, ep, alpha: 22, theta: 6, sem: 20);
+    expect(d.epochs.last.eyesClosed, isTrue, reason: 'line max(2 x 10, sqrt(10 x 25)) = 20');
+    final plain = WorkDrowsiness();
+    feed(plain, cal * ep, blinkEvery: 10, moveEvery: 7);
+    feed(plain, ep, alpha: 22, theta: 6, sem: 20);
+    expect(plain.epochs.last.eyesClosed, isFalse, reason: 'without the minute the line is 3x');
+    final strong = WorkDrowsiness(closedAlpha: 160);
+    feed(strong, cal * ep, blinkEvery: 10, moveEvery: 7);
+    feed(strong, ep, alpha: 35, theta: 6, sem: 20);
+    expect(strong.epochs.last.eyesClosed, isFalse, reason: 'sqrt(10 x 160) = 40');
+  });
+
   test('the input of one detector second: back alpha and theta of the usable channels, T3-T4 slow power', () {
     final s = Second(3)
       ..alpha[0] = 10

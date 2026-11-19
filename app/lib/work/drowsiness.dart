@@ -10,8 +10,9 @@
 //   - clean seconds: a back channel usable, no movement, no muscle (jaw, talking, chewing), no blink, no hole; under
 //     10 of them and the epoch is not scored ("noisy"); alpha is the median over them;
 //   - eye events: blinks and sideways eye movements per 30 seconds without a hole or movement (at least 20 of them);
-//   - eyes closed: alpha 3 times the baseline (or half your eyes-closed minute's alpha) with no blink and at most one
-//     sideways eye movement in 30 s; not scored (closed eyes raise alpha without drowsiness), shown as "eyes closed";
+//   - eyes closed: alpha 3 times the baseline (with the eyes-closed minute: the geometric middle of the baseline and
+//     its alpha, at least 2 times) with no blink and at most one sideways eye movement in 30 s; not scored (closed
+//     eyes raise alpha without drowsiness), shown as "eyes closed";
 //   - after 1 minute of settling in, the next 6 scored epochs (3 minutes) are the baseline (medians); after it each
 //     epoch's index is the mean of a = log2(alpha / baseline) and still = log2((baseline events + 1) / (events + 1)),
 //     each clipped to -2..3; with alpha under its baseline the index stays at 0.25 at most (still eyes alone may be
@@ -36,7 +37,7 @@ abstract final class WorkRule {
   static const double clipLo = -2, clipHi = 3;
 
   /// Eyes closed: alpha this many times the eyes-open baseline, or this share of the eyes-closed minute's alpha.
-  static const double closedX = 3, closedOfCal = 0.5;
+  static const double closedX = 3, closedOfCal = 0.5, closedMinX = 2;
   static const int closedMaxBlinks = 0, closedMaxEyeMoves = 1;
 
   /// "Eyes closed" on screen when this many of the last 10 epochs were.
@@ -335,14 +336,14 @@ class WorkDrowsiness {
     e.index = index;
   }
 
+  /// Alpha over this is closed eyes (with no blink and at most one glance): before the baseline half the eyes-closed
+  /// minute's alpha (nothing without it); after it 3x the baseline, or with the minute the geometric middle of the
+  /// two, at least 2x (the owner's eyes-closed alpha was only 2.5x his eyes-open alpha).
   double _closedLine() {
     final cal = closedAlpha, b = baseline;
-    final lines = [
-      if (cal != null && cal > 0) WorkRule.closedOfCal * cal,
-      if (b != null) WorkRule.closedX * b.alpha,
-    ];
-    if (lines.isEmpty) return double.infinity; // nothing to compare with yet
-    return lines.reduce(math.max);
+    if (b == null) return cal != null && cal > 0 ? WorkRule.closedOfCal * cal : double.infinity;
+    if (cal == null || cal <= b.alpha) return WorkRule.closedX * b.alpha;
+    return math.max(WorkRule.closedMinX * b.alpha, math.sqrt(b.alpha * cal));
   }
 
   void _level() {

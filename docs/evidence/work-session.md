@@ -50,8 +50,9 @@ recorded morning the level rose 8 minutes before the sleep model saw the owner d
 - Your baseline: after 1 minute of settling in, the medians of the next 3 minutes. The index is the mean of alpha
   against it and eye stillness against it (both on a log2 scale); the level is the median of the last 5 minutes
   (needs 3 readable minutes): under 0.5 alert, from 0.5 getting drowsy, from 1.0 drowsy.
-- Closed eyes are told apart by alpha 3 times the baseline (or half that of the optional eyes-closed minute) with
-  no blink and at most one glance in 30 seconds; they are left out of the level.
+- Closed eyes are told apart by alpha 3 times the baseline with no blink and at most one glance in 30 seconds; with
+  the optional eyes-closed minute, the line is halfway (geometrically) between your open and closed alpha, at least 2
+  times (the owner's closed eyes gave only 2.5 times his open-eye alpha). They are left out of the level.
 - Hints, the laptop's break-hint rules: after 60 minutes worn, plus 15 minutes for each hint no break followed; or
   when the level read getting drowsy or more in 8 of the last 12 half minutes. At most 4 a day (04:00 to 04:00),
   45 minutes apart, none 23:00-08:00; Snooze brings one back 20 minutes later. A soft chime and the words on the
