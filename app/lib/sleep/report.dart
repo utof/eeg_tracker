@@ -11,11 +11,10 @@ import 'drift.dart';
 import 'extras.dart';
 import 'periods.dart';
 
-/// Of the report file; a report of another version is rebuilt (the laptop's rule). 2: adds `extras` (jaw,
-/// movement and signal quality from the shared detectors), so older nights are scored again once. Since
-/// 2026-11-19 also `drift_off` (drift.dart), added without a new version: a version-2 report without it is rebuilt.
-/// Also since 2026-11-19 `wearer_signal` ("Was this you?", wearer/check.dart), added without a rebuild: an older
-/// night is simply not part of that check; and `wearer`, the owner's answer, which a rebuilt report keeps.
+/// Of the report file. 2: adds `extras` (jaw, movement and signal quality from the shared detectors). Since
+/// 2026-11-19 also `drift_off` (drift.dart) and `wearer_signal` ("Was this you?", wearer/check.dart), added without a
+/// new version; and `wearer`, the owner's answer, which a rebuilt report keeps. On the phone a report of an older
+/// version is kept as it is and offers "Score again" (DECISIONS row 580; the laptop rebuilds it).
 const int reportVersion = 2;
 const String reportNote = 'first guess; the scorer is not yet validated on this headband';
 
@@ -305,27 +304,57 @@ class NightReportStore {
     tmp.renameSync(fileFor(name).path);
   }
 
-  /// Every readable report, newest night first.
+  /// Reports read before, by path: kept while the file's size and times stay the same (DECISIONS row 584).
+  final Map<String, ({int bytes, int modifiedUs, int changedUs, SleepReport? report})> _known = {};
+
+  /// Every readable report, newest night first. Only reports that changed since the last call are read again.
   List<SleepReport> all() {
     if (!dir.existsSync()) return const [];
     final out = <SleepReport>[];
+    final seen = <String>{};
     for (final f in dir.listSync().whereType<File>()) {
       if (!f.path.endsWith('.report.json')) continue;
-      final r = SleepReport.read(f);
+      seen.add(f.path);
+      final st = f.statSync();
+      final k = _known[f.path];
+      SleepReport? r;
+      if (k != null &&
+          k.bytes == st.size &&
+          k.modifiedUs == st.modified.microsecondsSinceEpoch &&
+          k.changedUs == st.changed.microsecondsSinceEpoch) {
+        r = k.report;
+      } else {
+        r = SleepReport.read(f);
+        _known[f.path] = (
+          bytes: st.size,
+          modifiedUs: st.modified.microsecondsSinceEpoch,
+          changedUs: st.changed.microsecondsSinceEpoch,
+          report: r,
+        );
+      }
       if (r != null) out.add(r);
     }
+    _known.removeWhere((path, _) => !seen.contains(path));
     return out..sort((a, b) => b.nightOf.compareTo(a.nightOf));
   }
 }
 
-/// night_files.py `is_stale`: no report, another version, written before `drift_off` existed, a file gone or shrunk,
-/// or 10+ minutes of new samples. With [model] (the scorer's), also a scored night whose report names another
-/// model: since 2026-11-19 (two passes, DECISIONS row 263) the phone's older reports are scored again once.
-bool isStale(Map<String, int> files, SleepReport? report, {int newDataMinutes = 10, String? model}) {
-  if (report == null || report.json['version'] != reportVersion || !report.json.containsKey('drift_off')) return true;
-  if (model != null && report.json['scored'] == true && report.json['model'] != model) return true;
+/// Whether [report] no longer covers the night's recordings [files] (night_files.py `is_stale`'s data rule): no
+/// report (or one that cannot be read), a file gone or shrunk, or 10+ minutes of new samples. Only the night's data
+/// counts (DECISIONS row 580): a report of an older version or from an older scorer is kept as it is (until
+/// 2026-11-19 such nights were scored again after the update, row 263); [scoredByOlder] tells, and the report's page
+/// offers "Score again".
+bool isStale(Map<String, int> files, SleepReport? report, {int newDataMinutes = 10}) {
+  if (report == null) return true;
   final done = report.inputs;
   if (done.keys.any((f) => !files.containsKey(f)) || done.entries.any((e) => files[e.key]! < e.value)) return true;
   final newBytes = files.entries.fold(0, (s, e) => s + e.value - (done[e.key] ?? 0));
   return newBytes ~/ 20 >= newDataMinutes * 60 * 250;
 }
+
+/// Whether [report] came from an older scorer than [model] (the phone's): another report version, made before
+/// `drift_off` existed, or a scored night by another model.
+bool scoredByOlder(SleepReport report, {required String model}) =>
+    report.json['version'] != reportVersion ||
+    !report.json.containsKey('drift_off') ||
+    (report.scored && report.json['model'] != model);

@@ -74,6 +74,9 @@ class _SleepReportScreenState extends State<SleepReportScreen> {
           MaterialPageRoute<void>(builder: (_) => SleepReportScreen(scoring: scoring, nightOf: r.nightOf)),
         ),
         onRetry: () => scoring.retry(nightOf),
+        onRescore: report != null && scoring.scorer.olderScorer(report) && !scoring.busy
+            ? () => scoring.rescore(nightOf)
+            : null,
         onLicences: () => showLicensePage(context: context, applicationName: 'EEG Tracker'),
         wearer: w == null ? null : wearerLine(w, kindNight, nightOf),
         onWearerAnswer: _answer,
@@ -82,13 +85,22 @@ class _SleepReportScreenState extends State<SleepReportScreen> {
     },
   );
 
-  /// The smart alarm of the night, if it had one (a few small files; never breaks the report).
+  /// The alarm read for the report of this `built` time (the page rebuilds at every scoring step).
+  (String?, WakingUp?)? _alarmMemo;
+
+  /// The smart alarm of the night, if it had one (a few small files; never breaks the report); read once per report.
   WakingUp? _alarm(SleepReport r) {
+    final built = r.json['built'] as String?;
+    final memo = _alarmMemo;
+    if (memo != null && memo.$1 == built) return memo.$2;
+    WakingUp? found;
     try {
       final a = AlarmStore(alarmsDirFor(_dir)).forNight(r.dataStart, r.dataEnd);
-      return a == null ? null : wakingUp(a, r);
+      found = a == null ? null : wakingUp(a, r);
     } catch (_) {
-      return null;
+      found = null;
     }
+    _alarmMemo = (built, found);
+    return found;
   }
 }

@@ -72,6 +72,10 @@ class PhoneSessionKeeper implements SessionKeeper {
   /// One call at a time, in order: a release must not overtake the hold before it.
   static Future<void> _queue = Future<void>.value();
 
+  /// A session holds the keeper now (meditation, a check-in, a work session, ...): heavy work waits (the night's
+  /// sleep scoring, DECISIONS row 583).
+  static bool get held => _holder != null;
+
   @override
   void Function()? onStop;
 

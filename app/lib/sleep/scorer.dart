@@ -1,24 +1,43 @@
-// Scores finished nights on the phone after Stop (DECISIONS row 97): for each night whose report is missing or
-// out of date (night_files.py's rule), the recordings are joined and prepared in a background isolate, the three
-// AnySleep runs score it piece by piece, the stages are split into sleep periods and `files/nights/<date>.report.json`
-// is written. Beside them a second background isolate runs the shared detectors over the same samples for the
-// report's extras (jaw, movement, signal quality; extras.dart): little memory (the files are streamed), and done before the model
-// on the laptop; if it fails the report is still written, without extras. A `<date>.scoring` marker stays while it
-// works: if the app dies while scoring (memory, a kill), the marker is still there next time and that night waits
-// for "Try again" instead of crashing the app on every start.
+// Scores finished nights on the phone after Stop (DECISIONS rows 97 and 580-589). A night is scored when its report
+// is missing or its recordings changed (a file gone or shrunk, 10+ minutes of new samples), never again just because
+// the app or its scorer was updated: a report from an older scorer stays, and its page offers "Score again".
+//
+// Each go joins and prepares the recordings in a background isolate, then the three AnySleep runs score the night
+// piece by piece (ONNX Runtime on the plugin's own threads), then the shared detectors read the same samples in
+// another background isolate for the report's extras (jaw, movement, signal quality; extras.dart; if that fails the
+// report is still written, without extras), and `files/nights/<date>.report.json` is written. One step at a time, so
+// at most one heavy thing runs. After every model call the progress is saved (`files/cache/scoring/`, progress.dart):
+// a go that ends early (an app update, Android ending the app, a night that starts) goes on from there next time.
+//
+// A `<date>.scoring` marker stays while a go works. Still there at the next start: the app stopped while scoring,
+// and the night goes on by itself, unless [maxTries] goes in a row ended before a model call was saved (the app may
+// run out of memory preparing it): then it waits for "Try again" instead of stopping the app at every start. A
+// failure writes its reason into the marker and waits for "Try again" too.
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import '../recorder/nights.dart';
 import 'extras.dart';
 import 'model.dart';
 import 'prep.dart';
+import 'progress.dart';
 import 'report.dart';
 
 typedef PrepareFn = Future<ModelInput?> Function(List<File> recordings);
 
 Future<ModelInput?> prepareInBackground(List<File> recordings) =>
     Isolate.run(() => prepareNight(recordings), debugName: 'sleep-prep');
+
+/// Ends a go early on purpose ([SleepScorer.score]'s `between` throws it: a night or a session starts). Not a
+/// failure: the progress of the last model call stays, and the night goes on from there later.
+class ScoringPaused implements Exception {
+  const ScoringPaused(this.why);
+  final String why;
+
+  @override
+  String toString() => 'scoring paused: $why';
+}
 
 /// What the scorer is doing, for the screen.
 class ScoringState {
@@ -32,6 +51,9 @@ class ScoringState {
   final Map<String, String> blocked;
 }
 
+/// One night as the scorer sees it.
+typedef _Night = ({NightFiles night, bool wanted, String? blocked});
+
 class SleepScorer {
   SleepScorer({
     required this.recordingsDir,
@@ -42,8 +64,11 @@ class SleepScorer {
     this.prepare = prepareInBackground,
     this.see = seeInBackground,
     this.model = phoneModelId,
+    this.log,
+    ScoringProgressStore? progress,
     DateTime Function()? clock,
-  }) : _clock = clock ?? DateTime.now;
+  }) : progressStore = progress ?? ScoringProgressStore(scoringProgressDirFor(recordingsDir.path)),
+       _clock = clock ?? DateTime.now;
 
   final Directory recordingsDir;
   final NightReportStore store;
@@ -55,6 +80,12 @@ class SleepScorer {
   /// The detectors' pass for the extras.
   final SeeFn see;
   final String model;
+
+  /// One line when a go starts, pauses or ends (logcat on the phone: tag `flutter`).
+  final void Function(String line)? log;
+
+  /// The nights under way (progress.dart).
+  final ScoringProgressStore progressStore;
   final DateTime Function() _clock;
 
   static Map<String, int> inputsOf(NightFiles night) => {
@@ -62,99 +93,236 @@ class SleepScorer {
       if (f.existsSync()) f.uri.pathSegments.last: f.lengthSync(),
   };
 
-  /// Nights whose last scoring did not finish, with the reason written in the marker.
-  Map<String, String> blocked() {
+  /// The `.scoring` markers: night -> what it says.
+  Map<String, String> _markers() {
     final out = <String, String>{};
     if (!store.dir.existsSync()) return out;
     for (final f in store.dir.listSync().whereType<File>()) {
       final name = f.uri.pathSegments.last;
       if (!name.endsWith('.scoring')) continue;
+      final night = name.substring(0, name.length - 8);
       try {
-        out[name.substring(0, name.length - 8)] = f.readAsStringSync().trim();
+        out[night] = f.readAsStringSync().trim();
       } on FileSystemException {
-        out[name.substring(0, name.length - 8)] = '';
+        out[night] = '';
       }
     }
     return out;
   }
 
-  /// Nights with data whose report is missing or out of date, oldest first, except blocked ones.
-  List<NightFiles> due() {
-    final stuck = blocked();
-    return [
-      for (final n in nightsIn(recordingsDir).reversed)
-        if (n.recordings.isNotEmpty && !stuck.containsKey(n.name) && isStale(inputsOf(n), store.read(n.name), model: model)) n,
-    ];
+  /// Every night with recordings, oldest first: whether it needs scoring (no report, its recordings changed, a go
+  /// under way, or "Score again"), and why it waits for "Try again" if it does. With [tidy], a marker or progress
+  /// file left from something no longer needed (an older app's "score again after the update") is removed.
+  List<_Night> _nights({bool tidy = false}) {
+    final markers = _markers();
+    final out = <_Night>[];
+    for (final n in nightsIn(recordingsDir).reversed) {
+      if (n.recordings.isEmpty) continue;
+      final inputs = inputsOf(n);
+      final p = progressStore.read(n.name);
+      final going = p != null && p.matches(inputs, model);
+      final wanted = going || isStale(inputs, store.read(n.name));
+      final marker = markers[n.name];
+      String? stuck;
+      if (wanted && marker != null) {
+        if (marker.isNotEmpty) {
+          stuck = marker; // a failure: it would most likely fail again the same way
+        } else if (going && p.tries >= maxTries) {
+          stuck = ''; // stopped while scoring, again and again, before a model call was saved
+        }
+      }
+      if (tidy) {
+        if (p != null && !going) progressStore.delete(n.name);
+        if (marker != null && !wanted) store.markerFor(n.name).deleteSync();
+      }
+      out.add((night: n, wanted: wanted, blocked: stuck));
+    }
+    return out;
   }
 
-  /// Lets a blocked night be scored again.
+  /// Nights that need scoring but wait for "Try again", with the reason (empty: the app stopped while scoring).
+  Map<String, String> blocked() {
+    if (!store.dir.existsSync()) return {};
+    return {
+      for (final n in _nights())
+        if (n.blocked != null) n.night.name: n.blocked!,
+    };
+  }
+
+  /// Nights that need scoring, oldest first, except blocked ones. Removes markers and progress files nothing needs.
+  List<NightFiles> due() => [
+    for (final n in _nights(tidy: true))
+      if (n.wanted && n.blocked == null) n.night,
+  ];
+
+  /// "Try again": the night is scored once more, on from its last saved model call.
   void unblock(String night) {
+    final m = store.markerFor(night);
+    if (m.existsSync()) m.deleteSync();
+    final p = progressStore.read(night);
+    if (p != null && p.tries > 0) progressStore.write(night, p..tries = 0);
+  }
+
+  /// "Score again" for a night with a report (from an older scorer): scored once more from the start.
+  void request(String night) {
+    final n = nightsIn(recordingsDir).where((n) => n.name == night).firstOrNull;
+    if (n == null || n.recordings.isEmpty) return;
+    progressStore.write(night, NightProgress(inputs: inputsOf(n), model: model, requested: true));
     final m = store.markerFor(night);
     if (m.existsSync()) m.deleteSync();
   }
 
-  /// Scores [night] and writes its report. On a failure the marker keeps the reason and the error is rethrown.
-  Future<SleepReport> score(NightFiles night, {void Function(String step)? progress}) async {
-    final t0 = _clock();
+  /// Whether [r] came from an older scorer or report version (its page offers "Score again").
+  bool olderScorer(SleepReport r) => scoredByOlder(r, model: model);
+
+  /// Scores [night], on from its saved progress, and writes its report. [progress] gets each step's words;
+  /// [between] runs before each step and model call and may wait, or throw [ScoringPaused] to end this go early.
+  /// On a failure the marker keeps the reason and the error is rethrown.
+  Future<SleepReport> score(
+    NightFiles night, {
+    void Function(String step)? progress,
+    Future<void> Function()? between,
+  }) async {
+    final inputs = inputsOf(night);
     store.dir.createSync(recursive: true);
+    final saved = progressStore.read(night.name);
+    final p = saved != null && saved.matches(inputs, model) ? saved : NightProgress(inputs: inputs, model: model);
+    final triesBefore = p.tries;
+    p.tries += 1; // counted until a model call is saved: a go that keeps dying while preparing stops by itself
+    progressStore.write(night.name, p);
+    final callsBefore = p.progress?.calls ?? 0;
+    String calls() {
+      final c = p.calls(runCount);
+      return '${c.done} of ${c.of == 0 ? '?' : c.of} model calls';
+    }
+
+    log?.call(
+      'sleep scoring of ${night.name}: ${callsBefore == 0 && p.prepared == null ? 'starting' : 'going on at ${calls()}'}'
+      '${triesBefore > 0 ? ' (try ${triesBefore + 1})' : ''}',
+    );
     final marker = store.markerFor(night.name)..writeAsStringSync('', flush: true);
+    var since = _clock();
+    void keep() {
+      final now = _clock();
+      p.seconds += now.difference(since).inMicroseconds / 1e6;
+      since = now;
+      progressStore.write(night.name, p);
+    }
+
     try {
-      final inputs = inputsOf(night);
-      progress?.call('Preparing the recording');
-      // the detectors' pass runs beside the preparation and the model; it never fails the night
-      var seeing = true;
-      final seen = Future.sync(() => see(night.recordings)).then<(NightSeen?, String?)>(
-        (s) => (s, null),
-        onError: (Object e) => (null, '$e'),
-      ).whenComplete(() => seeing = false);
-      final input = await prepare(night.recordings);
-      Map<String, dynamic> rep;
-      if (input == null) {
-        await seen;
-        final start = night.start;
-        rep = buildReport(
-          nightOf: night.name,
-          built: _clock(),
-          scoringSeconds: _clock().difference(t0).inMilliseconds / 1000,
-          start: start,
-          lengthSeconds: night.end.difference(start).inMilliseconds / 1000,
-          inputs: inputs,
-          model: model,
-        );
-      } else {
-        final probs = await stageProbabilities(
-          input,
-          runCount,
-          openRun,
-          close: closeRun,
-          progress: (r, k, n) => progress?.call('Sleep model, run $r of $runCount${n > 1 ? ', part $k of $n' : ''}'),
-        );
-        final s = stagesOf(probs, input.gap);
-        if (seeing) progress?.call('Counting jaw, movement and signal');
-        final (found, whyNot) = await seen;
-        rep = buildReport(
-          nightOf: night.name,
-          built: _clock(),
-          scoringSeconds: _clock().difference(t0).inMilliseconds / 1000,
-          start: DateTime.fromMillisecondsSinceEpoch(input.startUnix * 1000),
-          lengthSeconds: input.recordedSamples / 250,
-          inputs: inputs,
-          model: model,
-          stages: s.stages,
-          confidence: s.confidence,
-          seen: found,
-          extrasError: whyNot,
-        );
-      }
+      await between?.call();
+      final rep = await _report(night, inputs, p, keep, progress, between);
       // the owner's "Was this you?" answer belongs to the night, not to this scoring: read just before the write
       final answered = store.read(night.name)?.json['wearer'];
       if (answered != null) rep['wearer'] = answered;
       store.write(rep);
       marker.deleteSync();
+      progressStore.delete(night.name);
+      log?.call(
+        'sleep scoring of ${night.name}: done, ${(p.progress?.calls ?? 0) - callsBefore} model calls in this go, '
+        '${p.seconds.round()} s of work in all',
+      );
       return SleepReport(rep);
+    } on ScoringPaused catch (e) {
+      if (p.tries > triesBefore) p.tries = triesBefore; // ended on purpose: not a try that failed
+      keep();
+      marker.deleteSync();
+      log?.call('sleep scoring of ${night.name}: paused at ${calls()} (${e.why})');
+      rethrow;
     } catch (e) {
+      try {
+        keep();
+      } catch (_) {}
       marker.writeAsStringSync('$e', flush: true);
       rethrow;
     }
   }
+
+  Future<Map<String, dynamic>> _report(
+    NightFiles night,
+    Map<String, int> inputs,
+    NightProgress p,
+    void Function() keep,
+    void Function(String step)? progress,
+    Future<void> Function()? between,
+  ) async {
+    var facts = p.prepared;
+    final m = p.progress;
+    if (facts != null && m != null && !m.fits(facts.gap.length, runCount, pieces(facts.gap.length).length)) {
+      p.progress = null; // made with other pieces or runs: start the model over
+    }
+    Float64List? probs;
+    if (facts != null && (p.progress?.done ?? false)) {
+      probs = meanProbabilities(p.progress!); // the model is done: no second preparation
+    } else {
+      final before = p.calls(runCount);
+      progress?.call(
+        before.done == 0 ? 'Preparing the recording' : 'Preparing the recording to go on from ${_pct(before.done, before.of)}',
+      );
+      final input = await prepare(night.recordings);
+      if (input != null) {
+        facts = (
+          startUnix: input.startUnix,
+          recordedSamples: input.recordedSamples,
+          missingSamples: input.missingSamples,
+          gap: input.gap,
+        );
+        if (p.prepared?.gap.length != input.epochs) p.progress = null;
+        p.prepared = facts;
+        keep();
+        final steps = modelCalls(input.epochs, runCount);
+        probs = await stageProbabilities(
+          input,
+          runCount,
+          openRun,
+          close: closeRun,
+          from: p.progress,
+          progress: (r, k, n) => progress?.call('Sleep model ${_pct((r - 1) * n + k - 1, steps)} (run $r of $runCount)'),
+          saved: (now) async {
+            p
+              ..progress = now
+              ..tries = 0;
+            keep();
+          },
+          between: between,
+        );
+      }
+    }
+    if (facts == null || probs == null) {
+      // under 5 minutes: an unscored report, as the laptop's
+      keep();
+      return buildReport(
+        nightOf: night.name,
+        built: _clock(),
+        scoringSeconds: p.seconds,
+        start: night.start,
+        lengthSeconds: night.end.difference(night.start).inMilliseconds / 1000,
+        inputs: inputs,
+        model: model,
+      );
+    }
+    final s = stagesOf(probs, facts.gap);
+    await between?.call();
+    progress?.call('Counting jaw, movement and signal');
+    final (found, whyNot) = await Future.sync(() => see(night.recordings)).then<(NightSeen?, String?)>(
+      (s) => (s, null),
+      onError: (Object e) => (null, '$e'),
+    );
+    keep();
+    return buildReport(
+      nightOf: night.name,
+      built: _clock(),
+      scoringSeconds: p.seconds,
+      start: DateTime.fromMillisecondsSinceEpoch(facts.startUnix * 1000),
+      lengthSeconds: facts.recordedSamples / 250,
+      inputs: inputs,
+      model: model,
+      stages: s.stages,
+      confidence: s.confidence,
+      seen: found,
+      extrasError: whyNot,
+    );
+  }
+
+  static String _pct(int done, int of) => '${of == 0 ? 0 : (100 * done / of).floor()} %';
 }

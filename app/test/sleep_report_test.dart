@@ -115,7 +115,7 @@ void main() {
       expect(DateTime.parse(isoLocal(t)).isAtSameMomentAs(t), isTrue);
     });
 
-    test('out of date: missing, another version, a file gone or shrunk, 10+ minutes new', () {
+    test('out of date by the data only: missing, a file gone or shrunk, 10+ minutes new', () {
       SleepReport report(Map<String, int> inputs, {int version = reportVersion}) => SleepReport({
         'version': version,
         'inputs': [for (final e in inputs.entries) {'file': e.key, 'bytes': e.value}],
@@ -124,18 +124,24 @@ void main() {
       const min = 60 * 250 * 20; // bytes per minute
       final files = {'a.f32': 60 * min, 'b.f32': 30 * min};
       expect(isStale(files, null), isTrue);
-      expect(isStale(files, report(files, version: 0)), isTrue);
       expect(isStale(files, report(files)), isFalse);
       expect(isStale(files, report({'a.f32': 60 * min, 'b.f32': 21 * min})), isFalse); // 9 min behind
       expect(isStale(files, report({'a.f32': 60 * min, 'b.f32': 20 * min})), isTrue);
       expect(isStale(files, report({'a.f32': 60 * min})), isTrue); // b.f32 is new
       expect(isStale(files, report({...files, 'gone.f32': 20})), isTrue);
-      expect(isStale(files, SleepReport({...report(files).json}..remove('drift_off'))), isTrue); // before drift_off
-      // a night the phone scored with another model (before the two passes) is scored once more; unscored ones not
+      // DECISIONS row 580: an older version, a report from before drift_off and another model are kept as they are
       final phone = SleepReport({...report(files).json, 'scored': true, 'model': phoneModelId});
-      expect(isStale(files, phone, model: phoneModelId), isFalse);
-      expect(isStale(files, SleepReport({...phone.json, 'model': 'old pieces'}), model: phoneModelId), isTrue);
-      expect(isStale(files, SleepReport({...phone.json, 'scored': false, 'model': null}), model: phoneModelId), isFalse);
+      final older = [
+        report(files, version: 0),
+        SleepReport({...phone.json}..remove('drift_off')),
+        SleepReport({...phone.json, 'model': 'old pieces'}),
+      ];
+      for (final r in older) {
+        expect(isStale(files, r), isFalse);
+        expect(scoredByOlder(r, model: phoneModelId), isTrue);
+      }
+      expect(scoredByOlder(phone, model: phoneModelId), isFalse);
+      expect(scoredByOlder(SleepReport({...phone.json, 'scored': false, 'model': null}), model: phoneModelId), isFalse);
     });
   });
 
@@ -191,7 +197,8 @@ void main() {
       expect(due.map((n) => n.name), ['2026-11-18']);
       final report = await scorer.score(due.single, progress: steps.add);
       expect(steps.first, 'Preparing the recording');
-      expect(steps.last, 'Sleep model, run 3 of 3');
+      expect(steps.sublist(1, 4), ['Sleep model 0 % (run 1 of 3)', 'Sleep model 33 % (run 2 of 3)', 'Sleep model 66 % (run 3 of 3)']);
+      expect(steps.last, 'Counting jaw, movement and signal'); // one step at a time: the detectors after the model
       expect(calls, [28, 28, 28]); // 14 minutes = 28 epochs, one piece, three runs
       expect(report.scored, isTrue);
       expect(report.periods.single.asleepMin, 10);

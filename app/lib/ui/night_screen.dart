@@ -22,6 +22,7 @@ import '../recorder/headband.dart';
 import '../recorder/nights.dart';
 import '../recorder/recorder_service.dart';
 import '../recorder/status.dart';
+import '../session_keeper.dart' show PhoneSessionKeeper;
 import '../share/control.dart';
 import '../share/isolate.dart' show shareAddress;
 import '../sleep/onnx_runs.dart';
@@ -326,6 +327,15 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     });
   }
 
+  /// Why the night's sleep scoring must not run now, or null.
+  String? _scoringStop({bool? running}) {
+    if (running ?? _running) return 'a night records';
+    if (dreamSessionRunning || soundSessionRunning || napSessionRunning || PhoneSessionKeeper.held) {
+      return 'a session runs';
+    }
+    return null;
+  }
+
   void _onScoring() {
     if (mounted) setState(() {});
   }
@@ -384,14 +394,17 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
         SleepScorer(
           recordingsDir: Directory(dir),
           store: NightReportStore(nightsDirFor(dir)),
-          openRun: (run) => OnnxStageRun.open(run, modelsDir: modelsDirFor(dir)),
+          openRun: (run) => OnnxStageRun.open(run, modelsDir: modelsDirFor(dir), threads: nightScoringThreads),
           closeRun: (run) => (run as OnnxStageRun).close(),
+          log: debugPrint,
         ),
+        stopFor: _scoringStop,
+        waitFor: () => _share.copying ? 'the laptop copies files' : null,
       )..addListener(_onScoring);
     }
-    // Last night is scored on the phone once it has ended (DECISIONS row 97); never while a night records, nor
-    // while a dream catcher session writes its recording.
-    if (!running && !dreamSessionRunning && !soundSessionRunning && !napSessionRunning) unawaited(_scoring?.run());
+    // Last night is scored on the phone once it has ended (DECISIONS rows 97 and 583): a short while after the app
+    // opens, never while a night records or a session runs; it goes on from where it stopped.
+    if (_scoringStop(running: running) == null) _scoring?.runSoon();
     final dreamLine = dir == null ? null : _lastDream(dir);
     final napLine = dir == null ? null : _lastNap(dir);
     final lucidLine = dir == null ? null : lucidNightLine(dir);
@@ -605,6 +618,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
         await _safe(() => Phone.openSettings('batteryOptimization'), false);
       }
       final dir = _dir ?? await _safe<String?>(Phone.recordingsDir, null);
+      _scoring?.halt(); // the night comes first: scoring stops at its next model call and goes on after Stop
       final plan = await _setAlarmClock(dir);
       await _share.beforeNight(); // the recorder serves during the night: the app lets go of the port
       final result = await startRecorderService(dir, alarm: plan);

@@ -49,6 +49,7 @@ class SleepReportView extends StatelessWidget {
     this.onAlarmInfo,
     this.onOpenNight,
     this.onRetry,
+    this.onRescore,
     this.onLicences,
     this.wearer,
     this.onWearerAnswer,
@@ -81,6 +82,9 @@ class SleepReportView extends StatelessWidget {
   final VoidCallback? onAlarmInfo;
   final void Function(SleepReport night)? onOpenNight;
   final VoidCallback? onRetry;
+
+  /// "Score again", offered when the report came from an older scorer (DECISIONS row 580); null otherwise.
+  final VoidCallback? onRescore;
   final VoidCallback? onLicences;
 
   /// "Was this you?" for this night (null: switched off or nothing to say), its answers and its "i".
@@ -119,7 +123,7 @@ class SleepReportView extends StatelessWidget {
             const SectionHeading('Past nights'),
             for (final o in others) _NightRow(report: o, onTap: onOpenNight == null ? null : () => onOpenNight!(o)),
           ],
-          if (r != null) _Footer(report: r, onLicences: onLicences),
+          if (r != null) _Footer(report: r, onLicences: onLicences, onRescore: scoringStep == null ? onRescore : null),
         ],
       ),
     );
@@ -416,9 +420,10 @@ class _NightRow extends StatelessWidget {
 }
 
 class _Footer extends StatelessWidget {
-  const _Footer({required this.report, required this.onLicences});
+  const _Footer({required this.report, required this.onLicences, this.onRescore});
   final SleepReport report;
   final VoidCallback? onLicences;
+  final VoidCallback? onRescore;
 
   @override
   Widget build(BuildContext context) {
@@ -438,6 +443,18 @@ class _Footer extends StatelessWidget {
             '${clock(report.dataEnd)}, with AnySleep (three runs averaged; MIT licence).',
             style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.4),
           ),
+          if (onRescore != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              'An earlier version of the app scored this night. It is never scored again by itself; scoring it '
+              'again takes a few minutes and gives the current model\'s stages.',
+              style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.4),
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(onPressed: onRescore, child: const Text('Score again')),
+            ),
+          ],
           if (onLicences != null)
             Align(
               alignment: Alignment.centerLeft,

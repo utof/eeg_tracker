@@ -14,6 +14,11 @@ import 'prep.dart' show epochSamples;
 
 const int anySleepRuns = 3;
 
+/// ONNX Runtime threads for scoring a finished night (DECISIONS row 583): two, and none of them waiting busily for
+/// work, so the phone keeps cores for its screen, Share on Wi-Fi and everything else; the live scorer of the night
+/// keeps the default four.
+const int nightScoringThreads = 2;
+
 String anySleepAsset(int run) => 'assets/models/anysleep-run$run.onnx';
 
 /// The models folder for the app's recordings folder.
@@ -48,13 +53,18 @@ class OnnxStageRun implements StageRun {
   OnnxStageRun._(this._session);
   final OrtSession _session;
 
-  /// Opens run [run] (1-3). Without the memory arena: ONNX Runtime then frees each piece's activations instead of
-  /// keeping the largest piece's worth for the session's lifetime.
-  static Future<OnnxStageRun> open(int run, {required Directory modelsDir}) async {
+  /// Opens run [run] (1-3) with [threads] for ONNX Runtime. Without the memory arena: ONNX Runtime then frees each
+  /// piece's activations instead of keeping the largest piece's worth for the session's lifetime. With fewer than 4
+  /// threads they also sleep between calls instead of spinning (`session.intra_op.allow_spinning` 0).
+  static Future<OnnxStageRun> open(int run, {required Directory modelsDir, int threads = 4}) async {
     final file = await modelFile(run, modelsDir);
     final session = await OnnxRuntime().createSession(
       file.path,
-      options: OrtSessionOptions(intraOpNumThreads: 4, useArena: false),
+      options: OrtSessionOptions(
+        intraOpNumThreads: threads,
+        useArena: false,
+        sessionConfigs: threads < 4 ? const {'session.intra_op.allow_spinning': '0'} : null,
+      ),
     );
     return OnnxStageRun._(session);
   }

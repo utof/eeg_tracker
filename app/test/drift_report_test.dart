@@ -269,7 +269,7 @@ void main() {
       expect(noDrift['extras'], isNotNull, reason: 'the extras do not depend on the detector');
     });
 
-    test('a report written before drift_off existed is rebuilt once', () {
+    test('a report written before drift_off existed is kept; it counts as from an older scorer (row 580)', () {
       final rep2 = SleepReport({
         'version': reportVersion,
         'night_of': '2026-11-18',
@@ -277,9 +277,11 @@ void main() {
           {'file': 'a.f32', 'bytes': 1000},
         ],
       });
-      expect(isStale(const {'a.f32': 1000}, rep2), isTrue);
+      expect(isStale(const {'a.f32': 1000}, rep2), isFalse);
+      expect(scoredByOlder(rep2, model: phoneModelId), isTrue);
       final now = SleepReport({...rep2.json, 'drift_off': null});
       expect(isStale(const {'a.f32': 1000}, now), isFalse);
+      expect(scoredByOlder(now, model: phoneModelId), isFalse);
     });
   });
 }
