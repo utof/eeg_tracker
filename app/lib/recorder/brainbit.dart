@@ -1,5 +1,8 @@
-// BrainBit (and BrainBit Black) through BrainBit's neurosdk2 plugin. Used only inside the recorder
-// isolate: the plugin has one instance per Flutter engine, so its objects never cross isolates.
+// BrainBit (and BrainBit Black) through BrainBit's neurosdk2 plugin: [SdkFinder]. The plugin has one instance
+// per Flutter engine, so its objects never cross isolates.
+//
+// Screens and the recorder ask for a `BrainBitFinder` (headband/finder.dart, exported here), which hands the work
+// to this SDK finder by default, or to our own connection when its switch is on (DECISIONS row 211).
 import 'dart:async';
 
 import 'package:neurosdk2/neurosdk2.dart';
@@ -7,9 +10,11 @@ import 'package:neurosdk2/neurosdk2.dart';
 import 'chunk_writer.dart';
 import 'headband.dart';
 
+export '../headband/finder.dart' show BrainBitFinder;
+
 const List<FSensorFamily> _families = [FSensorFamily.leBrainBit, FSensorFamily.leBrainBitBlack];
 
-class BrainBitFinder implements HeadbandFinder {
+class SdkFinder implements HeadbandFinder {
   /// The scanner that last found or reached the headband, and what it reported. The SDK appears to make
   /// sensors only for devices its scanner knows ("Sensor not founded" in the library), so a direct
   /// connection goes through this scanner, without starting a scan.
@@ -164,7 +169,7 @@ class _BrainBitBand implements Headband {
   @override
   Future<int> battery() => _sensor.batteryPower.value;
 
-  /// The scanner stays with [BrainBitFinder] for the next direct connection.
+  /// The scanner stays with [SdkFinder] for the next direct connection.
   @override
   Future<void> disconnectAndDispose() async {
     await _sensor.disconnect();

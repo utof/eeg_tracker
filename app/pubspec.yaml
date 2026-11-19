@@ -26,6 +26,10 @@ dependencies:
   # BSD-3-Clause, by llfbandit; on Android it uses the system's AudioRecord, nothing bundled.
   record: ^7.2.0
   qr: ^4.0.1
+  # Bluetooth LE for our own BrainBit connection (lib/headband/own/, behind a switch; DECISIONS rows 210-211).
+  # BSD-3-Clause, by Navideck. Pinned: lib/headband/own/universal_transport.dart names the version in the night's
+  # log. Its Linux part pulls `bluez` and `dbus` (MPL-2.0); neither is compiled into the Android app.
+  universal_ble: 3.3.0
 
 dev_dependencies:
   flutter_test:

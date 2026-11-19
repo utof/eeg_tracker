@@ -5,6 +5,7 @@ import '../recorder/contact.dart';
 import 'lights_off_view.dart';
 import '../share/control.dart' show ShareLine;
 import 'night_strip.dart';
+import 'own_ble_screen.dart' show OwnBleEntry;
 import 'parts.dart';
 import 'phone_checks.dart';
 import 'share_sheet.dart';
@@ -193,7 +194,8 @@ class NightView extends StatelessWidget {
           if (m.running) ...headband,
           const SectionHeading('Phone'),
           PhoneChecksList(checks: m.checks, onFix: onFix),
-          if (!m.running) ...headband,
+          // Between nights the Headband section also leads to the connection page (the probe and the switch).
+          if (!m.running) ...[...headband, const OwnBleEntry()],
           // A night being recorded is not finished, so Export waits for Stop (DECISIONS rows 56, 150); Share on
           // Wi-Fi is there during the night too (rows 220-229).
           if (m.share != null || (!m.running && (m.nightsOnPhone > 0 || m.exportLine != null))) ...[

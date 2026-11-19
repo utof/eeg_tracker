@@ -56,7 +56,7 @@ class BandId {
   }
 }
 
-/// One connected headband. Every call except the streams goes to the vendor SDK.
+/// One connected headband: BrainBit's SDK (brainbit.dart) or our own connection (headband/own/).
 abstract class Headband {
   String get name;
   String get address;
@@ -84,6 +84,20 @@ abstract class Headband {
 
   /// Only for a headband that is still in range (the laptop SDK crashed on a lost one).
   Future<void> disconnectAndDispose();
+}
+
+/// A line a headband wants in the night's `.log` (our own connection: its drops, reconnects, lost packets), and /
+/// or the news that the headband's packet numbers start again (a new stream inside the same connection object).
+class BandNote {
+  const BandNote(this.line, {this.newStream = false});
+  final String? line;
+  final bool newStream;
+}
+
+/// A headband that has such notes. BrainBit's SDK has none; our own connection does.
+abstract class BandNotes {
+  /// Notes made before anyone listened are kept and delivered to the first listener.
+  Stream<BandNote> get notes;
 }
 
 abstract class HeadbandFinder {
