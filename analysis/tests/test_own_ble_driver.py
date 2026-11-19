@@ -15,7 +15,6 @@ import struct
 import subprocess
 import sys
 import time
-import urllib.request
 from pathlib import Path
 
 import pytest
@@ -28,6 +27,7 @@ import bleak  # noqa: E402
 import battery  # noqa: E402
 import brainbit_ble as bb  # noqa: E402
 import ble_probe  # noqa: E402
+import recorder_poll  # noqa: E402
 import to_bdf  # noqa: E402
 
 VPC = 2.4 / 6 / 8388608  # volts per count at gain 6, by hand: 2.4 V reference / gain / 2^23
@@ -306,19 +306,6 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-def get(port: int, path: str) -> dict:
-    return json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/{path}", timeout=2).read())
-
-
-def hello(port: int) -> dict:
-    with urllib.request.urlopen(f"http://127.0.0.1:{port}/stream", timeout=3) as r:
-        for raw in r:
-            line = raw.decode().strip()
-            if line.startswith("data: "):
-                return json.loads(line[6:])
-    return {}
-
-
 @pytest.fixture(scope="module")
 def recorders(tmp_path_factory):
     base = tmp_path_factory.mktemp("recorders")
@@ -342,28 +329,7 @@ def recorders(tmp_path_factory):
         # the recorders must run without numpy: the system python, not this environment's
         procs[name] = subprocess.Popen(["python3", str(ROOT / "scripts" / args[0]), *args[1:], *where],
                                        env={**env, **extra}, stdout=log, stderr=subprocess.STDOUT)
-    seen: dict = {n: dict(status=[], state=None, hello=None, marker=False, errors_after_up=0) for n in ("sdk", "ble", "drop")}
-    deadline = time.time() + 70
-    while time.time() < deadline and any(p.poll() is None for p in procs.values()):
-        for name, s in seen.items():
-            if procs[name].poll() is not None:
-                continue
-            try:
-                st = get(ports[name], "state")
-            except OSError:
-                if s["status"]:
-                    s["errors_after_up"] += 1
-                continue
-            if not s["status"] or s["status"][-1] != st["status"]:
-                s["status"].append(st["status"])
-            if st["data"][0] and s["hello"] is None:
-                s["state"] = st; s["hello"] = hello(ports[name])
-                req = urllib.request.Request(f"http://127.0.0.1:{ports[name]}/marker", data=b"test-marker", method="POST")
-                s["marker"] = urllib.request.urlopen(req, timeout=2).read() == b"ok"
-        time.sleep(0.2)
-    for p in procs.values():
-        if p.poll() is None:
-            p.terminate(); p.wait(10)
+    seen = recorder_poll.watch(procs, ports, ("sdk", "ble", "drop"))
     out = {n: (base / f"{n}.out").read_text() for n in specs}
     return dict(dirs=dirs, seen=seen, rc={n: p.returncode for n, p in procs.items()}, out=out)
 
@@ -430,7 +396,7 @@ def test_ble_recorder_survives_a_drop_in_process(recorders):
     runs = to_bdf.runs(files[".f32"])
     assert len(runs) == 2, [(t, len(x)) for t, x in runs]  # the gap is found from the .idx arrival times
     gap = runs[1][0] - (runs[0][0] + len(runs[0][1]) / 250)
-    assert 2.0 < gap < 6.0, gap
+    assert 2.0 < gap < 7.5, gap  # away 2.5 s; tries at +1 s and +3 s after the drop, the next would be +8 s
 
 
 def test_probe_runs_on_the_fake_headband(recorders):
