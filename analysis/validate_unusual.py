@@ -7,17 +7,17 @@ whose day-to-day wobble is a planning value (below), not measured:
 - stable histories (nothing planted): cards per month once the card is on (after the silent 28 days), the share
   of days with a card, and the share of people who would see a card in their first 8 weeks (an average gap
   between false alarms says nothing about early ones; early-warning pass 2, Q1);
-- planted changes (shorter sleep, a cold-like week, low mood, slower reactions, a change in the headband's numbers
-  only): the share found (a card in the change's days or the day after that the same history without the change
-  does not have) and the median days from the change's first day to the card;
+- planted changes (shorter sleep, a cold-like week, low mood, slower reactions, less sharp days, slower reactions
+  in the day, a change in the headband's numbers only): the share found (a card in the change's days or the day
+  after that the same history without the change does not have) and the median days from the change's first day to the card;
 - each for the core numbers only (the card) and with the headband's numbers added (the "both ways" test), and for
   three rules: NightSignal's (one number, 2 days in a row), 3 days in a row, and the research's stricter variant
   (2 numbers together, 2 days in a row).
 
 Prints JSON. The made-up people: sleep 7 h 12 min +- 1 h a night (30 min longer on weekend mornings), sleepiness
 4 +- 1.3 of 9, mood 3.6 +- 0.7 of 5, tension 2.4 +- 0.8 of 5, reaction time 280 ms +- 7 %, alpha speed 9.8 +-
-0.25 Hz, alpha strength and the eyes-closed rise +- 30 % and 25 %, jaw muscle bursts 20 an hour +- 35 %; each day
-partly carries over from the day before (0.3-0.5) and odd days are commoner than a bell curve's (Student t, 5
+0.25 Hz, alpha strength and the eyes-closed rise +- 30 % and 25 %, jaw muscle bursts 20 an hour +- 35 %, sharp hours' day numbers (the mean of a day's ratings 3.4 +- 0.5 of 5 on
+70 % of days, the median of its reaction tests 290 ms +- 6 % on half the days); each day partly carries over from the day before (0.3-0.5) and odd days are commoner than a bell curve's (Student t, 5
 degrees of freedom); 15 % of nights and 30 % of check-ins missing, the reaction test on half the check-ins. The
 "noisier" person has 1.4 times the wobble and more missing days.
 """
@@ -53,6 +53,10 @@ class Profile:
             "mood": (3.6, 0.7, 0.5),
             "tension": (2.4, 0.8, 0.4),
             "reaction": (math.log(280.0), 0.07, 0.3),
+            # sharp hours' day numbers (DECISIONS 380; planning values): the mean of a day's 1-5 ratings (a mean
+            # of about 4 answers moves less than one rating) and the median of the day's reaction tests
+            "sharp": (3.4, 0.5, 0.4),
+            "dayrt": (math.log(290.0), 0.06, 0.3),
             "iaf": (9.8, 0.25, 0.3),
             "alpha": (math.log(30.0), 0.30, 0.3),
             "rise": (math.log(2.5), 0.25, 0.3),
@@ -63,6 +67,8 @@ class Profile:
     night_missing: float = 0.15
     checkin_missing: float = 0.30
     reaction_missing: float = 0.5  # of the check-ins
+    sharp_missing: float = 0.3  # days with no sharp-hours rating answered
+    dayrt_missing: float = 0.5  # days with no reaction test
     tail_df: float = 5.0
 
 
@@ -72,10 +78,14 @@ NOISIER = Profile(
     streams={k: (m, sd * 1.4, phi) for k, (m, sd, phi) in DEFAULT.streams.items()},
     night_missing=0.25,
     checkin_missing=0.45,
+    sharp_missing=0.45,
+    dayrt_missing=0.65,
 )
 
-LOG_STREAMS = {"reaction", "alpha", "rise", "jaw"}
+LOG_STREAMS = {"reaction", "dayrt", "alpha", "rise", "jaw"}
 RATINGS = {"kss": (1, 9), "mood": (1, 5), "tension": (1, 5)}
+MEAN_RATINGS = {"sharp": (1, 5)}  # a mean of a day's ratings: kept in range, not rounded
+DAY_STREAMS = ("dayrt", "sharp")  # drawn after everything else, so the older numbers of a person never move
 NIGHT_STREAMS = {"asleep", "jaw"}
 
 
@@ -102,6 +112,9 @@ CHANGES: tuple[Change, ...] = (
     Change("slower reactions (+15 %, 5 days)", 0, 5, {"reaction": math.log(1.15)}),
     Change("headband only (alpha speed +0.5 Hz, alpha strength x1.6; 5 days)", 0, 5,
            {"iaf": 0.5, "alpha": math.log(1.6)}),
+    # after the others: the draws of the changes before them stay as they were
+    Change("less sharp (-1 point, 5 days)", 0, 5, {"sharp": -1.0}),
+    Change("slower in the day (+15 %, 5 days)", 0, 5, {"dayrt": math.log(1.15)}),
 )
 
 RULES = {
@@ -118,12 +131,18 @@ def synthetic_history(
     person, missing days and odd days with or without a planted change."""
     rng = np.random.default_rng(seed)
     scale_t = math.sqrt(profile.tail_df / (profile.tail_df - 2))
-    noise = {k: rng.standard_t(profile.tail_df, days) / scale_t for k in sorted(profile.streams)}
+    older = [k for k in sorted(profile.streams) if k not in DAY_STREAMS]
+    noise = {k: rng.standard_t(profile.tail_df, days) / scale_t for k in older}
     night_seen = rng.random(days) >= profile.night_missing
     checkin_seen = rng.random(days) >= profile.checkin_missing
     reaction_seen = checkin_seen & (rng.random(days) >= profile.reaction_missing)
     seen = {k: (night_seen if k in NIGHT_STREAMS else reaction_seen if k == "reaction" else checkin_seen)
-            for k in profile.streams}
+            for k in older}
+    # sharp hours' day numbers last (DECISIONS 380): the older numbers are the same people as before they existed
+    for k, missing in (("dayrt", profile.dayrt_missing), ("sharp", profile.sharp_missing)):
+        if k in profile.streams:
+            noise[k] = rng.standard_t(profile.tail_df, days) / scale_t
+            seen[k] = rng.random(days) >= missing
     out: dict[str, dict[str, float]] = {}
     for k in sorted(profile.streams):
         mean, sd, phi = profile.streams[k]
@@ -141,6 +160,9 @@ def synthetic_history(
             if k in RATINGS:
                 lo, hi = RATINGS[k]
                 v = float(min(hi, max(lo, round(v))))
+            if k in MEAN_RATINGS:
+                lo, hi = MEAN_RATINGS[k]
+                v = float(min(hi, max(lo, v)))
             if seen[k][t]:
                 series[day] = v
         out[k] = series

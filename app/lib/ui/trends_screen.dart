@@ -34,8 +34,11 @@ TrendInputs readTrendInputs(String recordingsDir) => (
 
 /// Today's "Unusual for you" card from the app's folders; while it is on, the back-test log gets the finished days
 /// it does not have yet (DECISIONS 290-299). Also run off the night screen's thread for its one line.
-UnusualCard unusualToday(String recordingsDir, DateTime now) =>
-    refreshUnusual(UnusualStore(unusualDirFor(recordingsDir)), dailySeries(readTrendInputs(recordingsDir)), now);
+UnusualCard unusualToday(String recordingsDir, DateTime now) => refreshUnusual(
+  UnusualStore(unusualDirFor(recordingsDir)),
+  dailySeries(readTrendInputs(recordingsDir), extra: readSharpDayNumbers(recordingsDir)),
+  now,
+);
 
 class TrendsScreen extends StatefulWidget {
   const TrendsScreen({super.key, this.recordingsDir});
@@ -64,12 +67,13 @@ class _TrendsScreenState extends State<TrendsScreen> {
       if (dir == null) throw StateError("the app's folder is not known");
       final now = DateTime.now();
       final inputs = readTrendInputs(dir);
-      final m = buildTrends(inputs, now, extra: readSharpDayNumbers(dir));
+      final sharpDays = readSharpDayNumbers(dir);
+      final m = buildTrends(inputs, now, extra: sharpDays);
       final line = experimentLine(currentExperiment(dir, now));
       UnusualCard? unusual;
       String? unusualError;
       try {
-        unusual = refreshUnusual(_unusualStore(dir), dailySeries(inputs), now);
+        unusual = refreshUnusual(_unusualStore(dir), dailySeries(inputs, extra: sharpDays), now);
       } catch (e) {
         unusualError = '$e'; // the card is never worth breaking the trends
       }
@@ -123,12 +127,14 @@ class _TrendsScreenState extends State<TrendsScreen> {
         onInfo: () => showEvidence(context, 'trends'),
         experimentLine: _experiment,
         onExperiments: () async {
-          await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ExperimentsScreen(recordingsDir: _dir)));
+          await Navigator.of(context)
+              .push(MaterialPageRoute<void>(builder: (_) => ExperimentsScreen(recordingsDir: _dir)));
           await _load();
         },
         sharpLine: _sharp,
         onSharp: () async {
-          await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SharpHoursScreen(recordingsDir: _dir)));
+          await Navigator.of(context)
+              .push(MaterialPageRoute<void>(builder: (_) => SharpHoursScreen(recordingsDir: _dir)));
           await _load();
         },
       );

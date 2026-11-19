@@ -8,8 +8,8 @@
 //   - the usual is the median of the 28 days with a value that end a week before the day judged (a change that
 //     starts slowly does not drag it along), and a number is judged from 14 such days;
 //   - "beyond" is the trends page's arrow rule (usual.dart): 2 robust spreads AND the smallest change that matters;
-//   - one direction where the research names one (sleepier, lower mood, more tense, slower), both ways for sleep
-//     length and for the headband's signal numbers;
+//   - one direction where the research names one (sleepier, lower mood, more tense, slower; sharp hours' day numbers:
+//     less sharp, slower), both ways for sleep length and for the headband's signal numbers;
 //   - the headband's signal numbers (alpha speed, alpha strength, eyes-closed rise, jaw muscle bursts) are judged
 //     and logged but never in the card: the back-test (analysis/validate_unusual.py) found they would more than
 //     double the false cards, and no study shows they warn of anything;
@@ -42,6 +42,9 @@ const List<UnusualStream> unusualStreams = [
   UnusualStream('mood', Scale.rating, Way.down, StreamGroup.core),
   UnusualStream('tension', Scale.rating, Way.up, StreamGroup.core),
   UnusualStream('reaction', Scale.reaction, Way.up, StreamGroup.core),
+  // sharp hours' day numbers (DECISIONS row 380): strain one way only, less sharp and slower
+  UnusualStream('sharp', Scale.meanRating, Way.down, StreamGroup.core),
+  UnusualStream('dayrt', Scale.reaction, Way.up, StreamGroup.core),
   UnusualStream('iaf', Scale.plain, Way.both, StreamGroup.headband),
   UnusualStream('alpha', Scale.log, Way.both, StreamGroup.headband),
   UnusualStream('rise', Scale.log, Way.both, StreamGroup.headband),
@@ -293,8 +296,7 @@ StreamDay _streamDay(
     Arrow.down => StreamState.down,
     Arrow.none => StreamState.inRange,
   };
-  sd.off =
-      a != Arrow.none && (s.way == Way.both || (s.way == Way.up) == (a == Arrow.up));
+  sd.off = a != Arrow.none && (s.way == Way.both || (s.way == Way.up) == (a == Arrow.up));
   return sd;
 }
 

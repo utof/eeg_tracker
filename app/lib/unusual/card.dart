@@ -134,13 +134,30 @@ final Map<String, _Words> _words = {
     'slower reactions than usual',
     'quicker reactions than usual',
   ),
+  'sharp': _Words(
+    'sharpness in the day',
+    (size, when) => 'You have felt sharper than usual $when ($size).',
+    (size, when) => 'You have felt less sharp than usual $when ($size).',
+    'days',
+    'sharper than usual',
+    'less sharp than usual',
+  ),
+  'dayrt': _Words(
+    'reaction time in the day',
+    (size, when) => 'Your reaction time in the day has been slower than usual $when ($size).',
+    (size, when) => 'Your reaction time in the day has been quicker than usual $when ($size).',
+    'days',
+    'slower reactions in the day than usual',
+    'quicker reactions in the day than usual',
+  ),
 };
 
 String _size(String id, double mean, double usual) => switch (id) {
   'asleep' => _hm((mean - usual).abs()),
   'kss' => '${_of(mean, 9)}; usual ${_of(usual, 9)}',
   'mood' || 'tension' => '${_of(mean, 5)}; usual ${_of(usual, 5)}',
-  'reaction' => '${mean.round()} ms; usual ${usual.round()} ms',
+  'reaction' || 'dayrt' => '${mean.round()} ms; usual ${usual.round()} ms',
+  'sharp' => '${mean.toStringAsFixed(1)} of 5; usual ${usual.toStringAsFixed(1)} of 5',
   _ => '',
 };
 
@@ -195,7 +212,8 @@ UnusualCard unusualCard(
       kind: CardKind.paused,
       headline: 'Paused until ${dayLabel(until)}.',
       pausedUntil: until,
-      status: 'After feeling ill, your numbers can take a week or two to settle, so these days stay out of your '
+      status:
+          'After feeling ill, your numbers can take a week or two to settle, so these days stay out of your '
           'usual.',
     );
   }
@@ -221,9 +239,7 @@ UnusualCard _alert(
   Map<String, DayVerdict> byDay,
   Map<String, Set<String>> causes,
 ) {
-  final sentences = [
-    for (final id in v.onCore) ?cardSentence(id, v, series[id] ?? const {}, byDay),
-  ];
+  final sentences = [for (final id in v.onCore) ?cardSentence(id, v, series[id] ?? const {}, byDay)];
   if (sentences.isEmpty) return _quiet(verdicts);
   final episode = _episodeStart(verdicts);
   final names = [for (final id in v.onCore) ?_words[id]?.name];
@@ -233,7 +249,8 @@ UnusualCard _alert(
     lines: sentences.sublist(1),
     episode: episode,
     causes: causes[episode] ?? const {},
-    status: 'Based on your ${_join(names)}, ${names.length == 1 ? '' : 'each '}against your usual of the 28 days that '
+    status:
+        'Based on your ${_join(names)}, ${names.length == 1 ? '' : 'each '}against your usual of the 28 days that '
         'end a week before.',
     mainLine: 'Unusual for you: ${_lowerFirst(sentences.first)}',
   );
