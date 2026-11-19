@@ -329,6 +329,7 @@ void main() {
       put('sound-states/2026-11-20-230000.sound.json', jsonEncode({'recording': null}));
       put('sound-states/2026-11-21-000000.sound.json', jsonEncode({'recording': '2026-11-21-000000'}));
       put('naps/2026-11-20-150000.nap.json', '{}');
+      put('work-sessions/2026-11-20-093000.work.json', '{}');
       put(
         'lucid/mornings/2026-11-21-070000.json',
         jsonEncode({
@@ -367,6 +368,7 @@ void main() {
       expect(seen['replay'], 'Switched on.');
       expect(seen['lucid'], 'Lucid dream questions answered on Sat 21 Nov.');
       expect(seen['diy-board'], 'The board recorded 10 min on this phone, the newest on Sat 21 Nov.');
+      expect(seen['work'], 'A work session saved on Fri 20 Nov.');
     });
 
     test(
