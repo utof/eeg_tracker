@@ -319,6 +319,45 @@ Nothing of this has run on the phone yet; the numbers were checked against the l
    after N more days".
 5. Tell the assistant what felt wrong or slow. If the app closed or stalled, note at which step.
 
+## Unusual for you (on unless you switch it off)
+
+The assistant's proposal from the research, not one of your own wishes: switch it off with the switch beside its
+heading on the Trends page, and nothing more is noted. It compares your sleep length, sleepiness, mood, tension and
+reaction time with your own usual (the middle of the 28 days with a number that end a week before). When one of
+them has been well outside it on 2 days in a row, the Trends page leads with one sentence, such as "Your sleep has
+been 2 h shorter than usual for 2 nights", and the main screen's Morning section shows the same line. It says your
+numbers moved, not why: it often follows a late night, alcohol, travel, stress, hard exercise, a vaccine or the
+start of a cold, and it is never a diagnosis (DECISIONS rows 290-299; the **i** shows
+`docs/evidence/unusual-for-you.md`).
+
+- **Silent for the first 28 days with a number**: "Learning your usual: N of 28 days". Meanwhile it only notes what
+  it would have said; afterwards it tells you how often that was.
+- **No notifications**, and nothing while a night records. Sleep length counts both ways; the ratings and the
+  reaction test only the way that means strain. The headband's own numbers (alpha, the eyes-closed rise, jaw
+  bursts) are noted but never make a card: no study shows they warn of anything.
+- Under a card, **What might explain it?** chips are for your own record. **Feeling ill** pauses the card for two
+  weeks and keeps those days out of your usual (**Resume now** ends it). "Back in your usual range" follows a card
+  for 3 days.
+- On made-up people it gave about one false card every 6 weeks and found about 7 in 10 cold-like or low-mood weeks;
+  smaller changes, such as a cold's 20-40 minutes of lost sleep, are usually missed.
+
+Files, app-private, exported by Export data: `files/unusual/settings.json` (the switch), `events.jsonl` (switch,
+causes, resume) and `log.jsonl` (one line per finished day: what it said or would have said, with and without the
+headband's numbers; `docs/data-format.md`).
+
+### Owner step: nothing to do for 4 weeks, then one look (1 minute)
+
+Nothing of this has run on the phone yet, and it has never seen your numbers.
+
+1. Record nights and do the morning check-in as usual. Open **Trends** now and then: under "Unusual for you" the
+   count should climb ("Learning your usual: 5 of 28 days").
+2. After 28 days with a number it switches on. If a card appears, read it, tap what might explain it (or nothing),
+   and tell the assistant whether it matched how you felt and whether the words were calm enough.
+3. If it ever feels more worrying than useful, switch it off beside its heading, and say so: the assistant then
+   turns it off by default.
+4. Export data as usual: the log travels with it, and after a few months the laptop can count its cards against
+   your own days.
+
 ## Self-experiments (does this habit change that number, for you?)
 
 Everything on the Trends page is only "seen together". A self-experiment is the one way to test a habit: the app

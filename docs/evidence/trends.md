@@ -53,7 +53,8 @@ an EEG sleep-pressure number and next-day forecasts are weak, and no study shows
 - One forecast, tomorrow morning's sleepiness (half yesterday, half your 28-day mean), stays hidden until 60 days
   of ratings exist and it beats "same as yesterday" by at least 5 % over the last 60 days; then it is shown in
   words, with a range and its track record, and only after that morning's rating.
-- Planned: weeks of recovery after an illness kept out of "your usual".
+- "Unusual for you" (its own note) says when a number has been outside your usual on 2 days in a row; it keeps the
+  weeks after "feeling ill" out of its own usual.
 
 ## Sources
 
