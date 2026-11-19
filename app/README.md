@@ -262,6 +262,19 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    100 s and passed its hash check; two Russian and one English answer came out word for word, 0.38 s per second of
    audio (2.0-2.8 s an answer, the model already loaded), the room-hiss answer as "No words heard." in 0.2 s; the
    night scored again afterwards; the app was back to 154 MB (PSS) once the speech isolate had ended.
+12. **Connecting by one scan** (DECISIONS rows 530-539; 2026-11-20, the arm64 release APK on a 2-core AVD): on the
+   laptop `python3 scripts/phone_link.py --address 10.0.2.2 --phone-at http://127.0.0.1:28765` (the emulator reaches
+   the laptop at 10.0.2.2; `adb forward tcp:28765 tcp:8765` for the copy) prints the code's link under the QR code.
+   `adb shell am start '<the page's intent:// link>'` (what Chrome hands over) and `adb shell am start -a
+   android.intent.action.VIEW -d 'eegtracker://pair?h=10.0.2.2&p=8771&s=<code>&n=<name>'` both opened **Connect to
+   this laptop?** in the app's own task; **Not now** sent nothing; **Connect** said **Connected**, the laptop printed
+   "Paired" and copied (`_local/phone/link.json`, mode 600, with the phone's token), and its live pages answered from
+   the phone. **New code** on the sheet reached the laptop by itself within seconds ("The phone says it is at ..."),
+   and the copies went on with the new token; a restart of the app and **Start night** (the recorder's service then
+   serves) each told the laptop again; the laptop command run again copied from the remembered phone without a scan.
+   The first run found a bug the unit tests had missed: Dart sent the handshake chunked and Python's server read an
+   empty body ("The laptop said no"); fixed in `69f5e27`. Not checked here: Chrome opening the page (Chrome hung at
+   its first-run screen on the loaded laptop), a real camera, a VPN.
 
 The night of 2026-11-17 (58 recordings, 12.9 h) scored on the emulator in 99 s with a peak of 448 MB (PSS) and the
 laptop's stage on every scored epoch (two passes, 2026-11-19; the 1-hour pieces before took 69 s, peaked at 442 MB
