@@ -18,6 +18,7 @@ void main() {
       'sound-for-states',
       'self-experiments',
       'nap-coach',
+      'smart-alarm',
     ]) {
       final md = await rootBundle.loadString('assets/evidence/$name.md');
       expect(md, startsWith('# '), reason: name);
