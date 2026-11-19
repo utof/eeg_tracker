@@ -299,17 +299,25 @@ class MeditationController extends ChangeNotifier {
   bool _quiet = false;
   bool _disposed = false;
 
+  /// The number of the latest start: a start that Stop or a newer start overtook touches nothing of the session
+  /// (DECISIONS 450).
+  int _run = 0;
+  bool _live(int run) => run == _run && !_ended;
+
   /// Connects, checks contact, starts the sound and the calibration. Errors end in [Stage.failed]. With
   /// [checkStore] set, the replay check decides first whether this session is live or a replay.
   Future<void> start(Duration sessionLength, {SessionKind kind = SessionKind.meditation}) async {
     if (active) return;
     _reset(sessionLength);
+    final run = ++_run;
     this.kind = kind;
     silentLength = kind == SessionKind.meditation ? silentBlock : Duration.zero;
     _set(Stage.connecting, 'Looking for the headband.');
     try {
       await _readRoute();
-      await _prepareCheck(sessionLength);
+      if (!_live(run)) return;
+      await _prepareCheck(sessionLength, run);
+      if (!_live(run)) return;
       final link = BandLink(
         finder: finder,
         timing: timing.link,
@@ -320,25 +328,28 @@ class MeditationController extends ChangeNotifier {
       );
       _link = link;
       if (!await link.connect(onFound: (name) => _set(Stage.connecting, 'Found $name. Connecting.'))) {
-        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?');
+        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?', run);
       }
-      if (_ended) return await _release();
+      if (!_live(run)) return await link.close();
       _set(Stage.contact, 'Checking contact. Keep still for a few seconds.');
-      contact = await link.contact();
-      if (_ended) return await _release();
+      final ohms = await link.contact();
+      if (!_live(run)) return await link.close();
+      contact = ohms;
 
       SessionSound sound = kind == SessionKind.meditation ? MeditationSound(_makeSound()) : _makeAtSound();
+      String? note;
       try {
         await sound.start();
       } catch (e) {
-        soundNote = 'The sound did not start ($e). This session runs without sound.';
+        note = 'The sound did not start ($e). This session runs without sound.';
         sound = SilentSessionSound();
       }
-      _sound = sound;
-      if (_ended) {
+      if (!_live(run)) {
         await sound.stop();
-        return await _release();
+        return await link.close();
       }
+      soundNote = note;
+      _sound = sound;
 
       final engine = kind == SessionKind.alphaTheta ? AlphaThetaEngine() : null;
       final s = engine?.core ?? Session();
@@ -364,13 +375,17 @@ class MeditationController extends ChangeNotifier {
       calPhase = 'open';
       calSecondsLeft = Cal.openS.toInt();
       await link.startSignal();
+      if (!_live(run)) return await link.close(); // Stop came while the stream started
       _signalAt = _now();
       _ticker = Timer.periodic(timing.tick, (_) => _tick());
       _set(Stage.calibrating, '');
     } on TimeoutException catch (e) {
-      await _fail('The headband did not answer (${e.message ?? 'timeout'}). Switch it off and on, then try again.');
+      await _fail(
+        'The headband did not answer (${e.message ?? 'timeout'}). Switch it off and on, then try again.',
+        run,
+      );
     } catch (e) {
-      await _fail('Could not start: $e');
+      await _fail('Could not start: $e', run);
     }
   }
 
@@ -418,7 +433,7 @@ class MeditationController extends ChangeNotifier {
   /// With the check on: the next slot (the plan is frozen before the first randomised session) and, for a
   /// replay, the donors' control streams. A donor that cannot be read makes this session live instead; the
   /// record says so and the reveal counts it as a deviation.
-  Future<void> _prepareCheck(Duration sessionLength) async {
+  Future<void> _prepareCheck(Duration sessionLength, int run) async {
     final cs = checkStore, st = store;
     if (cs == null) return;
     final sessions = st?.list() ?? const <MeditationSummary>[];
@@ -427,9 +442,10 @@ class MeditationController extends ChangeNotifier {
     checkStatus = slot.status;
     if (slot.arm != Arm.replay || st == null) return;
     try {
-      _replayer = Replayer(await loadStreams(st.dir, slot.donors, kind), cleanSteps: cleanStepsFor(kind));
+      final streams = await loadStreams(st.dir, slot.donors, kind);
+      if (_live(run)) _replayer = Replayer(streams, cleanSteps: cleanStepsFor(kind));
     } catch (_) {
-      _replayFailed = true;
+      if (_live(run)) _replayFailed = true;
     }
   }
 
@@ -793,7 +809,9 @@ class MeditationController extends ChangeNotifier {
   /// Stops the signal and lets the headband go (only one still in range; a lost one is never touched).
   Future<void> _release() async => await _link?.close();
 
-  Future<void> _fail(String why) async {
+  /// [run]: the start that failed; one that Stop or a newer start overtook changes nothing (its headband was let go).
+  Future<void> _fail(String why, int run) async {
+    if (run != _run) return;
     final stoppedByUser = _ended; // a stop during connecting already went back to the start
     _ended = true;
     _ticker?.cancel();

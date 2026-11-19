@@ -14,6 +14,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import '../dream/band_link.dart' show BandLink;
 import '../recorder/chunk_writer.dart' show ChunkWriter, Sample, fileStem, unixSeconds;
 import '../recorder/contact.dart' show channelNames;
 import '../recorder/headband.dart';
@@ -118,7 +119,7 @@ class MorningController extends ChangeNotifier {
   bool get active => stage.index >= MorningStage.connecting.index && stage.index <= MorningStage.open.index;
 
   /// A headband was left out of range (the finder must not dispose its scanner then).
-  bool get leftLost => _lostBand;
+  bool get leftLost => _lostBands.isNotEmpty;
 
   Headband? _band;
   CheckInSound? _sound;
@@ -132,7 +133,15 @@ class MorningController extends ChangeNotifier {
   int _received = 0;
   int _phaseFrom = 0;
   DateTime? _signalAt, _lastData;
-  bool _restarted = false, _lostBand = false, _ended = false, _disposed = false;
+  bool _restarted = false, _ended = false, _disposed = false;
+
+  /// Headbands that went out of range in this screen: never called again, whichever check-in they belonged to.
+  final List<Headband> _lostBands = [];
+
+  /// The number of the latest start: a start that Stop or a newer start overtook touches nothing of the check-in
+  /// (DECISIONS 450).
+  int _run = 0;
+  bool _live(int run) => run == _run && !_ended;
   Future<({Map<String, ChannelMeasures> channels, Map<String, double?> back})>? _analysis;
 
   int get _phaseSamples => timing.phaseS * morningFs;
@@ -157,29 +166,41 @@ class MorningController extends ChangeNotifier {
   Future<void> start() async {
     if (active) return;
     _reset();
+    final run = ++_run;
     _set(MorningStage.connecting, 'Looking for the headband.');
     try {
-      final band = await finder
-          .find(timing.scanFor, onFound: (name, _) => _set(MorningStage.connecting, 'Found $name. Connecting.'))
-          .timeout(timing.scanFor + timing.connectTimeout);
+      // a headband the search brings after its deadline is let go; a search stuck behind an earlier one says so
+      final band = await BandLink.within(
+        finder.find(
+          timing.scanFor,
+          onFound: (name, _) => _live(run) ? _set(MorningStage.connecting, 'Found $name. Connecting.') : null,
+        ),
+        timing.scanFor + timing.connectTimeout,
+        sdkTimeout: timing.sdkTimeout,
+      );
       if (band == null) {
-        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?');
+        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?', run);
       }
+      // reached after Stop: nobody else lets it go
+      if (!_live(run)) return await BandLink.letGo(band, timing.sdkTimeout, streaming: false);
       _band = band;
-      if (_ended) return await _release();
-      _rangeSub = band.rangeChanges.listen(_onRange);
+      _rangeSub = band.rangeChanges.listen((inRange) => _onRange(band, inRange));
       _set(MorningStage.contact, 'Checking contact. Keep still for a few seconds.');
       rechecking = true;
-      contact = await _checkContact(band);
-      rechecking = false;
-      if (_ended) return await _release();
+      final ohms = await _checkContact(band);
+      if (run == _run) rechecking = false;
+      if (!_live(run)) return; // Stop let the headband go
+      contact = ohms;
       var sound = _makeSound();
+      String? note;
       try {
         await sound.start();
       } catch (e) {
-        soundNote = 'The tones did not start ($e): watch the screen for when to open your eyes.';
+        note = 'The tones did not start ($e): watch the screen for when to open your eyes.';
         sound = SilentCheckInSound();
       }
+      if (!_live(run)) return await sound.stop();
+      soundNote = note;
       _sound = sound;
       final st = store;
       if (st != null) {
@@ -191,31 +212,36 @@ class MorningController extends ChangeNotifier {
       }
       _signalSub = band.signal.listen(_onBatch);
       await _sdk(band.startSignal(), 'start signal');
+      if (!_live(run)) return; // Stop came while the stream started, and let the headband go
       _signalAt = _now();
       _ticker = Timer.periodic(timing.tick, (_) => _tick());
       _set(MorningStage.contact, '');
     } on TimeoutException catch (e) {
-      await _fail('The headband did not answer (${e.message ?? 'timeout'}). Switch it off and on, then try again.');
+      await _fail(
+        'The headband did not answer (${e.message ?? 'timeout'}). Switch it off and on, then try again.',
+        run,
+      );
     } catch (e) {
-      await _fail('Could not start: $e');
+      await _fail('Could not start: $e', run);
     }
   }
 
   /// Checks contact again (the laptop's "Check again"): the signal pauses for a few seconds.
   Future<void> recheck() async {
-    final band = _band;
+    final band = _band, run = _run;
     if (stage != MorningStage.contact || band == null || rechecking) return;
     rechecking = true;
     _notify();
     try {
       await _sdk(band.stopSignal(), 'stop signal');
-      contact = await _checkContact(band);
-      if (_ended) return;
+      final ohms = await _checkContact(band);
+      if (!_live(run)) return;
+      contact = ohms;
       await _sdk(band.startSignal(), 'start signal');
     } catch (e) {
-      message = 'The contact check did not finish ($e).';
+      if (_live(run)) message = 'The contact check did not finish ($e).';
     } finally {
-      rechecking = false;
+      if (run == _run) rechecking = false;
       _notify();
     }
   }
@@ -401,9 +427,9 @@ class MorningController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  void _onRange(bool inRange) {
-    if (inRange || !active || _ended) return;
-    _lostBand = true;
+  void _onRange(Headband band, bool inRange) {
+    if (inRange || !identical(band, _band) || !active || _ended) return;
+    _lostBands.add(band);
     unawaited(_abort('The headband dropped out, so the check-in stopped and nothing was kept. Start again when it '
         'is close.'));
   }
@@ -434,16 +460,13 @@ class MorningController extends ChangeNotifier {
     _rangeSub = null;
     final band = _band;
     _band = null;
-    if (band == null || _lostBand) return;
-    try {
-      await _sdk(band.stopSignal(), 'stop signal');
-    } catch (_) {}
-    try {
-      await _sdk(band.disconnectAndDispose(), 'disconnect');
-    } catch (_) {}
+    if (band == null || _lostBands.contains(band)) return;
+    await BandLink.letGo(band, timing.sdkTimeout, streaming: true);
   }
 
-  Future<void> _fail(String why) async {
+  /// [run]: the start that failed; one that Stop or a newer start overtook changes nothing (its headband was let go).
+  Future<void> _fail(String why, int run) async {
+    if (run != _run) return;
     final stopped = _ended;
     _ended = true;
     _ticker?.cancel();

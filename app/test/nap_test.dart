@@ -17,6 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'dream_test.dart' show DriftBand, OneFinder;
 import 'live_stager_test.dart' show ScriptedModel, scaleNow;
+import 'support/gates.dart';
 
 LiveStage st(int epoch, String stage) => LiveStage(epoch, stage, 0.9, 4);
 
@@ -303,6 +304,56 @@ void main() {
       expect(c.stage, NapStage.failed);
       expect(c.message, contains('could not wake you'));
       expect(band.calls.last, 'disconnect');
+      c.dispose();
+    });
+
+    test('Stop, then Start again while the first search runs: the first search ending touches nothing', () async {
+      final finder = GateFinder(), band = DriftBand((t) => 1, perTick: 5);
+      final c = NapController(
+        finder: finder,
+        sound: SilentNapSound.new,
+        store: store,
+        recordingsDir: recordings,
+        scale: scaleNow,
+        timing: fast,
+      );
+      final first = c.start(lengthMin: 30);
+      await until(c, () => finder.finds.length == 1);
+      await c.stop();
+      final second = c.start(lengthMin: 30);
+      await until(c, () => finder.finds.length == 2);
+      finder.finds[1].complete(band);
+      await until(c, () => c.stage == NapStage.resting);
+      finder.finds[0].complete(null); // the first search ends: "not found"
+      await first;
+      await second;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(c.stage, NapStage.resting, reason: c.message);
+      await c.stop();
+      expect(store.list().single.end, NapEnd.stopped);
+      c.dispose();
+    });
+
+    test('Stop while the stream is being started: the nap ends, stays ended, and its final record stands', () async {
+      final inner = DriftBand((t) => 1, perTick: 5), band = SlowStart(inner);
+      final c = NapController(
+        finder: OneFinder(band),
+        sound: SilentNapSound.new,
+        store: store,
+        recordingsDir: recordings,
+        scale: scaleNow,
+        timing: fast,
+      );
+      final started = c.start(lengthMin: 30);
+      await until(c, () => band.asked);
+      await c.stop();
+      band.gate.complete();
+      await started;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(c.stage, NapStage.done);
+      expect(c.active, isFalse);
+      expect(store.list().single.end, NapEnd.stopped, reason: 'not overwritten by a "running" save');
+      expect(inner.calls, contains('disconnect'));
       c.dispose();
     });
 

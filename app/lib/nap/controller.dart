@@ -204,31 +204,41 @@ class NapController extends ChangeNotifier {
   bool _ended = false;
   bool _disposed = false;
 
+  /// The number of the latest start: a start that Stop or a newer start overtook touches nothing of the nap
+  /// (DECISIONS 450).
+  int _run = 0;
+  bool _live(int run) => run == _run && !_ended;
+
   /// Lights off: connects, checks contact, starts the sound, the EEG file, the detectors and the live scorer.
   /// Errors end in [NapStage.failed].
   Future<void> start({int lengthMin = NapRule.defaultMin}) async {
     if (active) return;
     _reset();
+    final run = ++_run;
     this.lengthMin = lengthMin;
     _set(NapStage.connecting, 'Looking for the headband.');
     final link = BandLink(finder: finder, timing: timing.link, onBatch: _onBatch, onEvent: _onLinkEvent, clock: _now);
     _link = link;
     try {
       if (!await link.connect(onFound: (name) => _set(NapStage.connecting, 'Found $name. Connecting.'))) {
-        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?');
+        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?', run);
       }
-      if (_ended) return await link.close();
+      if (!_live(run)) return await link.close();
       _set(NapStage.contact, 'Checking contact. Lie still for a few seconds.');
-      contact = await link.contact();
-      if (_ended) return await link.close();
+      final ohms = await link.contact();
+      if (!_live(run)) return await link.close();
+      contact = ohms;
       final sound = _makeSound();
       try {
         await sound.start();
       } catch (e) {
-        return await _fail('The sound did not start ($e), so the nap could not wake you.');
+        return await _fail('The sound did not start ($e), so the nap could not wake you.', run);
+      }
+      if (!_live(run)) {
+        await sound.stop();
+        return await link.close();
       }
       _sound = sound;
-      if (_ended) return await _release();
       _openWriter(link.name);
       _seen = Detectors(onSecond: _onSecond);
       final hf = handsFree;
@@ -249,14 +259,18 @@ class NapController extends ChangeNotifier {
       _lightsOffAt = _now();
       _lastSave = _lightsOffAt;
       await link.startSignal();
+      if (!_live(run)) return await link.close(); // Stop came while the stream started
       _ticker = Timer.periodic(timing.tick, (_) => _tick());
       _set(NapStage.resting, '');
       _mark('nap coach: lights off; length $lengthMin min; sleep model ${m == null ? 'none' : 'on'}');
       _save();
     } on TimeoutException catch (e) {
-      await _fail('The headband did not answer (${e.message ?? 'timeout'}). Switch it off and on, then try again.');
+      await _fail(
+        'The headband did not answer (${e.message ?? 'timeout'}). Switch it off and on, then try again.',
+        run,
+      );
     } catch (e) {
-      await _fail('Could not start: $e');
+      await _fail('Could not start: $e', run);
     }
   }
 
@@ -590,7 +604,9 @@ class NapController extends ChangeNotifier {
     await _link?.close();
   }
 
-  Future<void> _fail(String why) async {
+  /// [run]: the start that failed; one that Stop or a newer start overtook changes nothing (its headband was let go).
+  Future<void> _fail(String why, int run) async {
+    if (run != _run) return;
     final stoppedByUser = _ended;
     _ended = true;
     _ticker?.cancel();
