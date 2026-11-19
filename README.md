@@ -22,7 +22,7 @@ a build-it-yourself ADS1299 helmet ([hardware and guides](https://github.com/uto
   dates) prints every gap with its reason, lost packets, restarts by Android, both batteries, contact, the phone's
   sleep report and a plain verdict with the top three things to fix. Works on a laptop night too; plain `python3`
   skips only the signal numbers. Reads files only.
-- `scripts/catalog.py`: one table of every night on the laptop (laptop and phone nights: files, hours, missing
+- `scripts/catalog.py`: one table of every night on the laptop (laptop, phone and DIY-board nights: files, hours, missing
   minutes, the sleep report's numbers, morning check-in) and the SHA-256 of every file, so the next run says what
   grew, changed or went missing; `--check` re-hashes everything. Reads the data only; writes `_local/catalog/`.
 

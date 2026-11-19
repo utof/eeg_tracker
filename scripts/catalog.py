@@ -11,6 +11,12 @@ no samples: drops and restarts), the sleep report (the laptop's <local>/nights/<
 with its asleep, deep and dream minutes, and the morning check-in (a <start>.morning.json recorded inside the night
 or starting within 12 hours after it).
 
+The DIY board's recordings (<local>/recordings-diy/, DECISIONS 381: scripts/record_diy.py) are nights of their
+own, source "diy", cut by the same chain rule and never mixed into a BrainBit night of the same evening (a DIY row has
+`id` <date>-diy and the sidecar <date>-diy.sha256). Their records are as wide as the board's channels and their rate is
+the board's: both are read from the file's .log ("format .f32 records <I4f ...; 250 Hz"; without that line, 4 channels
+at 250 Hz). They have no sleep report and no check-in.
+
 Writes <out>/catalog.json (the table and every file's size, time and SHA-256), <out>/<date>.sha256 per night
 (`sha256sum -c` format, paths from <local>), <out>/catalog.txt (the summary it prints), and appends what changed to
 <out>/history.log. A run hashes only the files whose size or time changed since the last catalog; --check re-hashes
@@ -24,7 +30,7 @@ Read-only on the data: it never deletes, moves or compresses a recording or a re
 """
 from __future__ import annotations
 
-import argparse, hashlib, json, os, sys
+import argparse, hashlib, json, os, re, sys
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -36,6 +42,8 @@ FORMAT, VERSION = "eeg-tracker-catalog", 1
 RAW = (".f32", ".idx", ".log", ".markers.jsonl")
 LAPTOP_REPORT = (".report.json", ".sleep.json", ".hypnogram.png", ".bdf")  # scripts/sleep_report.py's files
 MORNING_WITHIN_S = 12 * 3600
+DIY = "recordings-diy"
+DIY_FORMAT = re.compile(r"format \.f32 records <I(\d+)f\b.*?; (\d+(?:\.\d+)?) Hz")
 CHUNK = 1 << 20
 SHOW = 5  # names listed before "and N more"
 DEFAULT_LOCAL = Path(__file__).resolve().parents[1] / "_local"
@@ -79,7 +87,7 @@ def _numbers(rep: dict | None, by: str) -> dict | None:
 
 
 def _row(date: str, start: float | None, end: float | None) -> dict:
-    return dict(date=date, source="", recordings=0, start=start, end=end, hours_recorded=0.0, minutes_missing=0.0,
+    return dict(date=date, id=date, source="", recordings=0, start=start, end=end, hours_recorded=0.0, minutes_missing=0.0,
                 raw=False, report=None, morning=[], paths=[])
 
 
@@ -88,29 +96,47 @@ def _add(local: Path, row: dict, rel: str, kind: str) -> None:
         row["paths"].append((rel, kind))
 
 
-def _recording_nights(local: Path, phone: set[str]) -> dict[str, dict]:
-    """The nights in recordings/ by night_files.py's chain rule, each with its runs' files: the raw ones and anything
-    else made from one run alone (a hand-made BDF). Runs without samples join the night they fall in."""
+def diy_format(log: Path) -> tuple[int, float]:
+    """(bytes of one record, samples a second) of a DIY file set, from its .log's format line."""
+    try:
+        m = DIY_FORMAT.search(log.read_text(errors="replace"))
+    except OSError:
+        m = None
+    return (4 + 4 * int(m.group(1)), float(m.group(2))) if m else (nf.REC_BYTES, float(nf.FS))
+
+
+def _recording_nights(local: Path, phone: set[str], folder: str = "recordings", diy: bool = False) -> dict[str, dict]:
+    """The nights in <folder>/ by night_files.py's chain rule, each with its runs' files: the raw ones and anything
+    else made from one run alone (a hand-made BDF). Runs without samples join the night they fall in. For the DIY
+    board's folder (`diy`) the row's id carries "-diy" and a run's seconds come from its own record width and rate."""
     rows: dict[str, dict] = {}
     stems: dict[str, list[str]] = {}
-    for n in nf.nights(nf.recordings(local / "recordings")):
+    where = local / folder
+
+    def seconds(r: nf.Rec) -> float:
+        width, fs = diy_format(r.path.with_suffix(".log")) if diy else (nf.REC_BYTES, nf.FS)
+        return r.size // width / fs
+
+    for n in nf.nights(nf.recordings(where)):
         row = _row(n.name, n.start, n.end)
-        samples_s = sum(r.size // nf.REC_BYTES for r in n.recs) / nf.FS
+        samples_s = sum(seconds(r) for r in n.recs)
+        source = "diy" if diy else "+".join(sorted({"phone" if r.path.name in phone else "laptop" for r in n.recs}))
         row.update(recordings=len(n.recs), raw=True, hours_recorded=round(samples_s / 3600, 2),
-                   minutes_missing=round(max(0.0, n.end - n.start - samples_s) / 60, 1),
-                   source="+".join(sorted({"phone" if r.path.name in phone else "laptop" for r in n.recs})))
-        rows[n.name], stems[n.name] = row, [r.path.stem for r in n.recs]
-    for p in (local / "recordings").glob("*.f32"):
+                   minutes_missing=round(max(0.0, n.end - n.start - samples_s) / 60, 1), source=source)
+        key = n.name + "-diy" if diy else n.name
+        row["id"] = key
+        rows[key], stems[key] = row, [r.path.stem for r in n.recs]
+    for p in where.glob("*.f32"):
         t = nf.stamp_time(p)
         if t is not None and p.stat().st_size < nf.REC_BYTES:
             near = [d for d, r in rows.items() if r["start"] <= t < r["end"] + nf.CHAIN_GAP_S]
             if near:
                 stems[max(near)].append(p.stem)
-    for date, names in stems.items():
+    for key, names in stems.items():
         for stem in names:
-            for f in sorted((local / "recordings").glob(f"{stem}.*")):
+            for f in sorted(where.glob(f"{stem}.*")):
                 if f.is_file() and not f.name.endswith(".morning.json"):
-                    rows[date]["paths"].append((f"recordings/{f.name}", "raw" if f.name.endswith(RAW) else "derived"))
+                    rows[key]["paths"].append((f"{folder}/{f.name}", "raw" if f.name.endswith(RAW) else "derived"))
     return rows
 
 
@@ -140,7 +166,8 @@ def nights_on(local: Path) -> list[dict]:
             _add(local, row, f"nights/{date}{suffix}", "derived")
     out = [rows[d] for d in sorted(rows)]
     _attach_mornings(local, out)
-    return out
+    diy = _recording_nights(local, set(), DIY, diy=True)
+    return sorted(out + list(diy.values()), key=lambda r: (r["date"], r["source"] == "diy"))
 
 
 def _attach_mornings(local: Path, rows: list[dict]) -> None:
@@ -222,7 +249,7 @@ def build(local: Path, previous: dict | None, check: bool, now: datetime) -> tup
             st = p.stat()
             sha, what = _compare(p, kind, st, old.get(rel), gone.get(rel), check)
             if what:
-                events.append((what, rel, row["date"]))
+                events.append((what, rel, row["id"]))
             files.append(dict(path=rel, bytes=st.st_size, mtime_ns=st.st_mtime_ns, sha256=sha, kind=kind))
         row.update(files=len(files), bytes=sum(f["bytes"] for f in files), file_list=files,
                    start=_iso(row["start"]), end=_iso(row["end"]))
@@ -230,7 +257,7 @@ def build(local: Path, previous: dict | None, check: bool, now: datetime) -> tup
     before = dict(gone)  # raw files already missing last time, then everything the last catalog listed
     for n in (previous or {}).get("nights", []):
         for f in n.get("file_list", []):
-            before.setdefault(f["path"], dict(f, night=n["date"]))
+            before.setdefault(f["path"], dict(f, night=n.get("id", n["date"])))
     missing = []
     for path, f in sorted(before.items()):
         if path in listed or (local / path).exists():
@@ -246,10 +273,10 @@ def build(local: Path, previous: dict | None, check: bool, now: datetime) -> tup
 
 
 def other_files(local: Path, cat: dict, out: Path) -> list[Path]:
-    """Files in recordings/, nights/ and phone/ that belong to no night (logs, hand-made files, meditations...)."""
+    """Files in recordings/, recordings-diy/, nights/ and phone/ that belong to no night (logs, hand-made files, meditations...)."""
     listed = {f["path"] for n in cat["nights"] for f in n["file_list"]}
     found = []
-    for top in ("recordings", "nights", "phone"):
+    for top in ("recordings", "nights", "phone", DIY):
         for p in sorted((local / top).rglob("*")):
             if p.is_file() and str(p.relative_to(local)) not in listed and out not in p.resolve().parents:
                 found.append(p)
@@ -306,11 +333,11 @@ def _write(path: Path, text: str) -> None:
 
 
 def save(cat: dict, out: Path, summary: list[str], events: list[tuple[str, str, str]]) -> None:
-    """catalog.json, catalog.txt, one <date>.sha256 per night (and its missing raw files), a line in history.log."""
+    """catalog.json, catalog.txt, one <id>.sha256 per night (and its missing raw files), a line in history.log."""
     out.mkdir(parents=True, exist_ok=True)
     _write(out / "catalog.json", json.dumps(cat, indent=1) + "\n")
     _write(out / "catalog.txt", "\n".join(summary) + "\n")
-    per: dict[str, list[dict]] = {n["date"]: list(n["file_list"]) for n in cat["nights"]}
+    per: dict[str, list[dict]] = {n["id"]: list(n["file_list"]) for n in cat["nights"]}
     for f in cat["missing"]:
         per.setdefault(f.get("night", "missing"), []).append(f)
     for date, files in per.items():

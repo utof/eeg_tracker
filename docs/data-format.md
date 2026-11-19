@@ -441,14 +441,16 @@ recording that is still running.
 `scripts/catalog.py` (standard library only; DECISIONS 313-318) reads `_local/` and writes:
 
 - `catalog.json`: `format` (`eeg-tracker-catalog`), `version` 1, `made`, `local`, `nights` and `missing`. One object
-  per night, oldest first: `date` (evening date, as the sleep report names it), `source` (`laptop`, `phone` or
-  `laptop+phone`), `recordings` (runs with samples), `start` and `end` (first and last data), `hours_recorded`
+  per night, oldest first: `date` (evening date, as the sleep report names it), `id` (the date; `<date>-diy` for the
+  DIY board's nights, which are read from `_local/recordings-diy/` and listed apart from a BrainBit night of the same
+  evening, DECISIONS 381; their hours use the board's rate and record width from the `.log`), `source`
+  (`laptop`, `phone`, `laptop+phone` or `diy`), `recordings` (runs with samples), `start` and `end` (first and last data), `hours_recorded`
   (samples at 250 Hz), `minutes_missing` (time between them without samples), `raw` (`false` for a phone report
   whose raw night is not on the laptop), `report` (`by` laptop or phone, `asleep_min`, `deep_min`, `dream_min`, or
   `null`), `morning` (its check-in files), `files`, `bytes` and `file_list` (`path` from `_local/`, `bytes`,
   `mtime_ns`, `sha256`, `kind`: `raw` for `.f32 .idx .log .markers.jsonl`, else `derived`). `missing`: raw files an
   earlier catalog listed that are gone, with `night` and `since`.
-- `<date>.sha256`: the night's files (and its missing ones) in `sha256sum` format, so
+- `<id>.sha256`: the night's files (and its missing ones) in `sha256sum` format, so
   `cd _local && sha256sum -c catalog/<date>.sha256` checks them without the script.
 - `catalog.txt`: the printed summary; `history.log`: one entry per run with what changed.
 
