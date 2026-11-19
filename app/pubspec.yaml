@@ -30,6 +30,11 @@ dependencies:
   # BSD-3-Clause, by Navideck. Pinned: lib/headband/own/universal_transport.dart names the version in the night's
   # log. Its Linux part pulls `bluez` and `dbus` (MPL-2.0); neither is compiled into the Android app.
   universal_ble: 3.3.0
+  # The dream catcher's speech to text (DECISIONS row 250): k2-fsa's sherpa-onnx, Apache-2.0, prebuilt for arm64 and
+  # x86_64; its own ONNX Runtime 1.28.2 library has the file name of flutter_onnxruntime's 1.28.0, so
+  # android/build.gradle.kts packages sherpa's copy as libsherpa-ortx.so and both load side by side.
+  # Pinned: scripts/dream_text_check.py checks the same version on the laptop.
+  sherpa_onnx: 2.0.1
 
 dev_dependencies:
   flutter_test:
@@ -47,6 +52,10 @@ flutter:
     - assets/models/anysleep-run2.onnx
     - assets/models/anysleep-run3.onnx
     - assets/models/LICENSE-AnySleep.txt
+    # Silero's voice detector for the dream catcher's speech to text (0.6 MB, MIT); the speech model itself is a
+    # download (lib/dream/speech_model.dart).
+    - assets/models/silero_vad.onnx
+    - assets/models/LICENSE-silero-vad.txt
 
 hooks:
   user_defines:

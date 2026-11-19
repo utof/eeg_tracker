@@ -52,6 +52,12 @@ well.
 - The session's EEG is saved as part of that night, with every question as a marker, so the morning sleep report
   covers the drift-off and the detector can be checked against the sleep model.
 - Afterwards the screen lists the rounds: play each answer and type a note.
+- Your answers as words: once you download the speech model (671 MB, once, from the dream catcher's **Answers as
+  text**), the phone writes each answer out after the session, never during it, Russian or English without a
+  setting. It runs on the phone; the answers never leave it. The words sit under each answer's play button; fix any
+  word in its box (your version is kept, the phone's too). On spoken test clips the model got about 1 word in 20
+  wrong in Russian (1 in 10 when quiet, slow and muffled) and fewer in English; a real sleepy mumble will do worse,
+  so the recording stays the original.
 - The detector ships only when its sleep onset falls within 5 minutes of the sleep model's on 4 of 5 recorded
   nights (2 so far on the laptop, both within half a minute); until then the timers make every round happen anyway.
 - The same detector runs during every night the phone records: tap **Lights off** on the night screen as you close
@@ -76,6 +82,11 @@ well.
 - This project's own drift-off detector (MIT), grown from the brain sound's sleep guard; no machine-learning
   model.
 - The microphone: `record` 7.2.0 (BSD-3-Clause); answers are kept as sound files on the phone.
-- Speech-to-text for the answers is not built; an offline tool is a later idea.
+- Speech to text, on the phone: sherpa-onnx 2.0.1 (Apache-2.0, k2-fsa) running NVIDIA's Parakeet TDT 0.6B v3
+  (CC-BY-4.0, 25 European languages including Russian and English; downloaded when you ask, 671 MB), with Silero's
+  voice detector (MIT) so breaths and room noise are not turned into words. Checked on the laptop with the same
+  engine and model (`scripts/dream_text_check.py`): word error rate 5 % (Russian) and 1 % (English) on clear
+  test clips, 9 % and 2 % on quiet, slow, muffled ones, no words made up from silence. Whisper small, the usual
+  choice, was twice as wrong in Russian and invented words in every silent clip without the voice detector.
 
 Checked: 2026-11-18

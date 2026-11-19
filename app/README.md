@@ -86,7 +86,7 @@ core (`node app/test/fixtures/make_js_session.mjs` from the repo root remakes it
 The first build on the owner's laptop (2026-11-18) took about 5 minutes and fits under
 `systemd-run --user --scope -p MemoryMax=4500M`. Release builds work: `flutter build apk --release
 --target-platform android-arm64` (39 MB with the sleep model: 18 MB of models, ONNX Runtime's library 11 MB
-compressed; only the named ABI is packaged and native libraries are compressed, `android/app/build.gradle.kts`;
+compressed; 51 MB since the dream catcher's speech engine, DECISIONS row 257; only the named ABI is packaged and native libraries are compressed, `android/app/build.gradle.kts`;
 `android/app/proguard-rules.pro` keeps ONNX Runtime's Java classes). The neurosdk2 1.0.21 plugin shrinks its own release build without keep
 rules, which stripped its `Neurosdk2Plugin` class; `android/build.gradle.kts` builds that one plugin unshrunk.
 
@@ -165,6 +165,16 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    only sets the phone's alarm: `adb shell kill -9 $(adb shell pidof io.github.utof.eeg_tracker)`, lock, and the
    alarm must still ring 2 minutes later (`EegWake: ringing (window end)`). Reinstall the app afterwards. The
    scripts used on 2026-11-19 are kept in the lane's `_local/emu/` (not in the repository).
+
+8. **The dream catcher's speech to text** (DECISIONS rows 250-257): push a made-up session and its WAVs (the laptop
+   check's TTS clips, `_local/stt/check/clips/`, never personal audio) into `files/dream-catcher/` as in step 1, open
+   **Dream catcher**, tap **Download (671 MB)** under Answers as text and wait for "Speech model on this phone"; the
+   answers are written out at once: `files/dream-catcher/<stamp>-r<n>.text.json` holds the text and `tookS`. Then
+   delete `files/nights/*.report.json` and bring the app back to the front: the night is scored again in the same
+   process, so both ONNX Runtimes work side by side. On 2026-11-19 (release x86_64 build): the download took about
+   100 s and passed its hash check; two Russian and one English answer came out word for word, 0.38 s per second of
+   audio (2.0-2.8 s an answer, the model already loaded), the room-hiss answer as "No words heard." in 0.2 s; the
+   night scored again afterwards; the app was back to 154 MB (PSS) once the speech isolate had ended.
 
 The night of 2026-11-17 (58 recordings, 12.9 h) scored on the emulator in 99 s with a peak of 438 MB (PSS; 561 MB
 RSS) and the same stages as the laptop's ONNX check (96.6 % of epochs agree with the laptop's one-pass scoring; see
@@ -444,12 +454,18 @@ you drift again, 3 or 4 times. For ideas, not for sleep. The **i** button shows 
    to the main screen showing "Recording". **Stop** ends at any time and keeps the answers.
 8. Afterwards (or in the morning) open **Dream catcher**: the last session's rounds are at the top. Play each
    answer and type what it was about; the note is saved as you type. Earlier sessions are at the bottom.
+9. Your answers as words (once the speech model is on the phone, see the owner step below): under each play
+   button the phone shows what it heard, Russian or English. It writes them out after the session, never during
+   it, while this screen is open ("Words: writing out…"; a few seconds an answer). Fix a word in its box: your
+   version is shown from then on and kept apart from the phone's (**Undo edit** brings the phone's back). If an
+   answer cannot be written out, its row says why; the recording is always kept.
 
 The screen stays on (black and dim) during a session. You can lock the phone: the session goes on and still
 records your answers, but the **Drifting / Awake** halves need the screen, so a locked round counts as not
 answered. Do not swipe the app away. Files, app-private like the meditations: `files/dream-catcher/<time>.dream.json`
-(the rounds, the drift-off detector's epochs) and `<time>-r<n>.wav` (your answers), your prompts in
-`files/dream-catcher/prompts/`. The session's EEG is a normal recording in `files/recordings/` with every question
+(the rounds, the drift-off detector's epochs), `<time>-r<n>.wav` (your answers) and `<time>-r<n>.text.json` (their
+words: the phone's and yours, `docs/data-format.md`), your prompts in `files/dream-catcher/prompts/`; the speech
+model in `files/models/` (not exported). The session's EEG is a normal recording in `files/recordings/` with every question
 as a marker, so it is part of that night: the sleep report includes it and **Export a night** copies it.
 
 ### Owner step: the first try (a 20-minute nap, once)
@@ -470,6 +486,21 @@ asking at the right moment.
    - Could you tap Drifting / Awake half-asleep?
 4. With **Record the night** on a later evening, check in the morning that the night recorded and that **Sleep
    report** covers the time from Lights off.
+
+### Owner step: answers as words (once, about 10 minutes on Wi-Fi)
+
+The speech to text has run on the laptop and on the emulator, never on the 11T or on a real sleepy voice.
+
+1. On Wi-Fi, open **Dream catcher**, scroll to **Answers as text** and tap **Download (671 MB)**. Keep the page
+   open until it says "Speech model on this phone" (a few minutes; **Stop** pauses it, Download again goes on).
+   The app downloads only this model, from one fixed address, and checks it; your answers never leave the phone.
+2. If you already have dream catcher sessions, their answers are written out now, one after another.
+3. Next time, after a session: watch the words appear under each answer.
+4. Tell the assistant:
+   - How many seconds did one answer take ("Words: writing out…" to the words)? Did the phone get warm?
+   - How close were the words, in Russian and in English? Which words were wrong?
+   - Did a whispered or mumbled answer come out as "No words heard."?
+   - Did your fixes stay after closing and opening the page?
 
 ## Nap coach
 

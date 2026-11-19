@@ -30,3 +30,6 @@ explicit = true
 #   uv run --project analysis --group onnx python scripts/export_anysleep_onnx.py
 [dependency-groups]
 onnx = ["onnx>=1.19", "onnxruntime==1.28.0", "onnxscript>=0.5"]  # the ONNX Runtime the phone has (flutter_onnxruntime 1.9.0)
+# Only for scripts/dream_text_check.py (the dream catcher's speech to text, the same engine as the phone's
+# sherpa_onnx 2.0.1):  uv run --project analysis --only-group stt python scripts/dream_text_check.py
+stt = ["sherpa-onnx==2.0.1", "numpy>=2.2"]

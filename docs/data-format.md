@@ -219,6 +219,21 @@ The phone app runs the morning check-in itself (DECISIONS rows 120 and 125) and 
 
 A stopped check-in, or one whose headband dropped out, leaves no files. Export data copies them out (below).
 
+## Dream catcher answers as text (`files/dream-catcher/<stamp>-r<n>.text.json`)
+
+One small JSON beside each answer's WAV, written by the phone's speech to text after the session (DECISIONS rows
+250-256) and whenever you change the words. App-private, no backup; Export data copies it with the WAVs. Missing
+until the answer has been tried; nothing else refers to it.
+
+| Field | Meaning |
+|---|---|
+| `version` | 1 |
+| `answer` | the WAV in the same folder, `<stamp>-r<n>.wav` |
+| `machine` | what the phone heard, or `null` until it has worked: `text` (empty = no words heard), `model` (`parakeet-tdt-0.6b-v3-int8`), `at` (local ISO time), `audioS` (seconds in the WAV), `voiceS` (seconds the voice detector kept, its parts widened 0.25 s), `tookS` (seconds the phone took, model loading excluded) |
+| `edited` | your own words for the answer when you changed them, else `null`: shown instead of `machine.text` and never overwritten by the machine (a later model may rewrite `machine`); an edit back to the machine's text is stored as `null` |
+| `tries` | attempts so far, counted when one starts; after 2 without a `machine` text the answer waits for Try again (which sets it to 0) |
+| `failed` | why the last attempt did not work, or `null`; the WAV is always kept |
+
 ## The phone's export folder (`eeg-export/`)
 
 **Export data** in the phone app (DECISIONS rows 150-156) copies everything the app keeps in its private `files/`
@@ -227,7 +242,7 @@ folder). It never changes or deletes anything in the app's folder, and never run
 
 - The layout is the app's own: `recordings/` (raw nights, the recorder's format above), `nights/<date>.report.json`,
   `mornings/`, `meditations/`, `alpha-theta/` (sessions and `journal.json`), `replay-check/<kind>/` and
-  `settings.json`, `experiments/<made at>/` (self-experiments, below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers, `prompts/`), `sound-states/`, `hands-free/` (below), `own-ble/`
+  `settings.json`, `experiments/<made at>/` (self-experiments, below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers and their `<stamp>-r<n>.text.json` words, below, `prompts/`), `sound-states/`, `hands-free/` (below), `own-ble/`
   (`settings.json`: which headband connection is in use; `probe/<stamp>/`: the probe's result, docs/own-ble-driver.md), and any folder
   a later feature adds. Left on the phone: `models/` (copies of the app's model assets), `export/` (the export's own
   index), half-written `*.tmp` files, the scorer's `*.scoring` markers, and the two files Android and a plugin keep

@@ -43,9 +43,13 @@
          service (type microphone) keeps it, DECISIONS row 195. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Share on Wi-Fi (off unless the owner switches it on; DECISIONS rows 220-229): the app listens on the
-         local network for the laptop. Android has one permission for every socket, so this is INTERNET; the app
-         itself never calls out. The Wi-Fi lock (held only while sharing during a night) uses WAKE_LOCK above. -->
+    <!-- INTERNET: Android has one permission for every socket. The app uses it for two things only.
+         Share on Wi-Fi (off unless the owner switches it on; DECISIONS rows 220-229): the app listens on the local
+         network and answers the laptop; it sends nothing by itself. The Wi-Fi lock (held only while sharing during
+         a night) uses WAKE_LOCK above.
+         The dream catcher's speech model (DECISIONS row 251): downloaded once, when the owner taps Download, from one
+         fixed address and checked by its hash. That download is the only connection the app makes itself;
+         recordings and texts never leave the phone that way. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
