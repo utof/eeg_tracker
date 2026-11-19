@@ -14,6 +14,7 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 | The phone's export folder | `<picked folder>/eeg-export/`: the app's files in their own layout, `manifest.json`, `exports.jsonl` | the phone app's Export data (`app/lib/export/`); read by `scripts/import_phone.py` |
 | The phone over Wi-Fi | `GET /files`, `GET /files/<path>` on the phone; mirrored into `_local/recordings/` and `_local/phone/`, with `_local/phone/pull-state.json` and `pulls.jsonl` | the phone app's Share on Wi-Fi (`app/lib/share/`); read by `scripts/pull_phone.py` |
 | Catalog of nights | `_local/catalog/catalog.json`, `<date>.sha256`, `catalog.txt`, `history.log` | `scripts/catalog.py` (below) |
+| Raw recordings packed after a day | `<stamp>.f32.xz` on the laptop, `<stamp>.f32.gz` on the phone, in place of `<stamp>.f32`; `_local/packing.jsonl`, `files/packing.jsonl` | `scripts/pack_old.py` (daily), the phone app between nights (`app/lib/recorder/packed.dart`); below |
 | Events for other apps | `<root>/events/<dev>/eeg-YYYY-MM.jsonl`, `<root>/events/<dev>/breaks-YYYY-MM.jsonl` | `scripts/export_events.py`, `scripts/break_hints.py` |
 
 ## Raw recording (BrainBit)
@@ -69,6 +70,29 @@ recorder's own lines (`connected DIY board udp:9000 (no battery or signal-streng
   board reports none).
 - `.idx` and `.markers.jsonl`: as for the BrainBit. A USB drop while the board keeps running stays in one file set,
   with the gap in the `.idx` times.
+
+## Packed raw recordings (`<stamp>.f32.xz`, `<stamp>.f32.gz`)
+
+Owner's decision (2026-11-19): raw recordings that nothing has written for a day are compressed, losslessly
+(DECISIONS 540-549). Only the `.f32` is packed; its `.idx`, `.log` and `.markers.jsonl` stay plain beside it (small,
+and the nights' chaining reads the last `.idx` row of every recording). Files under 64 KiB stay plain.
+
+- **Laptop**: `<stamp>.f32.xz`, a standard xz file (`xz -d` gives back the `.f32`; `xz -lvv` shows the original's
+  SHA-256 as the block's CheckVal: the file is one block with a SHA-256 check, so every unpacking checks it) with the
+  `.f32`'s modified time. `scripts/pack_old.py` packs `_local/recordings/`, `_local/recordings-diy/` and
+  `_local/phone/mornings/` and appends one line per run to `_local/packing.jsonl`: `packed` (time), `files`,
+  `bytes`, `packed_bytes`, `failed`, `list` (`path`, `bytes`, `packed_bytes`, `sha256` of the original) and
+  `problems` (`path`, `why`). A real night: 61 % smaller.
+- **Phone**: `<stamp>.f32.gz` in `files/recordings/`, `files/recordings-diy/` and `files/mornings/`, a standard gzip
+  file (`gunzip -N` gives back the `.f32` with its name and time) whose header holds the name (FNAME), the time in
+  seconds (MTIME) and, in the comment field (FCOMMENT), `{"name", "bytes", "sha256", "modified_ms"}` of the `.f32`;
+  the file keeps the `.f32`'s modified time. `files/packing.jsonl` has the laptop's fields (exported with the rest).
+  A real night: 40 % smaller.
+- Both are written under a temporary name (`.<stamp>.f32.xz.packing`, `.<stamp>.f32.gz.packing.tmp`), unpacked to
+  check the length and SHA-256, given the original's time, renamed into place, and only then is the `.f32` removed.
+- Readers use the plain name: a sleep report's `inputs` keep naming `<stamp>.f32` with its unpacked size, so a report
+  stays up to date when its night is packed. On the laptop `scripts/packed.py` opens all three forms (plain, `.xz`,
+  and the phone's `.gz` in an export folder or a copy of the phone's files); on the phone `packed.dart` does.
 
 ## One night (BDF+)
 
@@ -313,7 +337,7 @@ folder). It never changes or deletes anything in the app's folder, and never run
 | `exported` | when this export ran (local ISO time with offset) |
 | `mode` | `new` or `everything` |
 | `complete` | `false` when the export stopped before copying everything it meant to |
-| `files` | one object per file, sorted by path: `path` (relative, `/`-separated), `bytes`, `sha256` (of the bytes written, worked out while copying), `modified_ms` (the phone's modified time of that copy, ms since 1970), `written` (the `exported` time of the export that copied it); `on_phone: false` when the app no longer has the file |
+| `files` | one object per file, sorted by path: `path` (relative, `/`-separated), `bytes`, `sha256` (of the bytes written, worked out while copying), `modified_ms` (the phone's modified time of that copy, ms since 1970), `written` (the `exported` time of the export that copied it); `on_phone: false` when the app no longer has the file (a `.f32` the phone packed is still on it); `original` (`path`, `bytes`, `sha256` of the `.f32`) for a recording packed after a day, sent as its `.f32.gz` |
 | `not_exported` | paths still only on the phone (the export stopped, or the folder failed) |
 | `totals` | `files`, `bytes` of the list |
 
@@ -321,6 +345,8 @@ folder). It never changes or deletes anything in the app's folder, and never run
   copied whole.
 - The manifest keeps listing a file after the owner deletes it from the export folder (to free space after an
   import): the laptop then checks it has that file with the same SHA-256.
+- A recording packed after a day leaves as its `.f32.gz`, with `original`; one whose `.f32` was exported before it
+  was packed is not exported again (**Export everything** copies the `.f32.gz` too).
 
 ### Self-experiments (`experiments/<made at>/`)
 
@@ -536,7 +562,10 @@ On the laptop, `scripts/import_phone.py <folder>` (standard library only) checks
 `_local/phone/<path>`, and keeps `phone/manifests/<exported>.manifest.json`, one line per import in
 `phone/imports.jsonl` and the copies' SHA-256 in `phone/import-index.json`. A copy is renamed into place only when its
 size and SHA-256 match. A differing file on the laptop is replaced only by a copy the phone changed later (the old one
-goes to `phone/replaced/<import time>/`); otherwise it is left alone and named in the summary.
+goes to `phone/replaced/<import time>/`); otherwise it is left alone and named in the summary. A packed `.f32.gz`
+is checked as sent, unpacked, checked against its `original` and saved as the plain `.f32`; it is "already here" when
+the laptop holds that `.f32`, plain or packed (the index keeps a packed copy's row under the plain name, with the
+original's SHA-256).
 
 ## The phone over Wi-Fi (Share on Wi-Fi)
 
@@ -551,7 +580,8 @@ that send its code (`Authorization: Bearer <code>`, `X-EEG-Token`, or `?token=`)
   `app/test/fixtures/share_api.json`.
 - `GET /files`: `{"format": "eeg-tracker-phone-files", "version": 1, "listed", "recording", "files": [...],
   "totals"}`; each file has the manifest's `path`, `bytes`, `sha256`, `modified_ms` (the same files and paths as the
-  export folder above). A file changed in the last 20 s is still being written: `"sha256": null, "growing": true`.
+  export folder above) and, for a recording packed after a day, `original`. A file changed in the last 20 s is still
+  being written: `"sha256": null, "growing": true`.
   `?sha=0` lists without working out missing SHA-256 values.
 - `GET /files/<path>`: the file, with HTTP `Range: bytes=<from>-<to>` (206 and `Content-Range`; 416 with
   `Content-Range: bytes */<size>` when it starts past the end), `X-Modified-Ms`, and HEAD. Read-only.
@@ -561,7 +591,8 @@ that send its code (`Authorization: Bearer <code>`, `X-EEG-Token`, or `?token=`)
 the phone is still writing, with their size) and `raw` (checked raw files, which the phone may add to later);
 `_local/phone/pulls.jsonl` has a line per pass that fetched something or found a problem. A partial copy ends where
 the phone's file ended when it was listed; readers should ignore an incomplete last record, as they do for a
-recording that is still running.
+recording that is still running. A packed `.f32.gz` is fetched whole, never in pieces, and lands as the plain `.f32`
+(unless the laptop holds that `.f32`, plain or packed: then nothing is fetched).
 
 ## The catalog of nights (`_local/catalog/`)
 
@@ -575,10 +606,13 @@ recording that is still running.
   (samples at 250 Hz), `minutes_missing` (time between them without samples), `raw` (`false` for a phone report
   whose raw night is not on the laptop), `report` (`by` laptop or phone, `asleep_min`, `deep_min`, `dream_min`, or
   `null`), `morning` (its check-in files), `files`, `bytes` and `file_list` (`path` from `_local/`, `bytes`,
-  `mtime_ns`, `sha256`, `kind`: `raw` for `.f32 .idx .log .markers.jsonl`, else `derived`). `missing`: raw files an
-  earlier catalog listed that are gone, with `night` and `since`.
+  `mtime_ns`, `sha256`, `kind`: `raw` for `.f32 .f32.xz .idx .log .markers.jsonl`, else `derived`; for a packed
+  `.f32.xz` also `original`: `path`, `bytes` and `sha256` of the `.f32` it holds). `missing`: raw files an earlier
+  catalog listed that are gone, with `night` and `since` (a `.f32` that became its `.f32.xz` with the same bytes is
+  "packed", not missing; with other bytes it is a PROBLEM, "changed"). `--check` unpacks every packed file and
+  compares what comes out with `original`.
 - `<id>.sha256`: the night's files (and its missing ones) in `sha256sum` format, so
-  `cd _local && sha256sum -c catalog/<date>.sha256` checks them without the script.
+  `cd _local && sha256sum -c catalog/<date>.sha256` checks them without the script (a packed file by its own bytes).
 - `catalog.txt`: the printed summary; `history.log`: one entry per run with what changed.
 
 ## Events (for utof_tracker and anything else)

@@ -145,8 +145,17 @@ Needs no owner decision, only time or data:
 Needs the owner's OK first:
 
 - **utof_tracker importer** for `eeg_*` events (row 11; utof_tracker does not read them yet).
-- **Packing old nights** (xz after 90 days); encryption and restic are deferred (see "Decisions waiting").
+- Encryption and restic backups are deferred (see "Decisions waiting").
 - **Sleep-scorer upgrade** (proposal; needs the 58 GB download).
+
+Built after the owner's OK (2026-11-19):
+
+- **Packing old nights**: built, after **1 day** (the owner: "is compression lossless? If yes, compress older than one
+  day"; was xz after 90 days). Laptop: `python3 scripts/pack_old.py` daily packs every raw `.f32` nothing has written
+  for a day into `.f32.xz` (about 61 % smaller); the phone packs its own into `.f32.gz` between nights (about 40 %).
+  Lossless and checked before the `.f32` goes; every reader, the catalog, Export data, Share on Wi-Fi and the
+  laptop's import read either form (DECISIONS 540-549). Next: run it on the owner's `_local/` after review (a dry run
+  first), then daily.
 
 Later or only if the evidence grows (the "Ideas for later" and "Proposals" tables below):
 

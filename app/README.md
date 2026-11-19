@@ -60,6 +60,10 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
   (everything the app keeps) and **Export a night** copy anything out (below; DECISIONS rows 53, 56 and 150-156).
   Android backups and phone-to-phone transfers skip the app completely (row 57), so a new phone starts empty:
   export first.
+- Packing (owner, 2026-11-19): a recording nothing has written for a day becomes `<stamp>.f32.gz` (gzip, lossless,
+  checked before the `.f32` goes; about 40 % smaller), between nights after the sleep report, never while anything
+  records. Every reader, Export data and Share on Wi-Fi take either form; the laptop unpacks it on import.
+  `lib/recorder/packed.dart`, `files/packing.jsonl`; DECISIONS rows 540-549, `docs/data-format.md`.
 - Export data: `lib/export/` (what leaves the phone, the index, the manifest), `lib/ui/export_*.dart`,
   `android/.../DataExport.kt` (the folder grant), `../scripts/import_phone.py` on the laptop; DECISIONS rows 150-156.
 - Recorder: a foreground service of type `connectedDevice` (`lib/recorder/recorder_service.dart`) whose

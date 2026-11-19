@@ -64,7 +64,7 @@ Each line says what it does. In brackets: how well the research backs it **for t
   check-in** pages, a Lab Streaming Layer bridge, and **brain-reactive sound** (a bench for the phone's version).
 - **Break hints** from ActivityWatch with no headband (`scripts/break_hints.py`). (some)
 - **Tools for the phone's files**: `import_phone.py`, `phone_night_check.py`, `catalog.py`, `pull_phone.py`
-  (below).
+  (below), and `pack_old.py`, which packs raw recordings older than a day (both sides pack: lossless, checked).
 - **The same scoring and detectors in Python**: the phone's rules were written and checked there first (`analysis/`).
 
 ## Files in this repository
@@ -88,6 +88,9 @@ Each line says what it does. In brackets: how well the research backs it **for t
 - `scripts/catalog.py`: one table of every night on the laptop (laptop, phone and DIY-board nights: files, hours, missing
   minutes, the sleep report's numbers, morning check-in) and the SHA-256 of every file, so the next run says what
   grew, changed or went missing; `--check` re-hashes everything. Reads the data only; writes `_local/catalog/`.
+- `scripts/pack_old.py`: run it daily (`python3 scripts/pack_old.py`; `--dry-run` only says what it would do). Packs
+  every raw `.f32` nothing has written for a day into `.f32.xz` (lossless, about 61 % smaller; checked to unpack to
+  the same bytes before the `.f32` goes). Every script reads either form; the phone packs its own (`.f32.gz`).
 
 Next morning, join the night's files and score sleep (AnySleep + YASA; neither is validated on BrainBit yet):
 
