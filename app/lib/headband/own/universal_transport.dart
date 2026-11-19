@@ -35,16 +35,20 @@ class UniversalTransport implements BleTransport {
     final timer = Timer(timeout, () {
       if (!found.isCompleted) found.complete(null);
     });
+    // The plugin queues scan commands without a deadline: a start that never answered would keep this scan (its
+    // listener) for good, and the stop queued behind it would never answer either. So both have deadlines.
     try {
-      await UniversalBle.startScan();
+      await UniversalBle.startScan().timeout(timeout);
       return await found.future;
+    } on TimeoutException {
+      throw BleError('the scan did not start (no answer from Bluetooth)');
     } catch (e) {
       throw BleError(_text(e));
     } finally {
       timer.cancel();
       await sub.cancel();
       try {
-        await UniversalBle.stopScan();
+        await UniversalBle.stopScan().timeout(const Duration(seconds: 3));
       } catch (_) {}
     }
   }
