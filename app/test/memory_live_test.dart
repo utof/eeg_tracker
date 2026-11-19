@@ -15,9 +15,46 @@ import 'package:eeg_tracker/memory_cues/rule.dart';
 import 'package:eeg_tracker/memory_cues/sounds.dart';
 import 'package:eeg_tracker/memory_cues/store.dart';
 import 'package:eeg_tracker/memory_cues/task.dart';
+import 'package:eeg_tracker/recorder/chunk_writer.dart' show Sample;
+import 'package:eeg_tracker/recorder/headband.dart';
+import 'package:eeg_tracker/recorder/night_recorder.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/fast_band.dart';
 import 'support/night_fakes.dart';
+
+/// A memory cue watch that fails on its [failAt]-th batch, or says [say] once (the recorder's side).
+class _Watch implements CueWatch {
+  _Watch({this.failAt, this.say});
+  final int? failAt;
+  String? say;
+  int batches = 0;
+  bool closed = false;
+
+  @override
+  String get who => 'memory cues';
+
+  @override
+  void add(DateTime arrival, List<Sample> rows, {bool firstOfFile = false}) {
+    if (++batches == failAt) throw StateError('cues broke');
+  }
+
+  @override
+  void check(DateTime now, {int? lightsOffMs, String? drift}) {}
+
+  @override
+  List<String> takeEvents() {
+    final s = say;
+    say = null;
+    return s == null ? const [] : [s];
+  }
+
+  @override
+  bool get finished => false;
+
+  @override
+  Future<void> close() async => closed = true;
+}
 
 /// A secret whose night 0 has sound with half [sound], and whose night [silentAt] is silent.
 String saltWith({required int sound, required int silentAt}) {
@@ -188,6 +225,64 @@ void main() {
     expect(r.cues.first.atMs, greaterThanOrEqualTo(startMs + 5 * 60000));
     expect(r.cues.last.atMs, lessThan(startMs + 11 * 60000));
     expect(events.last, 'memory cues: done for tonight (the cue hours are over)');
+  });
+
+  group('through the night recorder: its lines name the memory cues', () {
+    const fast = RecorderTiming(
+      tick: Duration(milliseconds: 10),
+      ticksPerCheck: 5,
+      scanFor: Duration(milliseconds: 20),
+      contactFor: Duration(milliseconds: 20),
+      settle: Duration(milliseconds: 5),
+      retryWait: Duration(milliseconds: 5),
+      sdkTimeout: Duration(milliseconds: 300),
+      connectTimeout: Duration(milliseconds: 300),
+      notFoundWait: Duration(milliseconds: 10),
+      notFoundWaitLong: Duration(milliseconds: 10),
+      stopTimeout: Duration(seconds: 2),
+      reconnectWaits: [Duration(milliseconds: 5)],
+      rescanFor: Duration(milliseconds: 20),
+    );
+
+    Future<String> night(CueWatch w) async {
+      final band = FastBand(start: startMs / 1000);
+      final r = NightRecorder(
+        finder: OneFinder(band),
+        dir: dir,
+        store: MemoryNightStore(),
+        onStatus: (_) {},
+        onStuck: (_) async {},
+        timing: fast,
+        clock: band.now,
+        watch: null,
+        cues: (_) => w,
+      );
+      final running = r.run(restartedBySystem: false);
+      await until(() => band.clockS >= 40);
+      await r.stop();
+      await running;
+      return [
+        for (final f in dir.listSync().whereType<File>().where((f) => f.path.endsWith('.log'))) f.readAsStringSync(),
+      ].join();
+    }
+
+    test('the guard switches them off by their own name; the cost line too', () async {
+      final broken = _Watch(failAt: 20);
+      final log = await night(broken);
+      expect(log, contains('memory cues stopped: Bad state: cues broke; the recording goes on'));
+      expect(log, isNot(contains('lucid')));
+      expect(broken.closed, isTrue);
+    });
+
+    test('their moments become markers, and the log ends with their cost', () async {
+      final log = await night(_Watch(say: 'memory cue 1 (N2/N3 0.90, -3 dB)'));
+      final markers = [
+        for (final f in dir.listSync().whereType<File>().where((f) => f.path.endsWith('.markers.jsonl')))
+          ...f.readAsLinesSync(),
+      ].join('\n');
+      expect(markers, contains('memory cue 1 (N2/N3 0.90, -3 dB)'));
+      expect(log, matches(RegExp(r"memory cues: [0-9.]+ s of the recorder's time over [0-9.]+ min")));
+    });
   });
 
   group('one kind a night', () {
