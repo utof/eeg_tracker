@@ -25,6 +25,10 @@ dependencies:
   # The dream catcher's microphone (DECISIONS row 112): your spoken answers and your own prompts as WAV files.
   # BSD-3-Clause, by llfbandit; on Android it uses the system's AudioRecord, nothing bundled.
   record: ^7.2.0
+  # The dream catcher's speech to text (DECISIONS row 250): k2-fsa's sherpa-onnx, Apache-2.0, prebuilt for arm64 and
+  # x86_64; its own ONNX Runtime 1.28.2 library meets flutter_onnxruntime's 1.28.0 (one is packaged:
+  # android/app/build.gradle.kts). Pinned: scripts/dream_text_check.py checks the same version on the laptop.
+  sherpa_onnx: 2.0.1
 
 dev_dependencies:
   flutter_test:
@@ -42,6 +46,10 @@ flutter:
     - assets/models/anysleep-run2.onnx
     - assets/models/anysleep-run3.onnx
     - assets/models/LICENSE-AnySleep.txt
+    # Silero's voice detector for the dream catcher's speech to text (0.6 MB, MIT); the speech model itself is a
+    # download (lib/dream/speech_model.dart).
+    - assets/models/silero_vad.onnx
+    - assets/models/LICENSE-silero-vad.txt
 
 hooks:
   user_defines:
