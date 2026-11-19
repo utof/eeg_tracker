@@ -114,6 +114,16 @@ abstract class OtherBoard {
 /// stream (that would start the mending over, every 10 s); its own no-data rule stays the backstop.
 abstract class MendsDrops {}
 
+/// This connection can reach that headband only through a scan, not directly (BrainBit's SDK and a headband that
+/// our own connection reached: its id has no SDK sensor family). The recorder then scans in the same try.
+class NeedsScan implements Exception {
+  NeedsScan(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 abstract class HeadbandFinder {
   /// Fresh scan for up to [scanFor], then a new sensor object for the best headband found, which also
   /// connects. Returns null when none was seen. [onFound] fires between the scan and the connection.

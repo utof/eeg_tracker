@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import '../alarm/bell.dart';
@@ -177,6 +178,11 @@ class RecorderTaskHandler extends TaskHandler {
   /// Who holds the Wi-Fi lock: the DIY board's datagrams, Share on Wi-Fi (one lock for the process, PhoneChannel.kt).
   bool _wifiDiy = false, _wifiShare = false;
 
+  /// Lights off and Alarm off that came before the recorder existed (the first moments of a start): handed to it as
+  /// soon as it is made, so a tap the screen already shows as done is never lost.
+  DateTime? _lightsOffEarly;
+  bool _alarmOffEarly = false;
+
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     final rec = await _recordingsDir();
@@ -217,6 +223,9 @@ class RecorderTaskHandler extends TaskHandler {
       startNotes: diy?.notes ?? const [],
     );
     _recorder = recorder;
+    final early = _lightsOffEarly;
+    if (early != null) recorder.lightsOff(at: early);
+    if (_alarmOffEarly) recorder.alarmOff();
     if (diy != null) {
       // the board's datagrams keep arriving with the screen off
       _wifiDiy = true;
@@ -281,6 +290,8 @@ class RecorderTaskHandler extends TaskHandler {
       if (r != null) {
         r.lightsOff();
         _send(r.status);
+      } else {
+        _lightsOffEarly = DateTime.now();
       }
     } else if (data is Map && data['kind'] == 'share') {
       unawaited(_sharing(() => _applyShare(ShareConfig.fromJson(data['config']))));
@@ -289,6 +300,8 @@ class RecorderTaskHandler extends TaskHandler {
       if (r != null) {
         r.alarmOff();
         _send(r.status);
+      } else {
+        _alarmOffEarly = true;
       }
     }
   }
@@ -332,12 +345,7 @@ class RecorderTaskHandler extends TaskHandler {
   void _send(RecorderStatus s) =>
       FlutterForegroundTask.sendDataToMain(s.toMap(nowMs: DateTime.now().millisecondsSinceEpoch));
 
-  Future<void> _restartProcess(String reason) async {
-    try {
-      await Phone.restartProcess(5000).timeout(const Duration(seconds: 5));
-    } catch (_) {}
-    exit(3); // reached only if the native call could not end the process
-  }
+  Future<void> _restartProcess(String reason) => restartAppProcess();
 
   static Future<AlarmPlan?> _alarmPlan() async {
     try {
@@ -356,6 +364,24 @@ class RecorderTaskHandler extends TaskHandler {
     final saved = await FlutterForegroundTask.getData<String>(key: _dirKey);
     return saved ?? '/data/user/0/io.github.utof.eeg_tracker/files/recordings'; // Context.getFilesDir()
   }
+}
+
+/// The SDK is wedged (night_recorder.dart `onStuck`): the service is started again in 5 s and this process ends.
+/// The native call arms the restart alarm and answers at once; it ends the process itself 300 ms later
+/// (`Process.killProcess`, PhoneChannel.kt). Dart's own `exit` (which runs the native exit handlers while the
+/// engine's and the SDK's threads still run) comes only if the process is still alive [grace] later, or at once when
+/// the native call failed. [restart] and [exitProcess] are the phone's and Dart's; tests pass their own.
+@visibleForTesting
+Future<void> restartAppProcess({
+  Future<void> Function(int delayMs) restart = Phone.restartProcess,
+  void Function(int code) exitProcess = exit,
+  Duration grace = const Duration(seconds: 2),
+}) async {
+  try {
+    await restart(5000).timeout(const Duration(seconds: 5));
+    await Future<void>.delayed(grace);
+  } catch (_) {}
+  exitProcess(3); // reached only if the native call could not end the process
 }
 
 /// The notification's line; while sharing is on it says so, with the address. [diy]: the DIY board's words.

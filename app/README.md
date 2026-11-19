@@ -1346,3 +1346,22 @@ step 2). All take a few minutes.
    - `phone battery summary: 8% in 8.0 h = 1.00 %/h, 320 mAh = 40 mAh/h` as the last lines of the night.
      The report's estimate is 1-2 % an hour; for a fair number unplug the phone, no charger all night, and
      if you can, do one 3-hour run with the app idle and one recording for comparison.
+5. **Many drops in one night with BrainBit's SDK (about 40 minutes).** After every drop the recorder leaves the
+   lost sensor object alone and makes a new one (DECISIONS row 49). Nothing frees the old one: the SDK's only
+   way to free it (`dispose`, which ends in its native `freeSensor`) is a call on a headband that is out of
+   range, and on the laptop such calls crashed the SDK. If the SDK keeps one Bluetooth client per sensor,
+   Android's limit of about 30 per app would stop every reconnect after about 30 drops in one app process.
+   (Our own connection does not have this: a lost headband object closes its own link.)
+   1. The "own connection" switch off. Start a night, screen on, phone on the charger.
+   2. `adb shell dumpsys bluetooth_manager > bt-00.txt`
+   3. 35 times: switch the headband off, wait until the notification says "Reconnecting", switch it on, wait
+      until it says "Recording" again (about a minute each time). After every 10th:
+      `adb shell dumpsys bluetooth_manager > bt-10.txt` (then `bt-20.txt`, `bt-30.txt`, `bt-35.txt`).
+   4. `adb logcat -d > logcat.txt`, then Stop and export the night.
+   5. What to look at: in each `bt-*.txt`, the section `GATT Client Map`: its `Entries:` number and how many
+      entries name `io.github.utof.eeg_tracker`. One more for each drop means every lost sensor keeps its
+      client. In the night's `.log` files: count the `drop (` lines, and note the drop after which
+      `reconnect try ... failed` lines pile up (errors with `133`, `GATT`, `no resources` or `too many`).
+      In `logcat.txt`: `grep -i -E "registerClient|too many|no resources|status=133" logcat.txt`.
+   6. Tell the assistant either way. A count that grows with each drop means the lost sensors must be freed
+      once the next one records, which first needs its own crash test; a flat count means nothing to do.

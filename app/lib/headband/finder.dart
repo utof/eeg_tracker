@@ -7,6 +7,8 @@
 // finder of its own (diy/night.dart).
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../phone.dart';
 import '../recorder/brainbit.dart' show SdkFinder;
 import '../recorder/headband.dart';
@@ -24,7 +26,8 @@ Future<({OwnBleSettings settings, OwnBleStore? store, Directory? recordings})> l
     if (rec == null) return (settings: const OwnBleSettings(), store: null, recordings: null);
     final store = OwnBleStore(ownBleDirFor(rec));
     return (settings: store.load(), store: store, recordings: Directory(rec));
-  } catch (_) {
+  } catch (e) {
+    debugPrint("own BLE: the settings could not be read ($e); BrainBit's SDK is used");
     return (settings: const OwnBleSettings(), store: null, recordings: null);
   }
 }

@@ -67,8 +67,8 @@ class SdkFinder implements HeadbandFinder {
   Future<Headband> connectDirect(BandId id) async {
     final known = _scanner != null && _info?.address == id.address;
     // After a process restart no scanner knows the headband; the SDK may refuse, and the recorder scans.
-    final scanner = known ? _scanner! : await Scanner.create(_families);
     final info = known ? _info! : _infoOf(id);
+    final scanner = known ? _scanner! : await Scanner.create(_families);
     final band = await _create(scanner, info, rssi: null, newScanner: !known);
     _keep(scanner, info);
     return band;
@@ -111,7 +111,14 @@ class SdkFinder implements HeadbandFinder {
 
   static FSensorInfo _infoOf(BandId id) {
     final family = FSensorFamily.values.asNameMap()[id.family];
-    if (family == null) throw StateError('unknown sensor family "${id.family}"');
+    if (family == null) {
+      // Our own connection's headband (the switch was moved during the night): no sensor info the SDK could use.
+      throw NeedsScan(
+        id.family == 'own'
+            ? "the night's headband was reached through our own connection; BrainBit's SDK needs a scan first"
+            : 'unknown sensor family "${id.family}"; BrainBit\'s SDK needs a scan first',
+      );
+    }
     return FSensorInfo(
       name: id.name,
       address: id.address,

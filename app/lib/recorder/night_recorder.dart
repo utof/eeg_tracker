@@ -197,6 +197,9 @@ class NightRecorder {
   final Completer<void> _done = Completer<void>();
   bool _endNight = true;
   ChunkWriter? _writer;
+
+  /// The run whose samples are already in the night's count ([_count]); a save does not add them again.
+  ChunkWriter? _counted;
   int _misses = 0;
 
   /// Log lines waiting for the next run's `.log` (no closed run of tonight to put them in), with their times.
@@ -234,6 +237,12 @@ class NightRecorder {
 
   /// Markers given before tonight's first file set opened, with their times.
   List<(DateTime, String)> _pendingMarkers = const [];
+
+  /// [run] has loaded or begun the night. Lights off and Alarm off that come before (the service hands over what came
+  /// in the first moments of a start) are kept here and applied then, so the new night cannot overwrite them.
+  bool _begun = false;
+  DateTime? _earlyLightsOff;
+  bool _earlyAlarmOff = false;
 
   /// The smart alarm while its live model runs; [_alarmLast] what it showed when it finished.
   AlarmWatch? _alarm;
@@ -304,7 +313,12 @@ class NightRecorder {
     _live.release();
     await _closeScorer().timeout(const Duration(seconds: 5), onTimeout: () {});
     await _done.future.timeout(timing.stopTimeout, onTimeout: () {});
-    _writer?.close();
+    final w = _writer;
+    if (w != null && !w.isClosed) {
+      // the run did not end in time (an SDK call still blocks): its files are closed here, and counted
+      w.close();
+      _count(w);
+    }
     await _save();
   }
 
@@ -378,6 +392,10 @@ class NightRecorder {
         note: restartedBySystem && prior.active ? 'restarted by Android; reconnecting' : 'looking for the headband',
       ).withDrift(lightsOffMs: _night.lightsOffMs).withAlarm(_alarmStatus()),
     );
+    _begun = true;
+    final early = _earlyLightsOff;
+    if (early != null) lightsOff(at: early);
+    if (_earlyAlarmOff) alarmOff();
   }
 
   Future<void> _loop() async {
@@ -462,12 +480,22 @@ class NightRecorder {
     _set(_status.copyWith(phase: Phase.reconnecting));
     await _pause(waits.isEmpty ? Duration.zero : waits[min(n, waits.length) - 1]);
     if (_stopping) return null;
-    final scan = _night.directOff || timing.scanEvery <= 1 || n % timing.scanEvery == 0;
-    final how = scan ? 'scan' : 'direct to ${id.address}';
+    var scan = _night.directOff || timing.scanEvery <= 1 || n % timing.scanEvery == 0;
+    var how = scan ? 'scan' : 'direct to ${id.address}';
     final t0 = _now();
     String took() => '${(_now().difference(t0).inMilliseconds / 1000).toStringAsFixed(1)} s';
     try {
-      final band = scan ? await _scan(timing.rescanFor) : await _direct(id);
+      Headband? band;
+      try {
+        band = scan ? await _scan(timing.rescanFor) : await _direct(id);
+      } on NeedsScan catch (e) {
+        // The connection in use cannot reach this headband directly (the switch moved during the night): a scan now
+        // rather than at every third try; once it connects, the night's headband is one it can reach.
+        _note('reconnect try $n ($how): $e; scanning instead');
+        scan = true;
+        how = 'scan';
+        band = await _scan(timing.rescanFor);
+      }
       if (band != null) {
         _via = (how: scan ? 'scan' : 'direct', tryNo: n);
         _note('reconnect try $n ($how): connected after ${took()}');
@@ -604,8 +632,14 @@ class NightRecorder {
       // Anything unexpected ends this run only; the night goes on with a reconnect.
       w.log('unexpected error: ${_short(e)}');
     }
-    await _cancel([sigSub, rangeSub, notesSub]);
-    return _finish(band, w, end, isLost);
+    await _cancel([sigSub, rangeSub]);
+    // The headband's notes are heard until the run's files close: stopping its signal and letting it go write its
+    // last lines (the lost packets since its last note).
+    try {
+      return await _finish(band, w, end, isLost);
+    } finally {
+      await _cancel([notesSub]);
+    }
   }
 
   /// Ends a run's subscriptions; a failing cancel costs nothing.
@@ -807,15 +841,20 @@ class NightRecorder {
   }
 
   /// The night screen's Lights off: a marker in the recording, kept in the saved night, and the drift-off detector
-  /// starts again from the night's next 30 s epoch (after a process restart it starts here).
-  void lightsOff() {
+  /// starts again from the night's next 30 s epoch (after a process restart it starts here). [at]: when it was tapped,
+  /// if earlier than now.
+  void lightsOff({DateTime? at}) {
     if (_stopping) return;
-    final at = _now();
-    _night = _night.copyWith(lightsOffMs: at.millisecondsSinceEpoch);
+    final t = at ?? _now();
+    if (!_begun) {
+      _earlyLightsOff = t;
+      return;
+    }
+    _night = _night.copyWith(lightsOffMs: t.millisecondsSinceEpoch);
     unawaited(_save().catchError((Object _) {})); // the next 10 s check saves it again
-    _marker(lightsOffMarker, at);
+    _marker(lightsOffMarker, t);
     if (_drift == null && !_driftUsed) _startDrift();
-    _guarded((d) => d.lightsOff(at));
+    _guarded((d) => d.lightsOff(t));
     _set(_withAlarm(_withDrift(_status)));
   }
 
@@ -988,6 +1027,10 @@ class NightRecorder {
 
   /// The night screen's Alarm off: the live model stops; the screen takes the phone's alarm away itself.
   void alarmOff() {
+    if (!_begun) {
+      _earlyAlarmOff = true; // the plan is known once the night is
+      return;
+    }
     if (_plan == null || _alarmLast?.note == 'Turned off.') return;
     final a = _alarm;
     _alarm = null;
@@ -1194,7 +1237,7 @@ class NightRecorder {
   /// Closes a run. Data first; SDK calls only for a headband that is still in range.
   Future<_End> _finish(Headband band, ChunkWriter w, _End end, bool Function() lost) async {
     _syncQuietly(w);
-    _night = _night.copyWith(samples: _night.samples + w.samplesWritten);
+    _count(w);
     _status = _status.copyWith(nightSamples: _night.samples);
     _logPackets(w);
     w.log('total samples ${w.samplesWritten}, ${(w.samplesWritten / sampleRateHz / 60).toStringAsFixed(1)} min');
@@ -1290,7 +1333,7 @@ class NightRecorder {
   Future<void> _stuck(SdkStuck e, ChunkWriter? w) async {
     if (w != null && !w.isClosed) {
       _syncQuietly(w);
-      _night = _night.copyWith(samples: _night.samples + w.samplesWritten);
+      _count(w);
       w.log('$e; saved${_stopping ? '' : ', restarting the app process'}');
       w.close();
     }
@@ -1298,6 +1341,14 @@ class NightRecorder {
     if (_stopping) return;
     _set(_status.copyWith(phase: Phase.reconnecting, note: 'Bluetooth stuck; restarting the recorder'));
     await onStuck(e.toString());
+  }
+
+  /// Adds a run's samples to the night's count, once whichever way the run ends (closed by the loop, by a stuck SDK
+  /// call, or by a Stop that could not wait for it).
+  void _count(ChunkWriter w) {
+    if (identical(_counted, w)) return;
+    _counted = w;
+    _night = _night.copyWith(samples: _night.samples + w.samplesWritten);
   }
 
   /// [ChunkWriter.sync] where a failure (storage full) must not stop what follows: the headband is still let go
@@ -1409,18 +1460,26 @@ class NightRecorder {
 
   /// Persists the night. It stays "active" unless the user ended it, so a restart continues it. Never throws: the
   /// saved night only helps a restarted process, and a store that fails must not cost the recording (one log line).
-  Future<void> _save() async {
+  /// One save at a time, in the order asked, each with the night as it is when it starts: two in flight could land
+  /// in the other order (SharedPreferences commits on a pool of threads) and leave an older state saved. A save that
+  /// takes over 10 s counts as failed, so the next can go.
+  Future<void> _save() => _saves = _saves.then((_) => _saveNow());
+  Future<void> _saves = Future<void>.value();
+
+  Future<void> _saveNow() async {
     final w = _writer;
-    final live = w == null || w.isClosed ? 0 : w.samplesWritten;
+    final live = w == null || w.isClosed || identical(w, _counted) ? 0 : w.samplesWritten;
     try {
-      await store.save(
-        _night.copyWith(
-          active: !(_stopping && _endNight),
-          samples: _night.samples + live,
-          slots: Map.of(_slots),
-          packets: _packets.counts,
-        ),
-      );
+      await store
+          .save(
+            _night.copyWith(
+              active: !(_stopping && _endNight),
+              samples: _night.samples + live,
+              slots: Map.of(_slots),
+              packets: _packets.counts,
+            ),
+          )
+          .timeout(const Duration(seconds: 10));
     } catch (e) {
       if (_saveFailed) return;
       _saveFailed = true;

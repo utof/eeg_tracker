@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
+import 'package:eeg_tracker/alarm/rule.dart';
 import 'package:eeg_tracker/recorder/battery.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
@@ -446,6 +448,38 @@ void main() {
     await running;
   });
 
+  test('a night begun through our own connection and continued with the SDK scans at once, not every third try', () async {
+    // The switch was moved during the night and the process restarted: the saved headband has no SDK sensor family.
+    store.state = const NightState(
+      active: true,
+      startMs: 1000,
+      runs: 1,
+      contactTried: true,
+      band: BandId(name: 'BB Black', address: 'AA:BB', serial: '123', family: 'own'),
+    );
+    final band = FakeBand('a');
+    final finder = _SdkLikeFinder([band]);
+    final r = recorder(finder);
+    final running = r.run(restartedBySystem: true);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await r.stop();
+    await running;
+
+    expect(finder.calls, ['direct AA:BB', 'scan']);
+    expect(band.calls, contains('startSignal'));
+    final log = files('log').single.readAsStringSync();
+    expect(
+      log,
+      contains(
+        "reconnect try 1 (direct to AA:BB): the night's headband was reached through our own connection; BrainBit's "
+        'SDK needs a scan first; scanning instead',
+      ),
+    );
+    expect(log, contains('reconnect try 1 (scan): connected'));
+    expect(store.state.band?.family, 'leBrainBitBlack', reason: 'the next drop goes direct again');
+    expect(store.state.directPending, isFalse);
+  });
+
   test('a process that died during a direct connection scans only', () async {
     store.state = const NightState(
       active: true,
@@ -626,6 +660,127 @@ void main() {
     expect(RegExp('could not save the night state').allMatches(files('log').single.readAsStringSync()), hasLength(1));
   });
 
+  test('Lights off and Alarm off that come before the night is set up are kept, not lost', () async {
+    // The service hands them over in the first moments of a start, before run() has loaded the saved night.
+    final end = DateTime.now().add(const Duration(hours: 8)).millisecondsSinceEpoch;
+    final band = FakeBand('a');
+    final r = NightRecorder(
+      finder: FakeFinder([band]),
+      dir: dir,
+      store: store,
+      onStatus: statuses.add,
+      onStuck: (r) async => stuck.add(r),
+      timing: fast,
+      watch: null,
+      alarmPlan: AlarmPlan(endMs: end, windowMin: 30),
+    );
+    final at = DateTime.now();
+    r.lightsOff(at: at);
+    r.alarmOff();
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect(r.status.lightsOffMs, at.millisecondsSinceEpoch);
+    await r.stop();
+    await running;
+
+    expect(store.state.lightsOffMs, at.millisecondsSinceEpoch);
+    expect(store.state.alarmOff, isTrue);
+    expect(store.state.alarmEndMs, end);
+    final log = files('log').single.readAsStringSync();
+    expect(RegExp(r' lights off\n').allMatches(log), hasLength(1), reason: log);
+    expect(log, contains('smart alarm: turned off'));
+  });
+
+  test('two quick saves of the night state land in the order they were made', () async {
+    // SharedPreferences commits on a pool of threads: a save started first may finish last.
+    final slow = _OrderStore();
+    final r = NightRecorder(
+      finder: FakeFinder([]),
+      dir: dir,
+      store: slow,
+      onStatus: statuses.add,
+      onStuck: (r) async => stuck.add(r),
+      timing: fast,
+      watch: null,
+    );
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    slow.delays = [const Duration(milliseconds: 150), Duration.zero];
+    final t1 = DateTime(2026, 11, 19, 23), t2 = DateTime(2026, 11, 19, 23, 1);
+    r.lightsOff(at: t1);
+    r.lightsOff(at: t2);
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    expect(slow.state.lightsOffMs, t2.millisecondsSinceEpoch, reason: 'an older state landed last');
+    await r.stop();
+    await running;
+  });
+
+  test('the saved sample count never counts a run twice (a save while the run is being closed)', () async {
+    final saves = _KeepingStore();
+    final first = _SlowBand('a');
+    late final NightRecorder r;
+    first.onStop = () => r.lightsOff(); // a save from outside the loop, while the run is closed
+    r = NightRecorder(
+      finder: FakeFinder([first]),
+      dir: dir,
+      store: saves,
+      onStatus: statuses.add,
+      onStuck: (r) async => stuck.add(r),
+      timing: fast,
+      watch: null,
+    );
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    first.sending = false; // a stall: the run ends with the headband still in range, so it is stopped properly
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await r.stop();
+    await running;
+
+    final total = f32Records(files('f32').single);
+    expect(total, greaterThan(0));
+    expect(files('log').single.readAsStringSync(), contains('still no data; reconnecting'));
+    expect(saves.saved.map((s) => s.samples).reduce(max), lessThanOrEqualTo(total));
+    expect(saves.state.samples, total);
+  });
+
+  test('Stop that cannot wait for the run still saves its samples, counted once', () async {
+    const slowSdk = RecorderTiming(
+      tick: Duration(milliseconds: 10),
+      ticksPerCheck: 5,
+      scanFor: Duration(milliseconds: 20),
+      contactFor: Duration(milliseconds: 20),
+      settle: Duration(milliseconds: 5),
+      retryWait: Duration(milliseconds: 5),
+      sdkTimeout: Duration(seconds: 1),
+      connectTimeout: Duration(milliseconds: 300),
+      stopTimeout: Duration(milliseconds: 100), // on the phone 20 s, under the SDK's 30 s
+      phoneLogEvery: Duration(minutes: 1),
+    );
+    final band = _SlowBand('a');
+    final r = NightRecorder(
+      finder: FakeFinder([band]),
+      dir: dir,
+      store: store,
+      onStatus: statuses.add,
+      onStuck: (r) async => stuck.add(r),
+      timing: slowSdk,
+      watch: null,
+    );
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    band.hangBattery = true; // the next 10 s check blocks in the battery read
+    final reads = band.calls.where((c) => c == 'battery').length;
+    while (band.calls.where((c) => c == 'battery').length == reads) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+    await r.stop();
+    final records = f32Records(files('f32').single);
+    expect(records, greaterThan(0));
+    expect(store.state.samples, records, reason: 'Stop closed the files, so the saved night must hold their samples');
+    await running;
+    expect(store.state.samples, records);
+  });
+
   test('packet accounting: a restarted process continues the night\'s counts; a new run is not compared', () async {
     store.state = const NightState(
       active: true,
@@ -653,4 +808,68 @@ class _BrokenStore implements NightStore {
 
   @override
   Future<void> save(NightState state) async => throw StateError('no preferences');
+}
+
+/// Saves that each wait their own time (the next of [delays], then none) before they land, like commits on a pool of
+/// threads.
+class _OrderStore implements NightStore {
+  NightState state = const NightState();
+  List<Duration> delays = const [];
+
+  @override
+  Future<NightState> load() async => state;
+
+  @override
+  Future<void> save(NightState s) async {
+    final wait = delays.isEmpty ? Duration.zero : delays.first;
+    if (delays.isNotEmpty) delays = delays.sublist(1);
+    await Future<void>.delayed(wait);
+    state = s;
+  }
+}
+
+/// Keeps every state saved.
+class _KeepingStore extends MemoryNightStore {
+  final List<NightState> saved = [];
+
+  @override
+  Future<void> save(NightState s) async {
+    saved.add(s);
+    await super.save(s);
+  }
+}
+
+/// [onStop] runs as the signal is stopped, which takes a moment; with [hangBattery] the battery read never returns.
+class _SlowBand extends FakeBand {
+  _SlowBand(super.label);
+  void Function()? onStop;
+  bool hangBattery = false;
+
+  @override
+  Future<void> stopSignal() async {
+    onStop?.call();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    await super.stopSignal();
+  }
+
+  @override
+  Future<int> battery() async {
+    if (hangBattery) {
+      calls.add('battery');
+      await Completer<void>().future;
+    }
+    return super.battery();
+  }
+}
+
+/// BrainBit's SDK as the finder sees it: it cannot reach a headband directly by an id our own connection made.
+class _SdkLikeFinder extends FakeFinder {
+  _SdkLikeFinder(super.bands);
+
+  @override
+  Future<Headband> connectDirect(BandId id) async {
+    if (id.family != 'own') return super.connectDirect(id);
+    calls.add('direct ${id.address}');
+    throw NeedsScan("the night's headband was reached through our own connection; BrainBit's SDK needs a scan first");
+  }
 }

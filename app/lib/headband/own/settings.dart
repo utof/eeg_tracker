@@ -4,6 +4,7 @@
 // BrainBit's SDK stays the default until the probe has passed on the real headband (DECISIONS rows 211, 215).
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'protocol.dart';
 
@@ -155,27 +156,36 @@ class OwnBleStore {
   Directory get probeDir => Directory('${dir.path}/probe');
 
   /// The saved settings; the defaults (SDK) when there are none or the file is damaged.
-  OwnBleSettings load() {
+  OwnBleSettings load() => _read() ?? const OwnBleSettings();
+
+  /// The saved settings, the defaults when there is no file yet, null when the file cannot be read or is damaged.
+  OwnBleSettings? _read() {
     try {
       return OwnBleSettings.fromJson(jsonDecode(file.readAsStringSync()));
+    } on PathNotFoundException {
+      return const OwnBleSettings();
     } on FileSystemException {
-      return const OwnBleSettings();
+      return null;
     } on FormatException {
-      return const OwnBleSettings();
+      return null;
     }
   }
 
-  /// Written to a temporary file, then renamed, so a reader never sees half a file.
+  /// Written to a temporary file of its own, then renamed, so a reader never sees half a file (the screen and the
+  /// recorder's service each save from their own isolate).
   void save(OwnBleSettings s) {
     dir.createSync(recursive: true);
-    final tmp = File('${file.path}.tmp');
+    final tmp = File('${file.path}.${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(1 << 32)}.tmp');
     tmp.writeAsStringSync('${const JsonEncoder.withIndent(' ').convert(s.toJson())}\n', flush: true);
     tmp.renameSync(file.path);
   }
 
-  /// Remembers the headband our connection reached (the other settings as they are on disk now).
+  /// Remembers the headband our connection reached (the other settings as they are on disk now). Settings that
+  /// cannot be read are left as they are: writing the defaults over them would switch our connection off and lose
+  /// the channel order for good, while the next read may well work.
   void remember(String address, String name) {
-    final now = load();
+    final now = _read();
+    if (now == null) return;
     if (now.address == address && (name.isEmpty || now.name == name)) return;
     save(now.copyWith(address: address, name: name.isEmpty ? null : name));
   }

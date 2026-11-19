@@ -13,6 +13,7 @@
 //   handed to the recorder as lines for the night's `.log` ([BandNotes]);
 // - no call can block for ever (each has a deadline and fails as "lost"), and none removes a bond or a device.
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 
@@ -72,9 +73,13 @@ class OwnFinder implements HeadbandFinder {
     DateTime Function()? clock,
   }) : _now = clock ?? DateTime.now,
        _address = settings.address,
-       _name = settings.name ?? '';
+       _name = settings.name ?? '',
+       _held = _Held(transport);
 
   final BleTransport transport;
+
+  /// [transport] as every headband object of this finder uses it, so a new object can wait for the old ones.
+  final _Held _held;
   final OwnBleSettings settings;
 
   /// Called with the address and name of every headband reached, to keep them for the next time.
@@ -85,7 +90,7 @@ class OwnFinder implements HeadbandFinder {
   String _name;
 
   BrainBitBle _driver(String? address, String name, Duration scanFor) => BrainBitBle(
-    transport: transport,
+    transport: _held,
     address: address,
     name: name,
     layout: settings.layout,
@@ -99,9 +104,16 @@ class OwnFinder implements HeadbandFinder {
     clock: _now,
   );
 
+  /// A new headband object connects only once the earlier ones have nothing open on Bluetooth: a let-go object's
+  /// connection try cannot be cancelled and may still be under way; universal_ble answers a second try for the same
+  /// address with "Connection already in progress", and its disconnect goes by address, so the old object letting go
+  /// of a link that opened late would close the new one's. At most one try's own limit.
+  Future<void> _quiet() => _held.quiet().timeout(timing.callTimeout + const Duration(seconds: 5), onTimeout: () {});
+
   /// The known address first, without a scan; a scan by name when there is none or it does not answer.
   @override
   Future<Headband?> find(Duration scanFor, {void Function(String name, int rssi)? onFound}) async {
+    await _quiet();
     final drv = _driver(_address, _name, scanFor);
     BandInfo? info;
     if (drv.address != null) {
@@ -129,6 +141,7 @@ class OwnFinder implements HeadbandFinder {
 
   @override
   Future<Headband> connectDirect(BandId id) async {
+    await _quiet();
     final drv = _driver(id.address, id.name, const Duration(seconds: 10));
     return _band(drv, await drv.connect());
   }
@@ -144,6 +157,84 @@ class OwnFinder implements HeadbandFinder {
 
   /// Nothing to free: every headband object closes its own link.
   void dispose() {}
+}
+
+/// A transport that knows what is open on it: connection tries under way and links not yet let go (or lost).
+class _Held implements BleTransport {
+  _Held(this._inner);
+  final BleTransport _inner;
+  int _open = 0;
+  Completer<void>? _quietNow;
+
+  /// Done when nothing is open.
+  Future<void> quiet() => _open == 0 ? Future<void>.value() : (_quietNow ??= Completer<void>()).future;
+
+  @override
+  String get describe => _inner.describe;
+
+  @override
+  Future<BleFound?> scan(bool Function(String name) match, Duration timeout) => _inner.scan(match, timeout);
+
+  @override
+  Future<BleLink> connect(String address, {required Duration timeout, required void Function() onLost}) async {
+    _open++;
+    var held = true;
+    void release() {
+      if (!held) return;
+      held = false;
+      if (--_open > 0) return;
+      final q = _quietNow;
+      _quietNow = null;
+      q?.complete();
+    }
+
+    try {
+      final link = await _inner.connect(
+        address,
+        timeout: timeout,
+        onLost: () {
+          release();
+          onLost();
+        },
+      );
+      return _HeldLink(link, release);
+    } catch (_) {
+      release();
+      rethrow;
+    }
+  }
+}
+
+class _HeldLink implements BleLink {
+  _HeldLink(this._link, this._release);
+  final BleLink _link;
+  final void Function() _release;
+
+  @override
+  bool get isConnected => _link.isConnected;
+  @override
+  int? get mtu => _link.mtu;
+  @override
+  Future<List<GattService>> services() => _link.services();
+  @override
+  Future<Uint8List> read(String service, String characteristic) => _link.read(service, characteristic);
+  @override
+  Future<void> write(String service, String characteristic, Uint8List data, {required bool withResponse}) =>
+      _link.write(service, characteristic, data, withResponse: withResponse);
+  @override
+  Future<void> subscribe(String service, String characteristic, void Function(Uint8List data) onData) =>
+      _link.subscribe(service, characteristic, onData);
+  @override
+  Future<void> pair() => _link.pair();
+
+  @override
+  Future<void> disconnect() async {
+    try {
+      await _link.disconnect();
+    } finally {
+      _release();
+    }
+  }
 }
 
 class OwnHeadband implements Headband, BandNotes, MendsDrops {
@@ -320,19 +411,15 @@ class OwnHeadband implements Headband, BandNotes, MendsDrops {
         keepOpen: true,
         giveUpAfter: timing.healFor,
         onConnected: (info, attempt) {
-          _reconnects++;
-          final away = _lostAt == null ? 0 : _now().difference(_lostAt!).inMilliseconds / 1000;
-          _lostAt = null;
           _status = info.status ?? _status;
-          _note(
-            'reconnected after ${away.toStringAsFixed(1)} s away (try ${attempt + 1}), battery '
-            '${info.status?.battery ?? '?'}%; same files',
-          );
+          _reconnected('try ${attempt + 1}');
         },
         onLost: (e, attempt, pause) {
           _lostAt ??= _now();
           _note(
-            pause == Duration.zero
+            stopping.isSet
+                ? 'headband lost: $e; no further tries: the signal was stopped'
+                : pause == Duration.zero
                 ? 'headband lost: $e; still away after ${_now().difference(_lostAt!).inSeconds} s, handing over to the '
                       "app's reconnect"
                 : 'headband lost: $e; trying again in ${_secs(pause)} s (try ${attempt + 1})',
@@ -342,8 +429,25 @@ class OwnHeadband implements Headband, BandNotes, MendsDrops {
     } catch (e) {
       _note('own connection stopped unexpectedly: $e'); // a bug, not a drop: treated as lost
     }
+    // A try under way as the signal was stopped may have got the link back; the driver does not report that one.
+    if (_lostAt != null && _drv.isConnected) _reconnected('as the signal was stopped');
     if (stopping.isSet || _disposed) return; // stopped on request
     if (!ok) _giveUp();
+  }
+
+  /// The `reconnected` note; the next drop is timed from its own start. Without a drop seen by this object (the link
+  /// closed while no signal ran, e.g. during the contact check) there is no time away to give.
+  void _reconnected(String how) {
+    _reconnects++;
+    final lostAt = _lostAt;
+    _lostAt = null;
+    final battery = 'battery ${_status?.battery ?? '?'}%; same files';
+    _note(
+      lostAt == null
+          ? 'reconnected ($how) after the link closed while the signal was off, $battery'
+          : 'reconnected after ${(_now().difference(lostAt).inMilliseconds / 1000).toStringAsFixed(1)} s away ($how), '
+                '$battery',
+    );
   }
 
   void _giveUp() {
@@ -422,6 +526,7 @@ class OwnHeadband implements Headband, BandNotes, MendsDrops {
       await _runner?.timeout(timing.stopWait, onTimeout: () {});
     } catch (_) {}
     await _drv.close(idle: true);
+    _tick(); // the lost packets since the last note, while the night's log still listens
     await _signal.close();
     await _resist.close();
     await _range.close();

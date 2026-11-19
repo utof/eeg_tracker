@@ -1,5 +1,6 @@
 // SdkFinder against neurosdk2's own platform channels (pigeon), answered here: what a failed scan leaves behind.
 import 'package:eeg_tracker/recorder/brainbit.dart';
+import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neurosdk2/constants.dart';
@@ -50,5 +51,13 @@ void main() {
     expect(await SdkFinder().find(const Duration(milliseconds: 1200)), isNull);
     await Future<void>.delayed(Duration.zero);
     expect(calls, containsAllInOrder(['startScan', 'getSensors', 'stopScan', 'closeScanner']));
+  });
+
+  test('a headband our own connection reached cannot be reached directly by the SDK: no scanner is made for it', () async {
+    await expectLater(
+      SdkFinder().connectDirect(const BandId(name: 'BB Black', address: 'AA:BB', family: 'own')),
+      throwsA(isA<NeedsScan>()),
+    );
+    expect(calls, isNot(contains('createScanner')));
   });
 }
