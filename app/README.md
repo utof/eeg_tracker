@@ -419,12 +419,18 @@ you drift again, 3 or 4 times. For ideas, not for sleep. The **i** button shows 
    to the main screen showing "Recording". **Stop** ends at any time and keeps the answers.
 8. Afterwards (or in the morning) open **Dream catcher**: the last session's rounds are at the top. Play each
    answer and type what it was about; the note is saved as you type. Earlier sessions are at the bottom.
+9. Your answers as words (once the speech model is on the phone, see the owner step below): under each play
+   button the phone shows what it heard, Russian or English. It writes them out after the session, never during
+   it, while this screen is open ("Words: writing out…"; a few seconds an answer). Fix a word in its box: your
+   version is shown from then on and kept apart from the phone's (**Undo edit** brings the phone's back). If an
+   answer cannot be written out, its row says why; the recording is always kept.
 
 The screen stays on (black and dim) during a session. You can lock the phone: the session goes on and still
 records your answers, but the **Drifting / Awake** halves need the screen, so a locked round counts as not
 answered. Do not swipe the app away. Files, app-private like the meditations: `files/dream-catcher/<time>.dream.json`
-(the rounds, the drift-off detector's epochs) and `<time>-r<n>.wav` (your answers), your prompts in
-`files/dream-catcher/prompts/`. The session's EEG is a normal recording in `files/recordings/` with every question
+(the rounds, the drift-off detector's epochs), `<time>-r<n>.wav` (your answers) and `<time>-r<n>.text.json` (their
+words: the phone's and yours, `docs/data-format.md`), your prompts in `files/dream-catcher/prompts/`; the speech
+model in `files/models/` (not exported). The session's EEG is a normal recording in `files/recordings/` with every question
 as a marker, so it is part of that night: the sleep report includes it and **Export a night** copies it.
 
 ### Owner step: the first try (a 20-minute nap, once)
@@ -445,6 +451,21 @@ asking at the right moment.
    - Could you tap Drifting / Awake half-asleep?
 4. With **Record the night** on a later evening, check in the morning that the night recorded and that **Sleep
    report** covers the time from Lights off.
+
+### Owner step: answers as words (once, about 10 minutes on Wi-Fi)
+
+The speech to text has run on the laptop and on the emulator, never on the 11T or on a real sleepy voice.
+
+1. On Wi-Fi, open **Dream catcher**, scroll to **Answers as text** and tap **Download (671 MB)**. Keep the page
+   open until it says "Speech model on this phone" (a few minutes; **Stop** pauses it, Download again goes on).
+   The app downloads only this model, from one fixed address, and checks it; your answers never leave the phone.
+2. If you already have dream catcher sessions, their answers are written out now, one after another.
+3. Next time, after a session: watch the words appear under each answer.
+4. Tell the assistant:
+   - How many seconds did one answer take ("Words: writing out…" to the words)? Did the phone get warm?
+   - How close were the words, in Russian and in English? Which words were wrong?
+   - Did a whispered or mumbled answer come out as "No words heard."?
+   - Did your fixes stay after closing and opening the page?
 
 ## Nap coach
 
