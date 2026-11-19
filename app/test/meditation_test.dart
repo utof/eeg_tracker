@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:eeg_tracker/detectors/detectors.dart' show EpochQuality;
+import 'package:eeg_tracker/dream/band_link.dart' show LinkTiming;
 import 'package:eeg_tracker/detectors/drift_off.dart';
 import 'package:eeg_tracker/feedback/demo.dart';
 import 'package:eeg_tracker/feedback/session.dart';
@@ -20,7 +21,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// Streams the demo signal (in volts, as the SDK gives it) far faster than real time: [perTick] samples
 /// every millisecond. Eyes open for the first 30 s (the calibration's instruction), then closed.
 class DemoBand implements Headband {
-  DemoBand(this.demo, {this.perTick = 250, this.label = 'A', this.skipAt});
+  DemoBand(this.demo, {this.perTick = 250, this.label = 'A', this.skipAt, this.silentStarts = 0});
 
   final DemoSignal demo;
   final int perTick;
@@ -28,6 +29,9 @@ class DemoBand implements Headband {
 
   /// At this sample, the packet numbers jump by 100 (100 samples lost on the way).
   final int? skipAt;
+
+  /// The first this many [startSignal] calls start nothing (a stream that stays silent until it is restarted).
+  final int silentStarts;
   int pack = 0;
   int sent = 0;
   Timer? _timer;
@@ -61,6 +65,7 @@ class DemoBand implements Headband {
   @override
   Future<void> startSignal() async {
     calls.add('startSignal');
+    if (calls.where((e) => e == 'startSignal').length <= silentStarts) return;
     _timer = Timer.periodic(const Duration(milliseconds: 1), (_) {
       if (!_signal.hasListener) return;
       demo.eyes = demo.t < 30 ? 'open' : 'closed';
@@ -118,6 +123,34 @@ class Finder implements HeadbandFinder {
   Future<Headband> connectDirect(BandId id) async {
     if (directTries >= direct.length) throw StateError('out of range');
     return direct[directTries++];
+  }
+}
+
+/// The first headband, then one direct reconnect target; records every try's kind and when it came (ms).
+class TimedFinder implements HeadbandFinder {
+  TimedFinder(this.first, this.direct);
+  final Headband first;
+  final Headband direct;
+  final clock = Stopwatch()..start();
+  final List<(String, int)> calls = [];
+  bool _found = false;
+
+  @override
+  Future<Headband?> find(Duration scanFor, {void Function(String name, int rssi)? onFound}) async {
+    if (_found) {
+      calls.add(('scan', clock.elapsedMilliseconds));
+      return null; // the rescan finds nothing
+    }
+    _found = true;
+    onFound?.call(first.name, -60);
+    return first;
+  }
+
+  @override
+  Future<Headband> connectDirect(BandId id) async {
+    calls.add(('direct', clock.elapsedMilliseconds));
+    if (calls.where((e) => e.$1 == 'direct').length < 3) throw StateError('out of range');
+    return direct;
   }
 }
 
@@ -307,6 +340,84 @@ void main() {
     expect(second.calls, containsAllInOrder(['startSignal', 'stopSignal', 'disconnect']));
     expect(c.leftLost, isTrue);
     expect(c.report!.complete, isTrue);
+    c.dispose();
+  });
+
+  test('a drop: the reconnect waits, the direct tries, every third a scan, and the log lines (DECISIONS 76)', () async {
+    final demo = DemoSignal(3), first = DemoBand(demo), second = DemoBand(demo, label: 'B');
+    final finder = TimedFinder(first, second);
+    const waits = [Duration(milliseconds: 40), Duration(milliseconds: 80), Duration(milliseconds: 120)];
+    final c = MeditationController(
+      finder: finder,
+      sound: SilentSound.new,
+      timing: const MeditationTiming(
+        contactFor: Duration(milliseconds: 5),
+        settle: Duration.zero,
+        tick: Duration(milliseconds: 20),
+        reconnectWaits: waits,
+        endRingOut: Duration.zero,
+      ),
+    );
+    await c.start(const Duration(minutes: 1));
+    await until(c, () => c.stage == Stage.running && c.runSeconds > 5);
+    final dropAt = finder.clock.elapsedMilliseconds;
+    first.goOutOfRange();
+    await until(c, () => c.stage == Stage.report);
+    expect(finder.calls.map((e) => e.$1), ['direct', 'direct', 'scan', 'direct'], reason: 'every third try is a scan');
+    var before = dropAt;
+    for (var i = 0; i < 4; i++) {
+      final wait = waits[i < 3 ? i : 2].inMilliseconds, at = finder.calls[i].$2;
+      expect(at - before, greaterThanOrEqualTo(wait - 5), reason: 'try ${i + 1} waits ${wait}ms (the last wait repeats)');
+      expect(at - before, lessThan(wait + 500), reason: 'try ${i + 1} is not delayed');
+      before = at;
+    }
+    expect(first.calls, isNot(contains('disconnect')));
+    final events = c.session!.log.info.map((i) => i['event']).whereType<String>().toList();
+    expect(events.where((e) => e == 'drop'), hasLength(1));
+    expect(events.where((e) => e == 'reconnect try'), hasLength(4));
+    expect(events.where((e) => e == 'reconnected'), hasLength(1));
+    final tries = c.session!.log.info.where((i) => i['event'] == 'reconnect try').toList();
+    expect([for (final t in tries) (t['try'], t['scan'], t['ok'])], [(1, false, false), (2, false, false), (3, true, false), (4, false, true)]);
+    c.dispose();
+  });
+
+  test('the reconnect rules are the shared link\'s: the timing maps one to one, and the controller has no copy', () {
+    const t = MeditationTiming(), l = LinkTiming();
+    expect(
+      [t.link.scanFor, t.link.connectTimeout, t.link.sdkTimeout, t.link.contactFor, t.link.settle, t.link.restartStreamAfter, t.link.rescanFor],
+      [l.scanFor, l.connectTimeout, l.sdkTimeout, l.contactFor, l.settle, l.restartStreamAfter, l.rescanFor],
+      reason: 'the defaults are the link\'s',
+    );
+    expect(t.link.reconnectWaits, l.reconnectWaits);
+    const custom = MeditationTiming(contactFor: Duration(milliseconds: 7), reconnectWaits: [Duration(milliseconds: 9)]);
+    expect([custom.link.contactFor, custom.link.reconnectWaits], [const Duration(milliseconds: 7), const [Duration(milliseconds: 9)]]);
+    final source = File('lib/meditation/controller.dart').readAsStringSync();
+    expect(source, contains('BandLink('));
+    for (final own in ['connectDirect', 'rangeChanges', 'startResist', 'stopSignal', 'disconnectAndDispose']) {
+      expect(source, isNot(contains(own)), reason: 'no own copy of the headband rules ($own)');
+    }
+  });
+
+  test('a stream that never starts is restarted once after restartStreamAfter, then the session goes on', () async {
+    final band = DemoBand(DemoSignal(3), silentStarts: 1);
+    final c = MeditationController(
+      finder: Finder([band]),
+      sound: SilentSound.new,
+      timing: const MeditationTiming(
+        contactFor: Duration(milliseconds: 5),
+        settle: Duration.zero,
+        tick: Duration(milliseconds: 20),
+        restartStreamAfter: Duration(milliseconds: 150),
+        endRingOut: Duration.zero,
+      ),
+    );
+    await c.start(const Duration(minutes: 1));
+    await until(c, () => band.sent > 500, max: const Duration(seconds: 10)); // nothing arrives until the restart
+    expect(band.calls.where((e) => e == 'stopSignal'), hasLength(1));
+    expect(c.session!.log.info.where((i) => i['event'] == 'stream restarted'), hasLength(1));
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect(band.calls.where((e) => e == 'startSignal'), hasLength(2), reason: 'restarted once only');
+    await c.stop();
     c.dispose();
   });
 
