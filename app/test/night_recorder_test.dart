@@ -658,6 +658,30 @@ void main() {
     expect(log, contains('smart alarm: turned off'));
   });
 
+  test('two quick saves of the night state land in the order they were made', () async {
+    // SharedPreferences commits on a pool of threads: a save started first may finish last.
+    final slow = _OrderStore();
+    final r = NightRecorder(
+      finder: FakeFinder([]),
+      dir: dir,
+      store: slow,
+      onStatus: statuses.add,
+      onStuck: (r) async => stuck.add(r),
+      timing: fast,
+      watch: null,
+    );
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    slow.delays = [const Duration(milliseconds: 150), Duration.zero];
+    final t1 = DateTime(2026, 11, 19, 23), t2 = DateTime(2026, 11, 19, 23, 1);
+    r.lightsOff(at: t1);
+    r.lightsOff(at: t2);
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    expect(slow.state.lightsOffMs, t2.millisecondsSinceEpoch, reason: 'an older state landed last');
+    await r.stop();
+    await running;
+  });
+
   test('packet accounting: a restarted process continues the night\'s counts; a new run is not compared', () async {
     store.state = const NightState(
       active: true,
@@ -685,4 +709,22 @@ class _BrokenStore implements NightStore {
 
   @override
   Future<void> save(NightState state) async => throw StateError('no preferences');
+}
+
+/// Saves that each wait their own time (the next of [delays], then none) before they land, like commits on a pool of
+/// threads.
+class _OrderStore implements NightStore {
+  NightState state = const NightState();
+  List<Duration> delays = const [];
+
+  @override
+  Future<NightState> load() async => state;
+
+  @override
+  Future<void> save(NightState s) async {
+    final wait = delays.isEmpty ? Duration.zero : delays.first;
+    if (delays.isNotEmpty) delays = delays.sublist(1);
+    await Future<void>.delayed(wait);
+    state = s;
+  }
 }

@@ -1374,18 +1374,26 @@ class NightRecorder {
 
   /// Persists the night. It stays "active" unless the user ended it, so a restart continues it. Never throws: the
   /// saved night only helps a restarted process, and a store that fails must not cost the recording (one log line).
-  Future<void> _save() async {
+  /// One save at a time, in the order asked, each with the night as it is when it starts: two in flight could land
+  /// in the other order (SharedPreferences commits on a pool of threads) and leave an older state saved. A save that
+  /// takes over 10 s counts as failed, so the next can go.
+  Future<void> _save() => _saves = _saves.then((_) => _saveNow());
+  Future<void> _saves = Future<void>.value();
+
+  Future<void> _saveNow() async {
     final w = _writer;
     final live = w == null || w.isClosed ? 0 : w.samplesWritten;
     try {
-      await store.save(
-        _night.copyWith(
-          active: !(_stopping && _endNight),
-          samples: _night.samples + live,
-          slots: Map.of(_slots),
-          packets: _packets.counts,
-        ),
-      );
+      await store
+          .save(
+            _night.copyWith(
+              active: !(_stopping && _endNight),
+              samples: _night.samples + live,
+              slots: Map.of(_slots),
+              packets: _packets.counts,
+            ),
+          )
+          .timeout(const Duration(seconds: 10));
     } catch (e) {
       if (_saveFailed) return;
       _saveFailed = true;
