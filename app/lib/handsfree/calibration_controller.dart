@@ -150,39 +150,61 @@ class CalibrationController extends ChangeNotifier {
   bool _ended = false;
   bool _disposed = false;
 
+  /// The number of the latest start: a start that Stop or a newer start overtook touches nothing of the calibration
+  /// now running (DECISIONS 450, 470).
+  int _run = 0;
+  bool _live(int run) => run == _run && !_ended;
+
   /// Connects, checks contact, then runs the plan. Errors end in [CalStage.failed].
   Future<void> start() async {
     if (active) return;
     _reset();
+    final run = ++_run;
     _set(CalStage.connecting, 'Looking for the headband.');
-    final link = BandLink(finder: finder, timing: timing.link, onBatch: _onBatch, onEvent: _onLinkEvent, clock: _now);
+    final link = BandLink(
+      finder: finder,
+      timing: timing.link,
+      onBatch: (now, batch) => _onBatch(now, batch, run),
+      onEvent: (e, line) => _onLinkEvent(e, line, run),
+      clock: _now,
+    );
     _link = link;
     try {
-      if (!await link.connect(onFound: (name) => _set(CalStage.connecting, 'Found $name. Connecting.'))) {
+      final found = await link.connect(onFound: (name) {
+        if (_live(run)) _set(CalStage.connecting, 'Found $name. Connecting.');
+      });
+      if (!_live(run)) return await link.close();
+      if (!found) {
         _link = null;
-        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?');
+        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?', run);
       }
-      if (_ended) return await link.close();
       _set(CalStage.contact, 'Checking contact. Keep still for a few seconds.');
-      contact = await link.contact();
-      if (_ended) return await link.close();
+      final ohms = await link.contact();
+      if (!_live(run)) return await link.close();
+      contact = ohms;
       final sound = _makeSound();
       try {
         await sound.start();
+        if (!_live(run)) {
+          await sound.stop();
+          return await link.close();
+        }
         _sound = sound;
       } catch (_) {
+        if (!_live(run)) return await link.close();
         message = 'The tones did not start; follow the words on the screen.';
       }
       _openWriter(link.name);
       _seen = Detectors()..tap = GestureTap(_second);
       _startedAt = _now();
       await link.startSignal();
+      if (!_live(run)) return await link.close(); // Stop came while the stream started
       _ticker = Timer.periodic(timing.tick, (_) => _tick());
       _set(CalStage.still, message);
     } on TimeoutException catch (e) {
-      await _fail('The headband did not answer (${e.message ?? 'timeout'}). Switch it off and on, then try again.');
+      await _fail('The headband did not answer (${e.message ?? 'timeout'}). Switch it off and on, then try again.', run);
     } catch (e) {
-      await _fail('Could not start: $e');
+      await _fail('Could not start: $e', run);
     }
   }
 
@@ -232,14 +254,15 @@ class CalibrationController extends ChangeNotifier {
 
   // ---- the signal ----
 
-  void _onLinkEvent(LinkEvent e, String line) {
+  void _onLinkEvent(LinkEvent e, String line, int run) {
+    if (run != _run) return;
     _writer?.log(line);
-    if (e == LinkEvent.drop && active) unawaited(_fail('The headband dropped out. Nothing was kept; please try again.'));
+    if (e == LinkEvent.drop && active) unawaited(_fail('The headband dropped out. Nothing was kept; please try again.', run));
   }
 
-  void _onBatch(DateTime now, List<Sample> batch) {
+  void _onBatch(DateTime now, List<Sample> batch, int run) {
     final seen = _seen;
-    if (seen == null || _ended) return;
+    if (seen == null || !_live(run)) return;
     _writer?.addBatch(now, batch);
     for (final x in batch) {
       if (_ended) return;
@@ -331,8 +354,9 @@ class CalibrationController extends ChangeNotifier {
     _set(CalStage.result, '');
   }
 
-  Future<void> _fail(String why) async {
-    if (_ended && stage == CalStage.failed) return;
+  /// [run]: the start that failed; one that Stop or a newer start overtook changes nothing (its headband was let go).
+  Future<void> _fail(String why, int run) async {
+    if (!_live(run)) return; // Stop, a newer start, or the end got there first
     _ended = true;
     _ticker?.cancel();
     _closeWriter(keep: false);

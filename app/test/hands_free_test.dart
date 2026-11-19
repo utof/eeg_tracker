@@ -34,6 +34,7 @@ import 'package:eeg_tracker/training/control.dart' show SessionKind;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'dream_test.dart' show FakeMic, OneFinder, spoken;
+import 'support/gates.dart';
 
 const fs = 250;
 
@@ -534,6 +535,81 @@ void main() {
       final eeg = Directory('${root.path}/hands-free/recordings');
       expect(eeg.existsSync() ? eeg.listSync() : const <FileSystemEntity>[], isEmpty);
       c.dispose();
+    });
+
+    group('Stop and Start in the middle of a start (DECISIONS 450)', () {
+      test('Stop, then Start again while the first search runs: the first search ending touches nothing', () async {
+        final finder = GateFinder(), band = GestureBand([]);
+        final c = CalibrationController(finder: finder, sound: SilentCheckInSound.new, store: HandsFreeStore(root), timing: calFast);
+        final first = c.start();
+        await until(() => finder.finds.length == 1, 'the first search');
+        await c.stop();
+        expect(c.stage, CalStage.setup);
+        final second = c.start();
+        await until(() => finder.finds.length == 2, 'the second search');
+        finder.finds[1].complete(band);
+        await until(() => c.seconds > 2, 'the new calibration running');
+        finder.finds[0].complete(null); // the first search ends: "not found"
+        await first;
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(c.stage, isNot(CalStage.failed), reason: 'no "Headband not found" in the new calibration');
+        expect(c.message, isNot(contains('not found')));
+        expect(c.active, isTrue);
+        await c.stop();
+        await second;
+        expect(c.stage, CalStage.setup);
+        c.dispose();
+      });
+
+      test('Stop, then Start again while the first search runs: a headband the first search brings late is let go', () async {
+        final finder = GateFinder(), late = SlowStart(GestureBand([])), band = GestureBand([]);
+        final c = CalibrationController(finder: finder, sound: SilentCheckInSound.new, store: HandsFreeStore(root), timing: calFast);
+        final first = c.start();
+        await until(() => finder.finds.length == 1, 'the first search');
+        await c.stop();
+        final second = c.start();
+        await until(() => finder.finds.length == 2, 'the second search');
+        finder.finds[1].complete(band);
+        await until(() => c.seconds > 2, 'the new calibration running');
+        finder.finds[0].complete(late);
+        await first;
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(late.disconnected, isTrue);
+        expect(c.stage, isNot(CalStage.failed));
+        expect(c.active, isTrue);
+        await c.stop();
+        await second;
+        c.dispose();
+      });
+
+      test('Stop while the stream is being started: the calibration ends and stays ended', () async {
+        final inner = GestureBand([]), band = SlowStart(inner);
+        final c = CalibrationController(finder: OneFinder(band), sound: SilentCheckInSound.new, store: HandsFreeStore(root), timing: calFast);
+        final started = c.start();
+        await until(() => band.asked, 'the stream start');
+        await c.stop();
+        band.gate.complete();
+        await started;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        expect(c.stage, CalStage.setup);
+        expect(c.active, isFalse);
+        expect(band.disconnected, isTrue);
+        expect(c.seconds, 0);
+        c.dispose();
+      });
+
+      test('Stop while it searches: the search ending without a headband says nothing', () async {
+        final finder = GateFinder();
+        final c = CalibrationController(finder: finder, sound: SilentCheckInSound.new, timing: calFast);
+        final started = c.start();
+        await until(() => finder.finds.length == 1, 'the search');
+        await c.stop();
+        finder.finds[0].complete(null);
+        await started;
+        expect(c.stage, CalStage.setup);
+        expect(c.message, isEmpty);
+        c.dispose();
+      });
     });
 
     test('no headband: a plain failure', () async {
