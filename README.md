@@ -17,6 +17,11 @@ a build-it-yourself ADS1299 helmet ([hardware and guides](https://github.com/uto
 - `scripts/import_phone.py`: brings the phone app's **Export data** folder onto the laptop (Syncthing or
   `adb pull`), checks every file against its checksum list, raw nights into `_local/recordings/`, the rest into
   `_local/phone/` ([app/README.md](app/README.md), "Export data").
+- `scripts/phone_night_check.py`: did the phone record the night well? After the import,
+  `uv run --project analysis python scripts/phone_night_check.py 2026-11-19 --compare 2026-11-17` (the evening
+  dates) prints every gap with its reason, lost packets, restarts by Android, both batteries, contact, the phone's
+  sleep report and a plain verdict with the top three things to fix. Works on a laptop night too; plain `python3`
+  skips only the signal numbers. Reads files only.
 
 Next morning, join the night's files and score sleep (AnySleep + YASA; neither is validated on BrainBit yet):
 
