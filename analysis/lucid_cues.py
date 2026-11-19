@@ -278,7 +278,8 @@ def cmd_cases(a: argparse.Namespace) -> None:
     for case in json.loads(Path(a.cases).read_text())["cases"]:
         got = run_case(case)
         exp = case["expect"]
-        ok = (got["cues"], got["arousals"]) == (exp["cues"], exp["arousals"]) and got["stops"] == exp.get("stops", got["stops"])
+        stops = exp.get("stops", got["stops"])
+        ok = (got["cues"], got["arousals"], got["stops"]) == (exp["cues"], exp["arousals"], stops)
         bad += not ok
         print(("ok  " if ok else "FAIL") + f" {case['name']}" + ("" if ok else f": got {got}"))
     sys.exit(1 if bad else 0)
