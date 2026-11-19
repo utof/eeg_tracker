@@ -1,0 +1,1214 @@
+{
+ "about": "Hand-worked cases of the lucid cue rule (DECISIONS 302-303), read by analysis/tests/test_lucid_cues.py and app/test/lucid_rule_test.dart. Times are seconds on the rule's clock. runs: [first epoch, last epoch, stage, confidence], each epoch handed out at (epoch + 5) * 30 s (2 minutes behind); stages: [known at, epoch, stage, confidence]; bursts: seconds, or [from, to, every]; moved: [first, last] spans of movement (3+ channels jumping); jaw: [first, last] spans of jaw muscle; drift: [from second, state], 'asleep' before the first. expect.cues: [second, step (dB over the evening's level), period].",
+ "cases": [
+  {
+   "name": "two REM epochs in a row start the cues, 30 s spacing, the ramp 1 dB a cue",
+   "cues_from_s": 0,
+   "seconds": 300,
+   "runs": [
+    [
+     0,
+     3,
+     "R",
+     0.8
+    ]
+   ],
+   "bursts": [
+    170
+   ],
+   "expect": {
+    "cues": [
+     [
+      180,
+      0,
+      1
+     ],
+     [
+      210,
+      1,
+      1
+     ],
+     [
+      240,
+      2,
+      1
+     ],
+     [
+      270,
+      3,
+      1
+     ]
+    ],
+    "arousals": [],
+    "stops": []
+   }
+  },
+  {
+   "name": "nothing before the second half of the night",
+   "cues_from_s": 250,
+   "seconds": 300,
+   "runs": [
+    [
+     0,
+     3,
+     "R",
+     0.8
+    ]
+   ],
+   "bursts": [
+    170
+   ],
+   "expect": {
+    "cues": [
+     [
+      250,
+      0,
+      1
+     ],
+     [
+      280,
+      1,
+      1
+     ]
+    ],
+    "arousals": [],
+    "stops": []
+   }
+  },
+  {
+   "name": "single REM epochs are not two REM in a row",
+   "cues_from_s": 0,
+   "seconds": 300,
+   "runs": [
+    [
+     0,
+     0,
+     "R",
+     0.8
+    ],
+    [
+     1,
+     1,
+     "N2",
+     0.8
+    ],
+    [
+     2,
+     2,
+     "R",
+     0.8
+    ],
+    [
+     3,
+     3,
+     "N2",
+     0.9
+    ]
+   ],
+   "bursts": [
+    170
+   ],
+   "expect": {
+    "cues": [],
+    "arousals": [],
+    "stops": []
+   }
+  },
+  {
+   "name": "low confidence holds the cues",
+   "cues_from_s": 0,
+   "seconds": 300,
+   "runs": [
+    [
+     0,
+     1,
+     "R",
+     0.8
+    ],
+    [
+     2,
+     3,
+     "R",
+     0.55
+    ]
+   ],
+   "bursts": [
+    170,
+    230
+   ],
+   "expect": {
+    "cues": [
+     [
+      180,
+      0,
+      1
+     ]
+    ],
+    "arousals": [],
+    "stops": []
+   }
+  },
+  {
+   "name": "never within 10 minutes after deep sleep (N3)",
+   "cues_from_s": 0,
+   "seconds": 800,
+   "runs": [
+    [
+     0,
+     0,
+     "N3",
+     0.9
+    ],
+    [
+     1,
+     21,
+     "R",
+     0.9
+    ]
+   ],
+   "bursts": [
+    770
+   ],
+   "expect": {
+    "cues": [
+     [
+      780,
+      0,
+      1
+     ]
+    ],
+    "arousals": [],
+    "stops": []
+   }
+  },
+  {
+   "name": "an eye burst in the last 2 minutes is needed",
+   "cues_from_s": 0,
+   "seconds": 330,
+   "runs": [
+    [
+     0,
+     6,
+     "R",
+     0.8
+    ]
+   ],
+   "bursts": [
+    300
+   ],
+   "expect": {
+    "cues": [
+     [
+      300,
+      0,
+      1
+     ]
+    ],
+    "arousals": [],
+    "stops": []
+   }
+  },
+  {
+   "name": "lying still for a minute after a movement",
+   "cues_from_s": 0,
+   "seconds": 330,
+   "runs": [
+    [
+     0,
+     6,
+     "R",
+     0.8
+    ]
+   ],
+   "bursts": [
+    170,
+    250,
+    300
+   ],
+   "moved": [
+    [
+     175,
+     175
+    ]
+   ],
+   "expect": {
+    "cues": [
+     [
+      236,
+      0,
+      1
+     ],
+     [
+      266,
+      1,
+      1
+     ],
+     [
+      296,
+      2,
+      1
+     ],
+     [
+      326,
+      3,
+      1
+     ]
+    ],
+    "arousals": [],
+    "stops": []
+   }
+  },
+  {
+   "name": "no cue while the drift-off detector says awake",
+   "cues_from_s": 0,
+   "seconds": 300,
+   "runs": [
+    [
+     0,
+     3,
+     "R",
+     0.8
+    ]
+   ],
+   "bursts": [
+    170
+   ],
+   "drift": [
+    [
+     0,
+     "awake"
+    ],
+    [
+     200,
+     "asleep"
+    ]
+   ],
+   "expect": {
+    "cues": [
+     [
+      200,
+      0,
+      1
+     ],
+     [
+      230,
+      1,
+      1
+     ],
+     [
+      260,
+      2,
+      1
+     ],
+     [
+      290,
+      3,
+      1
+     ]
+    ],
+    "arousals": [],
+    "stops": []
+   }
+  },
+  {
+   "name": "jaw muscle holds the cues for 15 s; one or two movement seconds after a cue are no arousal",
+   "cues_from_s": 0,
+   "seconds": 330,
+   "runs": [
+    [
+     0,
+     6,
+     "R",
+     0.8
+    ]
+   ],
+   "bursts": [
+    170,
+    250,
+    300
+   ],
+   "jaw": [
+    [
+     175,
+     175
+    ]
+   ],
+   "moved": [
+    [
+     200,
+     201
+    ]
+   ],
+   "expect": {
+    "cues": [
+     [
+      191,
+      0,
+      1
+     ],
+     [
+      262,
+      1,
+      1
+     ],
+     [
+      292,
+      2,
+      1
+     ],
+     [
+      322,
+      3,
+      1
+     ]
+    ],
+    "arousals": [],
+    "stops": []
+   }
+  },
+  {
+   "name": "10 per period, the ramp stops at +6 dB",
+   "cues_from_s": 0,
+   "seconds": 900,
+   "runs": [
+    [
+     0,
+     30,
+     "R",
+     0.8
+    ]
+   ],
+   "bursts": [
+    [
+     170,
+     900,
+     60
+    ]
+   ],
+   "expect": {
+    "cues": [
+     [
+      180,
+      0,
+      1
+     ],
+     [
+      210,
+      1,
+      1
+     ],
+     [
+      240,
+      2,
+      1
+     ],
+     [
+      270,
+      3,
+      1
+     ],
+     [
+      300,
+      4,
+      1
+     ],
+     [
+      330,
+      5,
+      1
+     ],
+     [
+      360,
+      6,
+      1
+     ],
+     [
+      390,
+      6,
+      1
+     ],
+     [
+      420,
+      6,
+      1
+     ],
+     [
+      450,
+      6,
+      1
+     ]
+    ],
+    "arousals": [],
+    "stops": []
+   }
+  },
+  {
+   "name": "a new period after two epochs that are not REM",
+   "cues_from_s": 0,
+   "seconds": 900,
+   "runs": [
+    [
+     0,
+     8,
+     "R",
+     0.8
+    ],
+    [
+     9,
+     10,
+     "N2",
+     0.8
+    ],
+    [
+     11,
+     40,
+     "R",
+     0.8
+    ]
+   ],
+   "bursts": [
+    [
+     150,
+     1200,
+     30
+    ]
+   ],
+   "expect": {
+    "cues": [
+     [
+      180,
+      0,
+      1
+     ],
+     [
+      210,
+      1,
+      1
+     ],
+     [
+      240,
+      2,
+      1
+     ],
+     [
+      270,
+      3,
+      1
+     ],
+     [
+      300,
+      4,
+      1
+     ],
+     [
+      330,
+      5,
+      1
+     ],
+     [
+      360,
+      6,
+      1
+     ],
+     [
+      390,
+      6,
+      1
+     ],
+     [
+      510,
+      6,
+      2
+     ],
+     [
+      540,
+      6,
+      2
+     ],
+     [
+      570,
+      6,
+      2
+     ],
+     [
+      600,
+      6,
+      2
+     ],
+     [
+      630,
+      6,
+      2
+     ],
+     [
+      660,
+      6,
+      2
+     ],
+     [
+      690,
+      6,
+      2
+     ],
+     [
+      720,
+      6,
+      2
+     ],
+     [
+      750,
+      6,
+      2
+     ],
+     [
+      780,
+      6,
+      2
+     ]
+    ],
+    "arousals": [],
+    "stops": []
+   }
+  },
+  {
+   "name": "30 per night",
+   "cues_from_s": 0,
+   "seconds": 2400,
+   "runs": [
+    [
+     0,
+     20,
+     "R",
+     0.8
+    ],
+    [
+     21,
+     22,
+     "N2",
+     0.8
+    ],
+    [
+     23,
+     43,
+     "R",
+     0.8
+    ],
+    [
+     44,
+     45,
+     "N2",
+     0.8
+    ],
+    [
+     46,
+     80,
+     "R",
+     0.8
+    ]
+   ],
+   "bursts": [
+    [
+     150,
+     2400,
+     30
+    ]
+   ],
+   "expect": {
+    "cues": [
+     [
+      180,
+      0,
+      1
+     ],
+     [
+      210,
+      1,
+      1
+     ],
+     [
+      240,
+      2,
+      1
+     ],
+     [
+      270,
+      3,
+      1
+     ],
+     [
+      300,
+      4,
+      1
+     ],
+     [
+      330,
+      5,
+      1
+     ],
+     [
+      360,
+      6,
+      1
+     ],
+     [
+      390,
+      6,
+      1
+     ],
+     [
+      420,
+      6,
+      1
+     ],
+     [
+      450,
+      6,
+      1
+     ],
+     [
+      870,
+      6,
+      2
+     ],
+     [
+      900,
+      6,
+      2
+     ],
+     [
+      930,
+      6,
+      2
+     ],
+     [
+      960,
+      6,
+      2
+     ],
+     [
+      990,
+      6,
+      2
+     ],
+     [
+      1020,
+      6,
+      2
+     ],
+     [
+      1050,
+      6,
+      2
+     ],
+     [
+      1080,
+      6,
+      2
+     ],
+     [
+      1110,
+      6,
+      2
+     ],
+     [
+      1140,
+      6,
+      2
+     ],
+     [
+      1560,
+      6,
+      3
+     ],
+     [
+      1590,
+      6,
+      3
+     ],
+     [
+      1620,
+      6,
+      3
+     ],
+     [
+      1650,
+      6,
+      3
+     ],
+     [
+      1680,
+      6,
+      3
+     ],
+     [
+      1710,
+      6,
+      3
+     ],
+     [
+      1740,
+      6,
+      3
+     ],
+     [
+      1770,
+      6,
+      3
+     ],
+     [
+      1800,
+      6,
+      3
+     ],
+     [
+      1830,
+      6,
+      3
+     ]
+    ],
+    "arousals": [],
+    "stops": [
+     [
+      1830,
+      "per night"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "an arousal after a cue: 3 dB quieter and 5 minutes of pause",
+   "cues_from_s": 0,
+   "seconds": 900,
+   "runs": [
+    [
+     0,
+     40,
+     "R",
+     0.8
+    ]
+   ],
+   "bursts": [
+    [
+     150,
+     900,
+     30
+    ]
+   ],
+   "moved": [
+    [
+     283,
+     285
+    ]
+   ],
+   "expect": {
+    "cues": [
+     [
+      180,
+      0,
+      1
+     ],
+     [
+      210,
+      1,
+      1
+     ],
+     [
+      240,
+      2,
+      1
+     ],
+     [
+      270,
+      3,
+      1
+     ],
+     [
+      585,
+      1,
+      1
+     ],
+     [
+      615,
+      2,
+      1
+     ],
+     [
+      645,
+      3,
+      1
+     ],
+     [
+      675,
+      4,
+      1
+     ],
+     [
+      705,
+      5,
+      1
+     ],
+     [
+      735,
+      6,
+      1
+     ]
+    ],
+    "arousals": [
+     285
+    ],
+    "stops": []
+   }
+  },
+  {
+   "name": "awake within 30 s after a cue is an arousal",
+   "cues_from_s": 0,
+   "seconds": 800,
+   "runs": [
+    [
+     0,
+     40,
+     "R",
+     0.8
+    ]
+   ],
+   "bursts": [
+    [
+     150,
+     800,
+     30
+    ]
+   ],
+   "drift": [
+    [
+     200,
+     "awake"
+    ],
+    [
+     260,
+     "asleep"
+    ]
+   ],
+   "expect": {
+    "cues": [
+     [
+      180,
+      0,
+      1
+     ],
+     [
+      500,
+      0,
+      1
+     ],
+     [
+      530,
+      1,
+      1
+     ],
+     [
+      560,
+      2,
+      1
+     ],
+     [
+      590,
+      3,
+      1
+     ],
+     [
+      620,
+      4,
+      1
+     ],
+     [
+      650,
+      5,
+      1
+     ],
+     [
+      680,
+      6,
+      1
+     ],
+     [
+      710,
+      6,
+      1
+     ],
+     [
+      740,
+      6,
+      1
+     ]
+    ],
+    "arousals": [
+     200
+    ],
+    "stops": []
+   }
+  },
+  {
+   "name": "an arousal read later as an awake epoch",
+   "cues_from_s": 0,
+   "seconds": 900,
+   "runs": [
+    [
+     0,
+     5,
+     "R",
+     0.8
+    ],
+    [
+     6,
+     6,
+     "W",
+     0.9
+    ],
+    [
+     7,
+     40,
+     "R",
+     0.8
+    ]
+   ],
+   "bursts": [
+    [
+     150,
+     900,
+     30
+    ]
+   ],
+   "expect": {
+    "cues": [
+     [
+      180,
+      0,
+      1
+     ],
+     [
+      210,
+      1,
+      1
+     ],
+     [
+      240,
+      2,
+      1
+     ],
+     [
+      270,
+      3,
+      1
+     ],
+     [
+      300,
+      4,
+      1
+     ],
+     [
+      630,
+      2,
+      1
+     ],
+     [
+      660,
+      3,
+      1
+     ],
+     [
+      690,
+      4,
+      1
+     ],
+     [
+      720,
+      5,
+      1
+     ],
+     [
+      750,
+      6,
+      1
+     ]
+    ],
+    "arousals": [
+     330
+    ],
+    "stops": []
+   }
+  },
+  {
+   "name": "three arousals end the night's cues",
+   "cues_from_s": 0,
+   "seconds": 1200,
+   "runs": [
+    [
+     0,
+     60,
+     "R",
+     0.8
+    ]
+   ],
+   "bursts": [
+    [
+     150,
+     1200,
+     30
+    ]
+   ],
+   "moved": [
+    [
+     193,
+     195
+    ],
+    [
+     518,
+     520
+    ],
+    [
+     843,
+     845
+    ]
+   ],
+   "expect": {
+    "cues": [
+     [
+      180,
+      0,
+      1
+     ],
+     [
+      495,
+      0,
+      1
+     ],
+     [
+      820,
+      0,
+      1
+     ]
+    ],
+    "arousals": [
+     195,
+     520,
+     845
+    ],
+    "stops": [
+     [
+      845,
+      "three arousals"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "a stale reading (the model stopped) holds the cues",
+   "cues_from_s": 0,
+   "seconds": 600,
+   "runs": [
+    [
+     0,
+     3,
+     "R",
+     0.8
+    ]
+   ],
+   "bursts": [
+    [
+     150,
+     600,
+     30
+    ]
+   ],
+   "expect": {
+    "cues": [
+     [
+      180,
+      0,
+      1
+     ],
+     [
+      210,
+      1,
+      1
+     ],
+     [
+      240,
+      2,
+      1
+     ],
+     [
+      270,
+      3,
+      1
+     ],
+     [
+      300,
+      4,
+      1
+     ]
+    ],
+    "arousals": [],
+    "stops": []
+   }
+  },
+  {
+   "name": "a lost epoch (gap) is not dream sleep",
+   "cues_from_s": 0,
+   "seconds": 400,
+   "runs": [
+    [
+     0,
+     1,
+     "R",
+     0.8
+    ],
+    [
+     2,
+     2,
+     "gap",
+     0
+    ],
+    [
+     3,
+     4,
+     "R",
+     0.8
+    ]
+   ],
+   "bursts": [
+    [
+     150,
+     400,
+     30
+    ]
+   ],
+   "expect": {
+    "cues": [
+     [
+      180,
+      0,
+      1
+     ],
+     [
+      270,
+      1,
+      1
+     ],
+     [
+      300,
+      2,
+      1
+     ],
+     [
+      330,
+      3,
+      1
+     ]
+    ],
+    "arousals": [],
+    "stops": []
+   }
+  }
+ ]
+}
