@@ -180,14 +180,20 @@ void main() {
     // "Score again" on its page: scored once more, from the start, with the current scorer
     updated.request(night);
     expect(updated.due().map((n) => n.name), [night]);
-    await updated.score(updated.due().single);
+    final steps = <String>[];
+    await updated.score(updated.due().single, progress: steps.add);
+    expect(steps.first, 'Preparing the recording to score it again');
     expect(calls, hasLength(2 * callsPerNight));
     expect(updated.olderScorer(store.read(night)!), isFalse);
     expect(scorer(recordings, calls).due(), isEmpty);
 
     // new data the same night (10+ minutes) is the one thing that scores it again by itself
     writeRun(recordings, start.add(const Duration(minutes: 7)), 12);
-    expect(scorer(recordings, calls).due().single.recordings, hasLength(2));
+    final grown = scorer(recordings, calls);
+    expect(grown.due().single.recordings, hasLength(2));
+    steps.clear();
+    await grown.score(grown.due().single, progress: steps.add);
+    expect(steps.first, 'Preparing the recording: new data since its report', reason: 'the screen says why');
   });
 
   test('an app killed during a model call goes on from its last saved call, with the numbers of one go', () async {

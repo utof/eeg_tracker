@@ -256,8 +256,15 @@ class SleepScorer {
       probs = meanProbabilities(p.progress!); // the model is done: no second preparation
     } else {
       final before = p.calls(runCount);
+      // why it is scored, in the first words (DECISIONS row 580: never just because the app was updated)
       progress?.call(
-        before.done == 0 ? 'Preparing the recording' : 'Preparing the recording to go on from ${_pct(before.done, before.of)}',
+        before.done > 0
+            ? 'Preparing the recording to go on from ${_pct(before.done, before.of)}'
+            : p.requested
+            ? 'Preparing the recording to score it again'
+            : store.read(night.name) != null
+            ? 'Preparing the recording: new data since its report'
+            : 'Preparing the recording',
       );
       final input = await prepare(night.recordings);
       if (input != null) {

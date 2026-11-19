@@ -452,9 +452,11 @@ stages. What you see:
 - "Scoring this night stopped before it finished" with **Try again** now appears only when the app closed three times
   in a row before the model's first step (most likely memory), or when the scoring failed with a reason; **Try
   again** goes on from the saved progress.
-- Between nights the scoring and Share on Wi-Fi run in the app itself, with no foreground service: if Android ever
-  freezes it in the background they wait until it is opened again (DECISIONS row 589). Leaving the app open on the
-  main screen until the time asleep appears is the safe way.
+- The first words say why a night is scored: "Preparing the recording" (no report yet), "...: new data since its
+  report" (10+ minutes more), "... to go on from 40 %" (after an update or a close), "... to score it again" (your
+  Score again). Never because the app was updated.
+- On the night of Wed 18 Nov (2026-11-19) the phone scored the 10.4 h night in 46 s; that was not what kept Share on
+  Wi-Fi from answering afterwards (see Share on Wi-Fi).
 
 The night extras come from the shared detectors (`lib/detectors/`), run over the same samples in a second background
 isolate after the model (one heavy step at a time, DECISIONS row 583): the note under the totals says how much of your sleep was read through noise; a
@@ -1488,6 +1490,12 @@ and never waits for it. If the server fails, sharing goes off with one line in t
 it is written to the log and the server goes on answering (row 587). The SHA-256 the laptop's list needs are kept
 between app updates, so the first list after an update takes seconds, not minutes (row 585). The night's sleep
 scoring waits while the laptop copies (row 583).
+
+**Between nights it keeps the app running (since 2026-11-20, row 589).** Android freezes an app in the background,
+and a frozen app's server takes connections and never answers (the owner's phone after an update). While sharing is
+on between nights, a notification "Sharing on Wi-Fi" keeps the app running; its Stop turns sharing off. A session
+(meditation, check-in, ...) shows its own notification meanwhile and gives it back; during a night the recorder's
+notification does it.
 
 ### Owner step: switch it on before a night (2 minutes; the first night doubles as the phone test)
 
