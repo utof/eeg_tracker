@@ -13,6 +13,7 @@ import '../phone.dart';
 import '../recorder/brainbit.dart';
 import '../sound/check_in_sound.dart';
 import '../training/check_store.dart' show filesDirFor;
+import '../wearer/wearer.dart';
 import 'evidence_sheet.dart';
 import 'hands_free_view.dart';
 import 'nearby.dart';
@@ -43,6 +44,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _nightRunning = false;
   String? _error;
 
+  /// "Was this you?" (DECISIONS 370-379): the app's recordings folder and the check's state, when known.
+  String? _recordings;
+  WearerResult? _wearer;
+
   @override
   void initState() {
     super.initState();
@@ -52,13 +57,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _load() async {
     final store = await handsFreeStore();
     final running = await FlutterForegroundTask.isRunningService;
+    String? rec;
+    WearerResult? wearer;
+    try {
+      rec = await Phone.recordingsDir();
+      if (rec != null) wearer = refreshWearer(rec, DateTime.now());
+    } catch (_) {
+      wearer = null; // the section is left out; hands-free still works
+    }
     if (!mounted) return;
     setState(() {
       _store = store;
       _state = store?.load() ?? const HandsFreeState();
       _nightRunning = running;
       _error = store == null ? 'The app\'s folder is not known yet, so nothing can be saved.' : null;
+      _recordings = rec;
+      _wearer = wearer;
     });
+  }
+
+  void _setWearer(bool on) {
+    final rec = _recordings;
+    if (rec == null) return;
+    try {
+      WearerStore(wearerDirFor(rec)).setOn(on, DateTime.now());
+      setState(() => _wearer = refreshWearer(rec, DateTime.now()));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('The setting could not be saved: $e')));
+    }
   }
 
   void _set(bool on) {
@@ -97,10 +123,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) => SettingsView(
-    model: SettingsViewModel(on: _state.on, calibration: _state.calibration, nightRunning: _nightRunning, error: _error),
+    model: SettingsViewModel(
+      on: _state.on,
+      calibration: _state.calibration,
+      nightRunning: _nightRunning,
+      error: _error,
+      wearerOn: _wearer?.on,
+      wearerStatus: _wearer == null ? '' : wearerStatus(_wearer!),
+    ),
     onToggle: (on) => unawaited(_toggle(on)),
     onCalibrate: () => unawaited(_calibrate()),
     onInfo: () => showEvidence(context, 'hands-free'),
+    onWearerSwitch: _setWearer,
+    onWearerInfo: () => showEvidence(context, 'was-this-you'),
   );
 }
 

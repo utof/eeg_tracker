@@ -159,6 +159,9 @@ class NightDrift {
   DriftOff? _d;
   String? error;
 
+  /// The detector's start when a lights-off marker gave it; null at the night start or when the markers failed.
+  int? get markedLightsOffS => _lightsOff == null ? null : _d?.lightsOff;
+
   void second(Second s) {
     final d = _d;
     if (d == null || s.k < d.lightsOff) return;

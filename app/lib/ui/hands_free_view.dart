@@ -13,6 +13,7 @@ import '../recorder/nights.dart' show nightLabel;
 import 'form_parts.dart' show Para, PinnedAction;
 import 'parts.dart';
 import 'theme.dart';
+import 'wearer_view.dart' show WearerSettings;
 
 String _clock(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
@@ -54,11 +55,22 @@ const List<(String, String, String)> gestureUses = [
 // ---------------------------------------------------------------------------------------------------------------
 
 class SettingsViewModel {
-  const SettingsViewModel({this.on = false, this.calibration, this.nightRunning = false, this.error});
+  const SettingsViewModel({
+    this.on = false,
+    this.calibration,
+    this.nightRunning = false,
+    this.error,
+    this.wearerOn,
+    this.wearerStatus = '',
+  });
   final bool on;
   final CalibrationRecord? calibration;
   final bool nightRunning;
   final String? error;
+
+  /// "Was this you?" (DECISIONS 370-379): the switch and its status in words; null when not known (no folder).
+  final bool? wearerOn;
+  final String wearerStatus;
 }
 
 /// The switch's line: what is on now, in words.
@@ -76,12 +88,22 @@ String handsFreeStatus(SettingsViewModel m) {
 }
 
 class SettingsView extends StatelessWidget {
-  const SettingsView({super.key, required this.model, required this.onToggle, required this.onCalibrate, required this.onInfo});
+  const SettingsView({
+    super.key,
+    required this.model,
+    required this.onToggle,
+    required this.onCalibrate,
+    required this.onInfo,
+    this.onWearerSwitch,
+    this.onWearerInfo,
+  });
 
   final SettingsViewModel model;
   final ValueChanged<bool> onToggle;
   final VoidCallback onCalibrate;
   final VoidCallback onInfo;
+  final ValueChanged<bool>? onWearerSwitch;
+  final VoidCallback? onWearerInfo;
 
   @override
   Widget build(BuildContext context) {
@@ -153,6 +175,8 @@ class SettingsView extends StatelessWidget {
             'first guesses until your calibration sets them.',
             style: muted,
           ),
+          if (m.wearerOn != null)
+            WearerSettings(on: m.wearerOn!, status: m.wearerStatus, onSwitch: onWearerSwitch, onInfo: onWearerInfo),
         ],
       ),
     );

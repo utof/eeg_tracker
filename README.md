@@ -108,6 +108,16 @@ after 12 nights the app can test whether the sound did anything for you. Rule an
 `analysis/lucid_cues.py`, `analysis/lucid_signals.py` (Python references, line-by-line Dart ports in `app/lib/lucid/`);
 how to use it and the owner step in [app/README.md](app/README.md) ("Lucid dream cues").
 
+**Was this you?** (phone app, the assistant's proposal, on unless switched off in Settings): after 10 check-ins (or
+10 nights) on 5 different days, it asks "Was it you?" on the check-in's result or the sleep report when a recording's
+eyes-closed alpha (speed, strength, background slope at O1/O2) looks clearly unlike your usual; "Someone else" (also
+offered by hand on every recording) keeps it out of the trends, the unusual card and experiments, written into that
+recording's file, never deleted. A weak check, tested only on made-up people (no other people's EEG at hand): about one
+false question in 5-10 months of daily recordings, and only 2-4 in 10 other wearers noticed. The rule:
+`analysis/wearer_check.py` (the reference) and `app/lib/wearer/check.dart` (the phone's line-by-line port); the
+back-test: `analysis/validate_wearer.py`; how to use it, switch it off and the owner step in
+[app/README.md](app/README.md) ("Was this you?").
+
 **Why we believe each feature (evidence notes).** Every feature has a short note in
 [docs/evidence/](docs/evidence/README.md): what the research says, where the data supports it and where it does
 not, how the app uses it, the sources, and the libraries and models with their licences. Each carries one grade

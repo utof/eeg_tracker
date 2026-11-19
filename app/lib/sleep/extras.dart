@@ -11,6 +11,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import '../detectors/detectors.dart';
+import '../wearer/check.dart' show NightWindow, NightWindowSampler;
 import 'drift.dart';
 import 'night_signal.dart';
 import 'periods.dart' show asleepStages;
@@ -32,15 +33,24 @@ const Map<BurstKind, String> _kindKey = {
 };
 
 /// What the detectors saw over a night: quality per whole epoch from the first sample, muscle bursts and movement
-/// spans (first and last second), and the drift-off detector from lights off (drift.dart; null with [driftError]
-/// when it failed).
+/// spans (first and last second), the drift-off detector from lights off (drift.dart; null with [driftError]
+/// when it failed), and the back channels of the 10 minutes after a Lights off marker for "Was this you?"
+/// ([wearer], wearer/check.dart; null without a marker).
 class NightSeen {
-  const NightSeen({required this.quality, required this.bursts, required this.moves, this.drift, this.driftError});
+  const NightSeen({
+    required this.quality,
+    required this.bursts,
+    required this.moves,
+    this.drift,
+    this.driftError,
+    this.wearer,
+  });
   final List<EpochQuality> quality;
   final List<Burst> bursts;
   final List<(int, int)> moves;
   final DriftSeen? drift;
   final String? driftError;
+  final NightWindow? wearer;
 }
 
 typedef SeeFn = Future<NightSeen?> Function(List<File> recordings);
@@ -52,7 +62,11 @@ NightSeen? seeNight(List<File> f32Files) {
   if (layout.samples == 0) return null;
   final drift = NightDrift(f32Files, layout.startUnix);
   final det = Detectors(onSecond: drift.second);
-  layout.forEachRow((row, missing) => det.push(row, missing: missing));
+  final wearer = NightWindowSampler(drift.markedLightsOffS);
+  layout.forEachRow((row, missing) {
+    det.push(row, missing: missing);
+    wearer.push(row, missing);
+  });
   det.finish();
   return NightSeen(
     quality: [for (final e in det.epochs) e.quality],
@@ -60,6 +74,7 @@ NightSeen? seeNight(List<File> f32Files) {
     moves: det.movement,
     drift: drift.seen,
     driftError: drift.error,
+    wearer: wearer.window,
   );
 }
 

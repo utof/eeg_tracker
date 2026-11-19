@@ -15,6 +15,8 @@ import '../recorder/contact.dart';
 import '../sound/check_in_sound.dart';
 import '../trends/days.dart';
 import '../trends/trends.dart';
+import '../wearer/check.dart' show kindCheckIn;
+import '../wearer/wearer.dart';
 import 'evidence_sheet.dart';
 import 'morning_view.dart';
 import 'nearby.dart';
@@ -69,6 +71,10 @@ class _MorningScreenState extends State<MorningScreen> {
   MorningStage _lastStage = MorningStage.intro;
   MorningOutcome? _outcome;
 
+  /// "Was this you?" for the check-in just saved, and its id (DECISIONS 370-379).
+  WearerLine? _wearer;
+  String? _wearerId;
+
   @override
   void initState() {
     super.initState();
@@ -115,6 +121,30 @@ class _MorningScreenState extends State<MorningScreen> {
     } catch (_) {
       _outcome = null;
     }
+    _wearerId = done.id;
+    _checkWearer();
+  }
+
+  /// The check over the app's files, for this check-in; never worth breaking the result page.
+  void _checkWearer() {
+    final rec = _recordings, id = _wearerId;
+    if (rec == null || id == null) return;
+    try {
+      _wearer = wearerLine(refreshWearer(rec, DateTime.now()), kindCheckIn, id);
+    } catch (_) {
+      _wearer = null;
+    }
+  }
+
+  void _answerWearer(String? answer) {
+    final rec = _recordings, id = _wearerId;
+    if (rec == null || id == null) return;
+    try {
+      answerWearer(rec, kindCheckIn, id, answer, DateTime.now());
+    } catch (e) {
+      _say('Not saved: $e');
+    }
+    setState(_checkWearer);
   }
 
   void _screen({required bool on}) {
@@ -147,6 +177,8 @@ class _MorningScreenState extends State<MorningScreen> {
       return;
     }
     _outcome = null;
+    _wearer = null;
+    _wearerId = null;
     await _c.start();
   }
 
@@ -208,6 +240,7 @@ class _MorningScreenState extends State<MorningScreen> {
       nightRunning: _nightRunning,
       doneTodayAt: _doneAt,
       outcome: _outcome,
+      wearer: c.stage == MorningStage.result ? _wearer : null,
     );
     final busy = c.active || c.stage == MorningStage.questions || c.stage == MorningStage.saving;
     return PopScope(
@@ -227,6 +260,8 @@ class _MorningScreenState extends State<MorningScreen> {
         onDone: () => Navigator.of(context).maybePop(),
         onTrends: _trends,
         onInfo: () => showEvidence(context, 'morning-check-in'),
+        onWearerAnswer: _answerWearer,
+        onWearerInfo: () => showEvidence(context, 'was-this-you'),
       ),
     );
   }

@@ -98,7 +98,8 @@ Between nights a "Your data" section (after Headband) says what the app keeps an
 Export data and Export a night. Export data is its own page: status word, what is new as two readouts, the copy
 strip, the route (this phone, the folder, the laptop) as numbered log rows, Export everything, and Export new pinned.
 Settings (a gear in the night screen's app bar) holds the hands-free switch, its calibration with Calibrate right under
-it, what each gesture does where (two label-over-value columns per session), and how often it is wrong; the
+it, what each gesture does where (two label-over-value columns per session), and how often it is wrong, then the
+"Was this you?" section (heading row with its "i" and switch, status, whose idea, what it does, how often wrong); the
 hands-free calibration is a page of its own with the six tries on top, the instruction at display size, the two live
 lanes and the one action pinned (Start, Stop, then Done or Try again).
 Self-experiments (from Trends) is a page per experiment: status, today's task, "did you keep to it?", the day bill,
@@ -235,6 +236,16 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   ink check mark and an ink-muted outline). "Back in your usual range" and "Paused until ..." (with a Resume now text
   button) take the same place. No colour means anything here; while there is a card the Morning section on the night
   screen adds one bodyLarge ink line above its buttons.
+- **Was this you?** (sleep report and check-in result; `.impeccable/surfaces/app-lib-ui-wearer-view-dart.md`): a
+  question leads the page, a remark ends it. When a recording did not look like the owner's usual signal, a hairline
+  and the question as the page's first entry under its lead (after the honest note; on the check-in right under the
+  title, before numbers that may not be his): one titleLarge ink sentence with its "i", what differed in muted
+  bodyLarge with units, the everyday causes in muted bodyMedium, then **Yes, it was me** and **Someone else** as two
+  equal outlined buttons side by side (stacked at large text); once answered, the same place says what the answer did
+  in ink, with an Undo text button. Every other state is a remark after the page's own entries (before Past nights,
+  before See trends): the hairline heading "Was this you?" with its "i", one muted sentence ("Learning what your
+  brain looks like: 3 of 10 nights.", "Looks like your usual brain signal.", "Not checked: ...") and the text button
+  **Someone else wore it**. No colour means anything; never a lock, a percentage or a person's name.
 - **Collection ledger** (sharp hours): the watch strip's own cells counting toward the first pattern: 60 answer cells
   in three rows of 20 and 21 day cells in one row, a wider gap every five, filled `saved` as answers and days come in,
   `track` while empty; a muted label left and "26 of 60" right. Gone once the pattern opens.

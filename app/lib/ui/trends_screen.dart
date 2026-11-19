@@ -15,6 +15,7 @@ import '../sharp/store.dart';
 import '../trends/trends.dart';
 import '../unusual/card.dart';
 import '../unusual/store.dart';
+import '../wearer/check.dart' show answerSomeoneElse;
 import 'evidence_sheet.dart';
 import 'experiments_screen.dart';
 import 'experiments_view.dart' show experimentLine;
@@ -22,10 +23,18 @@ import 'sharp_hours_screen.dart';
 import 'trends_view.dart';
 import 'unusual_view.dart';
 
-/// Everything the trends need, read from the app's folders (a missing folder is simply empty).
+/// Everything the trends need, read from the app's folders (a missing folder is simply empty). Nights and check-ins
+/// the owner said someone else wore the headband for are left out ("Was this you?", DECISIONS 377): the trends,
+/// the unusual card, the experiments and the check-in's own result all read them through here.
 TrendInputs readTrendInputs(String recordingsDir) => (
-  nights: NightReportStore(nightsDirFor(recordingsDir)).all(),
-  mornings: MorningStore(morningsDirFor(recordingsDir)).list(),
+  nights: [
+    for (final r in NightReportStore(nightsDirFor(recordingsDir)).all())
+      if (r.wearerAnswer != answerSomeoneElse) r,
+  ],
+  mornings: [
+    for (final m in MorningStore(morningsDirFor(recordingsDir)).list())
+      if (m.wearerAnswer != answerSomeoneElse) m,
+  ],
   sessions: [
     ...MeditationStore(meditationsDirFor(recordingsDir)).list(),
     ...MeditationStore(sessionsDirFor(recordingsDir, SessionKind.alphaTheta), kind: SessionKind.alphaTheta).list(),

@@ -8,11 +8,13 @@ import '../morning/controller.dart';
 import '../morning/live.dart';
 import '../recorder/contact.dart';
 import '../trends/trends.dart';
+import '../wearer/wearer.dart' show WearerLine;
 import 'form_parts.dart';
 import 'parts.dart';
 import 'reaction_test.dart';
 import 'theme.dart';
 import 'trends_view.dart' show MeasureEntry;
+import 'wearer_view.dart';
 
 /// The Karolinska Sleepiness Scale's standard labels (scripts/web/morning-core.js `KSS`).
 const List<String> kssLabels = [
@@ -53,6 +55,7 @@ class MorningViewModel {
     this.nightRunning = false,
     this.doneTodayAt,
     this.outcome,
+    this.wearer,
   });
 
   final MorningStage stage;
@@ -71,6 +74,9 @@ class MorningViewModel {
   /// When today's first check-in was saved ("09:12"), or null.
   final String? doneTodayAt;
   final MorningOutcome? outcome;
+
+  /// "Was this you?" for this check-in (null: switched off or not saved).
+  final WearerLine? wearer;
 }
 
 class MorningView extends StatelessWidget {
@@ -85,11 +91,17 @@ class MorningView extends StatelessWidget {
     this.onDone,
     this.onTrends,
     this.onInfo,
+    this.onWearerAnswer,
+    this.onWearerInfo,
   });
 
   final MorningViewModel model;
   final VoidCallback? onCheckContact, onRecheck, onBegin, onStop, onDone, onTrends, onInfo;
   final ValueChanged<MorningAnswers>? onSave;
+
+  /// "Was this you?": `me`, `someone else`, or null to take an answer back; and its "i".
+  final ValueChanged<String?>? onWearerAnswer;
+  final VoidCallback? onWearerInfo;
 
   @override
   Widget build(BuildContext context) {
@@ -289,6 +301,11 @@ class MorningView extends StatelessWidget {
     return [
       const StepMarks(current: 4),
       _title(context, o == null ? 'Saved' : 'This morning, ${o.time}'),
+      // a question leads: these numbers may not be yours (wearer_view.dart)
+      if (wearerLeads(m.wearer)) ...[
+        WearerQuestion(line: m.wearer!, onAnswer: onWearerAnswer, onInfo: onWearerInfo),
+        const Divider(height: 41),
+      ],
       if (o != null) ...[
         const SizedBox(height: 8),
         for (final (i, r) in o.rows.indexed) ...[
@@ -310,6 +327,8 @@ class MorningView extends StatelessWidget {
       ),
       if (m.saveNote != null) Para(m.saveNote!, color: Night.caution),
       if (m.experimentLine != null) Para(m.experimentLine!),
+      if (m.wearer != null && !wearerLeads(m.wearer))
+        WearerRemark(line: m.wearer!, onAnswer: onWearerAnswer, onInfo: onWearerInfo),
       const SizedBox(height: 12),
       Align(
         alignment: Alignment.centerLeft,

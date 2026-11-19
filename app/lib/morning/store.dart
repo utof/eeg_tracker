@@ -10,6 +10,7 @@ import 'dart:io';
 
 import '../recorder/chunk_writer.dart' show fileStem;
 import '../trends/days.dart';
+import '../wearer/check.dart' show wearerAnswerIn;
 import 'result.dart';
 
 /// The mornings folder for the app's recordings folder.
@@ -32,6 +33,12 @@ class MorningRecord {
   }
 
   String get day => dayKey(start);
+
+  /// The file stem of the result (`2026-11-20-091205`): the check-in's id in "Was this you?".
+  String get id => fileStem(start);
+
+  /// The owner's answer to "Was this you?" (`me` or `someone else`), or null (wearer/wearer.dart).
+  String? get wearerAnswer => wearerAnswerIn(json);
 
   double? _num(String path) => valueAt(json, path)?.toDouble();
   int? _int(String path, int lo, int hi) {
