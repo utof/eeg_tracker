@@ -64,7 +64,8 @@ flutter build apk --release --target-platform android-arm64
 
 `flutter test` also renders the night screen in six states (two also at the owner's 393 dp width), the meditation
 screen in eleven, the sleep report in nine, the replay check's and alpha-theta's pages in nineteen, the dream catcher in thirteen, the nap coach in sixteen, the check-in, trends
-and Morning section in eighteen, sound for states in fourteen, Export data in nine and Headband connection in eleven to `build/screens/*.png`
+and Morning section in eighteen, sound for states in fourteen, Export data in nine, Headband connection in eleven and "Was this you?" in thirteen
+(the sleep report, the check-in's result, Settings; `test/wearer_screens_test.dart`) to `build/screens/*.png`
 (normal and 130 % text). `test/own_ble_*_test.dart` run our own connection on a fake
 headband: the driver, a night, sessions, the probe and its page. `test/export_test.dart` exports a fake app folder (every place the app writes) and remakes,
 with `EXPORT_FIXTURE=write`, the export the laptop importer's test reads (`test/fixtures/phone_export/`).
@@ -78,6 +79,8 @@ made by `test/fixtures/make_live_fixture.py`), and `tool/live_night.dart` stream
 `test/states_controller_test.dart` runs
 sound-for-states sessions the same way, and `test/state_synth_test.dart` checks the made sound (loudness, pulse
 edges, the beat in the sound or only between the ears) without an audio device.
+`test/wearer_cross_check_test.dart` checks "Was this you?" against `analysis/wearer_check.py` (fixture made by
+`analysis/make_wearer_fixture.py` from made-up signals and histories).
 `test/sleep_prep_test.dart` checks the sleep model's input against a fixture made by the laptop's Python
 (`test/fixtures/make_sleep_fixture.py`); `test/night_extras_cross_check_test.dart` checks the night extras against
 `analysis/night_extras.py` (fixture made by `analysis/make_extras_fixture.py`), and `tool/night_extras.dart` runs them
