@@ -58,6 +58,7 @@ Files: `lib/sensor.dart` (base class `Sensor`), `lib/brain_bit_sensor.dart` (`Br
 
 - **[verified]** README: "When created, the device is automatically connected." It also says creation "is a blocking method".
   - On Android, `createSensor` runs on a cached thread pool (`android/.../flutter_impl/Neurosdk2Plugin.java`), so the Dart `Future` simply completes after the connection.
+  - **[verified 2026-11-19]** The other calls do not: every synchronous Pigeon method (`getSensors`, `getState`, `getBattPower`, the property reads and writes) runs its native call on Android's main thread, and Android hands the scan results (`ble/BleScanCallback.java`) to the native library there too. Since Flutter 3.29 all Dart runs on that thread, so a native call that never returns freezes the whole app; the emulator caught `Scanner.getSensors` doing so, and `Scanner.freeScanner` waiting for good on the library's own scan thread (`pthread_join`). The app now uses a copy of the plugin that moves that work to one thread of its own (`app/packages/neurosdk2/VENDORED.md`, DECISIONS rows 410-413).
   - Errors come back as `PlatformException`, e.g. "Cannot create sensor". README codes 107–110 cover create and connect failures.
 - **[verified]** `Sensor` API:
   ```dart

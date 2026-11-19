@@ -37,6 +37,10 @@ same APK, a Java GC forced every 3 s (adb shell kill -10 <pid>), 13:46-13:50, tw
 "main" ... at android.os.MessageQueue.nativePollOnce   <- free, so the recorder's deadline restarted the process
 ```
 
+Both came only with BrainBit's arm64 library under the emulator's ARM translation; its x86_64 library never hung in
+the same runs (app README, "Emulator smoke test"). Whatever the cause, a hang on the main thread freezes the app, a
+hang anywhere else is a stall the night recorder ends.
+
 ## What changed (each place is marked `eeg_tracker change` in the source)
 
 1. `android/src/main/java/com/neurosdk2/SdkLane.java` (new): one daemon thread per process, `neurosdk2-calls`, that
