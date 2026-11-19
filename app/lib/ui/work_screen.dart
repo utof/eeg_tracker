@@ -11,6 +11,7 @@ import '../phone.dart';
 import '../recorder/brainbit.dart';
 import '../session_keeper.dart';
 import '../sound/soloud_work_sound.dart';
+import '../wearer/wearer.dart';
 import '../work/breaks.dart';
 import '../work/controller.dart';
 import '../work/store.dart';
@@ -33,6 +34,8 @@ class _WorkScreenState extends State<WorkScreen> {
   late final WorkController _c = WorkController(finder: _finder, sound: SoloudWorkSound(), keeper: PhoneSessionKeeper());
   bool _nightRunning = false, _eyesClosedFirst = false, _screenOn = false;
   List<WorkSummary> _sessions = const [];
+  String? _recordings;
+  bool _wearerOn = false;
   WorkStage _lastStage = WorkStage.setup;
   int? _rated;
   WorkHint? _ratedFor;
@@ -48,7 +51,10 @@ class _WorkScreenState extends State<WorkScreen> {
   Future<void> _prepare() async {
     try {
       final rec = await Phone.recordingsDir();
-      if (rec != null) _c.store = WorkStore(workDirFor(rec));
+      if (rec != null) {
+        _recordings = rec;
+        _c.store = WorkStore(workDirFor(rec));
+      }
     } catch (_) {
       // without the folder the session still runs; it is just not saved
     }
@@ -61,6 +67,12 @@ class _WorkScreenState extends State<WorkScreen> {
   }
 
   void _load() {
+    final rec = _recordings;
+    try {
+      _wearerOn = rec != null && WearerStore(wearerDirFor(rec)).on;
+    } catch (_) {
+      _wearerOn = false;
+    }
     try {
       _sessions = _c.store?.list() ?? const [];
     } catch (_) {
@@ -153,9 +165,27 @@ class _WorkScreenState extends State<WorkScreen> {
     });
   }
 
+  /// "Someone else wore it" (or Undo): kept in the session's own file, so the trends leave it out.
+  void _answerWearer(WorkSummary session, String? answer) {
+    final rec = _recordings;
+    if (rec == null) return;
+    try {
+      answerWearer(rec, kindWork, session.id, answer, DateTime.now());
+    } catch (e) {
+      _say('Not saved: $e');
+    }
+    setState(_load);
+  }
+
   void _say(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// The session that just ended, as its file now says (the answer to "Was this you?" lives there).
+  WorkSummary? _summaryOf(Map<String, Object?>? last) {
+    final s = last == null ? null : WorkSummary.fromJson(last);
+    return s == null ? null : _sessions.where((x) => x.start == s.start).firstOrNull ?? s;
   }
 
   @override
@@ -185,7 +215,8 @@ class _WorkScreenState extends State<WorkScreen> {
       closedLeft: c.closedLeft,
       calibrationLeftMin: c.calibrationLeftMin,
       kept: c.kept || !c.active,
-      summary: last == null ? null : WorkSummary.fromJson(last),
+      summary: _summaryOf(last),
+      wearerOn: _wearerOn,
       sessions: _sessions,
       saveNote: c.saveNote ?? (c.store == null && c.stage == WorkStage.done ? 'This session was not saved.' : null),
     );
@@ -211,6 +242,8 @@ class _WorkScreenState extends State<WorkScreen> {
           setState(_load);
         },
         onInfo: () => showEvidence(context, 'work-session'),
+        onWearer: _answerWearer,
+        onWearerInfo: () => showEvidence(context, 'was-this-you'),
       ),
     );
   }

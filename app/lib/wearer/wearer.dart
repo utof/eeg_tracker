@@ -7,10 +7,14 @@ import 'dart:math' as math;
 
 import '../morning/store.dart';
 import '../sleep/report.dart';
+import '../work/store.dart';
 import 'check.dart';
 import 'store.dart';
 
 export 'store.dart' show WearerStore, wearerDirFor;
+
+/// A work session's kind in the events (its id is the file stem; DECISIONS 490).
+const String kindWork = 'work';
 
 String _key(String kind, String id) => '$kind:$id';
 
@@ -121,7 +125,10 @@ void answerWearer(String recordingsDir, String kind, String id, String? answer, 
     return out;
   }
 
-  if (kind == kindNight) {
+  if (kind == kindWork) {
+    final store = WorkStore(workDirFor(recordingsDir));
+    store.save(tagged(store.read(id) ?? (throw StateError('no work session $id'))));
+  } else if (kind == kindNight) {
     final store = NightReportStore(nightsDirFor(recordingsDir));
     final r = store.read(id) ?? (throw StateError('no report for the night of $id'));
     store.write(tagged(r.json).cast<String, dynamic>());
@@ -183,6 +190,22 @@ String? _biggest(WearerVerdict v, WearerSignal? s) {
         'about ${_power(u)}.',
     _ => 'Its background signal was ${z > 0 ? 'flatter' : 'steeper'} than yours usually is.',
   };
+}
+
+/// The words under a work session (DECISIONS 490-494): only the by-hand choice, since a work session is not judged
+/// against a profile. [answer] is what its file says; nothing when the check is switched off, as for the others.
+WearerLine? workWearerLine(String? answer, {required bool on}) {
+  if (!on) return null;
+  if (answer == answerSomeoneElse) {
+    return const WearerLine(
+      text: 'Someone else wore the headband: this session is left out of your trends, the unusual card and experiments.',
+      canUndo: true,
+    );
+  }
+  return const WearerLine(
+    text: 'Work sessions are not checked. If someone else wore the headband, say so.',
+    canSaySomeoneElse: true,
+  );
 }
 
 /// The words for one recording, or null when the check is off or has nothing to say about it.

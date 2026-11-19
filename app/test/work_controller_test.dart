@@ -1,6 +1,7 @@
 // A work session end to end on a synthetic headband with a clock of its own (DECISIONS 440-449): calibration,
 // the level, a drowsy hint with its chime and lock-screen words, a break, Stop and the saved file.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -167,6 +168,41 @@ void main() {
     expect(saved.breaks, 1);
     expect(saved.drowsyMin, greaterThan(2));
     expect(c.last!['epochs'], isNotEmpty);
+    c.dispose();
+  });
+
+  test("every saved epoch carries its own time under `at`, and theta stays under `t`", () async {
+    final band = WorkBand(start: DateTime(2026, 11, 19, 10).millisecondsSinceEpoch / 1000);
+    final c = make(band);
+    await c.start();
+    await until(() => c.level == DrowsyLevel.alert);
+    await c.stop();
+    final file = Directory('${tmp.path}/work-sessions').listSync().whereType<File>().single;
+    final j = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+    final start = DateTime.parse(j['start'] as String), end = DateTime.parse(j['end'] as String);
+    final epochs = (j['epochs'] as List).cast<Map<String, dynamic>>();
+    expect(epochs.length, greaterThan(8));
+    DateTime? before;
+    for (final e in epochs) {
+      final at = DateTime.tryParse('${e['at']}');
+      expect(at, isNotNull, reason: 'the epoch ${e['s']} has no time: $e');
+      expect(at!.isBefore(start) || at.isAfter(end), isFalse, reason: 'inside the session');
+      if (before != null) expect(at.isAfter(before), isTrue);
+      before = at;
+      // the epoch's own start second sits where its time says (the band's clock is the session's clock)
+      expect(at.difference(start).inSeconds, closeTo(e['s'] as num, 31));
+      expect(e['t'], anyOf(isNull, isA<num>()), reason: 'theta, not a time');
+    }
+    c.dispose();
+  });
+
+  test("the last hour's strip fills from the epochs' own times", () async {
+    final band = WorkBand(start: DateTime(2026, 11, 19, 10).millisecondsSinceEpoch / 1000);
+    final c = make(band);
+    await c.start();
+    await until(() => c.level == DrowsyLevel.alert);
+    expect(c.lastHour().where((x) => x == WorkCell.alert), isNotEmpty);
+    await c.stop();
     c.dispose();
   });
 

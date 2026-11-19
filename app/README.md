@@ -1071,6 +1071,9 @@ not measured.
 5. **On a break** when you get up, **Back** when you return (taking the headband off for 5 minutes counts too). Some
    minutes after Back the screen says whether drowsiness went down.
 6. **Stop** at the end: the session's totals and its hints.
+7. If someone else wore the headband, tap **Someone else wore it** on the end page, or under that session in the list of
+   earlier sessions on the start page (**Undo** takes it back). The session stays on the phone but is left out of
+   Trends, the unusual card and experiments. It shows only while "Was this you?" is on in Settings.
 
 **In Trends** (DECISIONS rows 480-489): once a day has 30 minutes of readable work time, Trends gains a few rows
 for it, each next to yesterday and your usual like the other numbers, with a worded arrow from 14 days and a line in

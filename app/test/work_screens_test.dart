@@ -22,9 +22,10 @@ const _cells = [
   WorkCell.alert, WorkCell.gettingDrowsy, WorkCell.gettingDrowsy, WorkCell.drowsy, WorkCell.drowsy, WorkCell.gettingDrowsy,
 ];
 final _past = WorkSummary(start: DateTime(2026, 11, 18, 14, 5), end: DateTime(2026, 11, 18, 16, 50), wornMin: 152, hints: 2, breaks: 1, drowsyMin: 18, alertMin: 120, hintList: [_hint]);
+final _other = WorkSummary(start: DateTime(2026, 11, 17, 9, 30), end: DateTime(2026, 11, 17, 11, 0), wornMin: 85, hints: 0, breaks: 0, drowsyMin: 4, alertMin: 80, hintList: const [], wearerAnswer: 'someone else');
 
 final Map<String, WorkViewModel> states = {
-  'setup': WorkViewModel(stage: WorkStage.setup, sessions: [_past]),
+  'setup': WorkViewModel(stage: WorkStage.setup, sessions: [_past, _other], wearerOn: true),
   'night': const WorkViewModel(stage: WorkStage.setup, nightRunning: true),
   'connecting': const WorkViewModel(stage: WorkStage.connecting, message: 'Found BrainBit. Connecting.'),
   'eyes_closed': const WorkViewModel(stage: WorkStage.eyesClosed, closedLeft: 42),
@@ -34,7 +35,8 @@ final Map<String, WorkViewModel> states = {
   'rated': WorkViewModel(stage: WorkStage.running, level: DrowsyLevel.drowsy, cells: _cells, wornMin: 64, stretchMin: 48, hintsToday: 2, hint: _hint, rated: 2),
   'break': const WorkViewModel(stage: WorkStage.running, level: DrowsyLevel.drowsy, onBreak: true, breakMin: 6, cells: _cells, wornMin: 64, hintsToday: 2),
   'noisy': const WorkViewModel(stage: WorkStage.running, noisy: true, signal: WorkSignal.noisy, cells: _cells, wornMin: 90, stretchMin: 30, hintsToday: 2, kept: false),
-  'done': WorkViewModel(stage: WorkStage.done, summary: _past, afterBreak: 'After your break: drowsiness went down (drowsy before, alert after).'),
+  'done_marked': WorkViewModel(stage: WorkStage.done, summary: _other, wearerOn: true),
+  'done': WorkViewModel(stage: WorkStage.done, summary: _past, wearerOn: true, afterBreak: 'After your break: drowsiness went down (drowsy before, alert after).'),
   'failed': const WorkViewModel(stage: WorkStage.failed, message: 'Headband not found. Is it switched on, charged, and free (no night recording)?'),
 };
 

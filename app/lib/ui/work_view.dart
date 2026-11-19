@@ -5,6 +5,8 @@
 import 'package:flutter/material.dart';
 
 import '../sharp/store.dart' show sharpWords;
+import '../wearer/check.dart' show answerSomeoneElse;
+import '../wearer/wearer.dart' show workWearerLine;
 import '../work/breaks.dart';
 import '../work/controller.dart';
 import '../work/drowsiness.dart';
@@ -12,6 +14,7 @@ import '../work/store.dart';
 import 'form_parts.dart' show PinnedAction, Para;
 import 'parts.dart';
 import 'theme.dart';
+import 'wearer_view.dart' show WearerRemark;
 
 class WorkViewModel {
   const WorkViewModel({
@@ -38,6 +41,7 @@ class WorkViewModel {
     this.summary,
     this.sessions = const [],
     this.saveNote,
+    this.wearerOn = false,
   });
 
   final WorkStage stage;
@@ -67,6 +71,9 @@ class WorkViewModel {
   final List<WorkSummary> sessions;
   final String? saveNote;
 
+  /// "Was this you?" is switched on (Settings): the by-hand "Someone else wore it" is offered (DECISIONS 490).
+  final bool wearerOn;
+
   bool get live => stage.index >= WorkStage.connecting.index && stage.index <= WorkStage.ending.index;
 }
 
@@ -84,10 +91,15 @@ class WorkView extends StatelessWidget {
     this.onEyesClosedFirst,
     this.onAgain,
     this.onInfo,
+    this.onWearer,
+    this.onWearerInfo,
   });
 
   final WorkViewModel model;
-  final VoidCallback? onStart, onStop, onBreak, onBack, onSnooze, onNotNow, onAgain, onInfo;
+  final VoidCallback? onStart, onStop, onBreak, onBack, onSnooze, onNotNow, onAgain, onInfo, onWearerInfo;
+
+  /// The owner's answer for a session: `someone else`, or null to take it back.
+  final void Function(WorkSummary session, String? answer)? onWearer;
   final ValueChanged<int>? onRate;
   final ValueChanged<bool>? onEyesClosedFirst;
 
@@ -146,7 +158,7 @@ class WorkView extends StatelessWidget {
         ),
       ),
       Para('The phone can be locked; the session goes on and the chime still sounds.', color: Night.inkMuted),
-      if (m.sessions.isNotEmpty) ...[const SectionHeading('Earlier sessions'), for (final s in m.sessions.take(7)) _SessionRow(s)],
+      if (m.sessions.isNotEmpty) ...[const SectionHeading('Earlier sessions'), for (final s in m.sessions.take(7)) _SessionRow(s, wearerOn: m.wearerOn, onWearer: onWearer)],
     ];
   }
 
@@ -207,6 +219,9 @@ class WorkView extends StatelessWidget {
         for (final h in s.hintList) Para('${_clock(h.at)}  ${_reasonWords(h)}${_answerWords(h)}', color: Night.inkMuted, top: 8),
       ],
       if (m.afterBreak != null) Para(m.afterBreak!, top: 16),
+      if (s != null)
+        if (workWearerLine(s.wearerAnswer, on: m.wearerOn) case final line?)
+          WearerRemark(line: line, onAnswer: (a) => onWearer?.call(s, a), onInfo: onWearerInfo),
     ];
   }
 
@@ -601,8 +616,10 @@ class _SignalLine extends StatelessWidget {
 }
 
 class _SessionRow extends StatelessWidget {
-  const _SessionRow(this.s);
+  const _SessionRow(this.s, {this.wearerOn = false, this.onWearer});
   final WorkSummary s;
+  final bool wearerOn;
+  final void Function(WorkSummary session, String? answer)? onWearer;
 
   @override
   Widget build(BuildContext context) {
@@ -620,8 +637,23 @@ class _SessionRow extends StatelessWidget {
             '${s.hints == 1 ? '1 hint' : '${s.hints} hints'} · ${s.breaks == 1 ? '1 break' : '${s.breaks} breaks'}',
             style: text.bodyMedium?.copyWith(color: Night.inkMuted, fontFeatures: tabular),
           ),
+          if (wearerOn) ..._wearer(text),
         ],
       ),
     );
+  }
+
+  /// The by-hand choice, quiet under the row: the words and Undo once someone else is said to have worn it.
+  List<Widget> _wearer(TextTheme text) {
+    final said = s.wearerAnswer == answerSomeoneElse;
+    final style = TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(48, 48), alignment: Alignment.centerLeft);
+    return [
+      if (said) Text('Someone else wore the headband: left out of your trends.', style: text.bodyMedium?.copyWith(color: Night.ink)),
+      TextButton(
+        onPressed: onWearer == null ? null : () => onWearer!(s, said ? null : answerSomeoneElse),
+        style: style,
+        child: Text(said ? 'Undo' : 'Someone else wore it'),
+      ),
+    ];
   }
 }
