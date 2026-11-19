@@ -97,6 +97,32 @@ void main() {
       );
     });
 
+    test('the weak-evidence marker follows the grade in the card\'s own evidence note', () {
+      String grade(String slug) {
+        final text = File('../docs/evidence/$slug.md').readAsStringSync();
+        final m = RegExp(r'^## Evidence for this \w+: (\w+)', multiLine: true).firstMatch(text);
+        expect(m, isNotNull, reason: '$slug has no grade line');
+        return m!.group(1)!;
+      }
+
+      for (final c in tryCards) {
+        if (c.evidence == null) {
+          expect(c.weakEvidence, isFalse, reason: '${c.id} marks weak evidence without a note');
+        } else {
+          expect(c.weakEvidence, grade(c.evidence!) == 'weak', reason: '${c.id} against ${c.evidence}');
+        }
+      }
+      // the lucid cues and the other weak-graded features the cards open
+      expect(
+        {
+          for (final c in tryCards)
+            if (c.weakEvidence) c.id,
+        },
+        {'smart-alarm', 'meditation', 'sound', 'alpha-theta', 'lucid'},
+      );
+      expect(tryCards.firstWhere((c) => c.id == 'sharp').weakEvidence, isFalse);
+    });
+
     test('the cards the app ticks by itself are exactly those it has a check for', () {
       expect({
         for (final c in tryCards)

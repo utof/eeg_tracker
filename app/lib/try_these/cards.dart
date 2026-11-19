@@ -74,6 +74,8 @@ class TryCard {
     required this.tell,
     required this.opens,
     required this.readme,
+    this.evidence,
+    this.weakEvidence = false,
     this.proposal = false,
     this.auto = false,
   });
@@ -94,6 +96,14 @@ class TryCard {
   final List<String> tell;
   final TryOpen opens;
   final List<TryRef> readme;
+
+  /// The evidence note (`docs/evidence/NAME.md`, the "i" on the feature's screen) this card's feature is graded by;
+  /// null when it has none.
+  final String? evidence;
+
+  /// The note's grade is "weak": the page says so beside the card (`test/try_these_test.dart` checks the flag
+  /// against the note's own grade line).
+  final bool weakEvidence;
 
   /// The assistant's proposal, not one of the owner's wishes.
   final bool proposal;
@@ -123,6 +133,7 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.nightScreen,
     readme: [TryRef('Lights off and falling asleep', 'tonight and the next four nights')],
+    evidence: 'sleep-recording',
     auto: true,
   ),
   TryCard(
@@ -146,6 +157,7 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.sleepReport,
     readme: [TryRef('Sleep report', 'how long does the phone take?')],
+    evidence: 'sleep-scoring',
     auto: true,
   ),
   TryCard(
@@ -166,6 +178,7 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.sleepReport,
     readme: [TryRef('Sleep report', 'the night extras')],
+    evidence: 'jaw-and-blinks',
   ),
   TryCard(
     id: 'check-in',
@@ -188,6 +201,7 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.morning,
     readme: [TryRef('Trends', 'the first phone check-ins')],
+    evidence: 'morning-check-in',
     auto: true,
   ),
   TryCard(
@@ -228,6 +242,8 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.alarm,
     readme: [TryRef('Smart alarm', 'the first smart alarm')],
+    evidence: 'smart-alarm',
+    weakEvidence: true,
     auto: true,
   ),
   TryCard(
@@ -268,6 +284,8 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.meditation,
     readme: [TryRef('Meditate')],
+    evidence: 'meditation-feedback',
+    weakEvidence: true,
     auto: true,
   ),
   TryCard(
@@ -289,6 +307,8 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.sound,
     readme: [TryRef('Sound for states', 'the first sound sessions')],
+    evidence: 'sound-for-states',
+    weakEvidence: true,
     auto: true,
   ),
   TryCard(
@@ -332,6 +352,7 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.nap,
     readme: [TryRef('Nap coach', 'the first nap')],
+    evidence: 'nap-coach',
     auto: true,
   ),
   TryCard(
@@ -354,6 +375,7 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.dream,
     readme: [TryRef('Dream catcher', 'the first try')],
+    evidence: 'dream-catcher',
     auto: true,
   ),
   TryCard(
@@ -376,6 +398,7 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.dream,
     readme: [TryRef('Dream catcher', 'answers as words')],
+    evidence: 'dream-catcher',
     auto: true,
   ),
   TryCard(
@@ -397,6 +420,8 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.alphaTheta,
     readme: [TryRef('Alpha-theta')],
+    evidence: 'alpha-theta',
+    weakEvidence: true,
     auto: true,
   ),
   TryCard(
@@ -418,12 +443,13 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.settings,
     readme: [TryRef('Hands-free controls', 'calibrate and try it')],
+    evidence: 'hands-free',
   ),
   TryCard(
     id: 'lucid',
     group: TryGroup.weeks,
     title: 'Lucid dream cues',
-    what: 'Soft rising tones in dream sleep, after an evening practice, to help you notice you are dreaming; the evidence is weak.',
+    what: 'Soft rising tones in dream sleep, after an evening practice, to help you notice you are dreaming.',
     takes: '15 minutes an evening, 1 minute a morning',
     steps: [
       'In the evening open Lucid dreams, tap Turn on and do the practice to the end.',
@@ -439,6 +465,8 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.lucid,
     readme: [TryRef('Lucid dream cues', 'the first week')],
+    evidence: 'lucid-cues',
+    weakEvidence: true,
     auto: true,
   ),
   TryCard(
@@ -460,6 +488,7 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.experiments,
     readme: [TryRef('Self-experiments', 'start a first experiment')],
+    evidence: 'self-experiments',
     auto: true,
   ),
   TryCard(
@@ -480,6 +509,7 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.training,
     readme: [TryRef('Replay check')],
+    evidence: 'replay-check',
     auto: true,
   ),
   TryCard(
@@ -501,6 +531,7 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.sharpHours,
     readme: [TryRef('Sharp hours', 'switch it on and watch the first two days')],
+    evidence: 'sharp-hours',
     proposal: true,
     auto: true,
   ),
@@ -520,6 +551,7 @@ const List<TryCard> tryCards = [
     tell: ['Did the card match how you felt?', 'Were the words calm enough?'],
     opens: TryOpen.trends,
     readme: [TryRef('Unusual for you', 'nothing to do for 4 weeks, then one look')],
+    evidence: 'unusual-for-you',
     proposal: true,
   ),
   TryCard(

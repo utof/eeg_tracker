@@ -64,6 +64,7 @@ final Map<String, ({Widget Function() w, String? reveal})> pages = {
   'new': (w: () => _page(const {}), reveal: null),
   'progress': (w: () => _page(_some()), reveal: null),
   'proposal_open': (w: () => _page(_some(), expanded: 'sharp', first: false), reveal: 'Sharp hours'),
+  'weak_open': (w: () => _page(_some(), expanded: 'lucid', first: false), reveal: 'Lucid dream cues'),
   'finished_open': (
     w: () => _page(_some(), expanded: 'check-in', finished: true, first: false),
     reveal: 'Morning check-in and Trends',
@@ -199,6 +200,41 @@ void main() {
       expect(find.text(entryLine(null)), findsOneWidget);
     });
   }
+
+  testWidgets('weak evidence is said in words beside the cards graded weak, and in the open stop', (tester) async {
+    tester.view.physicalSize = const Size(1080, 12000);
+    tester.view.devicePixelRatio = 1080 / 393;
+    addTearDown(tester.view.reset);
+    final weak = tryCards.where((c) => c.weakEvidence).length;
+    Widget view(String? open) {
+      final page = buildTryPage(tryCards, const {});
+      return MaterialApp(
+        theme: nightTheme(),
+        home: TryTheseView(
+          page: page,
+          expanded: open,
+          showFinished: false,
+          onToggle: (_) {},
+          onOpen: (_) {},
+          onDone: (_) {},
+          onSkip: (_) {},
+          onReopen: (_) {},
+          onNote: (_, _) {},
+          onShowFinished: _no,
+        ),
+      );
+    }
+
+    await tester.pumpWidget(view(null));
+    expect(find.text('The evidence is weak.'), findsNWidgets(weak));
+    expect(find.textContaining('The i on its screen says why'), findsNothing);
+    expect(find.text('The assistant\'s idea.'), findsNWidgets(tryCards.where((c) => c.proposal).length));
+    await tester.pumpWidget(view('lucid'));
+    expect(find.text('The evidence is weak.'), findsNWidgets(weak - 1), reason: 'the open stop says it in its body');
+    expect(find.text('The evidence is weak: it may do nothing for you. The i on its screen says why.'), findsOneWidget);
+    await tester.pumpWidget(view('sharp'));
+    expect(find.textContaining('may do nothing for you'), findsNothing);
+  });
 
   testWidgets('a finished tour leads to Export data, where the notes go', (tester) async {
     final opened = <String>[];
