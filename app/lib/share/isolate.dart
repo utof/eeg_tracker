@@ -11,6 +11,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show debugPrint;
 
 import '../recorder/chunk_writer.dart';
+import 'link.dart';
 import 'protocol.dart';
 import 'server.dart';
 
@@ -39,13 +40,15 @@ List<Object?> shareIsolateArgs(SendPort toHost, String filesDir, ShareConfig c, 
   c.offAtMs,
   wifi.nets,
   wifi.note,
+  c.laptop?.toJson(), // the paired laptop, told where this phone is (link.dart)
 ];
 
 /// The server isolate. Messages in: `['b', stem, first, t, Float32List]` a batch, `['s', map]` the status,
 /// `['m', id, t, i]` a marker's answer (t null = not recording), `['w', nets, note]` Android's answer about the
 /// Wi-Fi address again, `['x']` stop. Messages out: `['port', SendPort]`, `['up', addresses, port, why]` (why: empty,
 /// or what each source returned when no Wi-Fi address was found), `['marker', id, text]`, `['copying', n]` file
-/// requests being answered, `['error', text]` an error that did not stop it, `['down', why]`.
+/// requests being answered, `['error', text]` an error that did not stop it, `['log', line]` (the paired laptop),
+/// `['down', why]`.
 ///
 /// Every error inside it is caught (DECISIONS row 587): before the server listens it ends the isolate the orderly way
 /// (`['down', ...]`); after, it is reported and the server goes on answering. An uncaught error (running out of memory
@@ -107,6 +110,7 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
   );
   Timer? addressTimer;
   Timer? offTimer;
+  LaptopAnnouncer? announcer;
   var closing = false;
 
   /// The bind in flight: [end] waits for it, so a socket it opens is closed too (a killed isolate keeps its
@@ -118,6 +122,7 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
     closing = true;
     addressTimer?.cancel();
     offTimer?.cancel();
+    announcer?.stop();
     try {
       await binding?.timeout(const Duration(seconds: 3));
     } catch (_) {}
@@ -210,6 +215,15 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
     final text = '$e';
     toHost.send(['error', text.length > 300 ? '${text.substring(0, 300)}...' : text]);
   });
+  final laptop = PairedLaptop.fromJson(args.length > 7 ? args[7] : null);
+  if (laptop != null) {
+    announcer = LaptopAnnouncer(
+      laptop: laptop,
+      sharePort: server.boundPort,
+      token: args[2]! as String,
+      onLine: (line) => toHost.send(['log', 'sharing on Wi-Fi: $line']),
+    )..start();
+  }
   final left = (args[4]! as int) - DateTime.now().millisecondsSinceEpoch;
   offTimer = Timer(Duration(milliseconds: left < 0 ? 0 : left), () => unawaited(end('time is up')));
   await look();
@@ -411,6 +425,8 @@ class ShareHost {
           // the server goes on answering; the error goes to logcat (tag "flutter") and the night's log
           debugPrint('eeg_tracker share: an error in the server, which goes on: ${m[1]}');
           onLog('sharing on Wi-Fi: an error in the server, which goes on: ${m[1]}');
+        case 'log':
+          onLog(m[1] as String);
         case 'down':
           _end(m[1] == 'stopped' ? 'sharing on Wi-Fi off' : 'sharing on Wi-Fi off: ${m[1]}');
         default:

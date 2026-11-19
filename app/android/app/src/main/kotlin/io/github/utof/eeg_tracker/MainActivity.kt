@@ -20,6 +20,9 @@ class MainActivity : FlutterActivity() {
     private var sharpLaunch: Map<String, Any>? = null
     private var sharpChannel: MethodChannel? = null
 
+    /** Pairing with a laptop (PairLinkActivity.kt): "take" hands over the link once, "open" says one arrived. */
+    private var linkChannel: MethodChannel? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
@@ -108,6 +111,15 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+        linkChannel = MethodChannel(messenger, "eeg_tracker/link").apply {
+            setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "take" -> result.success(PairLinks.take())
+                    else -> result.notImplemented()
+                }
+            }
+        }
+        PairLinks.onArrived = { runOnUiThread { linkChannel?.invokeMethod("open", null) } }
         // Meditation and the dream catcher keep the screen on while they run: they live in this Activity, and a
         // locked phone could freeze them (DECISIONS rows 75 and 110). The dream catcher also dims this window to
         // the lowest brightness while you lie in bed; "off" hands the brightness back to the phone's setting.
@@ -156,6 +168,8 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         SharpPrompts.screenHeld = false
         sharpChannel = null
+        PairLinks.onArrived = null
+        linkChannel = null
         SessionService.onStopTapped = null
         SessionService.onButtonTapped = null
         SessionService.onFocusChanged = null

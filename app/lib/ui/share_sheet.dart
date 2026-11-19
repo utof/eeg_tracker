@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:qr/qr.dart';
 
 import '../share/control.dart';
+import '../share/link.dart';
 import '../share/protocol.dart';
 import 'theme.dart';
 
@@ -56,7 +57,14 @@ class ShareRow extends StatelessWidget {
 }
 
 class ShareSheetModel {
-  const ShareSheetModel({required this.address, required this.port, required this.token, required this.until, required this.night});
+  const ShareSheetModel({
+    required this.address,
+    required this.port,
+    required this.token,
+    required this.until,
+    required this.night,
+    this.laptop,
+  });
 
   /// `192.168.1.23`; null while no Wi-Fi address is known (the commands then use the cable: [cableCommand]).
   final String? address;
@@ -69,6 +77,9 @@ class ShareSheetModel {
   /// A night is recording (the recorder serves, screen off or on); else the app serves while it is open.
   final bool night;
 
+  /// The paired laptop (DECISIONS rows 530-539), told where this phone is while sharing is on.
+  final PairedLaptop? laptop;
+
   String get hostPort => '${address ?? '127.0.0.1'}:$port';
 
   /// Over a USB cable the laptop reaches the phone itself at 127.0.0.1 (DECISIONS row 563).
@@ -78,9 +89,10 @@ class ShareSheetModel {
 }
 
 class ShareSheet extends StatelessWidget {
-  const ShareSheet({super.key, required this.model, this.onNewToken});
+  const ShareSheet({super.key, required this.model, this.onNewToken, this.onForgetLaptop});
   final ShareSheetModel model;
   final VoidCallback? onNewToken;
+  final VoidCallback? onForgetLaptop;
 
   @override
   Widget build(BuildContext context) {
@@ -113,6 +125,10 @@ class ShareSheet extends StatelessWidget {
           const Divider(),
           _Line('Turns off at', clockText(m.until)),
           const Divider(),
+          if (m.laptop != null) ...[
+            _Line('Laptop', m.laptop!.name),
+            const Divider(),
+          ],
           const SizedBox(height: 14),
           Text(
             address == null
@@ -140,13 +156,27 @@ class ShareSheet extends StatelessWidget {
           const SizedBox(height: 20),
           Text('On the laptop', style: text.titleMedium?.copyWith(fontWeight: FontWeight.w500)),
           const SizedBox(height: 10),
+          Text(
+            m.laptop != null
+                ? 'Paired with ${m.laptop!.name}: this phone tells it where it is while sharing is on. On the laptop '
+                      'run python3 scripts/phone_link.py.'
+                : 'Easiest: on the laptop run python3 scripts/phone_link.py and point this phone\'s camera at the code '
+                      'it shows. Nothing to type.',
+            style: muted,
+          ),
+          if (m.laptop != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(onPressed: onForgetLaptop, child: const Text('Forget this laptop')),
+            ),
+          const SizedBox(height: 14),
           if (address == null) ...[
             Text('Phone on a USB cable, first:', style: muted),
             const SizedBox(height: 4),
             SelectableText(m.cableCommand, style: text.bodyMedium?.copyWith(height: 1.4)),
             const SizedBox(height: 14),
           ],
-          Text('The live pages:', style: muted),
+          Text('Or by hand, the live pages:', style: muted),
           const SizedBox(height: 4),
           SelectableText(m.pagesCommand, style: text.bodyMedium?.copyWith(height: 1.4)),
           const SizedBox(height: 14),
@@ -158,7 +188,13 @@ class ShareSheet extends StatelessWidget {
             alignment: Alignment.centerRight,
             child: TextButton(onPressed: onNewToken, child: const Text('New code')),
           ),
-          Text('A new code shuts out every laptop that has the old one.', style: text.bodyMedium?.copyWith(color: Night.inkMuted)),
+          Text(
+            m.laptop != null
+                ? 'A new code shuts out every laptop that has the old one. ${m.laptop!.name} is told the new one: '
+                      'forget it first to shut it out too.'
+                : 'A new code shuts out every laptop that has the old one.',
+            style: text.bodyMedium?.copyWith(color: Night.inkMuted),
+          ),
         ],
       ),
     );
