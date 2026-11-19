@@ -98,4 +98,21 @@ void main() {
     await released;
     expect(calls.map((c) => c.method), ['hold', 'release']);
   });
+
+  test("a second button on the card (the work session's Back): sent with the words, its tap reaches the holder", () async {
+    final k = PhoneSessionKeeper();
+    var taps = 0;
+    k.onButton = () => taps++;
+    await k.hold(const KeepSpec(title: 'Work session', text: 'On a break', headband: true, focus: false, button: 'Back'));
+    expect(calls.single.arguments, containsPair('button', 'Back'));
+    await messenger.handlePlatformMessage(
+      channel.name,
+      const StandardMethodCodec().encodeMethodCall(const MethodCall('buttonTapped')),
+      (_) {},
+    );
+    expect(taps, 1);
+    await k.hold(const KeepSpec(title: 'Work session', text: 'Alert', headband: true, focus: false));
+    expect((calls.last.arguments as Map).containsKey('button'), isFalse, reason: 'no button: none on the card');
+    await k.release();
+  });
 }

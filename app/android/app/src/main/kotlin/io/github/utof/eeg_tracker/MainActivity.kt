@@ -41,8 +41,9 @@ class MainActivity : FlutterActivity() {
             }
         }
         // Sound sessions with the phone locked (SessionService.kt): "hold" answers with what is kept
-        // ("headband", "microphone"), "release" ends it; Stop on the notification comes back as "stopTapped", and the
-        // audio focus (a call, another app's sound) as "focus" with "loss", "lossTransient", "duck" or "gain".
+        // ("headband", "microphone"), "release" ends it; Stop on the notification comes back as "stopTapped", the
+        // session's own second button ("button", e.g. the work session's Back) as "buttonTapped", and the audio focus
+        // (a call, another app's sound) as "focus" with "loss", "lossTransient", "duck" or "gain".
         val session = MethodChannel(messenger, "eeg_tracker/session")
         session.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -53,6 +54,7 @@ class MainActivity : FlutterActivity() {
                     call.argument<Boolean>("headband") == true,
                     call.argument<Boolean>("microphone") == true,
                     call.argument<Boolean>("focus") != false,
+                    call.argument<String>("button"),
                 ) { kept, error ->
                     runOnUiThread { if (kept != null) result.success(kept) else result.error("session", error, null) }
                 }
@@ -64,6 +66,7 @@ class MainActivity : FlutterActivity() {
             }
         }
         SessionService.onStopTapped = { runOnUiThread { session.invokeMethod("stopTapped", null) } }
+        SessionService.onButtonTapped = { runOnUiThread { session.invokeMethod("buttonTapped", null) } }
         SessionService.onFocusChanged = { change -> runOnUiThread { session.invokeMethod("focus", change) } }
         // The sharp-hours questions (SharpPrompts.kt): "arm" keeps the moments ahead, "takeLaunch" hands over the
         // question a notification tap opened (once), "open" tells the Dart side a tap came while the app ran.
@@ -154,6 +157,7 @@ class MainActivity : FlutterActivity() {
         SharpPrompts.screenHeld = false
         sharpChannel = null
         SessionService.onStopTapped = null
+        SessionService.onButtonTapped = null
         SessionService.onFocusChanged = null
         SessionService.release(applicationContext)
         super.onDestroy()

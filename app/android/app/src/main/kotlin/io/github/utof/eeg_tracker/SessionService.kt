@@ -35,6 +35,11 @@ import android.os.SystemClock
  * nothing until its wake): other apps' sound pauses, and a call or another app taking the sound, or giving it back,
  * reaches the session as "loss", "lossTransient", "duck" or "gain", so it can go quiet instead of playing through a
  * call. Android lowers the session's sound by itself for a short sound ("duck").
+ *
+ * A session may ask for a second button beside Stop (the work session's Back while on a break); its tap comes back
+ * as "buttonTapped". A session that holds again (the work session, every 20 minutes and when its words change)
+ * re-arms the wake lock first and only updates the card while the service already runs with the same types; a failed
+ * re-hold never ends a running service (work review 2026-11-20, finding 11).
  */
 class SessionService : Service() {
     companion object {
@@ -42,7 +47,9 @@ class SessionService : Service() {
         private const val NOTIFICATION_ID = 4712
         private const val ACTION_HOLD = "io.github.utof.eeg_tracker.session.HOLD"
         private const val ACTION_STOP_TAP = "io.github.utof.eeg_tracker.session.STOP_TAP"
+        private const val ACTION_BUTTON_TAP = "io.github.utof.eeg_tracker.session.BUTTON_TAP"
         private const val CUSTOM_STOP = "stop"
+        private const val CUSTOM_BUTTON = "button"
 
         /** The longest a session may hold the wake lock without holding again (the work session re-holds). */
         private const val WAKE_LOCK_MS = 3L * 60 * 60 * 1000
@@ -50,6 +57,10 @@ class SessionService : Service() {
         /** Stop was tapped on the notification or the lock screen; set by the screen's Activity. */
         @Volatile
         var onStopTapped: (() -> Unit)? = null
+
+        /** The card's second button (the session's own, e.g. Back) was tapped; set by the screen's Activity. */
+        @Volatile
+        var onButtonTapped: (() -> Unit)? = null
 
         /** The audio focus changed ("loss", "lossTransient", "duck", "gain"); set by the screen's Activity. */
         @Volatile
@@ -75,6 +86,7 @@ class SessionService : Service() {
             headband: Boolean,
             microphone: Boolean,
             focus: Boolean,
+            button: String?,
             done: (List<String>?, String?) -> Unit,
         ) {
             pending?.invoke(null, "replaced by a newer request")
@@ -87,7 +99,8 @@ class SessionService : Service() {
                         .putExtra("text", text)
                         .putExtra("headband", headband)
                         .putExtra("microphone", microphone)
-                        .putExtra("focus", focus),
+                        .putExtra("focus", focus)
+                        .putExtra("button", button),
                 )
             } catch (e: Exception) {
                 pending = null
@@ -104,6 +117,9 @@ class SessionService : Service() {
     private var session: MediaSession? = null
     private var focusRequest: AudioFocusRequest? = null
 
+    /** What the running foreground start kept ("headband", "microphone"); null before the first. */
+    private var keptTypes: List<String>? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -112,6 +128,7 @@ class SessionService : Service() {
                 val tapped = onStopTapped
                 if (tapped != null) tapped() else stopSelf() // no screen left to stop: just go
             }
+            ACTION_BUTTON_TAP -> onButtonTapped?.invoke()
             ACTION_HOLD -> hold(intent)
             else -> stopSelf() // a restart without its session
         }
@@ -123,36 +140,62 @@ class SessionService : Service() {
         val text = intent.getStringExtra("text") ?: ""
         val headband = intent.getBooleanExtra("headband", false)
         val microphone = intent.getBooleanExtra("microphone", false)
+        val button = intent.getStringExtra("button")
         val answer = pending
         pending = null
+        val asked = listOfNotNull(if (headband) "headband" else null, if (microphone) "microphone" else null)
+        val before = keptTypes
+        // The wake lock first: a session that holds again keeps it whatever happens to the card below.
+        armWakeLock()
         try {
             channel()
-            val media = mediaSession(title, text)
-            val notification = notification(title, text, media)
-            // Asked types first; if Android refuses one (a permission taken back), the sound alone.
-            val kept = ArrayList<String>()
-            try {
-                foreground(notification, headband, microphone)
-                if (headband) kept.add("headband")
-                if (microphone) kept.add("microphone")
-            } catch (e: SecurityException) {
-                if (!headband && !microphone) throw e
-                foreground(notification, false, false)
+            val media = mediaSession(title, text, button)
+            val notification = notification(title, text, media, button)
+            val kept: List<String>
+            if (running && before == asked) {
+                // already in the foreground with these types: only the card's words change
+                getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, notification)
+                kept = asked
+            } else {
+                // Asked types first; if Android refuses one (a permission taken back), the sound alone.
+                kept = try {
+                    foreground(notification, headband, microphone)
+                    asked
+                } catch (e: SecurityException) {
+                    if (!headband && !microphone) throw e
+                    foreground(notification, false, false)
+                    emptyList()
+                }
             }
+            keptTypes = kept
+            if (intent.getBooleanExtra("focus", true)) askFocus() else dropFocus()
+            running = true
+            answer?.invoke(kept, null)
+        } catch (e: Exception) {
+            if (running && before != null) {
+                // A re-hold that failed: the service, its foreground state and its wake lock stay as they were
+                // (ending them would end a running session); the card keeps its last words.
+                answer?.invoke(before, null)
+            } else {
+                answer?.invoke(null, e.message ?: e.javaClass.simpleName)
+                stopSelf()
+            }
+        }
+    }
+
+    /**
+     * (Re)arms the partial wake lock's timeout: a work session holds again every 20 minutes and can run a whole day
+     * (DECISIONS 447); the others hold once and are released long before.
+     */
+    private fun armWakeLock() {
+        try {
             if (wakeLock == null) {
                 wakeLock = getSystemService(PowerManager::class.java)
                     ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "eeg_tracker:session")
                     ?.apply { setReferenceCounted(false) }
             }
-            // Every hold (re)arms the lock's timeout: a work session holds again every 20 minutes and can
-            // run a whole day (DECISIONS 447); the others hold once and are released long before.
             wakeLock?.acquire(WAKE_LOCK_MS)
-            if (intent.getBooleanExtra("focus", true)) askFocus() else dropFocus()
-            running = true
-            answer?.invoke(kept, null)
-        } catch (e: Exception) {
-            answer?.invoke(null, e.message ?: e.javaClass.simpleName)
-            stopSelf()
+        } catch (_: Exception) {
         }
     }
 
@@ -211,14 +254,15 @@ class SessionService : Service() {
         nm.createNotificationChannel(c)
     }
 
-    /** A media session, so the lock screen shows the session as playing sound, with Stop. */
-    private fun mediaSession(title: String, text: String): MediaSession {
+    /** A media session, so the lock screen shows the session as playing sound, with Stop (and the session's button). */
+    private fun mediaSession(title: String, text: String, button: String?): MediaSession {
         val s = session ?: MediaSession(this, "eeg_tracker session").also {
             it.setCallback(object : MediaSession.Callback() {
                 override fun onStop() = tapped()
 
                 override fun onCustomAction(action: String, extras: Bundle?) {
                     if (action == CUSTOM_STOP) tapped()
+                    if (action == CUSTOM_BUTTON) onButtonTapped?.invoke()
                 }
                 // Play / pause from a headset do nothing: a session cannot pause, and a button pressed in
                 // bed by accident must not end it.
@@ -231,10 +275,14 @@ class SessionService : Service() {
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, text.ifEmpty { "EEG Tracker" })
                 .build(),
         )
+        val state = PlaybackState.Builder()
+            .setActions(PlaybackState.ACTION_STOP)
+            .addCustomAction(PlaybackState.CustomAction.Builder(CUSTOM_STOP, "Stop", R.drawable.ic_session_stop).build())
+        if (button != null) {
+            state.addCustomAction(PlaybackState.CustomAction.Builder(CUSTOM_BUTTON, button, R.drawable.ic_session_back).build())
+        }
         s.setPlaybackState(
-            PlaybackState.Builder()
-                .setActions(PlaybackState.ACTION_STOP)
-                .addCustomAction(PlaybackState.CustomAction.Builder(CUSTOM_STOP, "Stop", R.drawable.ic_session_stop).build())
+            state
                 .setState(PlaybackState.STATE_PLAYING, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1f, SystemClock.elapsedRealtime())
                 .build(),
         )
@@ -247,7 +295,7 @@ class SessionService : Service() {
         if (t != null) t() else stopSelf()
     }
 
-    private fun notification(title: String, text: String, media: MediaSession): Notification {
+    private fun notification(title: String, text: String, media: MediaSession, button: String?): Notification {
         val immutable = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         val open = PendingIntent.getActivity(
             this,
@@ -274,7 +322,18 @@ class SessionService : Service() {
             .addAction(
                 Notification.Action.Builder(Icon.createWithResource(this, R.drawable.ic_session_stop), "Stop", stop).build(),
             )
-            .setStyle(Notification.MediaStyle().setMediaSession(media.sessionToken).setShowActionsInCompactView(0))
+        if (button != null) {
+            val tap = PendingIntent.getService(
+                this,
+                2,
+                Intent(this, SessionService::class.java).setAction(ACTION_BUTTON_TAP),
+                immutable,
+            )
+            b.addAction(Notification.Action.Builder(Icon.createWithResource(this, R.drawable.ic_session_back), button, tap).build())
+            b.setStyle(Notification.MediaStyle().setMediaSession(media.sessionToken).setShowActionsInCompactView(0, 1))
+        } else {
+            b.setStyle(Notification.MediaStyle().setMediaSession(media.sessionToken).setShowActionsInCompactView(0))
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             b.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
         }
@@ -283,6 +342,7 @@ class SessionService : Service() {
 
     override fun onDestroy() {
         running = false
+        keptTypes = null
         dropFocus()
         try {
             wakeLock?.let { if (it.isHeld) it.release() }
