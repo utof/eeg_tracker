@@ -13,6 +13,10 @@ abstract class StateSound {
   /// Fades out over [seconds] and releases the audio device.
   Future<void> stop({double seconds = stopFadeS});
 
+  /// Hands-free (DECISIONS 246): [on] fades to silence over 1 s, off fades back over 2 s; the sound keeps going
+  /// underneath, so the session and its timers go on. Ignored once [fadeOut] has begun.
+  void pause({required bool on});
+
   /// Times the sound ran dry because the app fell behind (0 is right).
   int get stalls;
 
@@ -25,6 +29,7 @@ class SilentStateSound implements StateSound {
   SoundPlan? plan;
   double? fadeIn;
   final List<double> fades = [];
+  final List<bool> pauses = [];
   bool started = false, stopped = false;
   bool fail = false;
 
@@ -38,6 +43,11 @@ class SilentStateSound implements StateSound {
 
   @override
   void fadeOut(double seconds) => fades.add(seconds);
+
+  @override
+  void pause({required bool on}) {
+    if (fades.isEmpty) pauses.add(on);
+  }
 
   @override
   Future<void> stop({double seconds = stopFadeS}) async => stopped = true;

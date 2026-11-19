@@ -96,6 +96,10 @@ at the top; trends is a day log (today's entry, sleep pressure, the last 14 days
 Between nights a "Your data" section (after Headband) says what the app keeps and when it last left the phone, with
 Export data and Export a night. Export data is its own page: status word, what is new as two readouts, the copy
 strip, the route (this phone, the folder, the laptop) as numbered log rows, Export everything, and Export new pinned.
+Settings (a gear in the night screen's app bar) holds the hands-free switch, its calibration with Calibrate right under
+it, what each gesture does where (two label-over-value columns per session), and how often it is wrong; the
+hands-free calibration is a page of its own with the six tries on top, the instruction at display size, the two live
+lanes and the one action pinned (Start, Stop, then Done or Try again).
 Self-experiments (from Trends) is a page per experiment: status, today's task, "did you keep to it?", the day bill,
 the answer's place, Kept honest; its setup is a page of choices with Start tomorrow pinned.
 
@@ -162,6 +166,13 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   legend says all of it in words. The answer has its place on the page from day 1: "Sealed until <date>", later
   one sentence in titleLarge with its range and verdict, then log rows; a look before the end is an amber warning
   line with its icon.
+- **Gesture lanes** (hands-free calibration): two `track` lanes of the last 10 seconds, worded "Jaw" and "Eyes" like the
+  sleep chart's levels. Jaw: a bar per 0.1 s on a log scale (1 to 100 times your rest), `saved` under the clench line
+  and `ink` over it, the line dashed in ink and labelled "first guess" or "yours". Eyes: an ink step line from the
+  middle (up for one side, down for the other, holding between moves) with the look size as faint `rule` lines. The
+  six tries above them are the watch strip's cells under two words: a faint outline to come, a green ring while
+  cued, filled `saved` when seen or caught, a `track` cell with an amber dash when not, an `ink-muted` ring while not
+  yet judged.
 - **Buttons:** one filled button per screen: Start night on the night screen (Lights off while a night records), Start on the meditation screen, and on
   each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before
   stopping, except in alpha-theta, where stopping must be instant. Session faces (dream catcher, sound for states)

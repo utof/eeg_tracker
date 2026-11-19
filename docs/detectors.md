@@ -2,7 +2,8 @@
 
 One set of detectors, shared by every feature that needs them: meditation feedback, the dream catcher, sound for
 states, the night extras of the sleep report, and the drift-off detector during every night with its "Falling
-asleep" check in the morning report. ROADMAP next step 3; DECISIONS 85-89, 140-146 and 180-186.
+asleep" check in the morning report. ROADMAP next step 3; DECISIONS 85-89, 140-146 and 180-186. The hands-free gestures (DECISIONS 240-249) sit on top of
+them.
 
 - **Python reference**: `analysis/eeg_detectors.py`, checked on the owner's recordings with
   `analysis/validate_detectors.py` (commands below). Tests: `analysis/tests/test_eeg_detectors.py`.
@@ -164,10 +165,72 @@ so the times differ from the table above by the grid):
 | 09:11:25 (headband back on) | 09:14:55 | 09:15:25 | -0.5 min | yes |
 | 11:35:25 (back to sleep after waking; extra) | 11:58:25 | 11:50:55 | +7.5 min | no |
 
+## Hands-free gestures (DECISIONS 240-249)
+
+Two deliberate gestures on top of the detectors, used as a switch in sessions (app/README.md, "Hands-free controls"):
+`analysis/hands_free.py` (the reference) and `app/lib/detectors/gestures.dart` (the phone's line-by-line port). The
+recogniser takes one whole second at a time as the detectors finish it: ten 0.1 s ticks of 55-120 Hz power at T3
+and T4 (the detectors' muscle filter, through a tap that changes none of their numbers), each side's rest level (the
+detectors' 20th percentile of the last 2 minutes), the second's hole and movement flags, and the eye movements known
+by then.
+
+| Gesture | Rule (planning values; the calibration tunes the level and the size) |
+|---|---|
+| Double clench | jaw ticks (one side over 4x its rest, both over 2x: the jaw rule at 0.1 s) form bursts (a one-tick dip does not split one); bursts under 2 s apart form a cluster, decided after 2 s with no jaw tick. A gesture: exactly 2 bursts of 2-10 ticks (0.2-1 s), 3-15 ticks apart (0.3-1.5 s), each with both sides over the clench line (10x; calibrated 10-60x) at its strongest tick |
+| Look left, then right | eye movements under 2 s apart form a cluster, decided once every movement up to 2 s after its last is known. A gesture: 2 or 3 movements, each within 1.5 s of the one before, each the other way, the first two at least the look size (80 µV; calibrated 70-250), the first one left once left is known (else either way) |
+| Both | nothing spoiled from 2 s before to 2 s after: no Bluetooth hole, no movement second, the rest level known (so nothing in the first 30 s). Decided 2-4 s after the gesture. The app drops it while the drift-off detector says probably asleep |
+
+**False triggers** (nobody made a gesture in these recordings, so every gesture found is false; planning settings,
+left unknown; AnySleep's stages; `analysis/validate_hands_free.py`):
+
+| Recording | Hours | Double clench | Look left, then right |
+|---|---|---|---|
+| Night of 2026-11-17, awake | 4.6 | 0 (0 an hour) | 9 (1.9 an hour; 0.9-1.1 with left known) |
+| Same night, asleep | 6.5 | 4 (0.6 an hour; all 4 in light sleep of the restless morning) | 4 (0.6 an hour) |
+| Asleep, with the drift-off gate (lights off at the first sample) | 6.5 | 4 (the detector said awake then) | 3 |
+| Morning check-in of 2026-11-18 | 0.09 | 0 | 0 |
+
+By level: awake, a clench line of 4x gave 0.65 an hour, 8x 0.22 and 10x or more none; asleep, 10x 0.62, 20x 0.31,
+30x 0.16, 40x none. Looks awake: 40 µV 30 an hour, 60 µV 6, 70 µV 2.6, 80 µV 1.9, 100 µV 0.4, 150 µV none (about half
+of each with left known). The first version counted any one-sided muscle as "something else"; on the check-in's eyes-
+closed minutes one electrode's flicker then kept two of three synthetic calibration clenches from ever closing, so
+only jaw ticks (both sides up) count, as the detectors' jaw rule does; the night's numbers at the planning settings
+stayed the same.
+
+**Calibration** (`calibrate`, about 90 s): 32 s still, then six tries 8 s apart (three "clench twice now", three
+"look left, then right"), each answer to start within 5 s of its cue. Tries with a gesture's shape at any level set the
+clench line at half the weakest (10-60x) and the look size at 0.6 of the smallest (70-250 µV); left is known when at
+least 2 tries had a first step and all went the same way. Each try is then judged with the tuned settings; a gesture
+is used only if 2 of its 3 were caught.
+
+**Phone port**: `app/test/gestures_cross_check_test.dart` runs four excerpts of the recordings (the check-in's eyes
+open and eyes closed minutes, two stretches of the night with real jaw bursts and a hole) with synthetic clenches
+and looks drawn over them through the detectors, the tap and the recogniser, and expects the Python reference's
+per-second inputs (within 1e-8), clusters with their verdicts, gestures and, for a calibration run, the same tuned
+settings (fixture `app/test/fixtures/gestures.json` by `analysis/make_gesture_fixture.py`, 568 KB, no clock times or
+device numbers). In the night recorder the same recogniser runs inside the live drift-off detector (one guard for
+both); replayed on the night of 2026-11-17 with the planning settings it marked the same 4 double clenches as the
+reference.
+
+**Cost at night**: replayed batch by batch on the 12.9-hour night (AOT, `tool/live_drift.dart`, two runs each on a quiet
+laptop), the live detector took 0.85-0.86 s an hour of signal with the gestures and 0.83-0.86 s without: the gestures
+add less than the run-to-run noise.
+
+```
+uv run --project analysis python analysis/validate_hands_free.py night NIGHT.bdf NIGHT.sleep.json
+uv run --project analysis python analysis/validate_hands_free.py run RUN.f32 [...]
+uv run --project analysis python analysis/make_gesture_fixture.py NIGHT.bdf RUN.f32 RUN.markers.jsonl app/test/fixtures/gestures.json
+cd app && dart compile exe tool/live_drift.dart -o /tmp/live_drift && HANDS_FREE=1 /tmp/live_drift RECORDINGS 2026-11-17 NIGHT.sleep.json
+```
+
+The night takes about 90 s and 1.8 GB on the laptop.
+
 ## What still needs the owner
 
 - **The extended setup test** (`morning.html`, 2 min): 20 cued blinks set the blink depth, 10 glances give µV
   per degree and left vs right, 5 clenches confirm the jaw band and the 4x threshold.
+- **The hands-free calibration** (phone, Settings, 90 s): the first real double clenches and looks; its EEG is kept
+  for checking the gesture rules on the laptop.
 - **A Lights off tap** on each night or nap, as you close your eyes (app/README.md, "Lights off and falling asleep"):
   the morning report's check counts the nights; 4 of 5 within 5 minutes and the detector ships (DECISIONS 62).
 - **A meditation on the phone** where you let yourself doze: does "drifting" come when you feel it?

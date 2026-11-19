@@ -137,6 +137,9 @@ class Second {
 
   /// T3 and T4 muscle power against their baselines (NaN while a baseline is unknown).
   final List<double> muscleX = [double.nan, double.nan];
+
+  /// The T3 and T4 baselines themselves, µV² (NaN while unknown; eeg_detectors.muscle_rest).
+  final List<double> muscleRest = [double.nan, double.nan];
   bool muscleOn = false;
 
   /// Blinks whose lowest point fell in this second (set when the second is handed out, 1 s later).
@@ -184,6 +187,15 @@ class _BurstSpan {
   double peak = double.negativeInfinity;
 }
 
+/// Something that looks over the detectors' shoulder without changing them (the hands-free gestures,
+/// gestures.dart): every sample's 55-120 Hz values at T3 and T4, each eye movement as it is found (0.3 s after the
+/// fact), and each second as soon as it ends (before [Detectors.onSecond] hands it out a second later).
+abstract interface class DetectorTap {
+  void muscle(double t3, double t4, bool missing);
+  void eyeMove(EyeMove e);
+  void secondEnd(Second s);
+}
+
 /// The detectors, fed one sample at a time.
 class Detectors {
   Detectors({this.onSecond}) {
@@ -198,6 +210,9 @@ class Detectors {
 
   /// Each whole second, handed out one second late (once its blinks are known).
   final void Function(Second s)? onSecond;
+
+  /// Null: nobody looks (set by the hands-free gestures while they are on).
+  DetectorTap? tap;
 
   final List<Blink> blinks = [];
   final List<EyeMove> eyeMoves = [];
@@ -286,9 +301,12 @@ class Detectors {
     final first = _inSecond == 0;
     final s = _cur;
     if (missing) s.gap = true;
+    var y3 = 0.0, y4 = 0.0;
     for (var c = 0; c < 4; c++) {
       final v = row[c], q = _quality[c].step(v);
       final y = _muscle[c].step(v);
+      if (c == 2) y3 = y;
+      if (c == 3) y4 = y;
       if (first) {
         _rawLo[c] = v;
         _rawHi[c] = v;
@@ -318,6 +336,7 @@ class Detectors {
     if (first) _sumS = 0;
     _sumS += se * se;
     _inSecond++;
+    tap?.muscle(y3, y4, missing);
   }
 
   bool _anyMissing(int from, int to) {
@@ -392,7 +411,9 @@ class Detectors {
     for (var c = 0; c < 4; c++) {
       if (_range(c, i - h - k, i + h) > EyeRule.maxUv) return;
     }
-    eyeMoves.add(EyeMove(i, _s[i]));
+    final e = EyeMove(i, _s[i]);
+    eyeMoves.add(e);
+    tap?.eyeMove(e);
   }
 
   // ---- per second ----
@@ -414,6 +435,7 @@ class Detectors {
     _burstSecond(s);
     _moveSecond(s);
     _epochSecond(s);
+    tap?.secondEnd(s);
     final p = _pending;
     if (p != null) _settle(p);
     _pending = s;
@@ -430,6 +452,7 @@ class Detectors {
     for (var j = 0; j < 2; j++) {
       final hist = _restHist[j];
       final rest = hist.length >= MuscleRule.restMinS ? percentile(hist, MuscleRule.restPct) : double.nan;
+      s.muscleRest[j] = rest;
       s.muscleX[j] = rest.isNaN || rest <= 0 ? double.nan : s.muscle[sideChannels[j]] / rest;
       if (!s.gap) {
         hist.add(s.muscle[sideChannels[j]]);

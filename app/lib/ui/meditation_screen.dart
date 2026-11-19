@@ -6,6 +6,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'hands_free_screen.dart' show activeGestures;
+import '../sound/soloud_gesture_tone.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import '../meditation/controller.dart';
@@ -31,7 +33,11 @@ class MeditationScreen extends StatefulWidget {
 
 class _MeditationScreenState extends State<MeditationScreen> {
   final BrainBitFinder _finder = BrainBitFinder();
-  late final MeditationController _c = MeditationController(finder: _finder, sound: () => SoloudSound());
+  late final MeditationController _c = MeditationController(
+    finder: _finder,
+    sound: () => SoloudSound(),
+    gestureTone: SoloudGestureTone.new,
+  );
   int _minutes = 10;
   bool _nightRunning = false;
   bool _screenOn = false;
@@ -138,6 +144,7 @@ class _MeditationScreenState extends State<MeditationScreen> {
     // the session's notification carries Stop for a locked phone
     if (phone.sdkInt >= 33) await FlutterForegroundTask.requestNotificationPermission();
     _loadCheck();
+    _c.handsFree = await activeGestures();
     await _c.start(Duration(minutes: _minutes));
   }
 

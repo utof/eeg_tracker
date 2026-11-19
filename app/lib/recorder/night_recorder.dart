@@ -238,7 +238,7 @@ class NightRecorder {
     } else {
       _night = NightState(active: true, startMs: _now().millisecondsSinceEpoch);
       _startDrift();
-      if (_drift != null) _notes = [(_now(), 'drift-off detector on; lights off counts from the first sample until Lights off')];
+      if (_drift != null) _notes = [(_now(), 'drift-off detector on; lights off counts from the first sample until Lights off'), ..._notes];
     }
     _packets = PacketAccount(_night.packets);
     _packetsLoggedMs = _now().millisecondsSinceEpoch;
@@ -504,9 +504,10 @@ class NightRecorder {
     final make = watch;
     if (make == null) return;
     try {
-      _drift = make();
+      final d = _drift = make();
       _driftUsed = true;
       _driftWall.start();
+      if (d is LiveDrift && d.hands != null) _note('hands-free on: a double clench marks a moment (never while probably asleep)');
     } catch (e) {
       _note('drift-off detector could not start: ${_short(e)}');
     }
@@ -882,6 +883,9 @@ class NightRecorder {
         'drift-off detector: ${work.toStringAsFixed(2)} s of work for ${hours.toStringAsFixed(2)} h of signal'
         '${hours > 0 ? ' (${(work / hours).toStringAsFixed(2)} s an hour)' : ''}${_drift == null ? ', then stopped' : ''}',
       );
+      final d = _drift;
+      final h = d is LiveDrift ? d.hands : null;
+      if (h != null) _note('hands-free: ${h.heard} moments marked, ${h.ignoredAsleep} double clenches ignored while probably asleep');
     }
     await _save();
   }

@@ -13,6 +13,10 @@
 // 190-193) is held from Start until the headband is let go and, for "fall asleep, then the night", until the night
 // recording has started, so the app is never without a service in between.
 //
+// Hands-free (DECISIONS 244-246): with the owner's switch on, a double clench pauses the sound and the next one brings
+// it back, and a look left then right marks a moment (as a double clench does when there is no sound to pause); each
+// with a soft tone, never while the drift-off detector says probably asleep.
+//
 // Time: seconds after lights off are the larger of the samples received (holes held at their length) and the clock,
 // so a test can stream a session in a fraction of a second, and a headband out of range does not stop the timers.
 import 'dart:async';
@@ -24,13 +28,16 @@ import 'package:flutter/foundation.dart';
 
 import '../detectors/detectors.dart';
 import '../detectors/drift_off.dart';
+import '../detectors/gestures.dart';
 import '../dream/band_link.dart';
 import '../feedback/features.dart' show fs;
+import '../handsfree/live.dart';
 import '../meditation/controller.dart' show gapPauseS, gapSamples;
 import '../recorder/chunk_writer.dart';
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
 import '../session_keeper.dart';
+import '../sound/gesture_tone.dart';
 import '../sound/state_sound.dart';
 import 'presets.dart';
 import 'readout.dart';
@@ -67,12 +74,22 @@ class StatesController extends ChangeNotifier {
     this.startNight,
     this.keeper,
     this.timing = const StatesTiming(),
+    this.gestureTone,
     DateTime Function()? clock,
   }) : _makeSound = sound,
        _now = clock ?? DateTime.now;
 
   final HeadbandFinder finder;
   final StateSound Function() _makeSound;
+
+  /// The hands-free confirmation tone (null: none).
+  final GestureTone Function()? gestureTone;
+
+  /// The owner's calibrated gestures while the hands-free switch is on (set by the screen); null: off.
+  GestureSettings? handsFree;
+
+  /// The sound is paused by a double clench.
+  bool paused = false;
 
   /// Where sessions are kept (null: nothing saved).
   SoundStore? store;
@@ -153,6 +170,7 @@ class StatesController extends ChangeNotifier {
   SpectrumFeed? _feed;
   Readout? _readout;
   DriftOff? _drift;
+  HandsFree? _hands;
   DateTime? _lightsOffAt;
   int? _soundStartS;
   int? _soundStartK;
@@ -197,6 +215,7 @@ class StatesController extends ChangeNotifier {
       if (_ended) return await link.close();
       if (plan.state == SoundState.asleep) _openWriter(link.name);
       _seen = Detectors(onSecond: _onSecond);
+      _listen(_seen!);
       _feed = SpectrumFeed();
       _readout = Readout();
       if (plan.state == SoundState.asleep) _drift = DriftOff(0); // lights off: the first sample
@@ -266,6 +285,8 @@ class StatesController extends ChangeNotifier {
     _feed = null;
     _readout = null;
     _drift = null;
+    _hands = null;
+    paused = false;
     _lightsOffAt = null;
     _soundStartS = null;
     _soundStartK = null;
@@ -363,6 +384,29 @@ class StatesController extends ChangeNotifier {
         StopWhy.time => SoundEnd.time,
       }));
     }
+  }
+
+  // ---- hands-free ----
+
+  void _listen(Detectors seen) {
+    final s = handsFree;
+    if (s == null) return;
+    _hands = HandsFree(s, onGesture: _gesture, tone: gestureTone?.call(), asleep: () => _drift?.state == DriftState.asleep)
+      ..attach(seen);
+  }
+
+  /// A double clench while the sound plays pauses it or brings it back; anything else marks a moment.
+  void _gesture(GestureKind kind) {
+    if (_ended) return;
+    final sound = _sound;
+    if (kind == GestureKind.clench && sound != null && stage == SoundStage.playing) {
+      paused = !paused;
+      sound.pause(on: paused);
+      _event('hands-free: ${paused ? 'sound paused' : 'sound back'} (${gestureWord(kind)})');
+    } else {
+      _event('hands-free: moment (${gestureWord(kind)})');
+    }
+    _notify();
   }
 
   // ---- the EEG file (fall asleep) ----
@@ -514,6 +558,8 @@ class StatesController extends ChangeNotifier {
       return;
     }
     final endS = _t();
+    final h = _hands;
+    if (h != null) _event('hands-free: ${h.heard} gestures acted on, ${h.ignoredAsleep} ignored while probably asleep');
     _set(SoundStage.ending, why == SoundEnd.stopped ? 'Stopping.' : '');
     _event(switch (why) {
       SoundEnd.stopped => 'stopped',

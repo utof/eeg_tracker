@@ -21,6 +21,9 @@
 // With the replay check on (ROADMAP row 23), a session can be a replay: the sound then plays the control stream of
 // your own earlier live sessions (training/replay.dart) while the live gates still act. Which one it is stays in
 // here: the screen gets the same fields either way, without live bells or the settled / settling word.
+// Hands-free (DECISIONS 244-246): with the owner's switch on, a double clench in a meditation pauses the sound (the
+// bed fades, no bells) and the next brings it back; a look left then right, and any gesture in alpha-theta, marks a
+// moment in the session log. Never while the drift-off detector says probably asleep.
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -29,13 +32,16 @@ import 'package:flutter/foundation.dart';
 import '../alphatheta/engine.dart';
 import '../detectors/detectors.dart';
 import '../detectors/drift_off.dart';
+import '../detectors/gestures.dart';
 import '../feedback/features.dart' show channelNames, fs;
 import '../feedback/mapping.dart';
 import '../feedback/session.dart';
 import '../recorder/chunk_writer.dart' show Sample, fileStem;
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
+import '../handsfree/live.dart';
 import '../sound/feedback_sound.dart';
+import '../sound/gesture_tone.dart';
 import '../sound/session_sound.dart';
 import '../training/check.dart';
 import '../training/check_store.dart';
@@ -120,6 +126,7 @@ class MeditationController extends ChangeNotifier {
     this.store,
     this.checkStore,
     this.timing = const MeditationTiming(),
+    this.gestureTone,
     DateTime Function()? clock,
   }) : _makeSound = sound,
        _makeAtSound = alphaThetaSound ?? SilentSessionSound.new,
@@ -128,6 +135,15 @@ class MeditationController extends ChangeNotifier {
   final HeadbandFinder finder;
   final FeedbackSound Function() _makeSound;
   final SessionSound Function() _makeAtSound;
+
+  /// The hands-free confirmation tone (null: none).
+  final GestureTone Function()? gestureTone;
+
+  /// The owner's calibrated gestures while the hands-free switch is on (set by the screen); null: off.
+  GestureSettings? handsFree;
+
+  /// A meditation's sound is paused by a double clench.
+  bool paused = false;
 
   /// Where sessions of this controller's kind are kept; set by the screen once the app's folder is known
   /// (null: not saved).
@@ -217,6 +233,7 @@ class MeditationController extends ChangeNotifier {
   MeditationTracker? _tracker;
   Detectors? _seen;
   DriftOff? _drift;
+  HandsFree? _hands;
   int _lostSamples = 0;
   DateTime? _startedAt;
   StreamSubscription<List<Sample>>? _signalSub;
@@ -284,6 +301,7 @@ class MeditationController extends ChangeNotifier {
       _tally = engine == null ? null : AtTally();
       _tracker = MeditationTracker(sessionLength);
       _seen = Detectors(onSecond: _onSecond);
+      _listen(_seen!);
       _startedAt = _now();
       calPhase = 'open';
       calSecondsLeft = Cal.openS.toInt();
@@ -345,6 +363,8 @@ class MeditationController extends ChangeNotifier {
     _tracker = null;
     _seen = null;
     _drift = null;
+    _hands = null;
+    paused = false;
     _lostSamples = 0;
     _sound = null;
     _lastData = null;
@@ -450,7 +470,7 @@ class MeditationController extends ChangeNotifier {
       if (seen != null) _drift = DriftOff(seen.n ~/ fs); // lights off: the eyes close now
     } else if (r.cue == 'calibration-done') {
       sound.cue();
-      sound.bed(on: true);
+      sound.bed(on: !paused);
       calPhase = null;
       _set(Stage.running, '');
     }
@@ -463,7 +483,7 @@ class MeditationController extends ChangeNotifier {
     } else if (r.phase == 'run' && live != null) {
       final drift = driftState, asleep = drift == DriftState.asleep, at = kind == SessionKind.alphaTheta;
       // the same gates act whether the sound is live or replayed; in alpha-theta sleep is one of them
-      final gated = live.gated || (at && asleep);
+      final gated = live.gated || (at && asleep) || paused;
       final played = _replayer?.next(live, gated: gated) ??
           (gated && !live.gated ? (level: live.level, rough: live.rough, reward: null, gated: true) : live);
       sound.play(played);
@@ -496,6 +516,27 @@ class MeditationController extends ChangeNotifier {
       sound.bed(on: true);
       _session?.log.note({'event': 'awake again: bed back', 'n': _session?.n});
     }
+  }
+
+  void _listen(Detectors seen) {
+    final s = handsFree;
+    if (s == null) return;
+    _hands = HandsFree(s, onGesture: _gesture, tone: gestureTone?.call(), asleep: () => _drift?.state == DriftState.asleep)
+      ..attach(seen);
+  }
+
+  /// A double clench in a running meditation pauses the sound or brings it back; anything else marks a moment.
+  void _gesture(GestureKind g) {
+    final s = _session;
+    if (_ended || s == null) return;
+    if (g == GestureKind.clench && kind == SessionKind.meditation && stage == Stage.running) {
+      paused = !paused;
+      _sound?.bed(on: !paused);
+      s.log.note({'event': 'hands-free: ${paused ? 'sound paused' : 'sound back'} (${gestureWord(g)})', 'n': s.n});
+    } else {
+      s.log.note({'event': 'hands-free: moment (${gestureWord(g)})', 'n': s.n});
+    }
+    _notify();
   }
 
   /// Each whole second from the detectors (one second late): the drift-off detector's input after lights off.
@@ -625,6 +666,8 @@ class MeditationController extends ChangeNotifier {
     );
     _seen?.finish();
     s.log.note({'sound': sound?.info(), 'end': complete ? 'length reached' : 'stopped', 'runS': t.runSeconds});
+    final h = _hands;
+    if (h != null) s.log.note({'handsFree': h.summary()});
     final d = _drift, seen = _seen;
     if (seen != null) {
       s.log.note({

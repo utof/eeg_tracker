@@ -11,6 +11,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'hands_free_screen.dart' show activeGestures;
+import '../sound/soloud_gesture_tone.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
@@ -48,6 +50,7 @@ class _StatesScreenState extends State<StatesScreen> {
     sound: SoloudStateSound.new,
     startNight: _startNight,
     keeper: PhoneSessionKeeper(),
+    gestureTone: SoloudGestureTone.new,
   );
   SoundState _state = SoundState.asleep;
   Bed _bed = presets[SoundState.asleep]!.bed;
@@ -259,6 +262,7 @@ class _StatesScreenState extends State<StatesScreen> {
       }
     }
     _justEnded = false;
+    _c.handsFree = await activeGestures();
     await _c.start(
       _plan,
       useHeadband: measure,

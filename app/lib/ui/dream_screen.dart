@@ -8,6 +8,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'hands_free_screen.dart' show activeGestures;
+import '../sound/soloud_gesture_tone.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
@@ -46,6 +48,7 @@ class _DreamScreenState extends State<DreamScreen> {
     sound: () => _audio,
     mic: _mic,
     startNight: _startNight,
+    gestureTone: SoloudGestureTone.new,
   );
   String? _recordings;
   int _rounds = 4;
@@ -187,6 +190,7 @@ class _DreamScreenState extends State<DreamScreen> {
       await FlutterForegroundTask.requestNotificationPermission();
     }
     _justEnded = false;
+    _c.handsFree = await activeGestures();
     await _c.start(rounds: _rounds, ending: _ending);
   }
 

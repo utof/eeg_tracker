@@ -7,6 +7,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'hands_free_screen.dart' show activeGestures;
+import '../sound/soloud_gesture_tone.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
@@ -37,7 +39,12 @@ class NapScreen extends StatefulWidget {
 class _NapScreenState extends State<NapScreen> {
   final BrainBitFinder _finder = BrainBitFinder();
   final SoloudNapSound _audio = SoloudNapSound();
-  late final NapController _c = NapController(finder: _finder, sound: () => _audio, mayRunModel: () => !nightScoringBusy);
+  late final NapController _c = NapController(
+    finder: _finder,
+    sound: () => _audio,
+    mayRunModel: () => !nightScoringBusy,
+    gestureTone: SoloudGestureTone.new,
+  );
   int _length = NapRule.defaultMin;
   bool _nightRunning = false;
   bool _face = false;
@@ -148,6 +155,7 @@ class _NapScreenState extends State<NapScreen> {
       return;
     }
     _justEnded = false;
+    _c.handsFree = await activeGestures();
     await _c.start(lengthMin: _length);
   }
 

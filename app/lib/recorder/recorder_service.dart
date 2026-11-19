@@ -8,7 +8,9 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import '../phone.dart';
 import 'brainbit.dart';
+import '../handsfree/store.dart' show nightGestures;
 import 'headband.dart';
+import 'live_drift.dart';
 import 'night_recorder.dart';
 import 'status.dart';
 
@@ -85,6 +87,8 @@ class RecorderTaskHandler extends TaskHandler {
       probe: ChannelPhoneProbe(),
       onStatus: _onStatus,
       onStuck: _restartProcess,
+      // the owner's hands-free double clench, read when the detector starts (DECISIONS 247)
+      watch: () => LiveDrift(handsFree: nightGestures(Directory(dir).parent)),
     );
     _recorder = recorder;
     unawaited(recorder.run(restartedBySystem: starter == TaskStarter.system));

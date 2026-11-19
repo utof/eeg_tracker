@@ -227,7 +227,7 @@ folder). It never changes or deletes anything in the app's folder, and never run
 
 - The layout is the app's own: `recordings/` (raw nights, the recorder's format above), `nights/<date>.report.json`,
   `mornings/`, `meditations/`, `alpha-theta/` (sessions and `journal.json`), `replay-check/<kind>/` and
-  `settings.json`, `experiments/<made at>/` (self-experiments, below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers, `prompts/`), `sound-states/`, and any folder
+  `settings.json`, `experiments/<made at>/` (self-experiments, below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers, `prompts/`), `sound-states/`, `hands-free/` (below), and any folder
   a later feature adds. Left on the phone: `models/` (copies of the app's model assets), `export/` (the export's own
   index), half-written `*.tmp` files, the scorer's `*.scoring` markers, and the two files Android and a plugin keep
   there for themselves (`profileInstalled`, `flutter_callback_cache.json`; DECISIONS row 160).
@@ -266,6 +266,25 @@ answer: it holds the days ahead.
 
 The tested number of day D is the trends' per-day number of day D+1 (from `nights/` and `mornings/`); the app works
 the answer out again from those files each time, so nothing else is stored.
+
+### Hands-free controls (`hands-free/`)
+
+The switch and the newest calibration (DECISIONS rows 240-249); each file is written under a temporary name, then
+renamed. A missing or damaged file reads as "off" and "not calibrated".
+
+| File | Content |
+|---|---|
+| `settings.json` | `on` (the one switch, off by default) and `changed` (local ISO time) |
+| `calibration.json` | `made`; `settings`: `clenchX` (the clench line, times the jaw's rest level, 10-60), `glanceUv` (the look size, µV, 70-250), `leftSign` (+1 or -1: the sign of T3 minus T4's step when the eyes go left; 0 = not known), `clenchOn`, `glanceOn` (a gesture is used only when 2 of its 3 tries were caught); `tries` (each `kind` `clench`/`glance`, `cue` second, `level`, `sign`, `why`: `ok` or the rule it broke); `clenchSeen`, `glanceSeen`, `leftKnown`, `others` (gestures recognised outside the cued windows); `recording` (the stem of its EEG); `rules` (the timing limits it was judged with) |
+| `events.jsonl` | one line per change: `switched on`, `switched off`, `calibrated: ...` |
+| `recordings/<stamp>.*` | the calibration's EEG in the recorder's format, with a marker per cue (`hands-free calibration: try 2 of 6, clench twice now`); never joined to a night |
+
+Sessions write what a gesture did as a marker or event: `hands-free: sound paused (double clench)`, `hands-free:
+sound back (double clench)`, `hands-free: moment (look left then right)`, `hands-free: drifting (double clench)`,
+`hands-free: awake (look left then right)`, and at the end `hands-free: N gestures acted on, M ignored while probably
+asleep` (sound for states in the session's `events`, meditation and alpha-theta in its log's `info`, the dream
+catcher and the nap coach in the recording's `.markers.jsonl`). The night recording marks `hands-free: moment (double
+clench)` and its `.log` says when hands-free is on and how many moments it marked.
 
 On the laptop, `scripts/import_phone.py <folder>` (standard library only) checks the manifest, copies
 `recordings/<stamp>.*` into `_local/recordings/` beside the laptop's own recordings and everything else into

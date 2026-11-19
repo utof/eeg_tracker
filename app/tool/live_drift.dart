@@ -8,6 +8,8 @@
 // 2. Runs the morning's night pass (lib/sleep/extras.dart `seeNight`) on the same files and compares the onsets.
 // 3. Prints the report's `drift_off` against the stages of a laptop sleep.json (lights off from the night's markers,
 //    else its first sample), and for each HH:MM:SS given the same comparison with lights off there.
+// With HANDS_FREE=1 in the environment the detector also runs the hands-free double clench (planning values,
+// DECISIONS 247), so the cost line shows what the gestures add; the moments it marks are counted.
 // Reads only; writes nothing.
 import 'dart:convert';
 import 'dart:io';
@@ -15,6 +17,7 @@ import 'dart:typed_data';
 
 import 'package:eeg_tracker/detectors/detectors.dart';
 import 'package:eeg_tracker/detectors/drift_off.dart';
+import 'package:eeg_tracker/detectors/gestures.dart' show GestureSettings;
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/live_drift.dart';
 import 'package:eeg_tracker/recorder/nights.dart';
@@ -35,7 +38,9 @@ Future<void> main(List<String> args) async {
   final files = night.recordings;
 
   // 1. live, batch by batch
-  final live = LiveDrift();
+  final handsFree = Platform.environment['HANDS_FREE'] == '1';
+  final live = LiveDrift(handsFree: handsFree ? const GestureSettings() : null);
+  var moments = 0;
   final inAdd = Stopwatch();
   final wall = Stopwatch()..start();
   var batches = 0;
@@ -71,7 +76,7 @@ Future<void> main(List<String> args) async {
       final at = DateTime.fromMicrosecondsSinceEpoch((rows[k].$1 * 1e6).round());
       inAdd.start();
       live.add(at, batch, firstOfFile: k == 0);
-      live.takeEvents();
+      moments += live.takeEvents().where((e) => e == handsFreeMoment).length;
       inAdd.stop();
       batches++;
     }
@@ -126,6 +131,7 @@ Future<void> main(List<String> args) async {
     'live_work_s': double.parse(work.toStringAsFixed(3)),
     'live_work_s_per_hour': double.parse((work / hours).toStringAsFixed(3)),
     'live_share_of_signal_time': double.parse((work / (hours * 3600)).toStringAsExponential(2)),
+    if (handsFree) 'hands_free': {'moments': moments, 'ignored_asleep': live.hands?.ignoredAsleep},
     'replay_wall_s': wall.elapsedMilliseconds / 1000,
     'night_pass_s': passS,
     'live_vs_night_pass': {

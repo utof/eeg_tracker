@@ -32,6 +32,7 @@ class SoloudStateSound implements StateSound {
   int _feedErrors = 0;
   bool _running = false;
   bool _stopping = false;
+  bool _fadingOut = false;
   StreamSubscription<AudioDeviceStartFailure>? _failures;
   final Stopwatch _clock = Stopwatch();
 
@@ -62,6 +63,7 @@ class SoloudStateSound implements StateSound {
     _feedErrors = 0;
     _added = 0;
     _stopping = false;
+    _fadingOut = false;
     final src = _src = _s.setBufferStream(
       maxBufferSizeDuration: const Duration(seconds: 60),
       bufferingType: BufferingType.released,
@@ -117,9 +119,17 @@ class SoloudStateSound implements StateSound {
   Duration _d(double seconds) => Duration(milliseconds: (seconds * 1000).round());
 
   @override
+  void pause({required bool on}) {
+    final h = _h;
+    if (!_running || h == null || _fadingOut) return;
+    _guard(() => _s.fadeVolume(h, on ? 0 : 1, _d(on ? 1 : 2)));
+  }
+
+  @override
   void fadeOut(double seconds) {
     final h = _h;
     if (!_running || h == null) return;
+    _fadingOut = true;
     _guard(() {
       _s.fadeVolume(h, 0, _d(seconds));
       _s.scheduleStop(h, _d(seconds + 0.5)); // silent for good, even if the app is not there to stop it

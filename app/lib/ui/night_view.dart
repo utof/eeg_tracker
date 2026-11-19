@@ -121,6 +121,7 @@ class NightView extends StatelessWidget {
     this.onRetrySleep,
     this.morning,
     this.onLightsOff,
+    this.onSettings,
   });
 
   final NightViewModel model;
@@ -142,6 +143,9 @@ class NightView extends StatelessWidget {
   /// Lights off while a night records (DECISIONS 180).
   final VoidCallback? onLightsOff;
 
+  /// Settings (hands-free controls, DECISIONS 248); no gear when null.
+  final VoidCallback? onSettings;
+
   @override
   Widget build(BuildContext context) {
     final m = model;
@@ -151,6 +155,12 @@ class NightView extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text('EEG Tracker', style: text.titleMedium?.copyWith(color: Night.inkMuted)),
+        actions: [
+          if (onSettings != null) ...[
+            IconButton(onPressed: onSettings, icon: const Icon(Icons.settings_outlined), tooltip: 'Settings', color: Night.inkMuted),
+            const SizedBox(width: 8),
+          ],
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
