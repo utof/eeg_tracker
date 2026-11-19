@@ -59,15 +59,17 @@ for a state, with an optional beat, and with the headband shows what your brain 
 Between nights the main screen's **Try these** section (after Morning) opens one page with each feature's first try,
 in order: tonight and the morning (a night with Lights off, how long scoring takes, the report's noise and jaw numbers,
 the morning check-in, Export data), another night (smart alarm, Share on Wi-Fi), sessions, the tries that take weeks
-(a self-experiment, the replay check, and the assistant's proposals Sharp hours and Unusual for you, marked as such),
-and our own headband connection when the headband is charged. Each stop says what it is, what to do, opens its
-screen, lists what to tell the assistant, and takes a note ("What happened?"); **Done** or **Skip** folds it away and
-opens the next. "4 of 20 tried" and a row of cells sit at the top.
+(a self-experiment, the replay check, the lucid dream cues, and the assistant's proposals Sharp hours, Unusual for
+you and Was this you?, marked as such), our own headband connection when the headband is charged, and the DIY board
+(a test, not EEG yet) when the board is built. Each stop says what it is, what to do, opens its screen, lists what to
+tell the assistant, and takes a note ("What happened?"); **Done** or **Skip** folds it away and opens the next. "4 of
+23 tried" and a row of cells sit at the top.
 
 The app ticks a stop itself when it sees it done (a scored night with Lights off tapped, a scored night, a check-in,
 a complete export, the smart alarm rang, a meditation, a nap, a dream catcher session, an answer written out, an
 alpha-theta session, a Fall asleep sound session with the headband, an experiment started, the replay check on,
-sharp-hours answers on 2 days); a stop you skipped or reopened stays as you left it.
+sharp-hours answers on 2 days, lucid dream questions answered, 10 minutes recorded from the DIY board); a stop you
+skipped or reopened stays as you left it.
 
 Ticks and notes are kept in `files/try-these/` (`progress.json`, `events.jsonl`; `docs/data-format.md`) and leave the
 phone with **Export data**; after `scripts/import_phone.py` the assistant reads them in `_local/phone/try-these/`. The
@@ -1055,7 +1057,8 @@ Night screen, Headband section, **Headband connection** (between nights only), *
   are counted in the `.log`, never filled in; damaged, repeated and late datagrams are counted and dropped.
 - **Off with the board**: the sleep report, the morning check-in, meditation and the other sessions (they say so
   when started), the drift-off detector, hands-free, the smart alarm's sleep model and the lucid dream cues (with the
-  live sleep model they share): all read the BrainBit's O1 O2 T3 T4. The phone's alarm itself still rings. No contact or battery reading from the board.
+  live sleep model they share): all read the BrainBit's O1 O2 T3 T4. The phone's alarm itself still rings. No contact
+  or battery reading from the board.
 - **Not built**: USB (OTG serial) to the phone, the 8-channel chip (the laptop records it), Bluetooth (the firmware
   has none).
 - **Your data**: Export data takes `recordings-diy/` with everything else; `scripts/import_phone.py` files it under

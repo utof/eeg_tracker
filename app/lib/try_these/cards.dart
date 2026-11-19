@@ -3,7 +3,7 @@
 // gains an owner step with no card here. Pure data: no files, no Flutter.
 
 /// When in the owner's week a card belongs, in page order.
-enum TryGroup { tonight, anotherNight, sessions, weeks, charged }
+enum TryGroup { tonight, anotherNight, sessions, weeks, charged, board }
 
 const Map<TryGroup, String> tryGroupTitles = {
   TryGroup.tonight: 'Tonight, then the morning',
@@ -11,6 +11,7 @@ const Map<TryGroup, String> tryGroupTitles = {
   TryGroup.sessions: 'Sessions, when you have time',
   TryGroup.weeks: 'Over the next weeks',
   TryGroup.charged: 'When the headband is charged',
+  TryGroup.board: 'When the board is built',
 };
 
 /// The screen a card's button opens. [nightScreen] goes back to the main screen (Start night, Your data).
@@ -523,6 +524,26 @@ const List<TryCard> tryCards = [
     proposal: true,
   ),
   TryCard(
+    id: 'was-this-you',
+    group: TryGroup.weeks,
+    title: 'Was this you?',
+    what: 'After about two weeks of check-ins and Lights off nights, it asks when a recording looks unlike your usual.',
+    takes: 'Nothing for about two weeks, then 1 minute',
+    steps: [
+      'Do the check-in and tap Lights off at night as usual: the count at the end of each result climbs ("4 of 10").',
+      'If anyone else wears the headband, tap Someone else wore it on that recording.',
+      'If it asks about a recording that was you, tap Yes, it was me.',
+      'If it asks too often, switch it off in Settings.',
+    ],
+    tell: [
+      'If it asked about you: what was different that day (alcohol, a short night, the headband sat differently)?',
+      'Did it ask too often?',
+    ],
+    opens: TryOpen.settings,
+    readme: [TryRef('Was this you?', 'nothing to do for about two weeks, then one look')],
+    proposal: true,
+  ),
+  TryCard(
     id: 'own-ble',
     group: TryGroup.charged,
     title: 'Our own headband connection',
@@ -543,5 +564,27 @@ const List<TryCard> tryCards = [
     opens: TryOpen.ownBle,
     readme: [TryRef('Our own headband connection', 'the probe on the phone, then one night with the switch on')],
     proposal: true,
+  ),
+  TryCard(
+    id: 'diy-board',
+    group: TryGroup.board,
+    title: 'The DIY board on the phone (test, not EEG yet)',
+    what: 'Once the board passes its bench steps, the phone records its test signal over Wi-Fi: a test, not EEG yet.',
+    takes: '15 minutes, once',
+    steps: [
+      'Only after the bring-up card\'s bench steps pass. In the firmware: Wi-Fi on, your Wi-Fi, and the phone\'s address.',
+      'Open Headband connection, choose DIY board (test). Answer the board\'s prompts on the laptop: R, V, then T.',
+      'Tap Start night. Within a minute: "not EEG" and about 3750 µV on every channel.',
+      'After 10 minutes: Stop, then Export data.',
+      'Choose BrainBit again before any BrainBit night or session.',
+    ],
+    tell: [
+      'Did every channel read about 3750 µV?',
+      'How many samples did it say were lost?',
+      'Then import the export on the laptop, so the assistant can read the board\'s log.',
+    ],
+    opens: TryOpen.ownBle,
+    readme: [TryRef('The DIY board', 'the board on the phone')],
+    auto: true,
   ),
 ];

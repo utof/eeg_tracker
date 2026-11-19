@@ -3,6 +3,7 @@
 // notes leave the phone with Export data.
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:eeg_tracker/export/store.dart' show isExported, storedFiles;
 import 'package:eeg_tracker/try_these/cards.dart';
@@ -77,10 +78,11 @@ void main() {
       }
     });
 
-    test('the order: the first night and morning, then sessions, then weeks-long tries, the probe last', () {
+    test('the order: the first night and morning, then sessions, then weeks-long tries, the probe, the board last', () {
       final ids = [for (final c in tryCards) c.id];
       expect(ids.take(5), ['night', 'sleep-time', 'sleep-extras', 'check-in', 'export']);
-      expect(ids.last, 'own-ble');
+      expect(ids.skip(ids.length - 2), ['own-ble', 'diy-board']);
+      expect(tryCards.last.group, TryGroup.board);
       final groups = [for (final c in tryCards) c.group.index];
       expect(groups, orderedEquals([...groups]..sort()), reason: 'cards stay in their group order');
       expect(tryCards.firstWhere((c) => c.id == 'meditation').group, TryGroup.sessions);
@@ -93,7 +95,7 @@ void main() {
           for (final c in tryCards)
             if (c.proposal) c.id,
         },
-        {'sharp', 'unusual', 'own-ble'},
+        {'sharp', 'unusual', 'was-this-you', 'own-ble'},
       );
     });
 
@@ -258,6 +260,11 @@ void main() {
       ..createSync(recursive: true)
       ..writeAsStringSync(text);
 
+    /// A DIY board file set of [minutes] (one 20-byte record a sample, 250 Hz).
+    void board(String stem, double minutes) => File('${files.path}/recordings-diy/$stem.f32')
+      ..createSync(recursive: true)
+      ..writeAsBytesSync(Uint8List((minutes * 60 * 250).round() * 20));
+
     test('an empty folder: nothing seen', () {
       expect(seenByApp(files, seenChecks.keys.toSet()), isEmpty);
     });
@@ -314,6 +321,8 @@ void main() {
         '${jsonEncode({'at': '2026-11-20T11:02:00+03:00', 'sharp': 4})}\n'
             '${jsonEncode({'at': '2026-11-21T15:40:00+03:00', 'sharp': 3})}\n',
       );
+      board('2026-11-21-200000', 6); // a board restart: two file sets, 10 minutes together
+      board('2026-11-21-200610', 4);
       final seen = seenByApp(files, seenChecks.keys.toSet());
       expect(seen.keys.toSet(), seenChecks.keys.toSet());
       expect(seen['night'], 'A night with Lights off tapped, scored: the night of Thu 19 Nov.');
@@ -325,10 +334,12 @@ void main() {
       expect(seen['sharp'], 'Answers on 2 days.');
       expect(seen['replay'], 'Switched on.');
       expect(seen['lucid'], 'Lucid dream questions answered on Sat 21 Nov.');
+      expect(seen['diy-board'], 'The board recorded 10 min on this phone, the newest on Sat 21 Nov.');
     });
 
     test(
-      'not yet: a night without Lights off, an unfinished export, one day of answers, sound without the headband',
+      'not yet: a night without Lights off, an unfinished export, one day of answers, sound without the headband, '
+      'a short board test',
       () {
         put('nights/2026-11-18.report.json', jsonEncode({'night_of': '2026-11-18', 'scored': false}));
         put('export/exports.jsonl', '${jsonEncode({'exported': '2026-11-20T09:00:00+03:00', 'complete': false})}\n');
@@ -340,6 +351,7 @@ void main() {
         put('sound-states/2026-11-20-230000.sound.json', jsonEncode({'recording': null}));
         put('settings.json', jsonEncode({'replayCheck': false}));
         put('lucid/mornings/2026-11-20-070000.json', jsonEncode({'night': '2026-11-20-070000'}));
+        board('2026-11-21-200000', 9.9); // under the card's 10 minutes
         expect(seenByApp(files, seenChecks.keys.toSet()), isEmpty);
       },
     );

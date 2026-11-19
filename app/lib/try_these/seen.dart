@@ -5,7 +5,9 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../recorder/chunk_writer.dart' show recordBytes;
 import '../recorder/nights.dart' show nightLabel;
+import '../recorder/status.dart' show sampleRateHz;
 
 typedef SeenCheck = String? Function(Directory files);
 
@@ -26,6 +28,7 @@ const Map<String, SeenCheck> seenChecks = {
   'experiment': _experiment,
   'replay': _replay,
   'sharp': _sharp,
+  'diy-board': _diyBoard,
 };
 
 /// The checks of [ids] (the cards not touched yet) that see something, in [ids]' order.
@@ -191,4 +194,14 @@ String? _sharp(Directory files) {
     if (at != null) days.add('${at.year}-${at.month}-${at.day}');
   }
   return days.length >= 2 ? 'Answers on ${days.length} days.' : null;
+}
+
+/// The board recorded on this phone (files/recordings-diy, one `<I4f` record a sample at 250 Hz) for 10 minutes or
+/// more in all: the card's "after 10 minutes".
+String? _diyBoard(Directory files) {
+  final sets = _files(files, 'recordings-diy', '.f32');
+  final samples = sets.fold<int>(0, (n, f) => n + f.lengthSync() ~/ recordBytes);
+  final minutes = samples / sampleRateHz / 60;
+  if (minutes < 10) return null;
+  return 'The board recorded ${minutes.floor()} min on this phone, the newest on ${_stampDay(sets.first) ?? 'this phone'}.';
 }
