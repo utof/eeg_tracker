@@ -12,6 +12,7 @@ import '../alarm/notes.dart';
 import '../alarm/rule.dart' show AlarmPlan;
 import '../dream/store.dart';
 import '../export/store.dart';
+import '../headband/diy/settings.dart';
 import '../phone.dart';
 import 'experiments_screen.dart' show currentExperiment;
 import 'experiments_view.dart' show experimentLine;
@@ -41,6 +42,7 @@ import 'nap_view.dart' show endWords;
 import 'morning_screen.dart';
 import 'morning_section.dart';
 import 'nearby.dart';
+import 'own_ble_screen.dart' show phoneWifiAddress;
 import 'night_strip.dart';
 import 'night_view.dart';
 import 'phone_checks.dart';
@@ -53,14 +55,20 @@ import 'trends_screen.dart';
 
 const String _xiaomiDoneKey = 'xiaomiChecked';
 
-/// Title, sentence and tone for the status block. Pure, so it is tested without a phone.
+/// Title, sentence and tone for the status block. Pure, so it is tested without a phone. [diy]: the DIY board is
+/// chosen (its words, and this phone's Wi-Fi address for them).
 ({String title, String sentence, Tone tone}) describeNight({
   required RecorderStatus? status,
   required bool running,
   required int nowMs,
   required int quietMs,
   NightState? last,
+  ({String? address})? diy,
 }) {
+  if (diy != null) {
+    final words = _diyWords(status: status, running: running, nowMs: nowMs, quietMs: quietMs, address: diy.address);
+    if (words != null) return words;
+  }
   if (!running) {
     final hadNight = last != null && last.samples > 0;
     return (
@@ -144,6 +152,77 @@ const String _xiaomiDoneKey = 'xiaomiChecked';
   }
 }
 
+/// The DIY board's words where they differ from the headband's; null: the headband's words fit.
+({String title, String sentence, Tone tone})? _diyWords({
+  required RecorderStatus? status,
+  required bool running,
+  required int nowMs,
+  required int quietMs,
+  required String? address,
+}) {
+  final at = address ?? 'this phone';
+  if (!running) {
+    return (
+      title: 'Ready',
+      sentence: 'Start the board and answer its prompts, then start the night. It sends to $at over Wi-Fi.',
+      tone: Tone.calm,
+    );
+  }
+  final s = status;
+  if (s == null || quietMs > 15000) return null;
+  final note = s.note;
+  switch (s.phase) {
+    case Phase.searching:
+    case Phase.reconnecting:
+      if (note.startsWith('cannot write') || note.contains('stuck')) return null;
+      if (note.startsWith('could not connect: ')) {
+        return (title: 'Listening', sentence: note.substring('could not connect: '.length), tone: Tone.caution);
+      }
+      if (note.contains('not found')) {
+        return (
+          title: 'Listening',
+          sentence: 'No frames from the board yet. Is it on this Wi-Fi, sending to $at, and past its prompts? The app '
+              'keeps listening.',
+          tone: Tone.caution,
+        );
+      }
+      return s.phase == Phase.searching
+          ? (title: 'Listening', sentence: 'Waiting for the board\'s frames on UDP port 9000.', tone: Tone.calm)
+          : (
+              title: 'Listening',
+              sentence: 'The board stopped or restarted. Everything recorded is saved; a new file set starts when its '
+                  'frames come back.',
+              tone: Tone.caution,
+            );
+    case Phase.connecting:
+    case Phase.checkingContact:
+      return (title: 'Board found', sentence: 'Its frames are arriving.', tone: Tone.calm);
+    case Phase.recording:
+      final age = s.lastDataMs == null ? null : (nowMs - s.lastDataMs!) ~/ 1000;
+      if (age == null || age < 5) {
+        final b = s.board;
+        final what = switch (b?.mode) {
+          'test' => 'the board\'s test signal',
+          'short' => 'the board\'s shorted inputs',
+          'synthetic' => 'made-up data from the board',
+          _ => 'the board',
+        };
+        return (
+          title: 'Recording',
+          sentence: b == null || b.notEeg ? 'Recording $what. It is not EEG.' : 'Recording $what.',
+          tone: Tone.live,
+        );
+      }
+      if (age < 40) {
+        return (title: 'Recording', sentence: 'No frames for $age s. Is the board still sending?', tone: Tone.caution);
+      }
+      return (title: 'No data', sentence: 'No frames for $age s. A new file set starts when they come back.', tone: Tone.problem);
+    case Phase.stopping:
+    case Phase.idle:
+      return null;
+  }
+}
+
 class NightScreen extends StatefulWidget {
   const NightScreen({super.key});
 
@@ -174,6 +253,10 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   Pending? _pending;
   AlarmSetup _alarm = const AlarmSetup();
   AlarmClockState _clockState = const AlarmClockState({});
+
+  /// "Headband: DIY board (test)" (DECISIONS rows 360-369), and this phone's Wi-Fi address for its words.
+  DiyBoardSettings _diy = const DiyBoardSettings();
+  String? _address;
 
   /// Share on Wi-Fi (DECISIONS rows 220-229): the setting, and the app's own server between nights.
   late final ShareControl _share = ShareControl(
@@ -289,6 +372,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     final nights = dir == null || running ? const <NightFiles>[] : _listNights(dir);
     final checkedInAt = dir == null ? null : _checkedInToday(dir);
     final alarm = dir == null ? const AlarmSetup() : AlarmSetupStore.forRecordings(dir).read();
+    final diy = _readDiy(dir);
+    final address = diy.useDiy ? await phoneWifiAddress() : null;
     final clockState = await _safe(AlarmClock.state, const AlarmClockState({}));
     if (running) FlutterForegroundTask.sendDataToTask(statusCommand);
     if (dir != null && _scoring == null) {
@@ -334,7 +419,17 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       _pending = pending;
       _alarm = alarm;
       _clockState = clockState;
+      _diy = diy;
+      _address = address;
     });
+  }
+
+  static DiyBoardSettings _readDiy(String? dir) {
+    try {
+      return dir == null ? const DiyBoardSettings() : DiyBoardStore(diyBoardDirFor(dir)).load();
+    } catch (_) {
+      return const DiyBoardSettings();
+    }
   }
 
   Future<void> _refreshAlarm() async {
@@ -482,13 +577,20 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   Future<void> _start() async {
     setState(() => _busy = true);
     try {
-      if (!await nearbyAllowed(_phone.sdkInt) && !await _requestNearby()) {
+      // the DIY board comes over Wi-Fi: no Bluetooth needed, but a Wi-Fi address the board can send to
+      final diy = _readDiy(_dir).useDiy;
+      if (diy) {
+        if (await phoneWifiAddress() == null) {
+          _say('Connect the phone to the Wi-Fi the board sends to, then start the night.');
+          return;
+        }
+      } else if (!await nearbyAllowed(_phone.sdkInt) && !await _requestNearby()) {
         _say('Allow Nearby devices first: without it the headband cannot be found.');
         return;
       }
       if (_phone.sdkInt >= 33) await FlutterForegroundTask.requestNotificationPermission();
       final phone = await _safe(Phone.snapshot, _phone);
-      if (!phone.bluetoothOn) {
+      if (!diy && !phone.bluetoothOn) {
         _say('Turn Bluetooth on, then start the night.');
         await Phone.openSettings('bluetooth');
         return;
@@ -694,7 +796,15 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     final now = DateTime.now().millisecondsSinceEpoch;
     final s = _running ? _status : null;
     final quiet = _statusAtMs == null || now - _resumedAtMs < 5000 ? 0 : now - _statusAtMs!;
-    final d = describeNight(status: s, running: _running, nowMs: now, quietMs: quiet, last: _last);
+    final diy = _diy.useDiy;
+    final d = describeNight(
+      status: s,
+      running: _running,
+      nowMs: now,
+      quietMs: quiet,
+      last: _last,
+      diy: diy ? (address: _address) : null,
+    );
     final last = _last;
     final showLast = !_running && last != null && last.samples > 0;
     final List<StripRow> rows;
@@ -720,7 +830,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       battery: s?.battery,
       rssi: s?.rssi,
       contactOhms: s?.contactOhms ?? (showLast ? last.contactOhms : const {}),
-      checks: phoneChecks(phone: _phone, nearbyAllowed: _nearby, xiaomiDone: _xiaomiDone),
+      checks: phoneChecks(phone: _phone, nearbyAllowed: _nearby, xiaomiDone: _xiaomiDone, bluetooth: !diy),
       nightsOnPhone: _nights.length,
       exportLine: _running || _pending == null
           ? null
@@ -746,6 +856,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       alarmLine: _alarmLine(s, now),
       alarmAction: _alarmAction(s, now),
       ringing: _clockState.ringing ? (_clockState.reason ?? _windowEndReason()) : null,
+      board: s?.board,
+      diyNames: diy ? _diy.names : null,
     );
   }
 
@@ -805,6 +917,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onSettings: _settings,
       onAlarm: _onAlarm,
       onAwake: _awake,
+      onHeadbandPage: () => unawaited(_refresh()),
     );
   }
 }

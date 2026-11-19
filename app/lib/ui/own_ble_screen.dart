@@ -2,21 +2,35 @@
 // The probe of our own connection on the real headband, its plain result, and the switch between BrainBit's SDK
 // (the default) and our own connection. Never while a night records or a session holds the headband: the
 // headband keeps one connection. The page stays in front while the probe runs and keeps the screen on.
+// Above them, the device choice "Headband: BrainBit / DIY board (test)" (DECISIONS rows 360-369), locked the same way.
 import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../headband/finder.dart' show loadOwnBle;
+import '../headband/diy/settings.dart';
+import '../headband/finder.dart' show loadDiyBoard, loadOwnBle;
+import '../share/protocol.dart' show lanAddresses;
 import '../headband/own/controller.dart';
 import '../headband/own/settings.dart';
 import '../headband/own/universal_transport.dart';
 import '../phone.dart';
 import '../sound/check_in_sound.dart' show SoloudCheckInSound;
 import 'export_screen.dart' show exportBlocked;
+import 'diy_board_view.dart' show DiyPageModel;
 import 'nearby.dart';
 import 'own_ble_view.dart';
+
+/// This phone's Wi-Fi address now (the board's UDP_HOST), or null when it has none.
+Future<String?> phoneWifiAddress() async {
+  try {
+    final found = lanAddresses(await NetworkInterface.list(type: InternetAddressType.IPv4));
+    return found.isEmpty ? null : found.first.address;
+  } catch (_) {
+    return null;
+  }
+}
 
 /// Why the headband is not free now, or null (the same rule as Export data).
 Future<String?> _headbandBusy() async {
@@ -39,6 +53,9 @@ class _OwnBleScreenState extends State<OwnBleScreen> {
   Timer? _tick;
   String? _blocked;
   String? _error;
+  DiyBoardStore? _diyStore;
+  DiyBoardSettings _diy = const DiyBoardSettings();
+  String? _address;
 
   @override
   void initState() {
@@ -59,6 +76,9 @@ class _OwnBleScreenState extends State<OwnBleScreen> {
       )..load();
       c.addListener(_onChange);
       final blocked = await _headbandBusy();
+      final diyStore = DiyBoardStore(diyBoardDirFor(rec));
+      final diy = diyStore.load();
+      final address = await phoneWifiAddress();
       if (!mounted) {
         c.dispose();
         return;
@@ -66,6 +86,9 @@ class _OwnBleScreenState extends State<OwnBleScreen> {
       setState(() {
         _c = c;
         _blocked = blocked;
+        _diyStore = diyStore;
+        _diy = diy;
+        _address = address;
       });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -134,6 +157,30 @@ class _OwnBleScreenState extends State<OwnBleScreen> {
     if (yes == true) c.setUseOwn(true, anyway: true);
   }
 
+  /// The device choice; never while a night records or a session holds the headband.
+  Future<void> _setDevice(bool diy) async {
+    final blocked = await _headbandBusy();
+    final address = await phoneWifiAddress();
+    if (!mounted) return;
+    setState(() {
+      _blocked = blocked;
+      _address = address;
+    });
+    if (blocked != null) return;
+    _saveDiy(_diy.copyWith(useDiy: diy));
+  }
+
+  void _setNames(List<String> names) => _saveDiy(_diy.copyWith(names: names));
+
+  void _saveDiy(DiyBoardSettings next) {
+    try {
+      _diyStore?.save(next);
+      setState(() => _diy = next);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('The setting could not be saved: $e')));
+    }
+  }
+
   @override
   void dispose() {
     _tick?.cancel();
@@ -180,6 +227,7 @@ class _OwnBleScreenState extends State<OwnBleScreen> {
       fraction: c.fraction,
       blocked: _blocked,
       message: c.message,
+      diy: DiyPageModel(useDiy: _diy.useDiy, names: _diy.names, address: _address),
     );
     return PopScope(
       canPop: !c.busy, // Back waits for Stop: the probe runs from this page
@@ -193,6 +241,8 @@ class _OwnBleScreenState extends State<OwnBleScreen> {
         onSignalResist: (on) => c.setSignalResist(on),
         onWorn: c.setWorn,
         onPairFirst: c.setPairFirst,
+        onDevice: _setDevice,
+        onNames: _setNames,
       ),
     );
   }
@@ -201,7 +251,13 @@ class _OwnBleScreenState extends State<OwnBleScreen> {
 /// The night screen's entry: reads which connection is in use by itself, so the night screen's own code stays
 /// as it is.
 class OwnBleEntry extends StatefulWidget {
-  const OwnBleEntry({super.key});
+  const OwnBleEntry({super.key, this.onReturn, this.diy});
+
+  /// Back from the page: the device choice may have changed.
+  final VoidCallback? onReturn;
+
+  /// The night screen's own reading of the device choice (the line agrees with the block above it); null: read here.
+  final bool? diy;
 
   @override
   State<OwnBleEntry> createState() => _OwnBleEntryState();
@@ -209,6 +265,7 @@ class OwnBleEntry extends StatefulWidget {
 
 class _OwnBleEntryState extends State<OwnBleEntry> {
   bool _useOwn = false;
+  bool _useDiy = false;
 
   @override
   void initState() {
@@ -218,14 +275,21 @@ class _OwnBleEntryState extends State<OwnBleEntry> {
 
   Future<void> _read() async {
     final own = await loadOwnBle();
-    if (mounted) setState(() => _useOwn = own.settings.useOwn);
+    final diy = await loadDiyBoard();
+    if (mounted) {
+      setState(() {
+        _useOwn = own.settings.useOwn;
+        _useDiy = diy.settings.useDiy;
+      });
+    }
   }
 
   Future<void> _open() async {
     await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const OwnBleScreen()));
     await _read();
+    widget.onReturn?.call();
   }
 
   @override
-  Widget build(BuildContext context) => OwnBleEntryView(useOwn: _useOwn, onOpen: _open);
+  Widget build(BuildContext context) => OwnBleEntryView(useOwn: _useOwn, useDiy: widget.diy ?? _useDiy, onOpen: _open);
 }

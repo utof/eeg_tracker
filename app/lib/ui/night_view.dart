@@ -2,7 +2,9 @@
 import 'package:flutter/material.dart';
 
 import '../recorder/contact.dart';
+import '../recorder/status.dart' show BoardLive;
 import 'alarm_view.dart';
+import 'diy_board_view.dart';
 import 'lights_off_view.dart';
 import '../share/control.dart' show ShareLine;
 import 'night_strip.dart';
@@ -66,6 +68,8 @@ class NightViewModel {
     this.alarmLine,
     this.alarmAction,
     this.ringing,
+    this.board,
+    this.diyNames,
   });
 
   final String title;
@@ -121,6 +125,14 @@ class NightViewModel {
 
   /// While the alarm rings: why it rang, for the wake face.
   final String? ringing;
+
+  /// The DIY board while one records (its channels, mode and swing); null for the BrainBit.
+  final BoardLive? board;
+
+  /// The DIY board's channel names while it is chosen as the headband (DECISIONS rows 360-369); null: the BrainBit.
+  final List<String>? diyNames;
+
+  bool get diy => diyNames != null;
 }
 
 class NightView extends StatelessWidget {
@@ -145,6 +157,7 @@ class NightView extends StatelessWidget {
     this.onSettings,
     this.onAlarm,
     this.onAwake,
+    this.onHeadbandPage,
   });
 
   final NightViewModel model;
@@ -175,6 +188,9 @@ class NightView extends StatelessWidget {
   final VoidCallback? onAlarm;
   final VoidCallback? onAwake;
 
+  /// Back from the Headband connection page (the device choice may have changed).
+  final VoidCallback? onHeadbandPage;
+
   @override
   Widget build(BuildContext context) {
     final m = model;
@@ -204,10 +220,17 @@ class NightView extends StatelessWidget {
           _Status(m),
           if (m.minutes != null) ...[const SizedBox(height: 28), _Readouts(m)],
           if (m.rows.isNotEmpty) ...[SectionHeading(m.stripTitle), NightStrip(rows: m.rows)],
-          // In the morning the night's sleep comes right after its strip.
-          if (!m.running && sleep != null) ...[
+          // In the morning the night's sleep comes right after its strip. The DIY board's nights get no report.
+          if (!m.running && (sleep != null || m.diy)) ...[
             const SectionHeading('Sleep'),
-            _Sleep(sleep, onOpen: onSleepReport, onRetry: onRetrySleep),
+            if (m.diy) ...[
+              Text(
+                'No sleep report for the DIY board\'s nights: it reads the BrainBit\'s O1 O2 T3 T4.',
+                style: text.bodyLarge?.copyWith(height: 1.4),
+              ),
+              if (sleep != null) const SizedBox(height: 16),
+            ],
+            if (sleep != null) _Sleep(sleep, onOpen: onSleepReport, onRetry: onRetrySleep),
           ],
           if (!m.running && morning != null) ...[const SectionHeading('Morning'), morning!],
           // Before the night the phone settings matter most; during it, the headband.
@@ -215,7 +238,7 @@ class NightView extends StatelessWidget {
           const SectionHeading('Phone'),
           PhoneChecksList(checks: m.checks, onFix: onFix),
           // Between nights the Headband section also leads to the connection page (the probe and the switch).
-          if (!m.running) ...[...headband, const OwnBleEntry()],
+          if (!m.running) ...[...headband, OwnBleEntry(onReturn: onHeadbandPage, diy: m.diy)],
           // A night being recorded is not finished, so Export waits for Stop (DECISIONS rows 56, 150); Share on
           // Wi-Fi is there during the night too (rows 220-229).
           if (m.share != null || (!m.running && (m.nightsOnPhone > 0 || m.exportLine != null))) ...[
@@ -400,6 +423,9 @@ class _Headband extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final board = m.board;
+    if (m.running && board != null) return DiyNightBlock(board: board);
+    if (m.diyNames != null) return DiyIdleBlock(names: m.diyNames!);
     final text = Theme.of(context).textTheme;
     final muted = text.bodyMedium?.copyWith(color: Night.inkMuted);
     final value = text.titleLarge?.copyWith(fontFeatures: tabular);

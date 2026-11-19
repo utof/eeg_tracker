@@ -27,12 +27,18 @@ class PhoneCheck {
   final bool serious;
 }
 
-List<PhoneCheck> phoneChecks({required PhoneSnapshot phone, required bool nearbyAllowed, required bool xiaomiDone}) => [
-  if (!nearbyAllowed)
+/// [bluetooth] false: the DIY board is chosen (it comes over Wi-Fi), so Nearby devices and Bluetooth are not needed.
+List<PhoneCheck> phoneChecks({
+  required PhoneSnapshot phone,
+  required bool nearbyAllowed,
+  required bool xiaomiDone,
+  bool bluetooth = true,
+}) => [
+  if (bluetooth && !nearbyAllowed)
     const PhoneCheck('Nearby devices is not allowed, so the app cannot find the headband.', [
       ('Allow', FixAction.requestNearby),
     ]),
-  if (!phone.bluetoothOn) const PhoneCheck('Bluetooth is off.', [('Turn on', FixAction.bluetoothSettings)]),
+  if (bluetooth && !phone.bluetoothOn) const PhoneCheck('Bluetooth is off.', [('Turn on', FixAction.bluetoothSettings)]),
   if (!phone.ignoringBatteryOptimizations)
     const PhoneCheck('Battery optimisation is on for this app. It can stop the recording at night.', [
       ('Turn off', FixAction.batteryOptimisation),

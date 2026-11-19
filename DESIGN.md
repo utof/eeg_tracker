@@ -173,6 +173,19 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   label-left / value-right lines (Woke you as a tabular titleLarge time, Why, Full-night scoring, I'm awake after),
   then plain sentences: how early and that the live model read it 2 minutes behind, whether the full-night scoring
   agrees ("not deep sleep" / "the live reading was wrong this time"), and in muted ink that both are guesses.
+- **DIY board (test)** (Headband connection page and night screen; DECISIONS 360-369): the device choice is the app's
+  segmented row (BrainBit | DIY board (test), selected one step lighter) under a "Headband" heading, with one muted
+  sentence; with the board chosen the status mark is a ringed dot in `caution` with the words "DIY board (test)", and
+  the page has no pinned action. Its sections: Safety (ink body text: the app only listens; nothing makes the board
+  safe for a body or power, nothing changes its gates), Where the board sends (This phone / Port as label-left /
+  value-right rows in tabular titleLarge, an amber Wi-Fi-off row with its icon when there is no address, the
+  firmware settings in muted body), Channels (CH1-CH4 as muted label over titleLarge name, the names field, Save
+  names), With the board (what goes where and what is off, in sentences). On the night screen while it records,
+  the Headband block replaces battery, signal and contact: "DIY board (test)", the mode as a `caution` ringed dot
+  with "Test signal, not EEG" in titleLarge words, then "Swing over the last second, µV" over four name-over-value
+  cells in the contact cells' place (tabular titleLarge, no colour), then one muted line with the link and the lost
+  samples. Between nights the block is one line and the channel names, the Sleep section says in words that the
+  board's nights get no report, and the Phone section drops the Bluetooth rows.
 - **Phone checks:** icon, one plain sentence, right-aligned text buttons that open the exact setting.
 - **Export line** (Your data): an icon and one sentence, muted ("Last export yesterday; 3 new files since"), or
   `caution` amber with a warning icon once something new has been only on the phone for 3 days, or nothing was ever
