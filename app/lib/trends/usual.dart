@@ -4,8 +4,8 @@
 //   - the normal day-to-day spread = 1.4826 x the median distance from it (MAD; equals the standard deviation for
 //     bell-shaped data, but one odd day barely moves it);
 //   - an arrow only from 14 days, and only when the day is at least 2 spreads away from the usual AND at least the
-//     measure's smallest change that matters (sleep 1 hour, ratings 2 points, reaction time 10 %, jaw muscle bursts
-//     a quarter of the usual, a planning value): the research's
+//     measure's smallest change that matters (sleep 1 hour, ratings 2 points, a day's mean rating 1 point, reaction
+//     time 10 %, jaw muscle bursts a quarter of the usual, a planning value): the research's
 //     "beyond normal spread" rules (early-warning pass 2, Q4). The band shown as "your normal range" is exactly
 //     the stretch with no arrow.
 // Alpha strength and the eyes-closed rise are judged on a log scale (a doubling counts the same up and down).
@@ -26,6 +26,9 @@ enum Scale {
 
   /// A 1-5 or 1-9 rating: 2 spreads and at least 2 points.
   rating(minChange: 2),
+
+  /// The mean of a day's 1-5 ratings (sharpness in the day, DECISIONS row 287): 2 spreads and at least 1 point.
+  meanRating(minChange: 1),
 
   /// Reaction time (ms): 2 spreads and at least 10 % of the usual.
   reaction(relChange: 0.10),
