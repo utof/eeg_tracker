@@ -17,6 +17,9 @@ a build-it-yourself ADS1299 helmet ([hardware and guides](https://github.com/uto
 - `scripts/import_phone.py`: brings the phone app's **Export data** folder onto the laptop (Syncthing or
   `adb pull`), checks every file against its checksum list, raw nights into `_local/recordings/`, the rest into
   `_local/phone/` ([app/README.md](app/README.md), "Export data").
+- `scripts/catalog.py`: one table of every night on the laptop (laptop and phone nights: files, hours, missing
+  minutes, the sleep report's numbers, morning check-in) and the SHA-256 of every file, so the next run says what
+  grew, changed or went missing; `--check` re-hashes everything. Reads the data only; writes `_local/catalog/`.
 
 Next morning, join the night's files and score sleep (AnySleep + YASA; neither is validated on BrainBit yet):
 
@@ -26,6 +29,9 @@ uv run --project analysis python scripts/to_bdf.py _local/recordings/2026-11-18-
 uv run --project analysis python scripts/score_sleep.py night.bdf   # night.sleep.json + night.hypnogram.png
 python3 scripts/export_events.py night.sleep.json    # eeg_sleep_night event for utof_tracker
 ```
+
+A night over 14 hours is scored the way the phone scores every night (two passes with the app's ONNX models), so
+the laptop's and the phone's reports give the same stages.
 
 **Sleep page (automatic report).** After waking, open `http://localhost:8765/sleep.html` (the "Sleep" button on the
 check page) while the recorder runs. If there are newer recordings than the last report, it scores them by itself
