@@ -148,7 +148,11 @@ class NapSession {
     return out;
   }
 
-  /// Minutes asleep by the live stages (N1 N2 N3 R).
+  /// The sleep model scored at least one epoch (W N1 N2 N3 R); false for a nap the timer alone ran.
+  bool get scored => stages.contains(RegExp('[W123R]'));
+
+  /// Minutes asleep by the live stages (N1 N2 N3 R): 0 when nothing was scored ([scored]), and never the last
+  /// 2 minutes and the wake (the model reads 2 minutes behind).
   double get asleepMin => [for (final k in ['1', '2', '3', 'R']) minutes[k] ?? 0].fold(0.0, (a, b) => a + b);
 
   Map<String, Object?> toJson() => {

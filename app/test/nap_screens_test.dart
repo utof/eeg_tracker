@@ -148,4 +148,27 @@ void main() {
     expect(find.text('after 9 min'), findsOneWidget);
     expect(napLine(_stopped), '30 min · no sleep seen · stopped');
   });
+
+  testWidgets('a nap the timer alone ended: no stage minutes, "not scored", beside the alpha rule\'s onset', (tester) async {
+    tester.view.physicalSize = const Size(1210, 2695);
+    tester.view.devicePixelRatio = 2.75;
+    addTearDown(tester.view.reset);
+    final timerOnly = _nap(
+      DateTime(2026, 11, 19, 15),
+      stages: '.' * 40,
+      end: NapEnd.length,
+      length: 20,
+      onsetS: 540,
+      live: const NapLiveInfo(mode: LiveMode.timer, why: 'The sleep model stopped (no ONNX Runtime), so the timer alone ends the nap.'),
+    );
+    await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: _view(NapViewModel(stage: NapStage.done, latest: timerOnly, justEnded: true))));
+    expect(find.text('after 9 min'), findsOneWidget);
+    expect(find.text('0 min'), findsNothing, reason: 'nothing was scored: no "Asleep 0 min" beside "Fell asleep after 9 min"');
+    expect(find.text('light 0, deep 0, dream 0 min'), findsNothing);
+    expect(find.text('not scored (timer only)'), findsNWidgets(2));
+    expect(find.textContaining('last 2 minutes'), findsNothing);
+    // with the model on, the last 2 minutes and the wake are never scored, and the report says so
+    await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: _view(states['ended_length']!)));
+    expect(find.textContaining('leave out the last 2 minutes'), findsOneWidget);
+  });
 }

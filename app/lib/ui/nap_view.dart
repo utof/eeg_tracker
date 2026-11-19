@@ -388,12 +388,13 @@ class NapReport extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = session, text = Theme.of(context).textTheme, mins = s.minutes;
+    final notScored = s.live.mode == LiveMode.timer ? 'not scored (timer only)' : 'not scored';
     final light = (mins['1'] ?? 0) + (mins['2'] ?? 0), deep = mins['3'] ?? 0, dream = mins['R'] ?? 0;
     final rows = <(String, String)>[
       ('Lights off', '${nightLabel(s.start)}, ${clock(s.start)}'),
       ('Fell asleep', s.onsetS == null ? 'not seen' : 'after ${_min((s.onsetS! / 60).roundToDouble())}'),
-      ('Asleep', _min(s.asleepMin)),
-      ('Stages', 'light ${_num(light)}, deep ${_num(deep)}, dream ${_num(dream)} min'),
+      ('Asleep', s.scored ? _min(s.asleepMin) : notScored),
+      ('Stages', s.scored ? 'light ${_num(light)}, deep ${_num(deep)}, dream ${_num(dream)} min' : notScored),
       ('Woke you', switch (s.end) {
         NapEnd.deepSleep => 'at ${((s.wakeS ?? s.endS) / 60).round()} min, deep sleep starting',
         NapEnd.length => 'at ${s.lengthMin} min, your length',
@@ -428,7 +429,8 @@ class NapReport extends StatelessWidget {
         const SizedBox(height: 10),
         Text(
           '"Fell asleep" is the alpha rule\'s onset; the stages are the sleep model read 2 minutes behind, a first guess '
-          'not yet checked on this headband.',
+          'not yet checked on this headband.${s.scored ? ' "Asleep" and the stages leave out the last 2 minutes and the '
+                  'wake, which the model had not read yet.' : ''}',
           style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.4),
         ),
       ],
