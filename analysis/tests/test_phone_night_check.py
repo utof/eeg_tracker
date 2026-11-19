@@ -173,6 +173,21 @@ def test_a_recorder_that_died_and_never_came_back(tmp_path: Path) -> None:
     assert s["fixes"][0].startswith("The recorder stopped by itself at 23:05")
 
 
+def test_a_headband_that_never_came_back_before_stop(tmp_path: Path) -> None:
+    tries = [(60.0 * k, f"reconnect try {k} (scan): not found after 15.0 s") for k in range(1, 41)]
+    run = PhoneRun(T, seconds=200, end="drop", after=tries)
+    write_run(tmp_path, run)
+    log = tmp_path / f"{stem(T)}.log"
+    stop = run.last + timedelta(minutes=41)
+    log.write_text(log.read_text() + f"{stop:%Y-%m-%dT%H:%M:%S}.000 end of night, packets: 49999 samples, missing 0 in "
+                   "0 gaps, repeated 0, longest gap 0 samples\n")
+    s = pnc.check(tmp_path, NIGHT, signal=False)
+    assert s["tail"] is not None and s["tail"].text == "drop (out of range); 40 tries (0 direct, 40 scan)"
+    assert s["verdict"] == "Usable, with gaps"
+    assert any(f.startswith("No data for the last 41.0 min before Stop") for f in s["fixes"])
+    assert "after data    41.0 min from 23:03 until Stop: drop (out of range); 40 tries" in pnc.render(s)
+
+
 def test_risky_phone_settings_are_named(tmp_path: Path) -> None:
     run = PhoneRun(T, seconds=200, night_end=True)
     write_run(tmp_path, run)

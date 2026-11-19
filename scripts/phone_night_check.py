@@ -53,6 +53,7 @@ GAPS_LONGEST_S = 300
 RATE_TOL = 0.01  # samples per second within 1 % of 250
 LOST_BAD, LOST_SOME = 0.01, 0.001  # share of samples lost to counter jumps
 LATE_S = 10  # data held back longer than this (nothing lost) is worth fixing
+TAIL_S = 30 * 60  # this long without data before Stop, with the app trying, is a gap worth fixing
 SLOW_BACK_S = 60
 # Signal and contact: the project's own rules
 FLAT_UV, RAIL_UV = 1.4, 390_000.0  # analysis/eeg_detectors.py: raw range in a second under 1.4 uV = flat
@@ -755,7 +756,7 @@ def analyse(runs: list[Run], source: str, name: str, report_dirs: list[Path], si
 def _tail(last: Stretch, evs: list[Event]) -> Break | None:
     """The time between the last data and Stop (or the last log line) when the app was still trying: not part of
     the span (the owner may have taken the headband off before pressing Stop), but said."""
-    after = [e for e in evs if e.t > last.t1 + 2]
+    after = [e for e in evs if e.t >= last.t1 - 2]
     if not after or after[-1].t - last.t1 <= LIST_GAP_S:
         return None
     br = Break(last.t1, after[-1].t, last.run, last.run)
@@ -837,6 +838,11 @@ def judge(s: dict) -> None:
         else:
             issues.append((48, f"The log has no Stop line (its last line is at {hm(s['last_line'])}): press Stop in "
                            "the morning before exporting.", "gaps"))
+    tail = s["tail"]
+    if phone and s["stop"] is not None and tail is not None and tail.length > TAIL_S and tail.cat != "unknown":
+        issues.append((58, f"No data for the last {dur(tail.length)} before Stop (from {hm(tail.t0)}: {tail.text}). "
+                       "If the headband was still on, keep the phone closer; if not, press Stop when you take it off.",
+                       "gaps"))
     exits = sorted({e.g["reason"] for e in s["exits"]})
     if s["restarts"] or s["killed"]:
         n = max(len(s["restarts"]), len(s["killed"]))
