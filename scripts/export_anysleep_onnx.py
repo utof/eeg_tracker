@@ -20,7 +20,8 @@ unchanged model at lengths with every parity pattern).
 
 Checks, printed at the end:
 1. random inputs of 10, 11, 13, 37, 64 and 121 epochs: largest logit difference, unchanged PyTorch model vs ONNX
-   (own averages), and the same input weighed by its averages fed back in (`means`, as pass 2 does);
+   (own averages), and the same input weighed by its averages fed back in (`means`, as pass 2 does); then one call
+   on the phone's longest piece (175 epochs): its time and peak memory (`piece_call`, Linux);
 2. with --night: the night's model input (score_sleep.prepare on the whole night, as on the laptop), a slice of
    --slice-h hours from its middle: mean probabilities of the three runs, PyTorch vs ONNX, and the stage
    agreement; then the whole night as the phone scores it (two passes over pieces, analysis/two_pass.py and
@@ -114,12 +115,20 @@ def two_pass_module(net):
             self.net = net
 
         def skip(self, block, x, m, means, use_means, at):
-            """One skip connection: x (channels, filters, time), m (time,) the kept samples."""
+            """One skip connection: x (channels, filters, time), m (time,) the kept samples, one run of ones."""
             n_f = x.shape[1]
             own = x.mean(dim=-1)
             use = own + use_means * (means[:, at:at + n_f] - own)  # exactly `own` when use_means is 0
             alpha = block.softmax(block.mlp(use).reshape(1, -1)).unsqueeze(-1).unsqueeze(-1)
-            return (x.unsqueeze(0) * alpha).sum(1), torch.matmul(x, m), m.sum().expand(n_f)
+            # the kept sum as the whole sum less the context on each side (a and r samples: the mask's leading
+            # and trailing zeros). ONNX Runtime's MatMul with the mask took longer than the rest of the model, and
+            # a product with the mask would copy the feature map. Its ReduceSum fails on an empty slice, so each
+            # side sums at least one sample and is then zeroed when it has none
+            a, r = m.argmax(), m.flip(0).argmax()
+            left = x[:, :, :a.clamp(min=1)].sum(-1) * (a > 0)
+            right = x[:, :, -r.clamp(min=1):].sum(-1) * (r > 0)
+            kept = (x.sum(-1) - left - right) * (m.sum() > 0)
+            return (x.unsqueeze(0) * alpha).sum(1), kept, m.sum().expand(n_f)
 
         def forward(self, eeg, keep, means, use_means):
             net = self.net
@@ -138,6 +147,11 @@ def two_pass_module(net):
                 res.append(out); sums.append(s); counts.append(c)
                 at += x_r.shape[1]
                 m = m[::2]
+                # adds exactly 0 (clamped, so even an overflow to infinity adds 0), but the next level now waits
+                # for this connection's fusion and sums, so ONNX Runtime frees each four-channel feature map at
+                # once. Without it, its own order ran every connection after the last level and kept all 13 maps:
+                # about 260 instead of 140 MB for a 175-epoch input (the earlier graph's peak)
+                x = x + (out.sum() + s.sum()).clamp(0.0, 0.0)
             x = net.connector(x)
             x, s, c = self.skip(net.skip_connections[-1], x, m, means, use_means, at)
             sums.append(s); counts.append(c)
@@ -176,6 +190,23 @@ def weights_to_float16(model, min_elements: int = 1024) -> int:
     return n
 
 
+def short_names(model) -> None:
+    """Drop node names and name the inner values t0, t1, ... (graph inputs, outputs and weights keep theirs): the
+    tracer's long names took about 0.18 MB a run once the two-pass ops were in."""
+    g = model.graph
+    keep = {v.name for v in g.input} | {v.name for v in g.output} | {i.name for i in g.initializer}
+    new: dict[str, str] = {}
+    for node in g.node:
+        node.name = ""
+        for k, name in enumerate(node.output):
+            if name and name not in keep:
+                new[name] = node.output[k] = f"t{len(new):x}"
+    for node in g.node:
+        for k, name in enumerate(node.input):
+            if name in new:
+                node.input[k] = new[name]
+
+
 def export(mod, repo: Path, out: Path, commit: str) -> list[Path]:
     import onnx, torch
     out.mkdir(parents=True, exist_ok=True)
@@ -190,6 +221,7 @@ def export(mod, repo: Path, out: Path, commit: str) -> list[Path]:
         model = onnx.load(str(tmp))
         tmp.unlink()
         n = weights_to_float16(model)
+        short_names(model)
         model.doc_string = (f"AnySleep run {run} (mid fusion), github.com/dslaborg/AnySleep commit {commit}, MIT licence, "
                             "Copyright (c) 2026 dslaborg. Input eeg: (1, samples, 4) float32 at 128 Hz, O1 O2 T3 T4, "
                             "robust-scaled per channel over the night; samples a multiple of 3840. Output logits: "
@@ -239,6 +271,24 @@ def check_lengths(mod, repo: Path, sess) -> dict:
                 own, fed = max(own, float(np.abs(a - b).max())), max(fed, float(np.abs(a - c).max()))
             worst[f"run{run}"], worst[f"run{run}_fed"] = own, fed
     return worst
+
+
+def piece_cost(sess, n_ep: int = two_pass.MAX_WINDOW) -> dict:
+    """One model call on the longest piece the phone makes: seconds (median of 3) and the peak memory above the
+    process's before it (Linux; the peak is reset through /proc/self/clear_refs before each call). The earlier
+    1-hour graph on its longest piece (180 epochs): about 0.44 s and 141-147 MB on this laptop."""
+    x = np.random.default_rng(0).standard_normal((1, n_ep * EPOCH_SAMPLES, 4)).astype(np.float32)
+    f = two_pass.feeds(x, keep=(two_pass.CONTEXT_EP, n_ep - two_pass.CONTEXT_EP))
+    kb = lambda key: int(next(ln for ln in open("/proc/self/status") if ln.startswith(key)).split()[1])  # noqa: E731
+    sess[0].run(None, f)
+    secs, peaks = [], []
+    for _ in range(3):
+        Path("/proc/self/clear_refs").write_text("5")
+        before, t0 = kb("VmRSS:"), time.time()
+        sess[0].run(None, f)
+        secs.append(time.time() - t0)
+        peaks.append(round((kb("VmHWM:") - before) / 1024))
+    return dict(epochs=n_ep, seconds=round(sorted(secs)[1], 3), peak_mb_above=peaks)
 
 
 def ort_probs(sess, x: np.ndarray, n_ep: int, plan, two: bool = False) -> np.ndarray:
@@ -324,6 +374,8 @@ def main() -> None:
     sess = sessions(paths)
     result = dict(sizes_mb={p.name: round(p.stat().st_size / 1e6, 2) for p in paths},
                   lengths_max_abs_logit_diff=check_lengths(mod, a.anysleep, sess))
+    if Path("/proc/self/clear_refs").exists():
+        result["piece_call"] = piece_cost(sess)
     if a.night:
         result["night"] = check_night(mod, a.anysleep, sess, a.night, a.slice_h, a.dart_input)
     result["peak_mb"] = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024)
