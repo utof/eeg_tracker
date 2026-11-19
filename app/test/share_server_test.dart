@@ -194,6 +194,20 @@ void main() {
       expect((await json('/state'))['status'], 'reconnecting');
     });
 
+    test('a DIY board night: the board\'s channel names, as the laptop\'s DIY recorder sends them', () async {
+      server.setLive({
+        'kind': 'status',
+        'phase': 'recording',
+        'nightSamples': 2500,
+        'board': {'names': ['O1', 'O2', 'Fz', 'Fp1'], 'mode': 'test', 'modeText': 'test signal, not EEG'},
+      });
+      final s = await json('/state');
+      expect(s['names'], ['O1', 'O2', 'Fz', 'Fp1']);
+      expect((s['contact'] as Map).keys, ['O1', 'O2', 'Fz', 'Fp1']);
+      server.setLive({'kind': 'status', 'phase': 'recording', 'nightSamples': 2500});
+      expect((await json('/state'))['names'], shapes['names']); // the BrainBit's again
+    });
+
     test('/state from the app between nights: "session" while a session records, then "not recording"', () async {
       server.setLive(const {});
       server.addBatch('2026-11-19-030000', 0, now.microsecondsSinceEpoch / 1e6, batch(0, 250));

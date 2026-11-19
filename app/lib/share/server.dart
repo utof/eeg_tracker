@@ -24,7 +24,7 @@ import 'package:crypto/crypto.dart';
 import '../export/store.dart';
 import 'protocol.dart';
 
-const List<String> _names = ['O1', 'O2', 'T3', 'T4'];
+const List<String> _brainBit = ['O1', 'O2', 'T3', 'T4'];
 const int _fs = 250;
 const int _ringRows = _fs * 5;
 const int _stateRows = _fs * 4;
@@ -176,6 +176,14 @@ class ShareServer {
   }
 
   /// The recorder's status about once a second (`RecorderStatus.toMap`), or `{}` when the app itself serves.
+  /// The channels' names: the DIY board's from the recorder's status while it records one (DECISIONS rows 360-369),
+  /// else the BrainBit's.
+  List<String> get _names {
+    final b = _live['board'];
+    final n = b is Map ? b['names'] : null;
+    return n is List && n.length == 4 && n.every((x) => x is String) ? n.cast<String>() : _brainBit;
+  }
+
   void setLive(Map<Object?, Object?> live) {
     _live = live;
     final c = live['contact'];
