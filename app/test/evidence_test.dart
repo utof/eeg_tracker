@@ -22,6 +22,7 @@ void main() {
       'smart-alarm',
       'unusual-for-you',
       'sharp-hours',
+      'lucid-cues',
     ]) {
       final md = await rootBundle.loadString('assets/evidence/$name.md');
       expect(md, startsWith('# '), reason: name);

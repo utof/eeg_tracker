@@ -66,6 +66,7 @@ class NightViewModel {
     this.alarmLine,
     this.alarmAction,
     this.ringing,
+    this.lucidLine,
   });
 
   final String title;
@@ -121,6 +122,9 @@ class NightViewModel {
 
   /// While the alarm rings: why it rang, for the wake face.
   final String? ringing;
+
+  /// Lucid dream cues in a line ("On: practise before you sleep."), when they were ever used (DECISIONS 308).
+  final String? lucidLine;
 }
 
 class NightView extends StatelessWidget {
@@ -137,6 +141,7 @@ class NightView extends StatelessWidget {
     this.onMeditate,
     this.onDream,
     this.onNap,
+    this.onLucid,
     this.onSound,
     this.onSleepReport,
     this.onRetrySleep,
@@ -158,6 +163,7 @@ class NightView extends StatelessWidget {
   final VoidCallback? onMeditate;
   final VoidCallback? onDream;
   final VoidCallback? onNap;
+  final VoidCallback? onLucid;
   final VoidCallback? onSound;
   final VoidCallback? onSleepReport;
   final VoidCallback? onRetrySleep;
@@ -237,6 +243,8 @@ class NightView extends StatelessWidget {
           if (!m.running) ...[const SectionHeading('Dream catcher'), _Dream(line: m.dreamLine, onDream: onDream)],
           // The nap coach holds the headband too (DECISIONS row 173).
           if (!m.running) ...[const SectionHeading('Nap coach'), _Nap(line: m.napLine, onNap: onNap)],
+          // Lucid dream cues: the evening practice and the morning questions, between nights (DECISIONS 308).
+          if (!m.running && onLucid != null) ...[const SectionHeading('Lucid dreams'), _Lucid(line: m.lucidLine, onLucid: onLucid)],
           // Sound for states also plays during a night, by its timer alone (DECISIONS row 130).
           const SectionHeading('Sound'),
           _Sound(running: m.running, onSound: onSound),
@@ -674,6 +682,30 @@ class _Nap extends StatelessWidget {
           icon: const Icon(Icons.airline_seat_flat_angled_outlined),
           label: const Text('Nap coach'),
         ),
+      ],
+    );
+  }
+}
+
+class _Lucid extends StatelessWidget {
+  const _Lucid({required this.line, required this.onLucid});
+  final String? line;
+  final VoidCallback? onLucid;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Soft sounds in dream sleep to help you notice you are dreaming: an evening practice, then the night. An '
+          'experiment, with silent nights to test it.',
+          style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
+        ),
+        if (line != null) ...[const SizedBox(height: 8), Text(line!, style: text.bodyLarge?.copyWith(height: 1.4))],
+        const SizedBox(height: 16),
+        OutlinedButton.icon(onPressed: onLucid, icon: const Icon(Icons.visibility_outlined), label: const Text('Lucid dreams')),
       ],
     );
   }

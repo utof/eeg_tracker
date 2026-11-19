@@ -10,13 +10,15 @@ import '../alarm/bell.dart';
 import '../alarm/live_alarm.dart';
 import '../alarm/record.dart';
 import '../alarm/rule.dart';
+import '../handsfree/store.dart' show nightGestures;
+import '../lucid/bell.dart' show ChannelCueBell;
+import '../lucid/live_cues.dart' show lucidCuesFor;
 import '../phone.dart';
 import '../share/isolate.dart';
 import '../share/protocol.dart';
 import '../sleep/live_stager.dart';
 import '../sleep/onnx_runs.dart';
 import 'brainbit.dart';
-import '../handsfree/store.dart' show nightGestures;
 import 'headband.dart';
 import 'live_drift.dart';
 import 'night_recorder.dart';
@@ -179,6 +181,15 @@ class RecorderTaskHandler extends TaskHandler {
       watch: () => LiveDrift(handsFree: nightGestures(Directory(dir).parent)),
       alarmPlan: await _alarmPlan(),
       alarm: alarm(dir),
+      // lucid dream cues when they are on: AnySleep on ONNX in this engine, the phone's media player (DECISIONS 303)
+      cues: lucidCuesFor(
+        dir,
+        model: () => RunsLiveModel(
+          open: (run) => OnnxStageRun.open(run, modelsDir: modelsDirFor(dir)),
+          closeRun: (run) => (run as OnnxStageRun).close(),
+        ),
+        bell: ChannelCueBell(),
+      ),
     );
     _recorder = recorder;
     unawaited(recorder.run(restartedBySystem: starter == TaskStarter.system));

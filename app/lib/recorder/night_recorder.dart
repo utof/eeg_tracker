@@ -13,7 +13,8 @@
 // - the drift-off detector runs on the batches in this isolate (live_drift.dart, DECISIONS 180-184), always behind the
 //   files and inside a guard: an exception, or more than its share of time, switches it off with one log line;
 // - so does the smart alarm's live sleep model (alarm/live_alarm.dart, DECISIONS 230-236), only from an hour before
-//   its window, with a memory limit too; the phone's own alarm at the window's end never depends on it.
+//   its window, with a memory limit too; the phone's own alarm at the window's end never depends on it;
+// - so do the lucid dream cues (lucid/live_cues.dart, DECISIONS 300-303) through a WatchGuard with a memory limit too.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -21,6 +22,7 @@ import 'dart:math';
 
 import '../alarm/live_alarm.dart';
 import '../alarm/rule.dart';
+import '../lucid/live_cues.dart';
 import 'battery.dart';
 import 'chunk_writer.dart';
 import 'contact.dart';
@@ -29,6 +31,7 @@ import 'live_drift.dart';
 import 'nights.dart';
 import 'packets.dart';
 import 'status.dart';
+import 'watch_guard.dart';
 
 class RecorderTiming {
   const RecorderTiming({
@@ -141,6 +144,8 @@ class NightRecorder {
     this.alarmPlan,
     this.alarm,
     int Function()? rss,
+    this.cues,
+    this.cueLimits = const GuardLimits(),
     DateTime Function()? clock,
   }) : _now = clock ?? DateTime.now,
        _rss = rss ?? _processRss;
@@ -163,6 +168,11 @@ class NightRecorder {
 
   /// Makes the smart alarm's live model for a plan, an hour before its window; null: none (the phone's alarm alone).
   final AlarmWatch Function(AlarmPlan plan)? alarm;
+
+  /// Makes tonight's lucid dream cues for the night's start (null from it: they are off); null: none.
+  final CueFactory? cues;
+  final GuardLimits cueLimits;
+  late final WatchGuard<CueWatch> _cues = WatchGuard(limits: cueLimits, onStop: _cuesStopped);
   final DateTime Function() _now;
 
   /// The process's resident memory in bytes (the alarm's memory limit).
@@ -275,6 +285,8 @@ class NightRecorder {
       _night = _night.copyWith(alarmScoring: false);
       await _closeAlarm(a).timeout(const Duration(seconds: 5), onTimeout: () {});
     }
+    final c = _cues.release();
+    if (c != null) await _closeCues(c).timeout(const Duration(seconds: 5), onTimeout: () {});
     await _done.future.timeout(timing.stopTimeout, onTimeout: () {});
     _writer?.close();
     await _save();
@@ -331,6 +343,7 @@ class NightRecorder {
     }
     _packets = PacketAccount(_night.packets);
     _packetsLoggedMs = _now().millisecondsSinceEpoch;
+    _startCues();
     await store.save(_night);
     _set(
       RecorderStatus(
@@ -593,6 +606,72 @@ class NightRecorder {
         }
       });
     }
+    _cues.run((c) {
+      c.add(t, rows, firstOfFile: firstOfFile);
+      for (final text in c.takeEvents()) {
+        _marker(text, t);
+      }
+    });
+  }
+
+  /// Tonight's lucid dream cues, when they are on; a failure here costs only the cues.
+  void _startCues() {
+    final make = cues;
+    if (make == null) return;
+    try {
+      final c = make(_night.startMs);
+      if (c == null) return;
+      _cues.start(c);
+      for (final text in c.takeEvents()) {
+        _marker(text, _now());
+      }
+    } catch (e) {
+      _cueLine('lucid cues could not start: ${_short(e)}; the recording goes on');
+    }
+  }
+
+  /// The 10-second check of the cues: Lights off, the drift-off detector's state, their time and memory.
+  void _checkCues() {
+    if (_cues.watch == null) return;
+    final t = _now();
+    _cues.run((c) {
+      c.check(t, lightsOffMs: _night.lightsOffMs, drift: _drift?.live?.state.name);
+      for (final text in c.takeEvents()) {
+        _marker(text, t);
+      }
+    });
+    _cues.checkLimits();
+    final c = _cues.watch;
+    if (c != null && c.finished) {
+      _cues.release();
+      unawaited(_closeCues(c));
+    }
+  }
+
+  void _cuesStopped(String why, CueWatch c) {
+    _cueLine('lucid cues stopped: $why; the recording goes on');
+    try {
+      if (c is LiveCues) c.off('The recorder stopped them ($why).');
+    } catch (_) {}
+    unawaited(_closeCues(c));
+  }
+
+  Future<void> _closeCues(CueWatch c) async {
+    try {
+      await c.close();
+    } catch (_) {}
+  }
+
+  /// A line in the open file set's `.log`, else beside the last closed one, else kept for the next.
+  void _cueLine(String line) {
+    final w = _writer;
+    try {
+      if (w != null && !w.isClosed) {
+        w.log(line);
+      } else {
+        _note(line);
+      }
+    } catch (_) {}
   }
 
   /// The night screen's Lights off: a marker in the recording, kept in the saved night, and the drift-off detector
@@ -919,6 +998,7 @@ class NightRecorder {
       w.sync();
       _checkDriftBudget();
       _checkAlarm();
+      _checkCues();
       await _save();
       final got = w.samplesReceived - lastTotal;
       lastTotal = w.samplesReceived;
@@ -1159,6 +1239,12 @@ class NightRecorder {
       final d = _drift;
       final h = d is LiveDrift ? d.hands : null;
       if (h != null) _note('hands-free: ${h.heard} moments marked, ${h.ignoredAsleep} double clenches ignored while probably asleep');
+    }
+    if (_cues.used) {
+      _note(
+        'lucid cues: ${(_cues.time.elapsedMicroseconds / 1e6).toStringAsFixed(2)} s of the recorder\'s time over '
+        '${(_cues.wall.elapsedMicroseconds / 6e7).toStringAsFixed(1)} min',
+      );
     }
     await _save();
   }

@@ -243,7 +243,7 @@ folder). It never changes or deletes anything in the app's folder, and never run
 
 - The layout is the app's own: `recordings/` (raw nights, the recorder's format above), `nights/<date>.report.json`,
   `mornings/`, `meditations/`, `alpha-theta/` (sessions and `journal.json`), `replay-check/<kind>/` and
-  `settings.json`, `experiments/<made at>/` (self-experiments, below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers and their `<stamp>-r<n>.text.json` words, below, `prompts/`), `sound-states/`, `hands-free/` (below), `unusual/` (below), `own-ble/`
+  `settings.json`, `experiments/<made at>/` (self-experiments, below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers and their `<stamp>-r<n>.text.json` words, below, `prompts/`), `sound-states/`, `hands-free/` (below), `unusual/` (below), `lucid/` (below), `own-ble/`
   (`settings.json`: which headband connection is in use; `probe/<stamp>/`: the probe's result, docs/own-ble-driver.md), and any folder
   a later feature adds. Left on the phone: `models/` (copies of the app's model assets), `export/` (the export's own
   index), half-written `*.tmp` files, the scorer's `*.scoring` markers, and the two files Android and a plugin keep
@@ -337,6 +337,33 @@ The moments themselves are not stored: they are drawn again from `seed`, the day
 (`app/lib/sharp/schedule.dart`): the waking window cut into `per_day` equal parts, one random minute in each, at least
 60 minutes apart; two of them suggest the test. The Trends page reads two day numbers from these files (a day runs
 04:00 to 04:00): `sharp`, the mean of the day's ratings, and `dayrt`, the median of the day's tests' medians.
+
+### Lucid dream cues (`lucid/`)
+
+The evening practice, the nights with the cues on and the honest self-test (DECISIONS rows 300-309). Each JSON file is
+written under a temporary name, then renamed; a missing or damaged file reads as "off", "never" or "none". A night's
+`<stamp>` is its start (the recorder's first Start of the night), `yyyy-MM-dd-HHmmss` local time. Please do not open
+`sealed.json` or `plays.jsonl` before the app shows the results: together they say which nights had sound.
+
+| File | Content |
+|---|---|
+| `settings.json` | `on` (off by default), `level` (the practice's loudness, a share of the media volume, 0-1), `mediaVolume` and `mediaVolumeMax` (the phone's media volume step when it was set), `levelSet`, `changed` |
+| `events.jsonl` | one line per change: `switched on`, `switched off`, `loudness set to ...`, `plan frozen (schedule ...)` |
+| `practice.jsonl` | one line per evening practice: `start`, `end`, `cues` (played after the loudness step), `completed` |
+| `sealed.json` | `salt` (64 hex characters) and `allocation` (one character per night of the test from night 1: `C` = sound, `S` = silent; drawn again from the salt alone, the replay check's draw) |
+| `plan.json` | `plan` and `sha256` (of `plan` as JSON with sorted keys and no spaces). `plan`: `version` 1, `frozen`, `design`, `blockSize` 4, `cuePerBlock` 2, `plannedNights` 24, `maxNights` 36, `revealEvery` 12, `primary`, `secondary`, `seenTogether`, `exclusions`, `analysis`, `honesty`, `scheduleSha256` (SHA-256 of `sealed.json`'s content in the same canonical form) |
+| `plays.jsonl` | one line per cue the phone was asked to play (nights with sound only): `at`, `night` (its number from 0), `ok`, `error` |
+| `nights/<stamp>.json` | written by the night recorder, the same on nights with and without sound: `version` 1, `start`/`startMs`, `index` (the night's number in the test, from 0), `cuesFrom`/`cuesFromMs`, `phase` (`waiting`, `listening`, `done`, `off`, `ended`), `cues` (each `at`/`atMs`, `step`: dB over the practice level, `period`: the dream period, `confidence`: the live reading, `aroused`: a stir followed within 30 s), `arousalsMs`, `stops` (`atMs`, `why`: `per night` or `three arousals`), `running` (the live model was open when this was written), `off` (why the cues were switched off, a sentence), `model` (`mode`, `calls`, `median_ms`, `max_ms`, `skipped_windows`), `level`, `mediaVolume` |
+| `mornings/<stamp>.json` | `night`, `answered`, `answers`: `lucid` (`yes`, `no`, `unsure`), `heard` (`no`, `dream`, `woke`, `unsure`), `recall` (0 nothing, 1 a bit, 2 a dream, 3 more), `signal` (`yes`/`no` after a lucid yes, else null) |
+| `signals/<stamp>.json` | the morning's search over the night: `version` 1, `made`, `sweepUv` (the look size used), `clenchX` (the calibrated clench line, or null: no clench search), `staged` (false while the night had no sleep report), `signals` (each `at`/`atMs`, `kind` `lrlr` or `clench`, `pairs`, `stage`: the full-night scoring's stage there, `afterCueS`: seconds after the nearest earlier cue moment within 2 minutes) |
+| `cue.wav` | the cue: 16-bit PCM, 48 kHz, mono, three tones 400, 600, 800 Hz, 0.65 s |
+
+The night's recording carries the cues' moments as markers in its `.markers.jsonl` (and so as BDF annotations):
+`lucid cues on: night N of the test; cues from HH:MM, the sleep model from HH:MM`, `lucid cues: sleep model on`,
+`lucid cue N (dream sleep 0.84, +3 dB)`, `lucid cues: arousal after a cue; 3 dB quieter, 5 minutes without cues`,
+`lucid cues: done for tonight (...)`, `lucid cues off: ...`, `lucid cues from HH:MM (4.5 h after Lights off)`; its
+`.log` ends with the cues' share of the recorder's time, and says `lucid cues stopped: ...` if the guard switched
+them off. None of these says whether sound played.
 
 On the laptop, `scripts/import_phone.py <folder>` (standard library only) checks the manifest, copies
 `recordings/<stamp>.*` into `_local/recordings/` beside the laptop's own recordings and everything else into

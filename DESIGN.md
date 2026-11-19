@@ -107,6 +107,12 @@ row, Awake and A day as label-left / value-right rows, the delivery line, Collec
 hour (chips, then the ratings' and the reaction times' charts), Today, Your data; Rate now pinned. Its question page
 shows one decision at a time: the question at headlineSmall and five full-width 64 dp rows (5 Very sharp at the top);
 then the reaction test, with Skip outlined until a test is done and Done filled after.
+Lucid dreams (a section between nights after Nap coach) is one page ordered by what is due: the status word, then the
+morning's questions or Tonight (the plan lane, practice, loudness and the night's number in the test), Last night (its
+lane and log rows), The test (the night cells and the sealed answer, later the tested table), How it works, Who should
+not use it and the switch; the due action pinned (Start practice, Save answers, Turn on). The evening practice is its
+own page: the loudness on the ground with I hear it and Stop pinned (3 : 2), then the words and the eyes-closed cues on
+a true-black face with one dim counter.
 
 ## Elevation & Depth
 
@@ -214,6 +220,16 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   as ticks under it; answers as ink dots side by side per level, so a count reads as a row; once the pattern opens the
   dots turn ink-muted, each block with enough answers gets its range as a `rule` band and its mean as an ink tick, and
   the named best block (or two) is outlined in ink-muted. The sentence under it says the same in words.
+- **Night lane** (lucid dreams): the sleep chart's `track` lane on the night's clock, 26 dp tall, hour rules in the
+  ground's colour with tabular hours under it (the plan: Lights off, +3 h, +6 h, +9 h); the cue hours a `rule` band;
+  cue moments 1.5 dp `ink` ticks, `caution` amber where a stir followed; dream signals 2 dp rings above the lane (`ink`
+  in dream sleep, `ink-muted` elsewhere); one muted line under it says each mark in words.
+- **Night cells** (lucid dreams' test): the watch strip's cells, 12 a row with a wider gap every 4 (a block of the
+  draw): faint `rule` outline ahead (sealed), `saved` when answered, `track` when not, a `ground` dot for a lucid
+  morning, the next night outlined green while the cues are on; once the results open, a short `ink` bar under each
+  night that had sound. The legend says it in words.
+- **Choice column** (lucid dreams' morning): every morning question's answers as a vertical segmented column, full
+  width, 52 dp rows, 16 dp corners, the Questions styling otherwise (one shape for the whole form; answers never wrap).
 - **Buttons:** one filled button per screen: Start night on the night screen (Lights off while a night records), Start on the meditation screen, and on
   each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before
   stopping, except in alpha-theta, where stopping must be instant. Session faces (dream catcher, sound for states)
