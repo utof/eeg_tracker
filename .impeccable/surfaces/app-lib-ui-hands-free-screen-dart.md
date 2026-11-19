@@ -15,7 +15,7 @@ set up and again when gestures stop working; sitting up, lights on or dim, the p
 Constraints: off by default; the headband is free only between nights; plain short words; only measured numbers,
 planning limits labelled; renders at 100 % and 130 % text, 393 dp. Decided without the owner (subagent run, no
 question channel; the brief stood in). The structure roll ran without challengers: dealt 5, 6, 4 of the assistant's
-list; 5 (the live meter) leads, with 4 (the try track) as its row of tries.
+list (seed:cfda07469b40887d, reproduced with the same deal); 5 (the live meter) leads, with 4 (the try track) as its row of tries.
 
 ## Direction contract
 
@@ -36,6 +36,6 @@ Pinned at the bottom, full width, 64 dp: Start (filled) before, Stop (outlined) 
 
 SIGNATURE: the jaw lane: the clench line and your own bars crossing it, in your own resting level's units.
 
-FORM: the live meter (dealt lead, position 5 of 7), fused with the try track (4); seed: none (unavailable).
+FORM: the live meter (dealt lead, position 5 of 7), fused with the try track (4); seed:cfda07469b40887d.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance

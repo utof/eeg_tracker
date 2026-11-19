@@ -65,7 +65,8 @@ class SettingsViewModel {
 String handsFreeStatus(SettingsViewModel m) {
   final c = m.calibration;
   if (!m.on) return c == null || !c.usable ? 'Off. Calibrate first, then switch it on.' : 'Off.';
-  if (c == null || !c.usable) return 'On, but no gesture was caught clearly enough. Calibrate again.';
+  if (c == null) return 'On, but not calibrated yet. Calibrate first.';
+  if (!c.usable) return 'On, but no gesture was caught clearly enough. Calibrate again.';
   final s = c.settings;
   if (s.clenchOn && s.glanceOn) return 'On: both gestures.';
   return s.clenchOn ? 'On: the double clench only.' : 'On: the look left, then right only.';
@@ -107,10 +108,31 @@ class SettingsView extends StatelessWidget {
             ),
           ),
           if (m.error != null) Para(m.error!, color: Night.problem),
-          const Para(
+          const SizedBox(height: 12),
+          if (c == null)
+            Text('Not calibrated yet. About 90 seconds with the headband on.', style: text.bodyLarge?.copyWith(height: 1.45))
+          else ...[
+            Text('Calibrated ${nightLabel(c.made)}, ${_clock(c.made)}.', style: text.bodyLarge?.copyWith(height: 1.45)),
+            const SizedBox(height: 12),
+            for (final k in GestureKind.values) _GestureLine(kind: k, calibration: c),
+          ],
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: c == null
+                ? FilledButton.icon(onPressed: m.nightRunning ? null : onCalibrate, icon: const Icon(Icons.tune), label: const Text('Calibrate'))
+                : OutlinedButton.icon(onPressed: m.nightRunning ? null : onCalibrate, icon: const Icon(Icons.tune), label: const Text('Calibrate again')),
+          ),
+          if (m.nightRunning) ...[
+            const SizedBox(height: 8),
+            Text('The headband is busy with the night. Calibrate after Stop.', style: muted),
+          ],
+          const SectionHeading('What it is'),
+          Text(
             'A firm double clench of your teeth, or a look far left and then far right, works as a switch during '
             'sessions. A soft tone says it was caught. The temple electrodes see jaw muscle and sideways eye '
             'movements best.',
+            style: text.bodyLarge?.copyWith(height: 1.45),
           ),
           const SectionHeading('What each one does'),
           _Uses(clenchOn: c?.settings.clenchOn ?? true, glanceOn: c?.settings.glanceOn ?? true),
@@ -120,30 +142,6 @@ class SettingsView extends StatelessWidget {
             'are asleep.',
             style: muted,
           ),
-          const SectionHeading('Calibration'),
-          if (c == null)
-            Text('Not calibrated yet. About 90 seconds with the headband on.', style: text.bodyLarge?.copyWith(height: 1.45))
-          else ...[
-            Text(
-              'Calibrated ${nightLabel(c.made)}, ${_clock(c.made)}.',
-              style: text.bodyLarge?.copyWith(height: 1.45),
-            ),
-            const SizedBox(height: 12),
-            for (final k in GestureKind.values) _GestureLine(kind: k, calibration: c),
-          ],
-          const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-              onPressed: m.nightRunning ? null : onCalibrate,
-              icon: const Icon(Icons.tune),
-              label: Text(c == null ? 'Calibrate' : 'Calibrate again'),
-            ),
-          ),
-          if (m.nightRunning) ...[
-            const SizedBox(height: 8),
-            Text('The headband is busy with the night. Calibrate after Stop.', style: muted),
-          ],
           const SectionHeading('How often it is wrong'),
           Text(
             'Tested on one recorded night when nobody made a gesture: no double clench came up in 4.6 hours awake; '
@@ -166,8 +164,10 @@ class _Uses extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final label = text.bodyMedium?.copyWith(color: Night.inkMuted);
-    Widget cell(String s, bool on) =>
-        Text(s, style: text.bodyLarge?.copyWith(height: 1.35, color: on ? Night.ink : Night.inkMuted));
+    Widget cell(String s, bool on) => Text(
+      on ? s : 'off: not caught clearly',
+      style: text.bodyLarge?.copyWith(height: 1.35, color: on ? Night.ink : Night.inkMuted),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -188,7 +188,11 @@ class _Uses extends StatelessWidget {
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [Text('Look left, then right', style: label), const SizedBox(height: 2), cell(look, glanceOn)],
+                  children: [
+                    Text('Look left, then right', style: label),
+                    const SizedBox(height: 2),
+                    cell(look, glanceOn || look.startsWith('not used')),
+                  ],
                 ),
               ),
             ],
@@ -212,9 +216,8 @@ class _GestureLine extends StatelessWidget {
     final on = clench ? c.settings.clenchOn : c.settings.glanceOn;
     final seen = clench ? c.clenchSeen : c.glanceSeen;
     final detail = clench
-        ? 'Caught $seen of 3. The line: ${c.settings.clenchX.round()} times your resting jaw level.'
-        : 'Caught $seen of 3, ${c.leftKnown ? 'left and right told apart' : 'either way (left and right not told apart)'}. '
-              'The size: ${c.settings.glanceUv.round()} µV.';
+        ? 'Caught $seen of 3. It counts at ${c.settings.clenchX.round()} times your jaw at rest.'
+        : 'Caught $seen of 3, ${c.leftKnown ? 'left and right told apart' : 'either way: left and right were not told apart'}.';
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
@@ -252,9 +255,17 @@ class CalViewModel {
     this.result,
     this.saveNote,
     this.nightRunning = false,
+    this.shaped = const [],
+    this.linesAreYours = false,
   });
 
   final CalStage stage;
+
+  /// Each try's live mark (calibration_controller.dart `shaped`): true seen, false not seen, null not judged yet.
+  final List<bool?> shaped;
+
+  /// The lanes' lines come from an earlier calibration; else they are first guesses.
+  final bool linesAreYours;
   final String message;
 
   /// The try cued now (0..5), and whether its 5 s are still open.
@@ -312,6 +323,11 @@ class CalibrationView extends StatelessWidget {
         icon: const Icon(Icons.play_arrow_rounded),
         label: Text(m.stage == CalStage.failed ? 'Try again' : 'Start'),
       ),
+      CalStage.result when !_usable(m.result) => FilledButton.icon(
+        onPressed: onStart,
+        icon: const Icon(Icons.replay_rounded),
+        label: const Text('Try again'),
+      ),
       CalStage.result => FilledButton.icon(onPressed: onDone, icon: const Icon(Icons.check), label: const Text('Done')),
       _ => OutlinedButton.icon(onPressed: onStop, icon: const Icon(Icons.stop_rounded), label: const Text('Stop')),
     };
@@ -331,7 +347,10 @@ class CalibrationView extends StatelessWidget {
             TryCells(model: m),
             const SizedBox(height: 28),
             Text(m.stage == CalStage.contact ? 'Checking contact' : 'Connecting', style: text.displaySmall),
-            Para(m.message, color: Night.inkMuted),
+            const SizedBox(height: 10),
+            Text(m.message, style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4)),
+            const SizedBox(height: 28),
+            GestureLanes(jaw: const [], eyes: const [], clenchLine: m.clenchLine, glanceSize: m.glanceSize, yours: m.linesAreYours),
           ],
           CalStage.still || CalStage.trying => _running(context),
           CalStage.result => _result(context),
@@ -389,12 +408,12 @@ class CalibrationView extends StatelessWidget {
       const SizedBox(height: 10),
       Text(line, style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4, fontFeatures: tabular)),
       const SizedBox(height: 28),
-      GestureLanes(jaw: m.jaw, eyes: m.eyes, clenchLine: m.clenchLine, glanceSize: m.glanceSize),
+      GestureLanes(jaw: m.jaw, eyes: m.eyes, clenchLine: m.clenchLine, glanceSize: m.glanceSize, yours: m.linesAreYours),
       const SizedBox(height: 10),
       Text(
-        'The last $laneSeconds seconds. Jaw: both temple electrodes, in times your resting level; a clench counts '
-        'above the dashed line. Eyes: each sideways movement, up one way, down the other; a look counts past the '
-        'faint lines.',
+        'The last $laneSeconds seconds. Jaw: how strong both temple electrodes are, compared with sitting still; a '
+        'clench counts above the dashed line. Eyes: where your eyes went, up for one side and down for the other; a '
+        'look counts past the faint lines.',
         style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.4),
       ),
     ];
@@ -403,11 +422,16 @@ class CalibrationView extends StatelessWidget {
   List<Widget> _result(BuildContext context) {
     final m = model, r = m.result!;
     final text = Theme.of(context).textTheme;
-    final usable = r.settings.clenchOn || r.settings.glanceOn;
+    final usable = _usable(r);
+    final headline = !usable
+        ? 'Not clear enough'
+        : r.settings.clenchOn && r.settings.glanceOn
+        ? 'Both work'
+        : '${gestureName(r.settings.clenchOn ? GestureKind.clench : GestureKind.glance)} works';
     return [
       TryCells(model: m),
       const SizedBox(height: 28),
-      Text(usable ? 'Done' : 'Not clear enough', style: text.displaySmall),
+      Text(headline, style: text.displaySmall),
       Para(
         usable
             ? 'Saved. Switch hands-free on in Settings to use ${r.settings.clenchOn && r.settings.glanceOn ? 'both gestures' : 'it'}.'
@@ -418,6 +442,12 @@ class CalibrationView extends StatelessWidget {
       const SizedBox(height: 8),
       for (final k in GestureKind.values) _Verdict(kind: k, result: r),
       const SectionHeading('Each try'),
+      Text(
+        'Clench: how strong, in times your jaw at rest. Look: how far your eyes moved, in microvolts (µV) at the '
+        'temples.',
+        style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.4),
+      ),
+      const SizedBox(height: 6),
       for (final (i, t) in r.tries.indexed) _TryRow(n: i + 1, result: t, last: i == r.tries.length - 1),
       if (r.others > 0) ...[
         const SizedBox(height: 12),
@@ -430,6 +460,8 @@ class CalibrationView extends StatelessWidget {
     ];
   }
 }
+
+bool _usable(GestureCalibration? r) => r != null && (r.settings.clenchOn || r.settings.glanceOn);
 
 class _Verdict extends StatelessWidget {
   const _Verdict({required this.kind, required this.result});
@@ -537,11 +569,16 @@ class TryCells extends StatelessWidget {
   Widget build(BuildContext context) {
     final m = model, text = Theme.of(context).textTheme;
     final r = m.result;
+    String live(int i) {
+      final now = m.tryNow;
+      if (now == null || i > now) return 'to come';
+      if (i == now) return 'now';
+      final seen = i < m.shaped.length ? m.shaped[i] : null;
+      return seen == null ? 'done' : (seen ? 'seen' : 'not seen');
+    }
+
     final words = [
-      for (var i = 0; i < calTries.length; i++)
-        r != null
-            ? (r.tries[i].why == 'ok' ? 'caught' : 'missed')
-            : (m.tryNow == null || i > m.tryNow! ? 'to come' : (i == m.tryNow ? 'now' : 'done')),
+      for (var i = 0; i < calTries.length; i++) r != null ? (r.tries[i].why == 'ok' ? 'caught' : 'missed') : live(i),
     ];
     final step = m.stage == CalStage.still
         ? 'Sitting still'
@@ -553,8 +590,9 @@ class TryCells extends StatelessWidget {
     Widget cell(int i) {
       final w = words[i];
       final (fill, border) = switch (w) {
-        'caught' => (Night.saved, null),
-        'missed' || 'done' => (Night.track, null),
+        'caught' || 'seen' => (Night.saved, null),
+        'missed' || 'not seen' => (Night.track, null),
+        'done' => (Night.track, Night.inkMuted),
         'now' => (Night.track, Night.live),
         _ => (Colors.transparent, Night.rule),
       };
@@ -566,7 +604,7 @@ class TryCells extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
           border: border == null ? null : Border.all(color: border, width: w == 'now' ? 2 : 1),
         ),
-        child: w == 'missed' ? const Center(child: SizedBox(width: 12, height: 2, child: ColoredBox(color: Night.caution))) : null,
+        child: w == 'missed' || w == 'not seen' ? const Center(child: SizedBox(width: 12, height: 2, child: ColoredBox(color: Night.caution))) : null,
       );
     }
 
@@ -600,11 +638,21 @@ class TryCells extends StatelessWidget {
 /// The two live lanes: Jaw (bars per 0.1 s on a log scale from 1 to 100 times the resting level, the clench line
 /// dashed) and Eyes (each sideways movement as a step up or down from the middle, the glance size as faint rules).
 class GestureLanes extends StatelessWidget {
-  const GestureLanes({super.key, required this.jaw, required this.eyes, required this.clenchLine, required this.glanceSize});
+  const GestureLanes({
+    super.key,
+    required this.jaw,
+    required this.eyes,
+    required this.clenchLine,
+    required this.glanceSize,
+    this.yours = false,
+  });
   final List<double> jaw;
   final List<LaneStep> eyes;
   final double clenchLine;
   final double glanceSize;
+
+  /// The lines come from an earlier calibration; else they are first guesses and say so.
+  final bool yours;
 
   @override
   Widget build(BuildContext context) {
@@ -630,9 +678,14 @@ class GestureLanes extends StatelessWidget {
       excludeSemantics: true,
       child: Column(
         children: [
-          lane('Jaw', learning ? 'learning your resting level' : 'counts from ${clenchLine.round()} x', _JawPainter(jaw, clenchLine), 72),
+          lane(
+            'Jaw',
+            learning ? 'learning your jaw at rest' : '${yours ? 'yours' : 'first guess'}: ${clenchLine.round()} x',
+            _JawPainter(jaw, clenchLine),
+            72,
+          ),
           const SizedBox(height: 16),
-          lane('Eyes', 'counts from ${glanceSize.round()} µV', _EyePainter(eyes, glanceSize), 72),
+          lane('Eyes', yours ? 'your look size' : 'first-guess look size', _EyePainter(eyes, glanceSize), 72),
         ],
       ),
     );
@@ -696,15 +749,22 @@ class _EyePainter extends CustomPainter {
     canvas.drawLine(Offset(0, mid - g), Offset(s.width, mid - g), rule);
     canvas.drawLine(Offset(0, mid + g), Offset(s.width, mid + g), rule);
     canvas.drawLine(Offset(0, mid), Offset(s.width, mid), rule..color = Night.saved);
+    // where the eyes went: a step line from the middle, up for one side, down for the other, holding between moves
     final ink = Paint()
       ..color = Night.ink
-      ..strokeWidth = 3
-      ..strokeCap = StrokeCap.round;
-    for (final e in eyes) {
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke
+      ..strokeJoin = StrokeJoin.round;
+    final path = Path()..moveTo(0, mid);
+    var y = mid;
+    for (final e in [...eyes]..sort((a, b) => b.ago.compareTo(a.ago))) {
       final x = s.width * (1 - e.ago / laneSeconds);
-      final h = (e.step.abs() / top).clamp(0.0, 1.0) * (mid - 3);
-      canvas.drawLine(Offset(x, mid), Offset(x, e.step > 0 ? mid - h : mid + h), ink);
+      path.lineTo(x, y);
+      y = (y - e.step / top * mid).clamp(3.0, s.height - 3);
+      path.lineTo(x, y);
     }
+    path.lineTo(s.width, y);
+    canvas.drawPath(path, ink);
   }
 
   @override

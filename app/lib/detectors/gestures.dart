@@ -425,6 +425,13 @@ GestureCluster? _tryCluster(Gestures g, GestureTry t) {
 
 String _why(GestureCluster c, GestureSettings s) => c.kind == GestureKind.clench ? clenchWhy(c, s) : glanceWhy(c, s);
 
+/// Whether a try so far has a gesture's shape at any level (timing, quiet around, two opposite steps): the calibration
+/// page's live mark before the levels are set. Not in the Python reference: it decides nothing that is saved.
+bool tryShaped(Gestures g, GestureTry t) {
+  final c = _tryCluster(g, t);
+  return c != null && _why(c, const GestureSettings(clenchX: 0, glanceUv: 0)) == 'ok';
+}
+
 /// Tunes the clench level, the glance size and which way is left from a calibration run, then says for every cued
 /// try whether the tuned settings recognise it (and if not, which rule it broke). Only tries that have a gesture's
 /// shape at any level (timing, quiet around, two opposite steps) set the levels. Clusters do not depend on the

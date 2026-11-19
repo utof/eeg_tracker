@@ -112,6 +112,13 @@ class CalibrationController extends ChangeNotifier {
     return t != null && seconds - tries[t].cue < timing.windowS;
   }
 
+  /// Each try's live mark once the next one is cued: true when it had a gesture's shape, false when not (null: not
+  /// judged yet). The result's verdicts replace them at the end.
+  final List<bool?> shaped = List.filled(calTries.length, null);
+
+  /// The clench line and glance size come from an earlier calibration (else they are the first guesses).
+  bool linesAreYours = false;
+
   /// The result, once the six tries are done.
   GestureCalibration? result;
   CalibrationRecord? saved;
@@ -135,6 +142,7 @@ class CalibrationController extends ChangeNotifier {
   Detectors? _seen;
   ChunkWriter? _writer;
   final List<GestureSecond> _inputs = [];
+  Gestures _loose = Gestures(settings: const GestureSettings(clenchOn: false, glanceOn: false));
   final List<EyeMove> _moves = [];
   int? _lastPack;
   DateTime? _startedAt;
@@ -201,6 +209,8 @@ class CalibrationController extends ChangeNotifier {
     _seen = null;
     _writer = null;
     _inputs.clear();
+    _loose = Gestures(settings: const GestureSettings(clenchOn: false, glanceOn: false));
+    shaped.fillRange(0, shaped.length, null);
     _moves.clear();
     _lastPack = null;
     _startedAt = null;
@@ -215,6 +225,7 @@ class CalibrationController extends ChangeNotifier {
     contact = const {};
     message = '';
     final before = store?.load().calibration?.settings;
+    linesAreYours = before != null;
     clenchLine = before?.clenchX ?? GestureRule.clenchX;
     glanceSize = before?.glanceUv ?? GestureRule.glanceUv;
   }
@@ -247,6 +258,7 @@ class CalibrationController extends ChangeNotifier {
   /// Every second as it ends: the recogniser's input, the lanes, and the plan.
   void _second(GestureSecond s) {
     _inputs.add(s);
+    _loose.second(s);
     seconds = s.k + 1;
     for (var j = 0; j < ticksPerSecond; j++) {
       final r3 = s.rest3, r4 = s.rest4;
@@ -270,6 +282,7 @@ class CalibrationController extends ChangeNotifier {
     if (seconds < timing.stillS) return;
     final i = (seconds - timing.stillS) ~/ timing.tryEveryS;
     if (i == tryNow) return;
+    if (i > 0) shaped[i - 1] = tryShaped(_loose, tries[i - 1]);
     tryNow = i;
     final kind = calTries[i];
     kind == GestureKind.clench ? _sound?.close() : _sound?.open();

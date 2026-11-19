@@ -199,6 +199,8 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
           result: c.result,
           saveNote: c.saveNote,
           nightRunning: _nightRunning,
+          shaped: List.of(c.shaped),
+          linesAreYours: c.linesAreYours,
         ),
         onStart: () => unawaited(_start()),
         onStop: () => unawaited(c.stop()),

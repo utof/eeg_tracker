@@ -12,7 +12,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'hands_free_screen.dart' show activeGestures;
-import '../sound/gesture_tone.dart';
+import '../sound/soloud_gesture_tone.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 

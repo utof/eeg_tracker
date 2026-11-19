@@ -532,7 +532,7 @@ void main() {
       expect(c.stage, CalStage.setup);
       expect(store.load().calibration, isNull);
       final eeg = Directory('${root.path}/hands-free/recordings');
-      expect(eeg.existsSync() ? eeg.listSync() : const [], isEmpty);
+      expect(eeg.existsSync() ? eeg.listSync() : const <FileSystemEntity>[], isEmpty);
       c.dispose();
     });
 
