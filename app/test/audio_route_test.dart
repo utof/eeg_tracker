@@ -50,6 +50,26 @@ void main() {
     }
   });
 
+  test('a cue that must be heard: the media volume off or low, or Bluetooth taking it, is said before the session', () {
+    expect(cueCheck(volume: (volume: 0, max: 15), cue: 'the wake cue'), contains('media volume is off'));
+    final low = cueCheck(volume: (volume: 3, max: 15), cue: 'the wake cue')!;
+    expect(low, contains('3 of 15'));
+    expect(low, contains('the wake cue may not be heard'));
+    expect(cueCheck(volume: (volume: 5, max: 15), cue: 'the wake cue'), isNull, reason: 'a third of the range');
+    expect(cueCheck(volume: (volume: 2, max: 15), cue: 'the tone', floor: toneVolumeFloor), contains('2 of 15'));
+    expect(cueCheck(volume: (volume: 3, max: 15), cue: 'the tone', floor: toneVolumeFloor), isNull);
+    final bt = cueCheck(
+      volume: (volume: 10, max: 15),
+      route: const AudioRoute(RouteKind.bluetooth, device: 'Buds Pro'),
+      cue: 'the wake cue',
+    )!;
+    expect(bt, contains('Bluetooth headphones (Buds Pro)'));
+    expect(bt, contains('not from the phone\'s speaker'));
+    expect(cueCheck(route: const AudioRoute(RouteKind.bluetoothLe), cue: 'the wake cue'), contains('Bluetooth'));
+    expect(cueCheck(cue: 'the wake cue'), isNull, reason: 'nothing known: nothing said');
+    expect(cueCheck(volume: (volume: 0, max: 0), route: const AudioRoute(RouteKind.speaker), cue: 'x'), isNull);
+  });
+
   group('the platform channel', () {
     const channel = MethodChannel('eeg_tracker/audio_route');
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -102,6 +122,20 @@ void main() {
     expect(routes.listening, isTrue, reason: 'the screen keeps following it until the controller goes');
     c.dispose();
     expect(routes.listening, isFalse);
+  });
+
+  test('the media volume over the phone channel; no answer is unknown', () async {
+    const phone = MethodChannel('eeg_tracker/phone');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    addTearDown(() => messenger.setMockMethodCallHandler(phone, null));
+    messenger.setMockMethodCallHandler(phone, (call) async => call.method == 'mediaVolume' ? {'volume': 4, 'max': 15} : null);
+    expect(await phoneMediaVolume(), (volume: 4, max: 15));
+    messenger.setMockMethodCallHandler(phone, (call) async => {'volume': null, 'max': 15});
+    expect(await phoneMediaVolume(), isNull);
+    messenger.setMockMethodCallHandler(phone, (call) async => throw PlatformException(code: 'phone'));
+    expect(await phoneMediaVolume(), isNull);
+    messenger.setMockMethodCallHandler(phone, null);
+    expect(await phoneMediaVolume(), isNull);
   });
 
   test('a route that does not answer in time is unknown; the session starts anyway', () async {

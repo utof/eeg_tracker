@@ -22,6 +22,7 @@ import '../session_keeper.dart';
 import '../sleep/live_stager.dart';
 import '../sleep/onnx_runs.dart';
 import '../sound/nap_sound.dart';
+import 'cue_sound_check.dart';
 import 'evidence_sheet.dart';
 import 'nap_view.dart';
 import 'nearby.dart';
@@ -157,6 +158,8 @@ class _NapScreenState extends State<NapScreen> {
       await Phone.openSettings('bluetooth');
       return;
     }
+    // the wake cue is the nap's only way to wake you: a muted phone or headphones on the nightstand are said first
+    if (!mounted || !await confirmCueSound(context, cue: 'the wake cue', go: 'Lights off anyway')) return;
     _justEnded = false;
     _c.handsFree = await activeGestures();
     await _c.start(lengthMin: _length);

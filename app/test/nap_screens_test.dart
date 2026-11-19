@@ -9,6 +9,8 @@ import 'package:eeg_tracker/nap/controller.dart';
 import 'package:eeg_tracker/nap/rules.dart';
 import 'package:eeg_tracker/nap/store.dart';
 import 'package:eeg_tracker/sleep/live_stager.dart' show LiveMode;
+import 'package:eeg_tracker/sound/audio_route.dart';
+import 'package:eeg_tracker/ui/cue_sound_check.dart';
 import 'package:eeg_tracker/ui/nap_view.dart';
 import 'package:eeg_tracker/ui/theme.dart';
 import 'package:flutter/material.dart';
@@ -134,6 +136,46 @@ void main() {
     expect(find.textContaining('Deep sleep was starting'), findsOneWidget);
     await tester.tap(find.text("I'm awake"));
     expect(awake, isTrue);
+  });
+
+  testWidgets('the setup says where the wake sound plays and that the phone may be locked', (tester) async {
+    tester.view.physicalSize = const Size(1210, 2695);
+    tester.view.devicePixelRatio = 2.75;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: _view(states['first']!)));
+    expect(find.textContaining('or from Bluetooth headphones when they are connected'), findsOneWidget);
+    expect(find.textContaining('locking the phone can stop the nap'), findsNothing);
+    expect(find.textContaining('If you lock the phone, the nap goes on'), findsOneWidget);
+  });
+
+  testWidgets('Lights off with the media volume off: a dialog says so; Not now stops, the other button goes on', (tester) async {
+    bool? answer;
+    await tester.pumpWidget(MaterialApp(
+      theme: nightTheme(),
+      home: Builder(
+        builder: (context) => TextButton(
+          onPressed: () async => answer = await confirmCueSound(
+            context,
+            cue: 'the wake cue',
+            go: 'Lights off anyway',
+            routes: FixedAudioRoute(const AudioRoute(RouteKind.speaker)),
+            volume: () async => (volume: 0, max: 15),
+          ),
+          child: const Text('Lights off'),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('Lights off'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('media volume is off'), findsOneWidget);
+    await tester.tap(find.text('Not now'));
+    await tester.pumpAndSettle();
+    expect(answer, isFalse);
+    await tester.tap(find.text('Lights off'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lights off anyway'));
+    await tester.pumpAndSettle();
+    expect(answer, isTrue);
   });
 
   testWidgets('the report says why it woke you and how the model ran', (tester) async {
