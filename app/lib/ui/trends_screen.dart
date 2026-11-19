@@ -41,12 +41,17 @@ TrendInputs readTrendInputs(String recordingsDir) => (
 );
 
 /// Today's "Unusual for you" card from the app's folders; while it is on, the back-test log gets the finished days
-/// it does not have yet (DECISIONS 290-299). Also run off the night screen's thread for its one line.
-UnusualCard unusualToday(String recordingsDir, DateTime now) => refreshUnusual(
-  UnusualStore(unusualDirFor(recordingsDir)),
-  dailySeries(readTrendInputs(recordingsDir), extra: readOwnDayNumbers(recordingsDir)),
-  now,
-);
+/// it does not have yet (DECISIONS 290-299). Also run off the night screen's thread for its one line. Switched off,
+/// nothing else is read (DECISIONS row 586: every start and return read every night's report for nothing).
+UnusualCard unusualToday(String recordingsDir, DateTime now) {
+  final store = UnusualStore(unusualDirFor(recordingsDir));
+  if (!store.on) return offCard;
+  return refreshUnusual(
+    store,
+    dailySeries(readTrendInputs(recordingsDir), extra: readOwnDayNumbers(recordingsDir)),
+    now,
+  );
+}
 
 class TrendsScreen extends StatefulWidget {
   const TrendsScreen({super.key, this.recordingsDir});
