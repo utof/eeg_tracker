@@ -159,6 +159,9 @@ findings are on `_local/research/2026-11-18-findings.html`.
 
 ## Next tests that need the owner
 
+- **Start from Try these in the app** (main screen between nights, after Morning; DECISIONS 340): the tests below that
+  run on the phone, in order, each with its steps, a button to its screen, what to tell the assistant and a note that
+  goes out with Export data. The app ticks some by itself.
 - **Phone test** (about 1.5 h plus one night on battery): the steps in `app/README.md` on the app branch (install,
   phone settings, 1 hour screen off, the drop test, export). The assistant adds a few checks over USB while the
   phone is plugged in (forced deep sleep before the drop test, phone model, a 3-minute Bluetooth log).
