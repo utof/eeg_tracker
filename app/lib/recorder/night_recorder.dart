@@ -298,7 +298,12 @@ class NightRecorder {
   }
 
   Future<void> _begin(bool restartedBySystem) async {
-    final prior = await store.load();
+    NightState prior;
+    try {
+      prior = await store.load();
+    } catch (_) {
+      prior = const NightState(); // nothing to continue: a new night
+    }
     if (restartedBySystem && prior.active) {
       _night = prior;
       _slots.addAll(prior.slots);
@@ -349,7 +354,7 @@ class NightRecorder {
     _packets = PacketAccount(_night.packets);
     _packetsLoggedMs = _now().millisecondsSinceEpoch;
     _startCues();
-    await store.save(_night);
+    await _save();
     _set(
       RecorderStatus(
         phase: Phase.searching,
@@ -391,8 +396,27 @@ class NightRecorder {
         await _pause(timing.notFoundWaitLong);
         continue;
       }
-      if (await _session(band, w) == _End.stuck) return;
+      final _End end;
+      try {
+        end = await _session(band, w);
+      } catch (e) {
+        await _runFailed(w, e);
+        continue;
+      }
+      if (end == _End.stuck) return;
     }
+  }
+
+  /// Nothing unexpected may end the night (the service would stay up, idle, until morning): the run's files are
+  /// closed, one line says why, and after a pause (so a fault that repeats cannot spin) the loop reconnects.
+  Future<void> _runFailed(ChunkWriter w, Object e) async {
+    try {
+      w.close();
+      _lastLog = File('${dir.path}/${w.stem}.log');
+      _note('the run ended on an unexpected error: ${_short(e)}; the night goes on');
+      _set(_status.copyWith(phase: Phase.reconnecting, note: 'error; reconnecting'));
+    } catch (_) {}
+    await _pause(timing.retryWait);
   }
 
   /// No headband yet tonight: scan until it turns up.
@@ -554,19 +578,24 @@ class NightRecorder {
         end = lost ? _End.lost : _End.failed;
       }
     } on SdkStuck catch (e) {
-      await sigSub?.cancel();
-      await rangeSub.cancel();
-      await notesSub?.cancel();
+      await _cancel([sigSub, rangeSub, notesSub]);
       await _stuck(e, w);
       return _End.stuck;
     } catch (e) {
       // Anything unexpected ends this run only; the night goes on with a reconnect.
       w.log('unexpected error: ${_short(e)}');
     }
-    await sigSub?.cancel();
-    await rangeSub.cancel();
-    await notesSub?.cancel();
+    await _cancel([sigSub, rangeSub, notesSub]);
     return _finish(band, w, end, isLost);
+  }
+
+  /// Ends a run's subscriptions; a failing cancel costs nothing.
+  static Future<void> _cancel(List<StreamSubscription<Object?>?> subs) async {
+    for (final s in subs) {
+      try {
+        await s?.cancel();
+      } catch (_) {}
+    }
   }
 
   /// First line of a run that follows a drop: how the headband came back and how long the gap was so far.
@@ -1096,7 +1125,7 @@ class NightRecorder {
 
   /// Closes a run. Data first; SDK calls only for a headband that is still in range.
   Future<_End> _finish(Headband band, ChunkWriter w, _End end, bool Function() lost) async {
-    w.sync();
+    _syncQuietly(w);
     _night = _night.copyWith(samples: _night.samples + w.samplesWritten);
     _status = _status.copyWith(nightSamples: _night.samples);
     _logPackets(w);
@@ -1192,7 +1221,7 @@ class NightRecorder {
   /// An SDK call blocked: save, then let the app restart its process (unless the user is stopping).
   Future<void> _stuck(SdkStuck e, ChunkWriter? w) async {
     if (w != null && !w.isClosed) {
-      w.sync();
+      _syncQuietly(w);
       _night = _night.copyWith(samples: _night.samples + w.samplesWritten);
       w.log('$e; saved${_stopping ? '' : ', restarting the app process'}');
       w.close();
@@ -1201,6 +1230,16 @@ class NightRecorder {
     if (_stopping) return;
     _set(_status.copyWith(phase: Phase.reconnecting, note: 'Bluetooth stuck; restarting the recorder'));
     await onStuck(e.toString());
+  }
+
+  /// [ChunkWriter.sync] where a failure (storage full) must not stop what follows: the headband is still let go
+  /// properly and the night goes on. The `.log` says so when it can.
+  void _syncQuietly(ChunkWriter w) {
+    try {
+      w.sync();
+    } catch (e) {
+      w.log('could not save the newest data: ${_short(e)}');
+    }
   }
 
   Future<T> _sdk<T>(String what, Future<T> Function() call) =>
@@ -1300,19 +1339,28 @@ class NightRecorder {
     } catch (_) {}
   }
 
-  /// Persists the night. It stays "active" unless the user ended it, so a restart continues it.
+  /// Persists the night. It stays "active" unless the user ended it, so a restart continues it. Never throws: the
+  /// saved night only helps a restarted process, and a store that fails must not cost the recording (one log line).
   Future<void> _save() async {
     final w = _writer;
     final live = w == null || w.isClosed ? 0 : w.samplesWritten;
-    await store.save(
-      _night.copyWith(
-        active: !(_stopping && _endNight),
-        samples: _night.samples + live,
-        slots: Map.of(_slots),
-        packets: _packets.counts,
-      ),
-    );
+    try {
+      await store.save(
+        _night.copyWith(
+          active: !(_stopping && _endNight),
+          samples: _night.samples + live,
+          slots: Map.of(_slots),
+          packets: _packets.counts,
+        ),
+      );
+    } catch (e) {
+      if (_saveFailed) return;
+      _saveFailed = true;
+      _logLine('could not save the night state: ${_short(e)}; the recording goes on');
+    }
   }
+
+  bool _saveFailed = false;
 
   Future<List<String>> _exitReasons(int sinceMs) async {
     try {

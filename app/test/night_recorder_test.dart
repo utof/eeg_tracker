@@ -581,6 +581,51 @@ void main() {
     expect(store.state.packets.longestGap, 3);
   });
 
+  test('a write error (storage full) ends that run only: the night goes on in a new file set', () async {
+    // The first run's .idx is a device that is always full (ENOSPC on every write), as a phone out of storage.
+    final t0 = DateTime(2026, 11, 19, 23);
+    final sw = Stopwatch()..start();
+    Link('${dir.path}/${fileStem(t0)}.idx').createSync('/dev/full');
+    final first = FakeBand('a');
+    final second = FakeBand('b');
+    final r = recorder(FakeFinder([first], direct: [second]), clock: () => t0.add(sw.elapsed));
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    expect(r.finished, isFalse, reason: 'an IO error must never end the night');
+    await r.stop();
+    await running;
+
+    final f32 = files('f32');
+    expect(f32, hasLength(2));
+    expect(f32[0].lengthSync() % recordBytes, 0);
+    expect(f32Records(f32[1]), greaterThan(0));
+    expect(f32Records(f32[1]), second.emitted);
+    expect(first.calls, containsAllInOrder(['stopSignal', 'disconnect'])); // let go properly: it was in range
+    expect(files('log').first.readAsStringSync(), contains('unexpected error'));
+    expect(store.state.active, isFalse);
+  });
+
+  test('a night store that cannot save costs one log line, not the recording', () async {
+    final band = FakeBand('a');
+    final r = NightRecorder(
+      finder: FakeFinder([band]),
+      dir: dir,
+      store: _BrokenStore(),
+      onStatus: statuses.add,
+      onStuck: (r) async => stuck.add(r),
+      timing: fast,
+      watch: null,
+    );
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect(r.finished, isFalse);
+    await r.stop();
+    await running;
+    expect(f32Records(files('f32').single), band.emitted);
+    expect(band.emitted, greaterThan(0));
+    expect(RegExp('could not save the night state').allMatches(files('log').single.readAsStringSync()), hasLength(1));
+  });
+
   test('packet accounting: a restarted process continues the night\'s counts; a new run is not compared', () async {
     store.state = const NightState(
       active: true,
@@ -600,4 +645,12 @@ void main() {
     expect(store.state.packets.longestGap, 4);
     expect(store.state.packets.samples, greaterThan(1000));
   });
+}
+
+class _BrokenStore implements NightStore {
+  @override
+  Future<NightState> load() async => throw StateError('no preferences');
+
+  @override
+  Future<void> save(NightState state) async => throw StateError('no preferences');
 }
