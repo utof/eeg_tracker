@@ -607,6 +607,7 @@ class _SignalLine extends StatelessWidget {
     final (icon, color, words) = switch (signal) {
       WorkSignal.good => (Icons.circle, Night.live, 'Signal good'),
       WorkSignal.noisy => (Icons.adjust, Night.caution, 'Noisy: talking, chewing or moving'),
+      WorkSignal.noEyes => (Icons.adjust, Night.caution, 'An electrode has no contact: eye readings paused'),
       WorkSignal.off => (Icons.radio_button_unchecked, Night.caution, 'No usable signal: is the headband on?'),
       WorkSignal.lost => (Icons.radio_button_unchecked, Night.problem, 'No signal: reconnecting'),
     };

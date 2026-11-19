@@ -30,8 +30,9 @@ enum WorkStage { setup, connecting, contact, eyesClosed, calibrating, running, e
 /// One 5-minute cell of the last hour's strip: what the level read at its end, or a break, or nothing yet.
 enum WorkCell { none, unknown, alert, gettingDrowsy, drowsy, onBreak }
 
-/// How the signal is now, in four words' worth.
-enum WorkSignal { good, noisy, lost, off }
+/// How the signal is now, in four words' worth; [noEyes]: good enough for alpha, but an electrode the blink and
+/// eye-movement detectors need has no contact, so the eye readings are paused.
+enum WorkSignal { good, noisy, noEyes, lost, off }
 
 /// The strip: 12 cells of 5 minutes, oldest first, the newest ending now.
 const int stripCells = 12, cellMinutes = 5;
@@ -172,7 +173,8 @@ class WorkController extends ChangeNotifier {
     if (signalLost) return WorkSignal.lost;
     if (!worn) return WorkSignal.off;
     final last = _drowsy?.epochs.lastOrNull;
-    return last != null && last.cleanS < WorkRule.minCleanS ? WorkSignal.noisy : WorkSignal.good;
+    if (last != null && last.cleanS < WorkRule.minCleanS) return WorkSignal.noisy;
+    return (_drowsy?.eyesPaused ?? false) ? WorkSignal.noEyes : WorkSignal.good;
   }
 
   BandLink? _link;

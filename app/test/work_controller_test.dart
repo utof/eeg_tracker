@@ -40,6 +40,9 @@ class WorkBand implements Headband {
 
   /// What mends a stall: 'restart' (the stream started again) or 'reconnect' (a new connection); null: nothing.
   String? healOn;
+
+  /// T4 has lost contact: held at the rail.
+  bool t4lost = false;
   bool _started = false;
   final List<String> calls = [];
   final _signal = StreamController<List<Sample>>.broadcast(sync: true);
@@ -78,7 +81,7 @@ class WorkBand implements Headband {
         o1: (alpha + blink + slow + _noise()) * 1e-6,
         o2: (alpha * 0.9 + blink - slow + _noise()) * 1e-6,
         t3: (blink + eye + slow + _noise()) * 1e-6,
-        t4: (blink - eye - slow + _noise()) * 1e-6,
+        t4: t4lost ? 0.4 : (blink - eye - slow + _noise()) * 1e-6,
       ));
     }
     return out;
@@ -523,6 +526,27 @@ void main() {
     expect(c.planner!.breaks, isEmpty, reason: 'under a minute without data');
     expect(c.signal, WorkSignal.good);
     expect(c.level, DrowsyLevel.alert);
+    await c.stop();
+    c.dispose();
+  });
+
+  test('one electrode losing contact pauses the eye readings instead of reading as drowsy (review 2026-11-20, finding 3)', () async {
+    final band = WorkBand(start: DateTime(2026, 11, 20, 10).millisecondsSinceEpoch / 1000);
+    final c = make(band);
+    await c.start();
+    await until(() => c.level == DrowsyLevel.alert);
+    final at = band.clockS;
+    band.t4lost = true;
+    await until(() => band.clockS > at + 12 * 60);
+    expect(c.level, DrowsyLevel.alert, reason: 'window ${c.drowsiness!.window}');
+    expect(c.hint, isNull);
+    expect(c.signal, WorkSignal.noEyes, reason: 'the signal line says the eye readings are paused');
+    final last = c.drowsiness!.epochs.last;
+    expect(last.events, isNull);
+    expect(last.still, isNull);
+    band.t4lost = false;
+    await until(() => band.clockS > at + 14 * 60);
+    expect(c.signal, WorkSignal.good);
     await c.stop();
     c.dispose();
   });
