@@ -320,19 +320,15 @@ class OwnHeadband implements Headband, BandNotes, MendsDrops {
         keepOpen: true,
         giveUpAfter: timing.healFor,
         onConnected: (info, attempt) {
-          _reconnects++;
-          final away = _lostAt == null ? 0 : _now().difference(_lostAt!).inMilliseconds / 1000;
-          _lostAt = null;
           _status = info.status ?? _status;
-          _note(
-            'reconnected after ${away.toStringAsFixed(1)} s away (try ${attempt + 1}), battery '
-            '${info.status?.battery ?? '?'}%; same files',
-          );
+          _reconnected('try ${attempt + 1}');
         },
         onLost: (e, attempt, pause) {
           _lostAt ??= _now();
           _note(
-            pause == Duration.zero
+            stopping.isSet
+                ? 'headband lost: $e; no further tries: the signal was stopped'
+                : pause == Duration.zero
                 ? 'headband lost: $e; still away after ${_now().difference(_lostAt!).inSeconds} s, handing over to the '
                       "app's reconnect"
                 : 'headband lost: $e; trying again in ${_secs(pause)} s (try ${attempt + 1})',
@@ -342,8 +338,25 @@ class OwnHeadband implements Headband, BandNotes, MendsDrops {
     } catch (e) {
       _note('own connection stopped unexpectedly: $e'); // a bug, not a drop: treated as lost
     }
+    // A try under way as the signal was stopped may have got the link back; the driver does not report that one.
+    if (_lostAt != null && _drv.isConnected) _reconnected('as the signal was stopped');
     if (stopping.isSet || _disposed) return; // stopped on request
     if (!ok) _giveUp();
+  }
+
+  /// The `reconnected` note; the next drop is timed from its own start. Without a drop seen by this object (the link
+  /// closed while no signal ran, e.g. during the contact check) there is no time away to give.
+  void _reconnected(String how) {
+    _reconnects++;
+    final lostAt = _lostAt;
+    _lostAt = null;
+    final battery = 'battery ${_status?.battery ?? '?'}%; same files';
+    _note(
+      lostAt == null
+          ? 'reconnected ($how) after the link closed while the signal was off, $battery'
+          : 'reconnected after ${(_now().difference(lostAt).inMilliseconds / 1000).toStringAsFixed(1)} s away ($how), '
+                '$battery',
+    );
   }
 
   void _giveUp() {
