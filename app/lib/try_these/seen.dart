@@ -32,6 +32,7 @@ const Map<String, SeenCheck> seenChecks = {
   'sharp': _sharp,
   'diy-board': _diyBoard,
   'study': _study,
+  'memory-cues': _memoryCues,
 };
 
 /// The checks of [ids] (the cards not touched yet) that see something, in [ids]' order.
@@ -228,4 +229,13 @@ String? _study(Directory files) {
     if (j['kind'] == 'morning') morning = true;
   }
   return evening && morning ? 'An evening and a morning answered.' : null;
+}
+
+/// Memory cues: a morning test done (the evening task and a night came before it).
+String? _memoryCues(Directory files) {
+  for (final f in _files(files, 'memory_cues/mornings', '.json')) {
+    final taps = _json(f)?['taps'];
+    if (taps is Map && taps.isNotEmpty) return 'A morning test done on ${_stampDay(f) ?? 'this phone'}.';
+  }
+  return null;
 }

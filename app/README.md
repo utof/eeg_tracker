@@ -986,6 +986,53 @@ recorder, or the eye-signal finder.
 5. Export data after a few nights: the laptop can replay the cue rule on your nights (`analysis/lucid_cues.py`) and
    check the eye signals you made in step 2 (`analysis/lucid_signals.py`).
 
+## Memory cues (the assistant's proposal; off unless you switch it on)
+
+Soft sounds in deep sleep for one half of an evening task, tested the next morning: targeted memory reactivation as
+a self-test. The assistant's proposal: the evidence is weak (a small effect in the lab, several recent studies found
+none, a 13-lab replication is due around 2027), and sounds that wake you make the cued memories worse. The **i**
+button says what the research shows (`docs/evidence/memory-cues.md`); the page says who should not use it. Never on a
+night with the lucid dream cues: one kind of cue a night.
+
+1. **Settings** (the gear on the main screen), **Memory cues**, **Turn on**. Once on, the main screen has a Memory
+   cues section between nights.
+2. Each evening, before Start night: **Start the evening task** (about 12 minutes). Set the media volume so the
+   sounds are soft but clear and leave it there. 32 objects appear one by one at their places on a board, half with a
+   soft bell, half with a soft knock; then put each one back (you see where it was and hear its sound again; up to 3
+   rounds); then once more with no help. Last, lie down with the phone where it stays tonight and tap **I hear it** as
+   soon as you hear the bell, then the knock (each plays every 3 s, a little louder each time).
+3. **Start night** within 3 hours, and tap **Lights off** when you settle. From 30 minutes to 4.5 hours after it,
+   when the headband reads light or deep sleep and you lie still, one of the two sounds plays, 3 dB under where you
+   tapped: at most one every 10 s and 120 a night; a stir makes it quieter and pauses it, three stirs end it.
+4. In the morning, before anything else: **Start the morning test**, the same board with no help (about 2 minutes),
+   and "did you hear a sound in the night?". The page then shows the board with a line from each object's place to
+   where you put it, and the numbers against the evening.
+5. The test: in each block of 4 nights, 2 are silent on purpose, and which half's sound plays is a coin you are not
+   told. After 12 finished nights the page shows, on nights with sound, whether the half whose sound played drifted
+   less overnight than the other half, "tested" apart from what is only "seen together". Expect "not clear": about 24
+   nights would be needed to see the best home study's effect.
+
+Files, app-private: `files/memory_cues/` (the settings, each evening's session, the night records, the mornings, the
+sealed order of the nights and halves; docs/data-format.md "Memory cues"). Export data takes them; please do not open
+`sealed.json` or `plays.jsonl` on the laptop before the results open. The cue moments are markers in the night's
+recording, the same on silent nights.
+
+### Owner step: the first week (12 minutes an evening, 2 minutes a morning)
+
+Nothing of this has run on a phone or a head yet: not the sounds at night, the model running the night's first hours
+inside the recorder, or the board on a real screen.
+
+1. The first evening: Settings, **Memory cues**, **Turn on**, then **Start the evening task** to the end. Then Start
+   night and Lights off as usual.
+2. Each morning do the morning test before anything else.
+3. After the first night tell the assistant:
+   - Whether you heard the sounds at the loudness you tapped, and whether the night woke you (the page's "A stir after
+     one" and your answer).
+   - The night's `.log` end line `memory cues: ... s of the recorder's time` (with the smart alarm on too, `smart alarm
+     and memory cues, one sleep model: ...`), and any line starting `memory cues stopped` or `memory cues off`.
+   - How long the evening task took, and whether the board was too hard or too easy (the page's "Placed close").
+4. Export data after a few nights: the laptop can replay the cue rule on your nights (`analysis/memory_cues.py`).
+
 ## Sound for states
 
 Calm sound to help you fall asleep, relax, focus, take a break or wake up. A beat is an optional extra. With the

@@ -27,6 +27,7 @@ const Map<TryOpen, IconData> _openIcons = {
   TryOpen.experiments: Icons.science_outlined,
   TryOpen.sharpHours: Icons.schedule,
   TryOpen.study: Icons.menu_book_outlined,
+  TryOpen.memory: Icons.grid_view_outlined,
   TryOpen.ownBle: Icons.bluetooth_searching,
 };
 
