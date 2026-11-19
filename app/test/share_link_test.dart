@@ -41,6 +41,9 @@ class FakeLaptop {
   }
 
   Future<void> _handle(HttpRequest r) async {
+    // like Python's http.server: the body is read by its Content-Length, never chunked
+    expect(r.headers.chunkedTransferEncoding, isFalse);
+    expect(r.headers.contentLength, greaterThan(0));
     final body = jsonDecode(await utf8.decodeStream(r)) as Map;
     final via = body['via'] as String;
     final secret = via == 'code' ? code : key;

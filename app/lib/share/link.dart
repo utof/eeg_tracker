@@ -210,16 +210,18 @@ class LinkClient {
       final req = await client.post(host, port, path).timeout(timeout);
       req.followRedirects = false;
       req.headers.contentType = ContentType.json;
-      req.write(jsonEncode(body));
+      final bytes = utf8.encode(jsonEncode(body));
+      req.contentLength = bytes.length; // not chunked: the laptop (Python's http.server) reads Content-Length
+      req.add(bytes);
       final res = await req.close().timeout(timeout);
-      final bytes = <int>[];
+      final got = <int>[];
       await for (final chunk in res.timeout(timeout)) {
-        bytes.addAll(chunk);
-        if (bytes.length > _maxAnswer) throw const LinkError(LinkFailure.bad, 'answer too long');
+        got.addAll(chunk);
+        if (got.length > _maxAnswer) throw const LinkError(LinkFailure.bad, 'answer too long');
       }
       Object? answer;
       try {
-        answer = jsonDecode(utf8.decode(bytes));
+        answer = jsonDecode(utf8.decode(got));
       } on FormatException {
         answer = null;
       }

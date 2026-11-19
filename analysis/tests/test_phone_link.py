@@ -193,6 +193,13 @@ def test_too_big_and_not_json(link: pl.Link, server: Server) -> None:
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(req, timeout=5)
     assert e.value.code == 400
+    # a chunked body (Dart's HttpClient sends one unless told the length) is refused plainly, not read as empty
+    import http.client
+    c = http.client.HTTPConnection("127.0.0.1", int(server.base.rsplit(":", 1)[1]), timeout=5)
+    c.request("POST", "/link/hello", body=iter([b'{"v": 1}']), headers={"Transfer-Encoding": "chunked"},
+              encode_chunked=True)
+    assert c.getresponse().status == 411
+    c.close()
 
 
 def test_only_the_local_network(link: pl.Link) -> None:

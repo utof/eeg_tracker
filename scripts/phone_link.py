@@ -406,6 +406,10 @@ def make_handler(link: Link, client_of: Callable[[BaseHTTPRequestHandler], str] 
             c = self._client()
             if c is None:
                 return
+            if self.headers.get("Transfer-Encoding") or self.headers.get("Content-Length") is None:
+                self.close_connection = True  # a chunked body is not read here: the client must say its length
+                self._json(411, {"error": "length required"})
+                return
             try:
                 n = int(self.headers.get("Content-Length") or 0)
             except ValueError:
