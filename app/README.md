@@ -191,6 +191,19 @@ hours switched on armed its questions beside the smart alarm's alarm clock, and 
 emulator refuses to boot ("not enough disk space") when the disk that holds the AVD is nearly full: free space there,
 or make an AVD of your own elsewhere (`ANDROID_AVD_HOME=/var/tmp/<name> avdmanager create avd ...`).
 
+**The DIY board** (`feat/app-diy-board`, 2026-11-19, release x86_64, DECISIONS rows 360-369): the console's
+`adb emu redir add udp:9000:9000` does not reach the guest's `wlan0` on the API 36 image, so the frames are sent from
+inside: frames from the fake board's encoder (`fake_board.encode` in `tests/fake_diy/fake_board.py`, consecutive
+sequence numbers) into a file, `adb push` it to `/data/local/tmp/frames.bin`, **DIY board (test)** on Headband
+connection, **Start night**, then `adb shell 'i=0; (while [ $i -lt 600 ]; do dd if=/data/local/tmp/frames.bin bs=37
+skip=$i count=1 2>/dev/null; sleep 0.02; i=$((i+1)); done) | nc -u -q 1 10.0.2.16 9000'` (10.0.2.16: the address the
+page shows). With Bluetooth's permissions revoked first (`adb shell pm revoke io.github.utof.eeg_tracker
+android.permission.BLUETOOTH_CONNECT`, and `BLUETOOTH_SCAN`) the night started, the screen read "Recording the board's
+test signal. It is not EEG." with 3750 µV on every channel and the alarm line "the sleep model is off", and after Stop
+(`adb root`, `adb pull .../files/recordings-diy`) all 600 frames were in the `.f32`, in order, scaled as on the laptop.
+The emulator's OpenThread simulator holds UDP 9000 on a multicast address, so the `.log`'s link line says the port is
+shared.
+
 ## Meditate
 
 1. Make sure no night is being recorded (the headband talks to one thing at a time). Put the headband on and

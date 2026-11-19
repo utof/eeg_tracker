@@ -110,7 +110,9 @@ in `app/lib/headband/diy/`, and a test keeps it so.
   shows this phone's Wi-Fi address for the firmware's `UDP_HOST`, and holds the channel names (four, CH1 to CH4;
   default O1 O2 Fz Fp1, as on the laptop).
 - **The night.** The recorder's service builds the board's finder itself (`app/lib/headband/diy/night.dart`): one UDP
-  listener all night on every IPv4 interface, a Wi-Fi lock while it records (shared with Share on Wi-Fi), and the
+  listener all night on every IPv4 interface (alone when it can be, else shared with address reuse, said in the log:
+  the emulator's OpenThread simulator holds port 9000 on a multicast address), a Wi-Fi lock while it records (shared
+  with Share on Wi-Fi), and the
   app's night recorder unchanged in its rules (one file set per run, `.log` lines, markers, Lights off as a marker,
   the phone's alarm). The board object (`board.dart`) holds one capture; the decoder (`e9.dart`) is a line-for-line
   port of `scripts/diy_board.py` and both are pinned to the same results by `app/test/fixtures/diy_vectors.json`
@@ -140,8 +142,10 @@ in `app/lib/headband/diy/`, and a test keeps it so.
 
 The owner's steps are in `app/README.md`, "The DIY board". TO VERIFY on the real board, beyond the laptop's list: the
 board's datagrams reaching the phone with the screen off (HyperOS, the Wi-Fi lock), the Wi-Fi loss rate over a night,
-and whether Android starts the night's service with Bluetooth never allowed (the app declares `CHANGE_WIFI_STATE` for
-that; checked on the emulator only).
+and whether Android starts the night's service with Bluetooth never allowed on HyperOS (the app declares
+`CHANGE_WIFI_STATE` for that; on the API 36 emulator, with Bluetooth's permissions revoked, the night started and
+recorded: 600 frames sent inside the emulator to its Wi-Fi address, all 600 in the file, in order; app/README.md,
+emulator step 9).
 
 ## Verified and TO VERIFY
 
