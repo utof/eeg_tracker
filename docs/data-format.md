@@ -13,9 +13,10 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 | Morning check-in on the phone | `files/mornings/<start>.morning.json` and the visit's raw `<stamp>.f32/.idx/.log/.markers.jsonl` | the phone app (`app/lib/morning/`) |
 | The phone's export folder | `<picked folder>/eeg-export/`: the app's files in their own layout, `manifest.json`, `exports.jsonl` | the phone app's Export data (`app/lib/export/`); read by `scripts/import_phone.py` |
 | The phone over Wi-Fi | `GET /files`, `GET /files/<path>` on the phone; mirrored into `_local/recordings/` and `_local/phone/`, with `_local/phone/pull-state.json` and `pulls.jsonl` | the phone app's Share on Wi-Fi (`app/lib/share/`); read by `scripts/pull_phone.py` |
+| The laptop's work sessions | `_local/laptop/work/<stamp>.work.json`, `labels.jsonl` (below) | the laptop tray (`scripts/tray.py`, `scripts/laptop_work.py`) from ActivityWatch |
 | Catalog of nights | `_local/catalog/catalog.json`, `<date>.sha256`, `catalog.txt`, `history.log` | `scripts/catalog.py` (below) |
 | Raw recordings packed after a day | `<stamp>.f32.xz` on the laptop, `<stamp>.f32.gz` on the phone, in place of `<stamp>.f32`; `_local/packing.jsonl`, `files/packing.jsonl` | `scripts/pack_old.py` (daily), the phone app between nights (`app/lib/recorder/packed.dart`); below |
-| Events for other apps | `<root>/events/<dev>/eeg-YYYY-MM.jsonl`, `<root>/events/<dev>/breaks-YYYY-MM.jsonl` | `scripts/export_events.py`, `scripts/break_hints.py` |
+| Events for other apps | `<root>/events/<dev>/eeg-YYYY-MM.jsonl`, `<root>/events/<dev>/breaks-YYYY-MM.jsonl` | `scripts/export_events.py`, `scripts/break_hints.py` and the laptop tray |
 
 ## Raw recording (BrainBit)
 
@@ -656,6 +657,44 @@ wrong proof or a client outside the local network. `_local/phone/link.json` (mod
   `cd _local && sha256sum -c catalog/<date>.sha256` checks them without the script (a packed file by its own bytes).
 - `catalog.txt`: the printed summary; `history.log`: one entry per run with what changed.
 
+## The laptop's work sessions (`_local/laptop/work/`)
+
+Written by the laptop tray (`scripts/tray.py`, `scripts/laptop_work.py`; [laptop-tray.md](laptop-tray.md), DECISIONS
+570-579) from ActivityWatch, with no headband. Beside the phone's files, not among them: `_local/phone/` is the
+phone's mirror, and these files have no EEG. Times are local ISO times with their UTC offset, to the second. No window
+title is ever written; app names are.
+
+**`<stamp>.work.json`**, one per session; `<stamp>` is its start, `yyyy-MM-dd-HHmmss` local time (`-2` added if
+taken). Written whole (a temporary name, then a rename) at start, at each change, every 5 minutes while it runs and
+at the end.
+
+| Field | Content |
+|---|---|
+| `version`, `kind`, `app` | 1, `laptop_work_session`, `eeg_tracker tray` |
+| `start`, `end` | the session's span; while it runs `end` is the last moment written |
+| `ended` | `running` (still going, or the tray died; a file left `running` is taken up again by a tray started within 10 minutes, else marked `lost` at its last write), `stopped` (Stop), `away` (away longer than the setting: `end` is when you left), `not_work` (relabelled "Not work"), `quit` (the tray was quit or the laptop logged out), `lost` |
+| `started_by` | `manual` (Start), `asked` (Yes to "Started working?"), `auto` (started by itself) |
+| `detected` | for `asked` and `auto`: `at` (when it was noticed), `run_start` (when the work began: the session's `start`), `work_min` (clock minutes in work apps less the switches), `away_min` (active minutes in other apps inside it), `clear_min` (the work minutes at its end with at most `auto_max_away_min` elsewhere), `app` (the app that held most of it), `family` (`code` or `write`, aw_focus.py's families); `null` for `manual` |
+| `active_min` | minutes with keyboard or mouse use inside the session (ActivityWatch's AFK watcher, gaps under 3 minutes counted), tapped breaks left out |
+| `hints` | `at`, `reason` (`stretch`: the active-time threshold; `snooze`: the one a snooze brought back), `active_min`, `threshold_min`, `via` (`notification`, or `tray` with notifications off), `answer` (`snoozed`, `onBreak`, `notNow` = OK, or `null`; the phone's names), `answered_at`, `taken` (a break of 5 minutes or more began within 30 minutes), `event` (the id of its `break_hint` event below) |
+| `breaks` | `start`, `end` (`null` while it goes on), `source`: `tapped` (On a break; it ends at Back or when you come back from 5+ minutes away) or `away` (5 minutes or more without keyboard or mouse, not inside a tapped one). The time away that ended a session is after its `end`, not one of its breaks |
+| `labels` | the owner's answers about this session: `at`, `label` (`work` or `not_work`), `question` (`ask` or `auto`), `answer` (`yes`, `no`, `not_work`) |
+| `events` | `at`, `event`: `started (...)`, `on a break`, `back`, `back (returned)`, `hint`, `ended (...)`, `taken up again after a restart` |
+| `settings` | the tray's settings when the session started (below) |
+| `written` | when the file was written |
+
+**`labels.jsonl`**: one line per answer about the detection, so the rule can be checked against what the owner said:
+`version` 1, `at`, `question` (`ask`: "Started working?"; `auto`: a session it started by itself), `answer` (`yes`;
+`no`; `not_work`; `none`: a question dropped unanswered at a break, a mode change or Quit, or a started session nobody
+confirmed or relabelled), `run_start`, `work_min`, `away_min`, `clear_min`, `app`, `family` (as `detected`), `session`
+(its `<stamp>`, or `null`), `rule` (`laptop-detect-v1 ask=5 auto=12 away=3 switch=3`: the rule and numbers in force).
+
+**Settings** live outside the repository, in `~/.config/eeg_tracker/tray.json` (or `$XDG_CONFIG_HOME`): `version` 1,
+`notifications`, `auto_start` (`off`, `ask`, `auto`), `ask_after_min` (1-60), `auto_after_min` (5-120),
+`auto_max_away_min` (0-15), `ask_again_min` (0-240), `end_after_away_min` (0 = never, up to 480),
+`hint_threshold_min` (50-90), `quiet` (`HH:MM-HH:MM` or `off`), `max_hints_per_day` (0-12). A missing or wrong value
+takes its default. "Start at login" is the file `~/.config/autostart/eeg-tracker-tray.desktop` itself.
+
 ## Events (for utof_tracker and anything else)
 
 Same envelope and rules as utof_tracker's `docs/data-format.md`, so its readers can take these lines as they are:
@@ -764,8 +803,9 @@ event that `replaces` the old one. `ts` is when it was first exported.
 
 ### `break_hint`
 
-Written by `scripts/break_hints.py` ([break-hints.md](break-hints.md)) to `breaks-YYYY-MM.jsonl` in the same
-device folder, one event per thing that happened. `ts` is when it happened (local time with offset); `id` is
+Written by `scripts/break_hints.py` ([break-hints.md](break-hints.md)), and by the laptop tray during its work sessions
+([laptop-tray.md](laptop-tray.md); the same code, so the daily cap and the back-off count both), to
+`breaks-YYYY-MM.jsonl` in the same device folder, one event per thing that happened. `ts` is when it happened (local time with offset); `id` is
 `eeg:` + sha1 of device, type, `ts`, kind and hint; `seq` continues from the highest `seq` in the folder.
 
 | Field | Meaning |
