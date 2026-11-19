@@ -20,6 +20,7 @@ void main() {
       'nap-coach',
       'hands-free',
       'smart-alarm',
+      'unusual-for-you',
     ]) {
       final md = await rootBundle.loadString('assets/evidence/$name.md');
       expect(md, startsWith('# '), reason: name);

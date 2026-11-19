@@ -38,3 +38,6 @@ SIGNATURE: the fortnight watch bill: one row per measure, fourteen day cells, th
 
 FORM: day log as the lead (dealt lead, position 5 of 7), fused with the watch-bill grid (3) and per-measure
 ledger rows (1); seed:a88e53a391a6a1d12ca1cd8b2ccb5c22.
+
+SLOT: one section between the summary line and Today belongs to "Unusual for you"
+(`.impeccable/surfaces/app-lib-ui-unusual-view-dart.md`; DECISIONS 297): TrendsView's `unusual` widget.

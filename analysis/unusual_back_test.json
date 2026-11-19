@@ -1,0 +1,671 @@
+{
+ "planning_values": "synthetic people; the wobble is assumed, not measured",
+ "rules": {
+  "NightSignal: 1 number, 2 days in a row": {
+   "default": {
+    "people": 200,
+    "days": 365,
+    "seed": 1,
+    "profile": "default",
+    "stable": {
+     "core": {
+      "cards_per_month": 0.676,
+      "share_of_days_with_a_card": 0.0343,
+      "people_with_a_card_in_their_first_8_weeks": 0.71
+     },
+     "all": {
+      "cards_per_month": 1.875,
+      "share_of_days_with_a_card": 0.1054,
+      "people_with_a_card_in_their_first_8_weeks": 0.985
+     }
+    },
+    "changes": {
+     "short sleep (2 h, 4 nights)": {
+      "core": {
+       "found": 0.575,
+       "median_days_to_card": 2
+      },
+      "all": {
+       "found": 0.55,
+       "median_days_to_card": 2.0
+      }
+     },
+     "short sleep (1 h 30 min, 4 nights)": {
+      "core": {
+       "found": 0.39,
+       "median_days_to_card": 2.0
+      },
+      "all": {
+       "found": 0.375,
+       "median_days_to_card": 2
+      }
+     },
+     "short sleep (1 h, 4 nights)": {
+      "core": {
+       "found": 0.195,
+       "median_days_to_card": 1
+      },
+      "all": {
+       "found": 0.185,
+       "median_days_to_card": 1
+      }
+     },
+     "long sleep (2 h, 4 nights)": {
+      "core": {
+       "found": 0.545,
+       "median_days_to_card": 1
+      },
+      "all": {
+       "found": 0.535,
+       "median_days_to_card": 1
+      }
+     },
+     "a cold-like week (sleep -40 min, sleepier +2, mood -1, tension +1; 7 days)": {
+      "core": {
+       "found": 0.69,
+       "median_days_to_card": 2.0
+      },
+      "all": {
+       "found": 0.665,
+       "median_days_to_card": 3
+      }
+     },
+     "low mood (mood -2, tension +1.5; 7 days)": {
+      "core": {
+       "found": 0.745,
+       "median_days_to_card": 2
+      },
+      "all": {
+       "found": 0.72,
+       "median_days_to_card": 2.0
+      }
+     },
+     "sleepier (+3 points, 5 days)": {
+      "core": {
+       "found": 0.675,
+       "median_days_to_card": 2
+      },
+      "all": {
+       "found": 0.66,
+       "median_days_to_card": 2.0
+      }
+     },
+     "slower reactions (+15 %, 5 days)": {
+      "core": {
+       "found": 0.21,
+       "median_days_to_card": 2.0
+      },
+      "all": {
+       "found": 0.21,
+       "median_days_to_card": 2.0
+      }
+     },
+     "headband only (alpha speed +0.5 Hz, alpha strength x1.6; 5 days)": {
+      "core": {
+       "found": 0.0,
+       "median_days_to_card": null
+      },
+      "all": {
+       "found": 0.65,
+       "median_days_to_card": 2.0
+      }
+     }
+    }
+   },
+   "noisier": {
+    "people": 200,
+    "days": 365,
+    "seed": 1,
+    "profile": "noisier",
+    "stable": {
+     "core": {
+      "cards_per_month": 0.662,
+      "share_of_days_with_a_card": 0.0373,
+      "people_with_a_card_in_their_first_8_weeks": 0.725
+     },
+     "all": {
+      "cards_per_month": 1.625,
+      "share_of_days_with_a_card": 0.0986,
+      "people_with_a_card_in_their_first_8_weeks": 0.97
+     }
+    },
+    "changes": {
+     "short sleep (2 h, 4 nights)": {
+      "core": {
+       "found": 0.31,
+       "median_days_to_card": 2.0
+      },
+      "all": {
+       "found": 0.29,
+       "median_days_to_card": 2.0
+      }
+     },
+     "short sleep (1 h 30 min, 4 nights)": {
+      "core": {
+       "found": 0.225,
+       "median_days_to_card": 2
+      },
+      "all": {
+       "found": 0.21,
+       "median_days_to_card": 2.0
+      }
+     },
+     "short sleep (1 h, 4 nights)": {
+      "core": {
+       "found": 0.095,
+       "median_days_to_card": 2
+      },
+      "all": {
+       "found": 0.095,
+       "median_days_to_card": 2
+      }
+     },
+     "long sleep (2 h, 4 nights)": {
+      "core": {
+       "found": 0.27,
+       "median_days_to_card": 1.0
+      },
+      "all": {
+       "found": 0.265,
+       "median_days_to_card": 1
+      }
+     },
+     "a cold-like week (sleep -40 min, sleepier +2, mood -1, tension +1; 7 days)": {
+      "core": {
+       "found": 0.475,
+       "median_days_to_card": 3
+      },
+      "all": {
+       "found": 0.46,
+       "median_days_to_card": 3.0
+      }
+     },
+     "low mood (mood -2, tension +1.5; 7 days)": {
+      "core": {
+       "found": 0.48,
+       "median_days_to_card": 3.0
+      },
+      "all": {
+       "found": 0.465,
+       "median_days_to_card": 3
+      }
+     },
+     "sleepier (+3 points, 5 days)": {
+      "core": {
+       "found": 0.43,
+       "median_days_to_card": 2.0
+      },
+      "all": {
+       "found": 0.415,
+       "median_days_to_card": 2
+      }
+     },
+     "slower reactions (+15 %, 5 days)": {
+      "core": {
+       "found": 0.095,
+       "median_days_to_card": 3
+      },
+      "all": {
+       "found": 0.095,
+       "median_days_to_card": 3
+      }
+     },
+     "headband only (alpha speed +0.5 Hz, alpha strength x1.6; 5 days)": {
+      "core": {
+       "found": 0.0,
+       "median_days_to_card": null
+      },
+      "all": {
+       "found": 0.295,
+       "median_days_to_card": 2
+      }
+     }
+    }
+   }
+  },
+  "1 number, 3 days in a row": {
+   "default": {
+    "people": 200,
+    "days": 365,
+    "seed": 1,
+    "profile": "default",
+    "stable": {
+     "core": {
+      "cards_per_month": 0.121,
+      "share_of_days_with_a_card": 0.0063,
+      "people_with_a_card_in_their_first_8_weeks": 0.195
+     },
+     "all": {
+      "cards_per_month": 0.424,
+      "share_of_days_with_a_card": 0.0232,
+      "people_with_a_card_in_their_first_8_weeks": 0.63
+     }
+    },
+    "changes": {
+     "short sleep (2 h, 4 nights)": {
+      "core": {
+       "found": 0.335,
+       "median_days_to_card": 2
+      },
+      "all": {
+       "found": 0.33,
+       "median_days_to_card": 2.0
+      }
+     },
+     "short sleep (1 h 30 min, 4 nights)": {
+      "core": {
+       "found": 0.175,
+       "median_days_to_card": 3
+      },
+      "all": {
+       "found": 0.17,
+       "median_days_to_card": 2.5
+      }
+     },
+     "short sleep (1 h, 4 nights)": {
+      "core": {
+       "found": 0.075,
+       "median_days_to_card": 2
+      },
+      "all": {
+       "found": 0.075,
+       "median_days_to_card": 2
+      }
+     },
+     "long sleep (2 h, 4 nights)": {
+      "core": {
+       "found": 0.3,
+       "median_days_to_card": 2.0
+      },
+      "all": {
+       "found": 0.295,
+       "median_days_to_card": 2
+      }
+     },
+     "a cold-like week (sleep -40 min, sleepier +2, mood -1, tension +1; 7 days)": {
+      "core": {
+       "found": 0.385,
+       "median_days_to_card": 3
+      },
+      "all": {
+       "found": 0.385,
+       "median_days_to_card": 3
+      }
+     },
+     "low mood (mood -2, tension +1.5; 7 days)": {
+      "core": {
+       "found": 0.54,
+       "median_days_to_card": 3.0
+      },
+      "all": {
+       "found": 0.535,
+       "median_days_to_card": 3
+      }
+     },
+     "sleepier (+3 points, 5 days)": {
+      "core": {
+       "found": 0.395,
+       "median_days_to_card": 3
+      },
+      "all": {
+       "found": 0.395,
+       "median_days_to_card": 3
+      }
+     },
+     "slower reactions (+15 %, 5 days)": {
+      "core": {
+       "found": 0.06,
+       "median_days_to_card": 3.0
+      },
+      "all": {
+       "found": 0.055,
+       "median_days_to_card": 3
+      }
+     },
+     "headband only (alpha speed +0.5 Hz, alpha strength x1.6; 5 days)": {
+      "core": {
+       "found": 0.0,
+       "median_days_to_card": null
+      },
+      "all": {
+       "found": 0.415,
+       "median_days_to_card": 3
+      }
+     }
+    }
+   },
+   "noisier": {
+    "people": 200,
+    "days": 365,
+    "seed": 1,
+    "profile": "noisier",
+    "stable": {
+     "core": {
+      "cards_per_month": 0.123,
+      "share_of_days_with_a_card": 0.0071,
+      "people_with_a_card_in_their_first_8_weeks": 0.245
+     },
+     "all": {
+      "cards_per_month": 0.357,
+      "share_of_days_with_a_card": 0.0214,
+      "people_with_a_card_in_their_first_8_weeks": 0.55
+     }
+    },
+    "changes": {
+     "short sleep (2 h, 4 nights)": {
+      "core": {
+       "found": 0.13,
+       "median_days_to_card": 2.0
+      },
+      "all": {
+       "found": 0.125,
+       "median_days_to_card": 2
+      }
+     },
+     "short sleep (1 h 30 min, 4 nights)": {
+      "core": {
+       "found": 0.045,
+       "median_days_to_card": 3
+      },
+      "all": {
+       "found": 0.04,
+       "median_days_to_card": 3.0
+      }
+     },
+     "short sleep (1 h, 4 nights)": {
+      "core": {
+       "found": 0.03,
+       "median_days_to_card": 2.0
+      },
+      "all": {
+       "found": 0.03,
+       "median_days_to_card": 2.0
+      }
+     },
+     "long sleep (2 h, 4 nights)": {
+      "core": {
+       "found": 0.135,
+       "median_days_to_card": 2
+      },
+      "all": {
+       "found": 0.135,
+       "median_days_to_card": 2
+      }
+     },
+     "a cold-like week (sleep -40 min, sleepier +2, mood -1, tension +1; 7 days)": {
+      "core": {
+       "found": 0.23,
+       "median_days_to_card": 4.0
+      },
+      "all": {
+       "found": 0.225,
+       "median_days_to_card": 4
+      }
+     },
+     "low mood (mood -2, tension +1.5; 7 days)": {
+      "core": {
+       "found": 0.315,
+       "median_days_to_card": 4
+      },
+      "all": {
+       "found": 0.31,
+       "median_days_to_card": 4.0
+      }
+     },
+     "sleepier (+3 points, 5 days)": {
+      "core": {
+       "found": 0.19,
+       "median_days_to_card": 3.0
+      },
+      "all": {
+       "found": 0.19,
+       "median_days_to_card": 3.0
+      }
+     },
+     "slower reactions (+15 %, 5 days)": {
+      "core": {
+       "found": 0.035,
+       "median_days_to_card": 4
+      },
+      "all": {
+       "found": 0.035,
+       "median_days_to_card": 4
+      }
+     },
+     "headband only (alpha speed +0.5 Hz, alpha strength x1.6; 5 days)": {
+      "core": {
+       "found": 0.0,
+       "median_days_to_card": null
+      },
+      "all": {
+       "found": 0.105,
+       "median_days_to_card": 3
+      }
+     }
+    }
+   }
+  },
+  "2 numbers together, 2 days in a row": {
+   "default": {
+    "people": 200,
+    "days": 365,
+    "seed": 1,
+    "profile": "default",
+    "stable": {
+     "core": {
+      "cards_per_month": 0.016,
+      "share_of_days_with_a_card": 0.0006,
+      "people_with_a_card_in_their_first_8_weeks": 0.045
+     },
+     "all": {
+      "cards_per_month": 0.14,
+      "share_of_days_with_a_card": 0.0059,
+      "people_with_a_card_in_their_first_8_weeks": 0.29
+     }
+    },
+    "changes": {
+     "short sleep (2 h, 4 nights)": {
+      "core": {
+       "found": 0.015,
+       "median_days_to_card": 2
+      },
+      "all": {
+       "found": 0.075,
+       "median_days_to_card": 1
+      }
+     },
+     "short sleep (1 h 30 min, 4 nights)": {
+      "core": {
+       "found": 0.005,
+       "median_days_to_card": 2
+      },
+      "all": {
+       "found": 0.04,
+       "median_days_to_card": 2.0
+      }
+     },
+     "short sleep (1 h, 4 nights)": {
+      "core": {
+       "found": 0.005,
+       "median_days_to_card": 1
+      },
+      "all": {
+       "found": 0.03,
+       "median_days_to_card": 2.0
+      }
+     },
+     "long sleep (2 h, 4 nights)": {
+      "core": {
+       "found": 0.01,
+       "median_days_to_card": 2.0
+      },
+      "all": {
+       "found": 0.065,
+       "median_days_to_card": 2
+      }
+     },
+     "a cold-like week (sleep -40 min, sleepier +2, mood -1, tension +1; 7 days)": {
+      "core": {
+       "found": 0.155,
+       "median_days_to_card": 3
+      },
+      "all": {
+       "found": 0.25,
+       "median_days_to_card": 3.0
+      }
+     },
+     "low mood (mood -2, tension +1.5; 7 days)": {
+      "core": {
+       "found": 0.205,
+       "median_days_to_card": 2
+      },
+      "all": {
+       "found": 0.3,
+       "median_days_to_card": 2.0
+      }
+     },
+     "sleepier (+3 points, 5 days)": {
+      "core": {
+       "found": 0.055,
+       "median_days_to_card": 3
+      },
+      "all": {
+       "found": 0.165,
+       "median_days_to_card": 3
+      }
+     },
+     "slower reactions (+15 %, 5 days)": {
+      "core": {
+       "found": 0.01,
+       "median_days_to_card": 3.0
+      },
+      "all": {
+       "found": 0.03,
+       "median_days_to_card": 3.5
+      }
+     },
+     "headband only (alpha speed +0.5 Hz, alpha strength x1.6; 5 days)": {
+      "core": {
+       "found": 0.0,
+       "median_days_to_card": null
+      },
+      "all": {
+       "found": 0.28,
+       "median_days_to_card": 2.5
+      }
+     }
+    }
+   },
+   "noisier": {
+    "people": 200,
+    "days": 365,
+    "seed": 1,
+    "profile": "noisier",
+    "stable": {
+     "core": {
+      "cards_per_month": 0.015,
+      "share_of_days_with_a_card": 0.0007,
+      "people_with_a_card_in_their_first_8_weeks": 0.04
+     },
+     "all": {
+      "cards_per_month": 0.114,
+      "share_of_days_with_a_card": 0.0053,
+      "people_with_a_card_in_their_first_8_weeks": 0.225
+     }
+    },
+    "changes": {
+     "short sleep (2 h, 4 nights)": {
+      "core": {
+       "found": 0.01,
+       "median_days_to_card": 2.0
+      },
+      "all": {
+       "found": 0.03,
+       "median_days_to_card": 2.5
+      }
+     },
+     "short sleep (1 h 30 min, 4 nights)": {
+      "core": {
+       "found": 0.01,
+       "median_days_to_card": 2.0
+      },
+      "all": {
+       "found": 0.03,
+       "median_days_to_card": 2.0
+      }
+     },
+     "short sleep (1 h, 4 nights)": {
+      "core": {
+       "found": 0.0,
+       "median_days_to_card": null
+      },
+      "all": {
+       "found": 0.005,
+       "median_days_to_card": 3
+      }
+     },
+     "long sleep (2 h, 4 nights)": {
+      "core": {
+       "found": 0.005,
+       "median_days_to_card": 1
+      },
+      "all": {
+       "found": 0.035,
+       "median_days_to_card": 2
+      }
+     },
+     "a cold-like week (sleep -40 min, sleepier +2, mood -1, tension +1; 7 days)": {
+      "core": {
+       "found": 0.06,
+       "median_days_to_card": 4.0
+      },
+      "all": {
+       "found": 0.09,
+       "median_days_to_card": 3.5
+      }
+     },
+     "low mood (mood -2, tension +1.5; 7 days)": {
+      "core": {
+       "found": 0.095,
+       "median_days_to_card": 2
+      },
+      "all": {
+       "found": 0.16,
+       "median_days_to_card": 2.5
+      }
+     },
+     "sleepier (+3 points, 5 days)": {
+      "core": {
+       "found": 0.035,
+       "median_days_to_card": 3
+      },
+      "all": {
+       "found": 0.085,
+       "median_days_to_card": 3
+      }
+     },
+     "slower reactions (+15 %, 5 days)": {
+      "core": {
+       "found": 0.01,
+       "median_days_to_card": 3.0
+      },
+      "all": {
+       "found": 0.02,
+       "median_days_to_card": 2.5
+      }
+     },
+     "headband only (alpha speed +0.5 Hz, alpha strength x1.6; 5 days)": {
+      "core": {
+       "found": 0.0,
+       "median_days_to_card": null
+      },
+      "all": {
+       "found": 0.115,
+       "median_days_to_card": 2
+      }
+     }
+    }
+   }
+  }
+ }
+}

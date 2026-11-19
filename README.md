@@ -72,6 +72,13 @@ calibration for your own head. The rules: `analysis/hands_free.py` (the referenc
 (the phone's line-by-line port); false triggers on a recorded night in [docs/detectors.md](docs/detectors.md); how
 to use it and the owner step in [app/README.md](app/README.md) ("Hands-free controls").
 
+**Unusual for you** (phone app, the assistant's proposal, on unless switched off on the Trends page): after 28 silent
+days it says in one plain sentence when your sleep length, sleepiness, mood, tension or reaction time has been
+outside your own usual on 2 days in a row (Stanford's NightSignal rule), never as a notification and never as a
+diagnosis. The rules: `analysis/unusual.py` (the reference) and `app/lib/unusual/detector.dart` (the phone's
+line-by-line port); the back-test on made-up people: `analysis/validate_unusual.py` (about 0.7 false cards a month);
+how to use it and the owner step in [app/README.md](app/README.md) ("Unusual for you").
+
 **Why we believe each feature (evidence notes).** Every feature has a short note in
 [docs/evidence/](docs/evidence/README.md): what the research says, where the data supports it and where it does
 not, how the app uses it, the sources, and the libraries and models with their licences. Each carries one grade

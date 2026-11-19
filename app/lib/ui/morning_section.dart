@@ -5,7 +5,14 @@ import 'package:flutter/material.dart';
 import 'theme.dart';
 
 class MorningSection extends StatelessWidget {
-  const MorningSection({super.key, required this.doneAt, required this.onCheckIn, required this.onTrends, this.experiment});
+  const MorningSection({
+    super.key,
+    required this.doneAt,
+    required this.onCheckIn,
+    required this.onTrends,
+    this.experiment,
+    this.unusual,
+  });
 
   /// When today's first check-in was saved ("09:12"), or null.
   final String? doneAt;
@@ -14,6 +21,9 @@ class MorningSection extends StatelessWidget {
 
   /// Today's self-experiment task in one line (experiments_view.dart), or null.
   final String? experiment;
+
+  /// "Unusual for you: ..." only while there is a card (DECISIONS 290-299), or null.
+  final String? unusual;
 
   @override
   Widget build(BuildContext context) {
@@ -27,6 +37,10 @@ class MorningSection extends StatelessWidget {
               : 'Checked in today at $doneAt.',
           style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
         ),
+        if (unusual != null) ...[
+          const SizedBox(height: 8),
+          Text(unusual!, style: text.bodyLarge?.copyWith(height: 1.4)),
+        ],
         if (experiment != null) ...[
           const SizedBox(height: 8),
           Text(experiment!, style: text.bodyLarge?.copyWith(height: 1.4)),

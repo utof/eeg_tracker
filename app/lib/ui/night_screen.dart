@@ -168,7 +168,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   int? _lightsOffSentMs;
   String? _dreamLine;
   String? _napLine;
-  String? _checkedInAt, _experiment;
+  String? _checkedInAt, _experiment, _unusual;
   Pending? _pending;
   AlarmSetup _alarm = const AlarmSetup();
   AlarmClockState _clockState = const AlarmClockState({});
@@ -311,6 +311,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     } catch (_) {
       // a line of text is never worth breaking the night screen
     }
+    final unusual = dir == null || running ? null : await _unusualLine(dir);
     await _share.sync(night: running, filesDir: dir == null ? null : Directory(dir).parent.path, front: _front);
     if (!mounted) return;
     setState(() {
@@ -325,6 +326,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       _napLine = napLine;
       _checkedInAt = checkedInAt;
       _experiment = experiment;
+      _unusual = unusual;
       _pending = pending;
       _alarm = alarm;
       _clockState = clockState;
@@ -407,6 +409,15 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       _say('The phone\'s alarm could not be set ($e). Set one in the Clock app.');
     }
     return plan;
+  }
+
+  /// The "Unusual for you" line, only while there is a card (DECISIONS 290-299), worked out off the screen's thread.
+  static Future<String?> _unusualLine(String dir) async {
+    try {
+      return await Isolate.run(() => unusualToday(dir, DateTime.now()).mainLine);
+    } catch (_) {
+      return null; // a line of text is never worth breaking the night screen
+    }
   }
 
   /// What the next export would copy (sizes and times only), read off the screen's thread.
@@ -779,7 +790,13 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onSound: _sound,
       onSleepReport: sleep == null ? null : () => _openSleep(sleep.nightOf),
       onRetrySleep: sleep == null ? null : () => _scoring?.retry(sleep.nightOf),
-      morning: MorningSection(doneAt: _checkedInAt, onCheckIn: _checkIn, onTrends: _trends, experiment: _experiment),
+      morning: MorningSection(
+        doneAt: _checkedInAt,
+        onCheckIn: _checkIn,
+        onTrends: _trends,
+        experiment: _experiment,
+        unusual: _unusual,
+      ),
       onLightsOff: _lightsOff,
       onSettings: _settings,
       onAlarm: _onAlarm,

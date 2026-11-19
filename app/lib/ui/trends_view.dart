@@ -45,9 +45,12 @@ String pressureHeadline(PressureModel p, DateTime now) {
 }
 
 class TrendsView extends StatelessWidget {
-  const TrendsView({super.key, required this.model, this.onInfo, this.onExperiments, this.experimentLine});
+  const TrendsView({super.key, required this.model, this.onInfo, this.onExperiments, this.experimentLine, this.unusual});
   final TrendsModel model;
   final VoidCallback? onInfo;
+
+  /// The "Unusual for you" section (unusual_view.dart), right after the summary line; null: none.
+  final Widget? unusual;
 
   /// Opens the self-experiments page; the section shows only with it. [experimentLine]: today's task or where the
   /// experiment stands (experiments_view.dart), null without one.
@@ -85,6 +88,7 @@ class TrendsView extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(24, 4, 24, 32),
         children: [
           Para(trendsSummary(m), color: Night.inkMuted, top: 0),
+          ?unusual,
           SectionHeading('Today, ${dayLabel(m.today)}'),
           if (withData.isEmpty) const Para('No numbers in the last 14 days yet.', color: Night.inkMuted, top: 0),
           for (final (i, r) in withData.indexed) ...[

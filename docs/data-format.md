@@ -242,7 +242,7 @@ folder). It never changes or deletes anything in the app's folder, and never run
 
 - The layout is the app's own: `recordings/` (raw nights, the recorder's format above), `nights/<date>.report.json`,
   `mornings/`, `meditations/`, `alpha-theta/` (sessions and `journal.json`), `replay-check/<kind>/` and
-  `settings.json`, `experiments/<made at>/` (self-experiments, below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers and their `<stamp>-r<n>.text.json` words, below, `prompts/`), `sound-states/`, `hands-free/` (below), `own-ble/`
+  `settings.json`, `experiments/<made at>/` (self-experiments, below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers and their `<stamp>-r<n>.text.json` words, below, `prompts/`), `sound-states/`, `hands-free/` (below), `unusual/` (below), `own-ble/`
   (`settings.json`: which headband connection is in use; `probe/<stamp>/`: the probe's result, docs/own-ble-driver.md), and any folder
   a later feature adds. Left on the phone: `models/` (copies of the app's model assets), `export/` (the export's own
   index), half-written `*.tmp` files, the scorer's `*.scoring` markers, and the two files Android and a plugin keep
@@ -301,6 +301,22 @@ sound back (double clench)`, `hands-free: moment (look left then right)`, `hands
 asleep` (sound for states in the session's `events`, meditation and alpha-theta in its log's `info`, the dream
 catcher and the nap coach in the recording's `.markers.jsonl`). The night recording marks `hands-free: moment (double
 clench)` and its `.log` says when hands-free is on and how many moments it marked.
+
+### Unusual for you (`unusual/`)
+
+The card's switch, what was noted for its cards, and its back-test log (DECISIONS rows 290-299). A missing or
+damaged `settings.json` reads as "on"; damaged lines of the two logs are skipped. The card itself is worked out
+again from `nights/` and `mornings/` every time (the trends page's per-day numbers), so nothing else is stored.
+
+| File | Content |
+|---|---|
+| `settings.json` | `on` (the switch; on unless switched off) and `changed` (local ISO time); written under a temporary name, then renamed |
+| `events.jsonl` | one line per change, `at` (local ISO time) and `event`: `switched on`, `switched off`, `causes` (`card`: the card's first day, `YYYY-MM-DD`; `causes`: the chips chosen for it, of `late night`, `alcohol`, `travel`, `stress`, `hard exercise`, `vaccine`, `feeling ill`, `not sure`; the latest line for a card wins), `resumed` (ends a pause that day). `feeling ill` pauses the card from the card's first day to 14 days after the day it was first chosen, and keeps those days out of the usual; taking it back undoes that |
+| `log.jsonl` | the back-test log: one line per finished day (a day runs 04:00 to 04:00; today is written once it is over), appended once and never rewritten; days the app first judged later (it was not opened, or the card is new) carry that later `judged` time. Fields: `day`; `judged` (when it was written); `phase` (`silent` in the first 28 days with a number, `on`, `paused`); `card` (the rule held with the core numbers), `shown` (`card` while `on`: what the owner saw), `numbers` (the ids in it); `withHeadband` and `numbersWithHeadband` (the same with the headband's numbers added: the "both ways" record); `words` (the card's sentences, when `card`); `values`: per measure id with a value that day, `value`, `usual` (the median of the 28 values ending a week before), `half` (half the no-card band, on a log scale for alpha strength and the rise), `n` (values in the usual), `state` (`unjudged` under 14 values, `in`, `up`, `down`) and `run` (days outside it in a row, one missing day bridged) |
+
+Measure ids are the trends page's: `asleep` (minutes), `kss`, `mood`, `tension`, `reaction` (ms) make the card;
+`iaf` (Hz), `alpha` (µV²), `rise`, `jaw` (bursts an hour asleep) are only logged. Nothing is written while the card
+is switched off.
 
 On the laptop, `scripts/import_phone.py <folder>` (standard library only) checks the manifest, copies
 `recordings/<stamp>.*` into `_local/recordings/` beside the laptop's own recordings and everything else into
