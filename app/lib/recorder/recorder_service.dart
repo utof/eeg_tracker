@@ -14,7 +14,9 @@ import '../alarm/rule.dart';
 import '../handsfree/store.dart' show nightGestures;
 import '../headband/diy/night.dart';
 import '../lucid/bell.dart' show ChannelCueBell;
-import '../lucid/live_cues.dart' show CueFactory, lucidCuesFor;
+import '../cues/night_cues.dart' show CueFactory, oneKindANight;
+import '../lucid/live_cues.dart' show lucidCuesFor;
+import '../memory_cues/live_cues.dart' show memoryCuesFor;
 import '../phone.dart';
 import '../share/isolate.dart';
 import '../share/protocol.dart';
@@ -124,7 +126,7 @@ Future<ServiceRequestResult> startRecorderService(
 }
 
 /// The night's one live sleep model in the recorder's isolate: AnySleep's runs on ONNX (the plugin is registered in
-/// this engine too), shared by the smart alarm and the lucid cues (DECISIONS 330).
+/// this engine too), shared by the smart alarm and tonight's sound cues (DECISIONS 330).
 NightScorer nightScorer(String recordingsDir) => NightScorer(
   model: () => RunsLiveModel(
     open: (run) => OnnxStageRun.open(run, modelsDir: modelsDirFor(recordingsDir)),
@@ -145,13 +147,20 @@ LiveAlarm smartAlarm(String recordingsDir, AlarmPlan plan, NightScorer scorer) =
 CueFactory lucidCuesWith(String recordingsDir, NightScorer scorer) =>
     lucidCuesFor(recordingsDir, scorer: scorer, bell: ChannelCueBell());
 
+/// Tonight's sound cues, one kind a night: the lucid dream cues when they are on, else the memory cues when they are on
+/// (DECISIONS 303, 507); both listen to the night's live model ([scorer]) and play through the phone's media player.
+CueFactory nightCuesWith(String recordingsDir, NightScorer scorer) => oneKindANight([
+  lucidCuesWith(recordingsDir, scorer),
+  memoryCuesFor(recordingsDir, scorer: scorer, bell: ChannelCueBell()),
+]);
+
 Future<NightState> loadNight() async => _PrefsNightStore().load();
 
 @pragma('vm:entry-point')
 void recorderEntryPoint() => FlutterForegroundTask.setTaskHandler(RecorderTaskHandler());
 
 class RecorderTaskHandler extends TaskHandler {
-  RecorderTaskHandler({this.finder, this.alarm = smartAlarmFor, this.cues = lucidCuesWith});
+  RecorderTaskHandler({this.finder, this.alarm = smartAlarmFor, this.cues = nightCuesWith});
 
   /// Only for smoke tests (a replayed headband); null: the BrainBit.
   final HeadbandFinder Function()? finder;
@@ -159,7 +168,7 @@ class RecorderTaskHandler extends TaskHandler {
   /// The smart alarm for the recordings folder and the night's live model (a smoke test watches its own).
   final AlarmWatch Function(AlarmPlan plan) Function(String recordingsDir, NightScorer scorer) alarm;
 
-  /// The lucid cues for the recordings folder and the night's live model (a smoke test brings their hours forward).
+  /// The sound cues for the recordings folder and the night's live model (a smoke test brings their hours forward).
   final CueFactory Function(String recordingsDir, NightScorer scorer) cues;
   NightRecorder? _recorder;
   BrainBitFinder? _finder;
@@ -201,7 +210,7 @@ class RecorderTaskHandler extends TaskHandler {
       finder = b;
     }
     // the night's one live sleep model: none for the DIY board (it reads BrainBit's O1 O2 T3 T4), so neither the smart
-    // alarm's model nor the lucid cues run with it
+    // alarm's model nor the sound cues run with it
     final scorer = diy == null ? nightScorer(rec) : null;
     final recorder = NightRecorder(
       finder: finder,
@@ -214,11 +223,12 @@ class RecorderTaskHandler extends TaskHandler {
       // the owner's hands-free double clench, read when the detector starts (DECISIONS 247); none of the BrainBit's
       // detectors for the DIY board (they read O1 O2 T3 T4)
       watch: diy == null ? () => LiveDrift(handsFree: nightGestures(Directory(rec).parent)) : null,
-      // one live sleep model for the smart alarm and the lucid cues, fed by the recorder (DECISIONS 330)
+      // one live sleep model for the smart alarm and the sound cues, fed by the recorder (DECISIONS 330)
       scorer: scorer,
       alarmPlan: plan,
       alarm: scorer == null ? null : alarm(rec, scorer),
-      // lucid dream cues when they are on: the shared model, the phone's media player (DECISIONS 303)
+      // the lucid dream cues or the memory cues, one kind a night: the shared model, the phone's media player
+      // (DECISIONS 303, 507)
       cues: scorer == null ? null : cues(rec, scorer),
       startNotes: diy?.notes ?? const [],
     );

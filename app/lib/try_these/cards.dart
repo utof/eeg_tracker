@@ -34,6 +34,7 @@ enum TryOpen {
   experiments,
   sharpHours,
   study,
+  memory,
   ownBle,
 }
 
@@ -57,6 +58,7 @@ const Map<TryOpen, String> tryOpenLabels = {
   TryOpen.experiments: 'Open Experiments',
   TryOpen.sharpHours: 'Open Sharp hours',
   TryOpen.study: 'Open Study reminders',
+  TryOpen.memory: 'Open Memory cues',
   TryOpen.ownBle: 'Open Headband connection',
 };
 
@@ -627,6 +629,31 @@ const List<TryCard> tryCards = [
     opens: TryOpen.study,
     readme: [TryRef('Study reminders', 'switch it on and watch the first two days')],
     evidence: 'study-timing',
+    proposal: true,
+    auto: true,
+  ),
+  TryCard(
+    id: 'memory-cues',
+    group: TryGroup.weeks,
+    title: 'Memory cues in deep sleep',
+    what: 'Learn where objects sit in the evening; one half\'s soft sound plays in deep sleep; the morning tests both halves.',
+    takes: '12 minutes an evening, 2 minutes a morning',
+    steps: [
+      'Open Settings, then Memory cues, and tap Turn on.',
+      'In the evening tap Start the evening task and do it to the end, the loudness lying down with the phone where it stays.',
+      'Then Start night and Lights off as usual, within 3 hours.',
+      'Next morning, before anything else, do the morning test.',
+    ],
+    tell: [
+      'Did you hear the sounds at the loudness you tapped? Did the night wake you?',
+      'The night\'s .log end line "memory cues: ... s of the recorder\'s time", and any line starting "memory cues stopped" or "memory cues off".',
+      'How many cue moments the page shows for last night, and how long the evening task took.',
+      'Then Export data after a few nights.',
+    ],
+    opens: TryOpen.memory,
+    readme: [TryRef('Memory cues', 'the first week')],
+    evidence: 'memory-cues',
+    weakEvidence: true,
     proposal: true,
     auto: true,
   ),

@@ -96,7 +96,7 @@ void main() {
           for (final c in tryCards)
             if (c.proposal) c.id,
         },
-        {'sharp', 'study', 'unusual', 'was-this-you', 'own-ble'},
+        {'sharp', 'study', 'unusual', 'was-this-you', 'own-ble', 'memory-cues'},
       );
     });
 
@@ -121,7 +121,17 @@ void main() {
           for (final c in tryCards)
             if (c.weakEvidence) c.id,
         },
-        {'smart-alarm', 'meditation', 'meditation-learning', 'sound', 'alpha-theta', 'lucid', 'was-this-you', 'sound-test'},
+        {
+          'smart-alarm',
+          'meditation',
+          'meditation-learning',
+          'sound',
+          'alpha-theta',
+          'lucid',
+          'was-this-you',
+          'sound-test',
+          'memory-cues',
+        },
       );
       expect(tryCards.firstWhere((c) => c.id == 'sharp').weakEvidence, isFalse);
     });
@@ -357,6 +367,18 @@ void main() {
         '${jsonEncode({'version': 1, 'at': '2026-11-20T21:40:00+03:00', 'kind': 'evening', 'studied': true})}\n'
             '${jsonEncode({'version': 1, 'at': '2026-11-21T08:10:00+03:00', 'kind': 'morning', 'recall': 'some'})}\n',
       );
+      put(
+        'memory_cues/mornings/2026-11-21-003000.json',
+        jsonEncode({
+          'version': 1,
+          'session': '2026-11-20-232000',
+          'made': '2026-11-21T08:05:00+03:00',
+          'taps': {
+            'dog': [0.2, 0.3],
+          },
+          'heard': 'no',
+        }),
+      );
       final seen = seenByApp(files, seenChecks.keys.toSet());
       expect(seen.keys.toSet(), seenChecks.keys.toSet());
       expect(seen['night'], 'A night with Lights off tapped, scored: the night of Thu 19 Nov.');
@@ -372,6 +394,7 @@ void main() {
       expect(seen['lucid'], 'Lucid dream questions answered on Sat 21 Nov.');
       expect(seen['diy-board'], 'The board recorded 10 min on this phone, the newest on Sat 21 Nov.');
       expect(seen['work'], 'A work session saved on Fri 20 Nov.');
+      expect(seen['memory-cues'], 'A morning test done on Sat 21 Nov.');
     });
 
     test(
@@ -389,6 +412,7 @@ void main() {
         Directory('${files.path}/sound-states/plans/2026-11-20-120000-asleep').createSync(recursive: true); // no plan saved
         put('settings.json', jsonEncode({'replayCheck': false}));
         put('lucid/mornings/2026-11-20-070000.json', jsonEncode({'night': '2026-11-20-070000'}));
+        put('memory_cues/mornings/2026-11-20-003000.json', jsonEncode({'version': 1, 'session': 'x', 'taps': <String, Object?>{}}));
         board('2026-11-21-200000', 9.9); // under the card's 10 minutes
         put('study-review/log.jsonl', '${jsonEncode({'version': 1, 'at': '2026-11-20T21:40:00+03:00', 'kind': 'evening', 'studied': true})}\n');
         expect(seenByApp(files, seenChecks.keys.toSet()), isEmpty);

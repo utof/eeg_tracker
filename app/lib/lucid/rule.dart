@@ -18,8 +18,11 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import '../cues/night_cues.dart' show NightRule, RuleCue;
 import '../detectors/detectors.dart';
 import '../detectors/filters.dart';
+
+export '../cues/night_cues.dart' show RuleCue;
 
 /// Planning values (DECISIONS 302).
 abstract final class LucidRule {
@@ -45,15 +48,9 @@ abstract final class LucidRule {
 /// The cue's amplitude against the evening's level: +1 dB a step, at most +6 dB.
 double cueGain(int step) => math.pow(10, step.clamp(0, LucidRule.maxSteps) * LucidRule.stepDb / 20).toDouble();
 
-/// One cue the rule let play: its second, its step (dB over the evening's level) and its dream-sleep period (from 1).
-class RuleCue {
-  RuleCue(this.k, this.step, this.period);
-  final int k, step, period;
-  bool aroused = false;
-}
-
-/// The rule, stepped once a second of signal; the live stages are given as they are handed out.
-class CueRule {
+/// The rule, stepped once a second of signal; the live stages are given as they are handed out. A cue's step is dB
+/// over the evening's level; its period the dream-sleep period (from 1).
+class CueRule implements NightRule {
   CueRule({required this.cuesFrom});
 
   /// The second (on this rule's clock) from which cues may play (moves with a later Lights off).
@@ -63,17 +60,25 @@ class CueRule {
   int? _lastN3, _lastBurst, _lastMoved, _lastJaw;
   int _notRRun = 0, _step = 0, _period = 0, _periodCues = 0, _pauseUntil = 0, _movesSinceCue = 0;
   bool _periodOpen = false;
+  @override
   final List<RuleCue> cues = [];
+  @override
   final List<int> arousals = [];
 
   /// Why the cues ended for the night, with the second: 'per night' or 'three arousals'.
+  @override
   final List<(int, String)> stops = [];
+  @override
   String? done;
+
+  @override
+  void startAt(int k) => cuesFrom = k;
 
   /// The step the next cue would play at.
   int get step => _step;
 
   /// Epoch [epoch] read as [stage] (W N1 N2 N3 R or gap) with top probability [conf], known at second [k].
+  @override
   void stage(int epoch, String stage, double conf, int k) {
     if (stage == 'N3') _lastN3 = _lastN3 == null ? epoch : math.max(_lastN3!, epoch);
     _prev = _newest;
@@ -117,6 +122,7 @@ class CueRule {
 
   /// Second [k]: [moved] movement in it (3+ channels jumping), [jaw] jaw muscle, [burst] an eye burst became known in
   /// it, [drift] the drift-off detector's state. Returns the cue to play now, if any.
+  @override
   RuleCue? second(int k, {required bool moved, required bool jaw, required bool burst, required String? drift}) {
     if (burst) _lastBurst = k;
     final last = cues.isEmpty ? null : cues.last;

@@ -522,6 +522,35 @@ one live sleep model the cues and the smart alarm share opens and closes (DECISI
 ... (load N tonight)`, `live sleep model: shared with the ... (no second copy)`, `live sleep model off, no one needs it
 (N calls, median S s)`.
 
+### Memory cues (`memory_cues/`)
+
+The evening task, the nights in the test and the honest self-test (DECISIONS rows 500-509; the assistant's proposal).
+Each JSON file is written under a temporary name, then renamed; a missing or damaged file reads as "off", "never" or
+"none". A night's `<stamp>` is its start, `yyyy-MM-dd-HHmmss` local time. Places on the board are in board widths
+from its top left corner (`x` 0-1, `y` 0-1.25). Please do not open `sealed.json` or `plays.jsonl` before the app shows
+the results: together they say which nights had sound and which half.
+
+| File | Content |
+|---|---|
+| `settings.json` | `on` (off by default), `changed` |
+| `events.jsonl` | one line per change: `switched on`, `switched off`, `plan frozen (schedule ...)` |
+| `sessions/<id>.json` | one per evening (`id` = when it was drawn, `yyyy-MM-dd-HHmmss`): `version` 1, `made`, `boardDp` (the board's width on the screen, dp), `items` (32: `object` (an English name), `x`, `y`, `sound`: 0 the bell, 1 the knock), `studyOrder`, `learn` (each placement while learning: `object`, `round`, `x`, `y`, `ms` from the start of learning), `evening` (`{object: [x, y]}`, the evening test), `eveningEnd`, `levels` (`[bell, knock]`: the "just heard" loudness, a share of the media volume), `mediaVolume`, `mediaVolumeMax`, `completed` (the test and the loudness done; only a complete session is cued, by a night starting within 3 hours) |
+| `sealed.json` | `salt` (64 hex characters), `allocation` (one character per night of the test from night 1: `C` = sound, `S` = silent; shuffled blocks of 4, the replay check's draw) and `sounds` (one digit per night: the half whose sound plays, or would; the first byte of SHA-256(`salt:sound:N`) under 128 is 0) |
+| `plan.json` | `plan` and `sha256` (of `plan` as JSON with sorted keys and no spaces). `plan`: `version` 1, `frozen`, `design`, `blockSize` 4, `soundPerBlock` 2, `maxNights` 36, `revealEvery` 12, `measure`, `primary`, `secondary`, `seenTogether`, `exclusions`, `analysis`, `honesty`, `scheduleSha256` (SHA-256 of `sealed.json`'s content in the same canonical form) |
+| `plays.jsonl` | one line per sound the phone was asked to play (nights with sound only): `at`, `night` (its number from 0), `sound`, `ok`, `error` |
+| `nights/<stamp>.json` | written by the night recorder, the same on nights with and without sound: `version` 1, `start`/`startMs`, `index` (the night's number in the test, from 0), `session` (the evening session it cues), `cuesFrom`/`cuesFromMs`, `phase` (`waiting`, `listening`, `done`, `off`, `ended`), `cues` (each `at`/`atMs`, `step`: dB against the evening loudness, -3 and lower, `period`: the stretch of N2/N3, `confidence`: the live reading, `aroused`: a stir followed within 30 s), `arousalsMs`, `stops` (`atMs`, `why`: `hours over`, `per night` or `three arousals`), `running`, `off` (why the cues were switched off, a sentence), `model` (`mode`, `calls`, `median_ms`, `max_ms`, `skipped_windows`), `mediaVolume` |
+| `mornings/<stamp>.json` | the morning test of the night `<stamp>`: `version` 1, `session`, `made`, `taps` (`{object: [x, y]}`), `heard` (`no`, `yes`, `woke`, `unsure`) |
+| `sound_a.wav`, `sound_b.wav` | the two sounds: 16-bit PCM, 48 kHz, mono; the bell (660 Hz with a bell's off-key overtone, 0.7 s) and the knock (two 520 Hz strikes 0.2 s apart, 0.45 s), the same RMS |
+
+The night's recording carries the cue moments as markers in its `.markers.jsonl`: `memory cues on: night N of the
+test; sounds from HH:MM to HH:MM`, `memory cues: sleep model on`, `memory cue N (N2/N3 0.91, -3 dB)`, `memory cues:
+arousal after a sound; 3 dB quieter, 5 minutes without sounds`, `memory cues: done for tonight (...)`, `memory cues off:
+...`, `memory cues from HH:MM (30 min after Lights off)`, or, on a night without a finished evening task, `memory cues:
+no evening task finished in the 3 hours before this night, so no sounds tonight`. Its `.log` ends with the cues' share
+of the recorder's time (`memory cues: ... s of the recorder's time`; with the smart alarm too, `smart alarm and memory
+cues, one sleep model: ...`) and says `memory cues stopped: ...` if the guard switched them off. None of these says
+whether sound played or which half.
+
 ### Try these (`try-these/`)
 
 The in-app list of what to try next (DECISIONS row 340): which stops the owner ticked Done or Skip, which the app

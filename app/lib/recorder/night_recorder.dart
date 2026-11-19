@@ -13,12 +13,14 @@
 // - the drift-off detector runs on the batches in this isolate (live_drift.dart, DECISIONS 180-184), always behind the
 //   files and inside a guard: an exception, or more than its share of time, switches it off with one log line;
 // - so do the smart alarm (alarm/live_alarm.dart, DECISIONS 230-236: only from an hour before its window; the phone's
-//   own alarm at the window's end never depends on it) and the lucid dream cues (lucid/live_cues.dart, DECISIONS
-//   300-303), with the one live sleep model they share (sleep/night_scorer.dart, DECISIONS 330): one guard with a
-//   memory limit too covers all three; an exception in the alarm or the cues costs only that one;
+//   own alarm at the window's end never depends on it) and tonight's sound cues, one kind a night (the lucid dream
+//   cues, lucid/live_cues.dart, DECISIONS 300-303, or the memory cues, memory_cues/live_cues.dart, DECISIONS 500-509;
+//   the engine both use is cues/night_cues.dart), with the one live sleep model they share (sleep/night_scorer.dart,
+//   DECISIONS 330): one guard with a memory limit too covers all three; an exception in the alarm or the cues costs
+//   only that one;
 // - a board that is not a BrainBit (the DIY board, recorder/headband.dart `OtherBoard`) gets no contact check and no
-//   battery lines, and its samples never reach the drift-off detector, the smart alarm, the lucid cues or the live
-//   sleep model they share: they read O1 O2 T3 T4.
+//   battery lines, and its samples never reach the drift-off detector, the smart alarm, the cues or the live sleep
+//   model they share: they read O1 O2 T3 T4.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -26,7 +28,7 @@ import 'dart:math';
 
 import '../alarm/live_alarm.dart';
 import '../alarm/rule.dart';
-import '../lucid/live_cues.dart';
+import '../cues/night_cues.dart';
 import '../sleep/night_scorer.dart';
 import 'battery.dart';
 import 'chunk_writer.dart';
@@ -167,7 +169,8 @@ class NightRecorder {
   /// Lines for the night's log at its start (and again after a restart by Android): which headband, what is off.
   final List<String> startNotes;
 
-  /// Makes tonight's lucid dream cues for the night's start (null from it: they are off); null: none.
+  /// Makes tonight's sound cues for the night's start (the lucid or the memory cues, one kind a night; null from it:
+  /// they are off); null: none.
   final CueFactory? cues;
 
   /// The night's one live sleep model, which the smart alarm and the lucid cues made by [alarm] and [cues] listen to
@@ -181,7 +184,7 @@ class NightRecorder {
   final GuardLimits liveLimits;
   late final WatchGuard<_LiveSleep> _live = WatchGuard(limits: liveLimits, onStop: _liveStopped);
 
-  /// Tonight's lucid dream cues while they run.
+  /// Tonight's sound cues while they run.
   CueWatch? _cueWatch;
 
   /// The guard switched the live sleep model off: nothing starts it again in this process.
@@ -733,7 +736,7 @@ class NightRecorder {
     if (identical(_alarm, a) && a.finished) _alarmFinished(a);
   }
 
-  /// A call into the lucid cues: their exception switches them off alone, with one log line.
+  /// A call into the cues: their exception switches them off alone, with one log line.
   void _cueCall(void Function(CueWatch c) call, DateTime t) {
     final c = _cueWatch;
     if (c == null) return;
@@ -754,7 +757,7 @@ class NightRecorder {
     final a = _alarm, c = _cueWatch, plan = _plan;
     _alarm = null;
     _cueWatch = null;
-    final who = [if (a != null) 'smart alarm', if (c != null) 'lucid cues'];
+    final who = [if (a != null) 'smart alarm', if (c != null) c.who];
     _logLine(
       '${who.isEmpty ? 'live sleep model' : who.join(' and ')} stopped: $why; '
       '${a == null ? '' : 'the phone\'s alarm still rings at ${plan == null ? 'the window\'s end' : _hm(plan.endMs)}; '}'
@@ -777,7 +780,7 @@ class NightRecorder {
     } catch (_) {}
   }
 
-  /// Tonight's lucid dream cues, when they are on; a failure here costs only the cues.
+  /// Tonight's sound cues, when they are on; a failure here costs only the cues.
   void _startCues() {
     final make = cues;
     if (make == null || _noDetectors) return;
@@ -785,12 +788,12 @@ class NightRecorder {
       final c = make(_night.startMs);
       if (c == null) return;
       _cueWatch = c;
-      if (!c.finished) _liveStart('lucid cues'); // off from the start (no loudness yet): let go at the next batch
+      if (!c.finished) _liveStart(c.who); // off from the start (no loudness yet): let go at the next batch
       for (final text in c.takeEvents()) {
         _marker(text, _now());
       }
     } catch (e) {
-      _cueLine('lucid cues could not start: ${_short(e)}; the recording goes on');
+      _cueLine('sound cues could not start: ${_short(e)}; the recording goes on');
     }
   }
 
@@ -811,13 +814,13 @@ class NightRecorder {
 
   /// The cues alone failed: one log line; the smart alarm and the model it uses go on.
   void _cuesStopped(String why, CueWatch c) {
-    _cueLine('lucid cues stopped: $why; the recording goes on');
+    _cueLine('${c.who} stopped: $why; the recording goes on');
     _offCues(why, c);
   }
 
   void _offCues(String why, CueWatch c) {
     try {
-      if (c is LiveCues) c.off('The recorder stopped them ($why).');
+      if (c is NightCues) c.off('The recorder stopped them ($why).');
     } catch (_) {}
     unawaited(_closeCues(c));
   }
@@ -966,7 +969,7 @@ class NightRecorder {
     final c = _cueWatch;
     _cueWatch = null;
     if (c != null) {
-      _cueLine("lucid cues: off with this board (the sleep model reads BrainBit's O1 O2 T3 T4); no cue plays tonight");
+      _cueLine("${c.who}: off with this board (the sleep model reads BrainBit's O1 O2 T3 T4); no cue plays tonight");
       _offCues('off with the DIY board', c);
     }
     final plan = _plan;
@@ -1428,11 +1431,12 @@ class NightRecorder {
     _note(_night.phoneBattery.summaryLine());
     if (_live.used) {
       // one line for the guard's helpers; with both, they shared one model
-      final who = _liveWho.length > 1
-          ? 'smart alarm and lucid cues, one sleep model:'
-          : _liveWho.contains('smart alarm')
+      final names = [if (_liveWho.contains('smart alarm')) 'smart alarm', ..._liveWho.where((w) => w != 'smart alarm')];
+      final who = names.length > 1
+          ? '${names.join(' and ')}, one sleep model:'
+          : names.single == 'smart alarm'
           ? 'smart alarm: sleep model'
-          : 'lucid cues:';
+          : '${names.single}:';
       _note(
         '$who ${(_live.spent.inMicroseconds / 1e6).toStringAsFixed(2)} s of the recorder\'s time over '
         '${(_live.ran.inMicroseconds / 6e7).toStringAsFixed(1)} min',

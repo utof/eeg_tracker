@@ -70,6 +70,7 @@ class NightViewModel {
     this.alarmAction,
     this.ringing,
     this.lucidLine,
+    this.memoryLine,
     this.board,
     this.diyNames,
   });
@@ -131,6 +132,10 @@ class NightViewModel {
   /// Lucid dream cues in a line ("On: practise before you sleep."), when they were ever used (DECISIONS 308).
   final String? lucidLine;
 
+  /// Memory cues in a line ("On: learn the board before Start night."), once switched on (DECISIONS 508); null: no
+  /// section (they live in Settings).
+  final String? memoryLine;
+
   /// The DIY board while one records (its channels, mode and swing); null for the BrainBit.
   final BoardLive? board;
 
@@ -155,6 +160,7 @@ class NightView extends StatelessWidget {
     this.onDream,
     this.onNap,
     this.onLucid,
+    this.onMemory,
     this.onSound,
     this.onWork,
     this.onSleepReport,
@@ -179,6 +185,9 @@ class NightView extends StatelessWidget {
   final VoidCallback? onDream;
   final VoidCallback? onNap;
   final VoidCallback? onLucid;
+
+  /// The Memory cues page (DECISIONS 508); its section shows only with a [NightViewModel.memoryLine].
+  final VoidCallback? onMemory;
   final VoidCallback? onSound;
 
   /// The work session (ROADMAP row 35): holds the headband, so only between nights.
@@ -276,6 +285,12 @@ class NightView extends StatelessWidget {
           if (!m.running) ...[const SectionHeading('Nap coach'), _Nap(line: m.napLine, onNap: onNap)],
           // Lucid dream cues: the evening practice and the morning questions, between nights (DECISIONS 308).
           if (!m.running && onLucid != null) ...[const SectionHeading('Lucid dreams'), _Lucid(line: m.lucidLine, onLucid: onLucid)],
+          // Memory cues, the assistant's proposal: the evening task and the morning test, once switched on (DECISIONS
+          // 508).
+          if (!m.running && onMemory != null && m.memoryLine != null) ...[
+            const SectionHeading('Memory cues'),
+            _Memory(line: m.memoryLine!, onMemory: onMemory),
+          ],
           // The work session holds the headband too, so it waits for the night to end (DECISIONS 447).
           if (!m.running && onWork != null) ...[const SectionHeading('Work'), _Work(onWork: onWork)],
           // Sound for states also plays during a night, by its timer alone (DECISIONS row 130).
@@ -742,6 +757,31 @@ class _Lucid extends StatelessWidget {
         if (line != null) ...[const SizedBox(height: 8), Text(line!, style: text.bodyLarge?.copyWith(height: 1.4))],
         const SizedBox(height: 16),
         OutlinedButton.icon(onPressed: onLucid, icon: const Icon(Icons.visibility_outlined), label: const Text('Lucid dreams')),
+      ],
+    );
+  }
+}
+
+class _Memory extends StatelessWidget {
+  const _Memory({required this.line, required this.onMemory});
+  final String line;
+  final VoidCallback? onMemory;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Soft sounds in deep sleep for one half of an evening task, tested the next morning. The assistant\'s '
+          'proposal; the evidence is weak.',
+          style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
+        ),
+        const SizedBox(height: 8),
+        Text(line, style: text.bodyLarge?.copyWith(height: 1.4)),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(onPressed: onMemory, icon: const Icon(Icons.grid_view_outlined), label: const Text('Memory cues')),
       ],
     );
   }

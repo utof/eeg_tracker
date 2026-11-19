@@ -19,8 +19,11 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../cues/night_cues.dart' show CueMoment;
 import '../sleep/report.dart' show isoLocal;
 import 'plan.dart';
+
+export '../cues/night_cues.dart' show CueMoment;
 
 const String lucidFolder = 'lucid';
 
@@ -63,37 +66,6 @@ class LucidSettings {
       mediaVolumeMax: mm is int ? mm : null,
       levelSet: DateTime.tryParse('${j['levelSet']}')?.toLocal(),
     );
-  }
-}
-
-/// One cue moment of a night: when, its step (dB over the evening's level), its dream-sleep period, the live
-/// reading that allowed it, and whether an arousal followed.
-class CueMoment {
-  const CueMoment({
-    required this.atMs,
-    required this.step,
-    required this.period,
-    required this.confidence,
-    this.aroused = false,
-  });
-  final int atMs, step, period;
-  final double confidence;
-  final bool aroused;
-
-  Map<String, Object?> toJson() => {
-    'at': isoLocal(DateTime.fromMillisecondsSinceEpoch(atMs)),
-    'atMs': atMs,
-    'step': step,
-    'period': period,
-    'confidence': (confidence * 1000).round() / 1000,
-    'aroused': aroused,
-  };
-
-  static CueMoment? fromJson(Object? j) {
-    if (j is! Map) return null;
-    final a = j['atMs'], s = j['step'], p = j['period'], c = j['confidence'];
-    if (a is! int || s is! int || p is! int || c is! num) return null;
-    return CueMoment(atMs: a, step: s, period: p, confidence: c.toDouble(), aroused: j['aroused'] == true);
   }
 }
 

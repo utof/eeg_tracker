@@ -27,6 +27,9 @@ Each line says what it does. In brackets: how well the research backs it **for t
   after the session the phone writes the answers out as text (Russian and English, a one-time 671 MB download). (some)
 - **Lucid dream cues**: soft sounds in dream sleep, with silent nights mixed in so the app can test whether they
   did anything. An experiment. (weak)
+- **Memory cues in deep sleep**: an evening memory task (objects at places), soft sounds in deep sleep for half of
+  it, and a morning test; silent nights and a hidden half let the app test whether the sounds helped. Never on a
+  lucid-cue night. Off until you switch it on. (weak)
 - **Morning check-in and Trends**: a 5-minute eyes-closed / eyes-open check, plus your own ratings, and your
   numbers next to yesterday and your usual, with 14-day lines. (check-in: strong; trends: some)
 - **Work session**: headband on while you work; it shows alert / getting drowsy / drowsy, hints at a break, and keeps a

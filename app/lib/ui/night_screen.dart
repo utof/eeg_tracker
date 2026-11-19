@@ -38,6 +38,7 @@ import 'hands_free_screen.dart' show SettingsScreen;
 import 'lights_off_view.dart';
 import 'meditation_screen.dart';
 import 'lucid_screen.dart';
+import 'memory_cues_screen.dart';
 import 'nap_screen.dart';
 import 'nap_view.dart' show endWords;
 import 'morning_screen.dart';
@@ -252,6 +253,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   String? _dreamLine;
   String? _napLine;
   String? _lucidLine;
+  String? _memoryLine;
   String? _checkedInAt, _experiment, _unusual;
   Pending? _pending;
   AlarmSetup _alarm = const AlarmSetup();
@@ -395,6 +397,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     final dreamLine = dir == null ? null : _lastDream(dir);
     final napLine = dir == null ? null : _lastNap(dir);
     final lucidLine = dir == null ? null : lucidNightLine(dir);
+    final memoryLine = dir == null ? null : memoryNightLine(dir);
     final pending = dir == null || running ? null : await _pendingExport(dir);
     String? experiment;
     try {
@@ -418,6 +421,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       _dreamLine = dreamLine;
       _napLine = napLine;
       _lucidLine = lucidLine;
+      _memoryLine = memoryLine;
       _checkedInAt = checkedInAt;
       _experiment = experiment;
       _unusual = unusual;
@@ -760,6 +764,12 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     unawaited(_refresh());
   }
 
+  /// Memory cues: the evening task and the morning test need no headband (DECISIONS 508).
+  Future<void> _memory() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const MemoryCuesScreen()));
+    unawaited(_refresh());
+  }
+
   /// The check-in owns the headband while it runs, so it too starts only between nights.
   Future<void> _checkIn() async {
     if (_running) return;
@@ -875,6 +885,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       alarmAction: _alarmAction(s, now),
       ringing: _clockState.ringing ? (_clockState.reason ?? _windowEndReason()) : null,
       lucidLine: _lucidLine,
+      memoryLine: _memoryLine,
       board: s?.board,
       diyNames: diy ? _diy.names : null,
     );
@@ -923,6 +934,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onDream: _dream,
       onNap: _nap,
       onLucid: _lucid,
+      onMemory: _memory,
       onSound: _sound,
       onWork: _work,
       onSleepReport: sleep == null ? null : () => _openSleep(sleep.nightOf),

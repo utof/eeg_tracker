@@ -11,6 +11,7 @@ import '../handsfree/calibration_controller.dart';
 import '../handsfree/store.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
+import '../memory_cues/store.dart' show MemoryStore, memoryDirFor;
 import '../study/store.dart' show StudyStore, studyDirFor;
 import '../sound/check_in_sound.dart';
 import '../training/check_store.dart' show filesDirFor;
@@ -18,6 +19,7 @@ import '../wearer/wearer.dart';
 import 'evidence_sheet.dart';
 import 'hands_free_view.dart';
 import 'nearby.dart';
+import 'memory_cues_screen.dart';
 import 'study_screen.dart';
 
 /// The hands-free settings of the app's folder, or null when the folder is not known.
@@ -44,7 +46,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   HandsFreeStore? _store;
   HandsFreeState _state = const HandsFreeState();
   bool _nightRunning = false;
-  bool? _studyOn;
+  bool? _studyOn, _memoryOn;
   String? _error;
 
   /// "Was this you?" (DECISIONS 370-379): the app's recordings folder and the check's state, when known.
@@ -69,9 +71,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       wearer = null; // the section is left out; hands-free still works
     }
     final studyOn = await _readStudyOn();
+    final memoryOn = await _readMemoryOn();
     if (!mounted) return;
     setState(() {
       _studyOn = studyOn;
+      _memoryOn = memoryOn;
       _store = store;
       _state = store?.load() ?? const HandsFreeState();
       _nightRunning = running;
@@ -106,6 +110,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const StudyScreen()));
     final on = await _readStudyOn();
     if (mounted) setState(() => _studyOn = on);
+  }
+
+  /// The memory cues' switch, read from their own file (null when the app's folder is not known).
+  Future<bool?> _readMemoryOn() async {
+    try {
+      final dir = await Phone.recordingsDir();
+      return dir == null ? null : MemoryStore(memoryDirFor(dir)).settings().on;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _openMemory() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const MemoryCuesScreen()));
+    final on = await _readMemoryOn();
+    if (mounted) setState(() => _memoryOn = on);
   }
 
   void _set(bool on) {
@@ -159,6 +179,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     onWearerInfo: () => showEvidence(context, 'was-this-you'),
     studyOn: _studyOn,
     onStudy: () => unawaited(_openStudy()),
+    memoryOn: _memoryOn,
+    onMemory: () => unawaited(_openMemory()),
   );
 }
 

@@ -132,36 +132,36 @@ class LucidView extends StatelessWidget {
           const SectionHeading('The test'),
           _test(context),
           const SectionHeading('How it works'),
-          const _Note(
+          const IconNote(
             Icons.graphic_eq,
             'The cue is three soft rising tones. In the evening practice you learn to ask "am I dreaming?" each time '
             'you hear it. In the night it plays softly again while the headband reads dream sleep.',
           ),
-          _Note(
+          IconNote(
             Icons.schedule,
             'Only in the second half of the night (from ${_hours(LucidRule.cuesFrom)} after Lights off), when the sleep '
             'model has read dream sleep for 2 epochs with your eyes moving and you lie still; never in deep sleep. At '
             'most ${LucidRule.perPeriod} cues in a dream and ${LucidRule.perNight} a night, 1 dB louder each time up to '
             '+${LucidRule.maxSteps} dB; a stir or a wake makes it quieter and pauses it.',
           ),
-          const _Note(
+          const IconNote(
             Icons.visibility_off_outlined,
             'Some nights are silent on purpose and you are not told which. Everything else is the same, so after 12 '
             'nights the app can test whether the sound did anything for you.',
           ),
-          const _Note(
+          const IconNote(
             Icons.swap_horiz,
             'If you know you are dreaming, look left-right-left-right, twice, wide. The morning search looks for that '
             'on the temple electrodes (and a double jaw clench, once hands-free is calibrated).',
           ),
-          _Note(
+          IconNote(
             Icons.info_outline,
             'The evidence is weak: it worked in a sleep lab, but a home app found no clear difference against no cue. '
             'Dream sleep is read by a model not yet checked on this headband. The i button says more.',
             onTap: onInfo,
           ),
           const SectionHeading('Who should not use it'),
-          const _Note(
+          const IconNote(
             Icons.warning_amber_outlined,
             'Sounds in the night can disturb sleep. Turn it off if your sleep gets worse, after nightmares, or if dreams '
             'and waking start to feel mixed up. Do not use it with poor sleep, a sleep disorder, frequent nightmares, '
@@ -290,20 +290,20 @@ class LucidView extends StatelessWidget {
           '${last.record.index + 1} of the test.',
           style: text.bodyMedium?.copyWith(color: Night.inkMuted),
         ),
-        _StackQuestion<String>(
+        StackQuestion<String>(
           question: 'In a dream, did you know that you were dreaming?',
           choices: const [('yes', 'Yes'), ('no', 'No'), ('unsure', 'Not sure')],
           value: d.lucid,
           onChanged: (v) => onDraft(d.copyWith(lucid: v)),
         ),
         if (d.lucid == 'yes')
-          _StackQuestion<String>(
+          StackQuestion<String>(
             question: 'Did you make the eye signal, left-right-left-right?',
             choices: const [('yes', 'Yes'), ('no', 'No')],
             value: d.signal,
             onChanged: (v) => onDraft(d.copyWith(signal: v)),
           ),
-        _StackQuestion<String>(
+        StackQuestion<String>(
           question: 'Did you hear the sound in the night?',
           choices: const [
             ('no', 'No'),
@@ -314,7 +314,7 @@ class LucidView extends StatelessWidget {
           value: d.heard,
           onChanged: (v) => onDraft(d.copyWith(heard: v)),
         ),
-        _StackQuestion<int>(
+        StackQuestion<int>(
           question: 'How much of your dreams do you remember?',
           choices: const [(0, 'Nothing'), (1, 'A bit of one'), (2, 'One dream'), (3, 'More than one dream')],
           value: d.recall,
@@ -338,12 +338,12 @@ class LucidView extends StatelessWidget {
       children: [
         const NightLane.plan(),
         const SizedBox(height: 14),
-        _LogRow(label: 'Practice', value: m.practisedAt == null ? 'not yet' : 'done ${_hm(m.practisedAt!)}'),
-        _LogRow(
+        LogValueRow(label: 'Practice', value: m.practisedAt == null ? 'not yet' : 'done ${_hm(m.practisedAt!)}'),
+        LogValueRow(
           label: 'Loudness',
           value: m.level == null ? 'not set' : '${(m.level! * 100).toStringAsFixed(m.level! < 0.1 ? 1 : 0)} % of media',
         ),
-        _LogRow(label: 'Night of the test', value: '${m.nextIndex + 1}', last: true),
+        LogValueRow(label: 'Night of the test', value: '${m.nextIndex + 1}', last: true),
         const SizedBox(height: 12),
         Text(
           'Practice: set the loudness (tap when you just hear it), then ${PracticeRule.guided} cues with the words and '
@@ -363,7 +363,11 @@ class LucidView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        NightCells(nights: m.nights, next: m.on ? m.nextIndex : -1, arms: r?.arms),
+        NightCells(
+          nights: m.nights,
+          next: m.on ? m.nextIndex : -1,
+          sound: r == null ? null : [for (final a in r.arms) a == NightArm.cue],
+        ),
         const SizedBox(height: 10),
         Text(
           r == null
@@ -403,8 +407,8 @@ class LucidView extends StatelessWidget {
 
 /// A question over a full-width column of choices, one 52 dp row each, so every answer fits at any text size and the
 /// morning's questions share one shape; nothing preselected, as [ChoiceQuestion].
-class _StackQuestion<T extends Object> extends StatelessWidget {
-  const _StackQuestion({required this.question, required this.choices, required this.value, required this.onChanged});
+class StackQuestion<T extends Object> extends StatelessWidget {
+  const StackQuestion({super.key, required this.question, required this.choices, required this.value, required this.onChanged});
   final String question;
   final List<(T, String)> choices;
   final T? value;
@@ -479,12 +483,12 @@ class LastNightLog extends StatelessWidget {
           signals: [for (final x in s?.signals ?? const <FoundSignal>[]) (x.atMs, x.inDreamSleep)],
         ),
         const SizedBox(height: 14),
-        _LogRow(
+        LogValueRow(
           label: 'Cue moments',
           value: r.cues.isEmpty ? 'none' : '${r.cues.length} in $periods dream${periods == 1 ? '' : 's'}',
         ),
-        _LogRow(label: 'A stir after a cue', value: r.cues.isEmpty ? '-' : '$aroused of ${r.cues.length}'),
-        _LogRow(
+        LogValueRow(label: 'A stir after a cue', value: r.cues.isEmpty ? '-' : '$aroused of ${r.cues.length}'),
+        LogValueRow(
           label: 'Dream signals',
           value: n.searching
               ? 'looking...'
@@ -494,7 +498,7 @@ class LastNightLog extends StatelessWidget {
               ? 'none found'
               : '$inDream in dream sleep${s.signals.length > inDream ? ', ${s.signals.length - inDream} other' : ''}',
         ),
-        _LogRow(label: 'Your answers', value: _answerWords(n.answers), last: true),
+        LogValueRow(label: 'Your answers', value: _answerWords(n.answers), last: true),
         const SizedBox(height: 12),
         Text(_sentence(r, s), style: muted),
       ],
@@ -590,10 +594,10 @@ class LucidResultsView extends StatelessWidget {
         if (chance.isNotEmpty) ...[const SizedBox(height: 10), Text(chance, style: muted)],
         const SizedBox(height: 20),
         Text('Seen together, not tested', style: text.titleMedium?.copyWith(fontWeight: FontWeight.w500)),
-        _LogRow(label: 'Lucid when you heard it', value: '${r.lucidWhenHeard.$1} of ${r.lucidWhenHeard.$2}'),
-        _LogRow(label: 'Lucid when you did not', value: '${r.lucidWhenNotHeard.$1} of ${r.lucidWhenNotHeard.$2}'),
-        _LogRow(label: 'Lucid after a practice', value: '${r.practisedLucid.$1} of ${r.practisedLucid.$2}'),
-        _LogRow(label: 'Lucid without one', value: '${r.unpractisedLucid.$1} of ${r.unpractisedLucid.$2}', last: true),
+        LogValueRow(label: 'Lucid when you heard it', value: '${r.lucidWhenHeard.$1} of ${r.lucidWhenHeard.$2}'),
+        LogValueRow(label: 'Lucid when you did not', value: '${r.lucidWhenNotHeard.$1} of ${r.lucidWhenNotHeard.$2}'),
+        LogValueRow(label: 'Lucid after a practice', value: '${r.practisedLucid.$1} of ${r.practisedLucid.$2}'),
+        LogValueRow(label: 'Lucid without one', value: '${r.unpractisedLucid.$1} of ${r.unpractisedLucid.$2}', last: true),
         const SizedBox(height: 12),
         Text(
           '${r.shown.length} nights opened${r.hidden > 0 ? ', ${r.hidden} still sealed' : ''}'
@@ -649,8 +653,9 @@ class _TableRow extends StatelessWidget {
   }
 }
 
-class _LogRow extends StatelessWidget {
-  const _LogRow({required this.label, required this.value, this.last = false});
+/// Label left, value right in tabular figures, a hairline under it unless [last] (DESIGN.md log rows).
+class LogValueRow extends StatelessWidget {
+  const LogValueRow({super.key, required this.label, required this.value, this.last = false});
   final String label, value;
   final bool last;
 
@@ -688,8 +693,9 @@ class _LogRow extends StatelessWidget {
   }
 }
 
-class _Note extends StatelessWidget {
-  const _Note(this.icon, this.text, {this.onTap, this.color = Night.inkMuted});
+/// A muted sentence after its icon; tappable when [onTap] is given.
+class IconNote extends StatelessWidget {
+  const IconNote(this.icon, this.text, {super.key, this.onTap, this.color = Night.inkMuted});
   final IconData icon;
   final String text;
   final VoidCallback? onTap;
@@ -853,10 +859,12 @@ class _LanePainter extends CustomPainter {
 /// ahead (sealed), filled when answered, an ink dot for a lucid morning, the next night outlined green; after the
 /// results open, a bar under each night that had sound.
 class NightCells extends StatelessWidget {
-  const NightCells({super.key, required this.nights, required this.next, this.arms});
+  const NightCells({super.key, required this.nights, required this.next, this.sound});
   final List<({bool answered, bool lucid})> nights;
   final int next;
-  final List<NightArm>? arms;
+
+  /// Once the results open: whether each shown night had sound (a short ink bar under it).
+  final List<bool>? sound;
 
   @override
   Widget build(BuildContext context) {
@@ -892,7 +900,7 @@ class NightCells extends StatelessWidget {
   Widget _cell(int i, double size) {
     final past = i < nights.length;
     final n = past ? nights[i] : null;
-    final sound = arms != null && i < arms!.length && arms![i] == NightArm.cue;
+    final hadSound = sound != null && i < sound!.length && sound![i];
     final Color? fill = n == null ? null : (n.answered ? Night.saved : Night.track);
     final Color border = i == next ? Night.live : (past ? Colors.transparent : Night.rule);
     return Column(
@@ -915,9 +923,9 @@ class NightCells extends StatelessWidget {
                 )
               : null,
         ),
-        if (arms != null) ...[
+        if (sound != null) ...[
           const SizedBox(height: 3),
-          Container(width: size * 0.6, height: 2.5, color: sound ? Night.ink : Colors.transparent),
+          Container(width: size * 0.6, height: 2.5, color: hadSound ? Night.ink : Colors.transparent),
         ],
       ],
     );
