@@ -260,8 +260,34 @@ nights** (about 3 minutes in, right after the Share toggles), BrainBit's library
 `Scanner.getSensors` (native, under the ARM translation) for good: the app showed "isn't responding", Stop could not
 be tapped, and the recorder's own 90 s scan timeout never fired, since with Flutter's merged platform and UI threads
 (3.47, the default) every Dart isolate of the process waits on that thread too. Two later nights (7 minutes each, one
-with the same toggles) and one on the previous head did not hang. Watch for it on the phone (a frozen night screen,
-no `.log` lines): if it happens there, BrainBit's calls need their own thread or the merged threads switched off.
+with the same toggles) and one on the previous head did not hang. Fixed on `fix/app-sdk-main-thread` (below).
+
+**BrainBit's calls off the main thread** (`fix/app-sdk-main-thread`, 2026-11-19, DECISIONS rows 410-414): the app uses a
+copy of the plugin (`packages/neurosdk2/`, every change listed in its `VENDORED.md`) whose synchronous calls and scan
+results run on a thread of its own, `neurosdk2-calls`. Flutter 3.47 cannot switch the merged threads off on Android
+(the engine aborts on `MergedPlatformUIThread=disabled`). The hang itself is inside BrainBit's library and can be
+brought on: during a night without a headband, `adb root`, then `adb shell kill -10 <pid>` every 3 s (ART answers
+SIGUSR1 with a garbage collection) and, for more, three busy loops in `adb shell` (`sh -c "while :; do :; done"`).
+`adb shell kill -3 <pid>` writes every thread's stack to `/data/anr/trace_NN`: a `neurosdk2` frame under `"main"` is
+the freeze; under `pool-N-thread-M` or `neurosdk2-calls` it is the kind the recorder survives. What it showed (arm64
+APKs under the ARM translation, x86_64 API 36 image):
+
+- the integration's APK (`dda9ba2`, plugin as published): hangs in `Scanner.freeScanner` (`pthread_join` on the
+  library's own scan thread, which never ends), `startScanner` and `createScanner`, on the first close in 3 of 3
+  processes right after a fresh boot, then once in 8 scans, and 3 times in 8 minutes with the busy loops. Each was on
+  the plugin's pool, so the main thread stayed free and the recorder's 90 s deadline restarted the process
+  (`exited cleanly (3)`), as DECISIONS row 50 planned; the integration's one happened to be the main thread's
+  `getSensors`, which froze everything. Without forced collections, 7 scans in a row were clean.
+- the fixed APK (`d191e17`): no hang in 13 scans with the forced collections (after Share on Wi-Fi switched on and
+  off five times); with the busy loops too, `freeScanner` hung once in 12 minutes (the 8th close), the main thread and
+  `neurosdk2-calls` stayed idle, a volume key sent every 35 s never gave an ANR, the recorder restarted the process
+  2.5 minutes later and the scans went on. Stop ended the service.
+- BrainBit's x86_64 library (no translation), original plugin (an older x86_64 build, `8ea4fad`) and the fix: no hang
+  in about 11 and 15 scans with the forced collections. So the hang has only been seen with the arm64 library under
+  the emulator's translator: most likely the translator's doing; a phone (arm64, no translator) cannot be tried here.
+  Either way a hang there is now a stall the recorder ends, not a frozen app.
+
+The plugin's JVM tests: `cd android && ./gradlew :neurosdk2:testDebugUnitTest` after one `flutter build apk`.
 
 ## Meditate
 

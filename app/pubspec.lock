@@ -291,10 +291,9 @@ packages:
   neurosdk2:
     dependency: "direct main"
     description:
-      name: neurosdk2
-      sha256: "63925e9bad874314bc4846a3729b2a5712ae34160af1c61b4ac99a58cac806fa"
-      url: "https://pub.dev"
-    source: hosted
+      path: "packages/neurosdk2"
+      relative: true
+    source: path
     version: "1.0.21"
   objective_c:
     dependency: transitive
