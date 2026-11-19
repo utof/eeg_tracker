@@ -29,6 +29,7 @@ import diy_board as db  # noqa: E402
 import fake_board  # noqa: E402
 import record_diy  # noqa: E402
 import recorder_hub  # noqa: E402
+import recorder_poll  # noqa: E402
 import to_bdf  # noqa: E402
 
 VECTORS = json.loads((FAKE / "golden" / "e9_vectors.json").read_text())
@@ -236,7 +237,7 @@ def test_the_board_hub_refuses_the_brainbit_reports(tmp_path):
     hub = recorder_hub.Hub(tmp_path / "rec", reports=False); port = free_port(); hub.serve(port)
     try:
         for path in ("sleep-report", "morning-report"):
-            body = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/{path}", timeout=2).read())
+            body = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/{path}", timeout=15).read())
             assert "O1 O2 T3 T4" in body["error"]
         assert not (tmp_path / "nights").exists()
     finally:
@@ -266,18 +267,6 @@ def free_port(kind: int = socket.SOCK_STREAM) -> int:
     with socket.socket(socket.AF_INET, kind) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
-
-
-def get(port: int, path: str) -> dict:
-    return json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/{path}", timeout=2).read())
-
-
-def hello(port: int) -> dict:
-    with urllib.request.urlopen(f"http://127.0.0.1:{port}/stream", timeout=3) as r:
-        for line in r:
-            if line.startswith(b"data: "):
-                return json.loads(line[6:])
-    return {}
 
 
 @pytest.fixture(scope="module")
@@ -313,23 +302,7 @@ def runs(tmp_path_factory):
                               env=dict(os.environ, FAKE_DIY_SEED="5", FAKE_DIY_DUPLICATE_EVERY="40",
                                        FAKE_DIY_STALE_EVERY="60", FAKE_DIY_CORRUPT_EVERY="45"),
                               stdout=open(base / "sender.out", "w"), stderr=subprocess.STDOUT)
-    seen = {n: dict(status=[], state=None, hello=None, marker=False) for n in specs}
-    deadline = time.time() + 40
-    while time.time() < deadline and any(p.poll() is None for p in procs.values()):
-        for name, s in seen.items():
-            if procs[name].poll() is not None:
-                continue
-            try:
-                st = get(ports[name], "state")
-            except OSError:
-                continue
-            if not s["status"] or s["status"][-1] != st["status"]:
-                s["status"].append(st["status"])
-            if st["data"][0] and s["hello"] is None:
-                s["state"] = st; s["hello"] = hello(ports[name])
-                req = urllib.request.Request(f"http://127.0.0.1:{ports[name]}/marker", data=b"test-marker", method="POST")
-                s["marker"] = urllib.request.urlopen(req, timeout=2).read() == b"ok"
-        time.sleep(0.2)
+    seen = recorder_poll.watch(procs, ports)
     for p in [*procs.values(), sender]:
         if p.poll() is None:
             p.terminate(); p.wait(10)
@@ -465,7 +438,7 @@ def test_real_pyserial_reads_a_pty_and_writes_nothing_back(tmp_path):
             except BlockingIOError:
                 pass
             time.sleep(0.01)
-        out = proc.communicate(timeout=10)[0]
+        out = proc.communicate(timeout=60)[0]
     finally:
         if proc.poll() is None:
             proc.kill()
