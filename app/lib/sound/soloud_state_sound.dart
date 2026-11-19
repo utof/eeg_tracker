@@ -6,15 +6,25 @@
 // pulse would flatten it (build guide 1), and the synthesis keeps its peaks under 0.9.
 // If the app stops feeding (a frozen process), the stream runs dry within the 8 s and the sound goes quiet: it can never
 // outlast the session's timers by more than that.
+// The engine is shared ([soloudShare], engine_share.dart): the screen's Listen preview and the session are two of these,
+// and a preview still fading out must not close the engine the session plays on. Each stops its own voice and frees
+// its own stream; the last one closes the engine.
 import 'dart:async';
 import 'dart:isolate';
 
 import 'package:flutter_soloud/flutter_soloud.dart';
 
 import '../states/presets.dart';
+import 'engine_share.dart';
 import 'state_sound.dart';
 import 'state_synth.dart';
 import 'synth.dart' show synthRate;
+
+/// The app's one flutter_soloud engine, as the sound-for-states sounds share it.
+final EngineShare soloudShare = EngineShare(
+  isUp: () => SoLoud.instance.isInitialized,
+  close: () => SoLoud.instance.deinitAsync(),
+);
 
 class SoloudStateSound implements StateSound {
   /// Seconds made ahead of what plays, and the size of each piece handed over.
@@ -53,7 +63,7 @@ class SoloudStateSound implements StateSound {
   Future<void> _start(SoundPlan plan, double fadeInS) async {
     final g = await Isolate.run(() => StateSynth.gainsFor(plan)); // about 0.5 s of maths: off the screen's thread
     _synth = StateSynth(plan, bedGain: g.bed, beatGain: g.beat);
-    if (!_s.isInitialized) await _s.init(sampleRate: synthRate, bufferSize: _buffer, lowLatency: false);
+    await soloudShare.take(this, () => _s.init(sampleRate: synthRate, bufferSize: _buffer, lowLatency: false));
     _failures ??= _s.audioDeviceStartFailures.listen((_) {
       _deviceFailures++;
       unawaited(_s.startAudioDevice().catchError((Object _) {}));
@@ -153,12 +163,18 @@ class SoloudStateSound implements StateSound {
     _feeder?.cancel();
     _feeder = null;
     _synth = null;
+    final h = _h, src = _src;
     _src = null;
     _h = null;
     await _failures?.cancel();
     _failures = null;
     try {
-      if (_s.isInitialized) await _s.deinitAsync(); // stops every voice and frees the stream
+      // its own voice and stream only: another sound may be playing on the engine
+      if (_s.isInitialized && h != null) await _s.stop(h);
+      if (_s.isInitialized && src != null) await _s.disposeSource(src);
+    } catch (_) {}
+    try {
+      await soloudShare.give(this); // the last one closes the engine
     } catch (_) {}
   }
 

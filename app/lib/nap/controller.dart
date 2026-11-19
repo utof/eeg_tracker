@@ -10,11 +10,16 @@
 // always ends the nap, so it works on the timer alone when the model is too slow or the signal is lost, and the
 // screen says so. The night recorder's service is never touched (row 177).
 //
+// With the phone locked the nap goes on: a [SessionKeeper] (the phone's foreground service, DECISIONS rows 190-195 and
+// 460) is held from Lights off until the nap is saved; Stop on its notification is "I'm awake" (or ends the nap
+// before the wake). The screen still stays on by itself, as before.
+//
 // Hands-free (DECISIONS 244-246): with the owner's switch on, a double clench or a look left then right marks a
 // moment in the nap's recording, with a soft tone; never while the drift-off detector says probably asleep.
 //
-// Time: seconds after lights off are the larger of the samples received (holes held at their length) and the clock,
-// so a test can stream a nap in a fraction of a second, and a headband out of range does not stop the timer.
+// Time: seconds after lights off are the larger of the samples received (holes held at their length) and a monotonic
+// clock (session_clock.dart: a correction of the phone's clock moves nothing), so a test can stream a nap in a
+// fraction of a second, and a headband out of range does not stop the timer.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -32,6 +37,8 @@ import '../meditation/controller.dart' show gapPauseS, gapSamples;
 import '../recorder/chunk_writer.dart';
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
+import '../session_clock.dart';
+import '../session_keeper.dart';
 import '../sleep/live_stager.dart';
 import '../sound/gesture_tone.dart';
 import '../sleep/periods.dart' show gapStage;
@@ -67,6 +74,7 @@ class NapTiming {
     this.tick = const Duration(milliseconds: 250),
     this.noDataAfter = const Duration(seconds: 2),
     this.saveEvery = const Duration(seconds: 60),
+    this.modelDeadline = const Duration(seconds: 60),
   });
 
   final LinkTiming link;
@@ -79,6 +87,9 @@ class NapTiming {
 
   /// The session file is rewritten this often (so a killed app keeps the nap so far).
   final Duration saveEvery;
+
+  /// A sleep model call still running after this is given up: the timer alone ends the nap (DECISIONS row 461).
+  final Duration modelDeadline;
 }
 
 class NapController extends ChangeNotifier {
@@ -92,12 +103,20 @@ class NapController extends ChangeNotifier {
     this.scale = scaleInBackground,
     this.timing = const NapTiming(),
     this.gestureTone,
+    this.keeper,
     DateTime Function()? clock,
+    Duration Function()? monotonic,
   }) : _makeSound = sound,
-       _now = clock ?? DateTime.now;
+       _now = clock ?? DateTime.now,
+       _clock = SessionClock(wall: clock, monotonic: monotonic);
+
+  final SessionClock _clock;
 
   final HeadbandFinder finder;
   final NapSound Function() _makeSound;
+
+  /// Keeps the nap alive with the phone locked (null: nothing does; the screen stays on as before).
+  final SessionKeeper? keeper;
 
   /// The hands-free confirmation tone (null: none).
   final GestureTone Function()? gestureTone;
@@ -191,12 +210,13 @@ class NapController extends ChangeNotifier {
   LiveStager? _stager;
   NapRules? _rules;
   DateTime? _lightsOffAt;
+  Duration? _lightsOffMono;
   double? _wakeS, _upS;
   int _cues = 0;
   Timer? _ticker;
   int _ticks = 0;
   DateTime? _lastArrival;
-  DateTime? _lastSave;
+  Duration? _lastSave;
   int? _lastPack;
   bool _gapPending = false;
   int _lostSamples = 0;
@@ -217,6 +237,8 @@ class NapController extends ChangeNotifier {
     final run = ++_run;
     this.lengthMin = lengthMin;
     _set(NapStage.connecting, 'Looking for the headband.');
+    await _keep(lengthMin);
+    if (_ended) return; // stopped meanwhile
     final link = BandLink(finder: finder, timing: timing.link, onBatch: _onBatch, onEvent: _onLinkEvent, clock: _now);
     _link = link;
     try {
@@ -255,9 +277,16 @@ class NapController extends ChangeNotifier {
       final m = model;
       _stager = m == null
           ? null
-          : LiveStager(model: m(), scale: scale, mayRun: mayRunModel, onStage: _onStage, onChange: _onLiveChange);
+          : LiveStager(
+              model: m(),
+              scale: scale,
+              mayRun: mayRunModel,
+              onStage: _onStage,
+              onChange: _onLiveChange,
+              deadline: timing.modelDeadline,
+            );
       _lightsOffAt = _now();
-      _lastSave = _lightsOffAt;
+      _lastSave = _lightsOffMono = _clock.now;
       await link.startSignal();
       if (!_live(run)) return await link.close(); // Stop came while the stream started
       _ticker = Timer.periodic(timing.tick, (_) => _tick());
@@ -272,6 +301,29 @@ class NapController extends ChangeNotifier {
     } catch (e) {
       await _fail('Could not start: $e', run);
     }
+  }
+
+  /// Asks the keeper to hold the nap, so a locked phone does not freeze it; Stop on its notification is "I'm awake".
+  Future<void> _keep(int lengthMin) async {
+    final k = keeper;
+    if (k == null) return;
+    k.onStop = () => unawaited(awake());
+    final by = _now().add(Duration(minutes: lengthMin));
+    String two(int v) => v.toString().padLeft(2, '0');
+    try {
+      // no audio focus: nothing plays until the wake, and a podcast you fall asleep to should go on (row 468)
+      await k.hold(
+        KeepSpec(title: 'Nap', text: 'Wakes you by ${two(by.hour)}:${two(by.minute)}', headband: true, focus: false),
+      );
+    } catch (_) {
+      // the screen stays on as before
+    }
+  }
+
+  Future<void> _letGo() async {
+    try {
+      await keeper?.release();
+    } catch (_) {}
   }
 
   /// "I'm awake" while the cue plays; before the wake it ends the nap as stopped.
@@ -309,6 +361,7 @@ class NapController extends ChangeNotifier {
     _stager = null;
     _rules = null;
     _lightsOffAt = null;
+    _lightsOffMono = null;
     _wakeS = null;
     _upS = null;
     _cues = 0;
@@ -328,10 +381,10 @@ class NapController extends ChangeNotifier {
   }
 
   double _t() {
-    final at = _lightsOffAt;
+    final at = _lightsOffMono;
     if (at == null) return 0;
     final samples = (_seen?.n ?? 0) / fs;
-    return math.max(samples, _now().difference(at).inMicroseconds / 1e6);
+    return math.max(samples, _clock.secondsSince(at));
   }
 
   // ---- the EEG file ----
@@ -481,8 +534,8 @@ class NapController extends ChangeNotifier {
     }
     if (stage == NapStage.waking) _ring(t);
     final saved = _lastSave;
-    if (saved != null && _now().difference(saved) >= timing.saveEvery) {
-      _lastSave = _now();
+    if (saved != null && _clock.now - saved >= timing.saveEvery) {
+      _lastSave = _clock.now;
       _save();
     }
     _notify();
@@ -527,6 +580,7 @@ class NapController extends ChangeNotifier {
       // stopped while connecting: nothing to keep
       await _release();
       await _sound?.stop();
+      await _letGo();
       _set(NapStage.setup, '');
       return;
     }
@@ -537,11 +591,13 @@ class NapController extends ChangeNotifier {
     _mark('nap coach: end (${why.name})');
     _seen?.finish();
     _closeWriter();
+    // the final record first: the headband's release, the fade and a model call still running may all be slow
+    last = _save(endS: endS, why: why);
     await _release();
     await _sound?.stop();
-    await _stager?.close();
-    last = _save(endS: endS, why: why);
+    await _letGo();
     _set(NapStage.done, '');
+    unawaited(_stager?.close()); // after a running call, which may never end: nothing waits for it
   }
 
   NapSession? _save({double? endS, NapEnd? why}) {
@@ -613,7 +669,8 @@ class NapController extends ChangeNotifier {
     _closeWriter();
     await _release();
     await _sound?.stop();
-    await _stager?.close();
+    unawaited(_stager?.close());
+    await _letGo();
     if (!stoppedByUser) _set(NapStage.failed, why);
   }
 

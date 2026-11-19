@@ -86,6 +86,7 @@ class LiveStager {
     this.onStage,
     this.onChange,
     this.fallback = 'the timer alone ends the nap',
+    this.deadline,
     int Function()? clockMs,
   }) : prep = prep ?? LivePrep(),
        _ms = clockMs ?? _wallMs;
@@ -108,6 +109,11 @@ class LiveStager {
 
   /// What takes over when the model stops, for [why] ("the timer alone ends the nap").
   final String fallback;
+
+  /// A model call still running after this ends the model's part as a failure does (the timer takes over); the
+  /// model is closed only once that call has ended. Null: no deadline.
+  final Duration? deadline;
+  Future<Float64List>? _hung;
   final int Function() _ms;
 
   static final Stopwatch _wall = Stopwatch()..start();
@@ -181,7 +187,7 @@ class LiveStager {
       final x = await scale(w);
       final prepMs = _ms() - t0;
       if (_closed) return;
-      final p = await model.probabilities(x, w.epochs, runs, first: w.first);
+      final p = await _ask(x, w, runs);
       if (p.length != w.epochs * 5) throw StateError('the model gave ${p.length} values for ${w.epochs} epochs');
       final ms = _ms() - t0;
       calls.add(LiveCall(w.end, w.epochs, runs, ms, prepMs));
@@ -196,6 +202,11 @@ class LiveStager {
         _slowInARow = 0;
         _stepDown(ms);
       }
+    } on _NoAnswer catch (t) {
+      if (_closed) return;
+      mode = LiveMode.timer;
+      why = 'The sleep model did not answer in ${_seconds(t.after)}, so $fallback.';
+      onChange?.call();
     } catch (e) {
       if (_closed) return;
       mode = LiveMode.timer;
@@ -204,6 +215,23 @@ class LiveStager {
     }
   }
 
+  /// The model's answer, within [deadline]; a call past it is kept aside (still running) and never asked again.
+  Future<Float64List> _ask(Float32List x, LiveWindow w, int runs) {
+    final call = model.probabilities(x, w.epochs, runs, first: w.first);
+    final d = deadline;
+    if (d == null) return call;
+    return call.timeout(
+      d,
+      onTimeout: () {
+        _hung = call;
+        unawaited(call.then<void>((_) {}, onError: (Object _) {})); // its late end or error goes nowhere
+        throw _NoAnswer(d);
+      },
+    );
+  }
+
+  static String _seconds(Duration d) =>
+      d.inMilliseconds % 1000 == 0 ? '${d.inSeconds} s' : '${(d.inMilliseconds / 1000).toStringAsFixed(1)} s';
   static LiveStage _stageOf(Float64List p, int i, int epoch, int lag, bool gap) {
     var best = 0;
     for (var k = 1; k < 5; k++) {
@@ -238,6 +266,12 @@ class LiveStager {
   Future<void> _close() async {
     _closed = true;
     await idle();
+    final hung = _hung;
+    if (hung != null) {
+      // never closed under a call that is still running (a native run would read freed memory): once it ends
+      unawaited(hung.then<void>((_) => model.close(), onError: (Object _) => model.close()));
+      return;
+    }
     await model.close();
   }
 
@@ -283,4 +317,10 @@ class RunsLiveModel implements LiveModel {
       await closeRun?.call(_runs.removeLast());
     }
   }
+}
+
+/// A model call that passed [LiveStager.deadline].
+class _NoAnswer implements Exception {
+  const _NoAnswer(this.after);
+  final Duration after;
 }

@@ -9,6 +9,8 @@
 //   - wired or the speaker with Android's low-latency path: 45 ms or less (Android NDK);
 //   - the one direct test of feedback delay: 244 ms trained best, at 744 ms nothing lasting remained
 //     (Belinskaia 2020).
+// Also the check before a session whose cue must be heard (the nap's wake cue, the check-in's tones; DECISIONS row
+// 466): the media volume (the phone channel's "mediaVolume") off or low, or Bluetooth taking the sound.
 import 'dart:async';
 
 import 'package:flutter/services.dart';
@@ -69,6 +71,48 @@ String? routeWarning(AudioRoute r) {
           'start.',
     _ => null,
   };
+}
+
+/// The media volume: its step now and its largest step.
+typedef MediaVolume = ({int volume, int max});
+
+/// The nap's wake cue must wake you: warned under this share of the media volume's range (planning value).
+const double wakeVolumeFloor = 0.3;
+
+/// The check-in's soft tones (the cue to open your eyes): warned under this share (planning value).
+const double toneVolumeFloor = 0.2;
+
+/// What to say before a session whose [cue] must be heard ("the wake cue"): the media volume off or under [floor]
+/// of its range, and the sound going to Bluetooth headphones (they may lie on the nightstand). Null when nothing
+/// needs saying; an unknown volume or route says nothing.
+String? cueCheck({MediaVolume? volume, AudioRoute route = AudioRoute.unknown, required String cue, double floor = wakeVolumeFloor}) {
+  final out = <String>[];
+  if (volume != null && volume.max > 0) {
+    if (volume.volume <= 0) {
+      out.add('The media volume is off, so $cue cannot be heard. Turn it up first.');
+    } else if (volume.volume < volume.max * floor) {
+      out.add('The media volume is low (${volume.volume} of ${volume.max}), so $cue may not be heard. Turn it up first.');
+    }
+  }
+  if (route.bluetooth) {
+    final name = route.device.isEmpty ? '' : ' (${route.device})';
+    out.add('The sound goes to Bluetooth headphones$name, not from the phone\'s speaker: wear them, or switch '
+        'Bluetooth off.');
+  }
+  return out.isEmpty ? null : out.join(' ');
+}
+
+/// The media volume over the phone channel; null when the phone cannot say.
+Future<MediaVolume?> phoneMediaVolume() async {
+  try {
+    final m = await const MethodChannel('eeg_tracker/phone').invokeMethod<Map<Object?, Object?>>('mediaVolume');
+    final v = m?['volume'], x = m?['max'];
+    return v is int && x is int ? (volume: v, max: x) : null;
+  } on PlatformException {
+    return null;
+  } on MissingPluginException {
+    return null;
+  }
 }
 
 abstract class AudioRouteSource {

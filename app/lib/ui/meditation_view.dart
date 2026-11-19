@@ -103,6 +103,16 @@ class MeditationViewModel {
   final String? routeNote;
 }
 
+/// The report's sentence for a session that a clock limit ended (null for the length or Stop).
+String? endedByItself(String? end) => switch (end) {
+  MeditationSummary.endNoSignal =>
+    'The session ended by itself: the headband sent no signal for 5 minutes. What came before is kept.',
+  MeditationSummary.endClock =>
+    'The session ended by itself at its time limit (its length, the silent minutes and 20 minutes more): the signal '
+        'kept dropping out or was too poor to count. What there was is kept.',
+  _ => null,
+};
+
 /// The model for the controller's state (pure; the screen passes the controller's fields).
 MeditationViewModel meditationModel({
   required Stage stage,
@@ -139,6 +149,7 @@ MeditationViewModel meditationModel({
   final notes = [
     ?soundNote,
     ?saveNote,
+    if (stage == Stage.report) ?endedByItself(report?.end),
     if (lateSound)
       stage == Stage.report
           ? 'Some of this session\'s sound went to Bluetooth headphones, about 0.25-0.5 s late.'

@@ -10,6 +10,7 @@ import 'package:eeg_tracker/morning/result.dart';
 import 'package:eeg_tracker/morning/store.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
+import 'package:eeg_tracker/session_keeper.dart';
 import 'package:eeg_tracker/sound/check_in_sound.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -299,6 +300,53 @@ void main() {
     expect(c.stage, MorningStage.intro);
     expect(c.active, isFalse);
     expect(inner.calls, contains('disconnect'));
+  });
+
+  test('the check-in holds the session service while it records; its Stop ends the check-in', () async {
+    late MorningController c;
+    final band = EyesBand(DemoSignal(1), () => c.stage == MorningStage.closed ? 'closed' : 'open');
+    final keeper = FakeSessionKeeper();
+    c = MorningController(finder: OneFinder(band), store: MorningStore(tmp), timing: fast, keeper: keeper);
+    await c.start();
+    expect(keeper.held, isTrue, reason: 'a locked phone must not freeze the recording part');
+    expect((keeper.spec!.title, keeper.spec!.headband), ('Morning check-in', true));
+    c.begin();
+    await until(c, () => c.stage == MorningStage.questions);
+    expect(keeper.log, ['hold', 'release'], reason: 'the questions need no service');
+    c.again();
+    final second = FakeSessionKeeper();
+    c = MorningController(finder: OneFinder(EyesBand(DemoSignal(2), () => 'open')), store: MorningStore(tmp), timing: fast, keeper: second);
+    await c.start();
+    second.onStop!(); // Stop on the notification
+    await until(c, () => c.stage == MorningStage.intro);
+    expect(second.log, ['hold', 'release']);
+    final none = FakeSessionKeeper();
+    final failed = MorningController(finder: OneFinder(null), store: MorningStore(tmp), timing: fast, keeper: none);
+    await failed.start();
+    expect(failed.stage, MorningStage.failed);
+    expect(none.log, ['hold', 'release']);
+  });
+
+  test('a call during the check-in stops it and keeps nothing; a short notification sound does not', () async {
+    late MorningController c;
+    final band = EyesBand(DemoSignal(1), () => c.stage == MorningStage.closed ? 'closed' : 'open');
+    final keeper = FakeSessionKeeper();
+    c = MorningController(
+      finder: OneFinder(band),
+      store: MorningStore(tmp),
+      timing: const MorningTiming(contactFor: Duration(milliseconds: 5), settle: Duration.zero, phaseS: 600),
+      keeper: keeper,
+    );
+    await c.start();
+    c.begin();
+    keeper.onFocus!(FocusChange.duck);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(c.stage, MorningStage.closed, reason: 'a notification sound is not a call');
+    keeper.onFocus!(FocusChange.paused);
+    await until(c, () => c.stage == MorningStage.intro);
+    expect(c.message, contains('call or another app'));
+    expect(tmp.listSync(), isEmpty);
+    expect(keeper.held, isFalse);
   });
 
   test('no headband: a plain failure', () async {

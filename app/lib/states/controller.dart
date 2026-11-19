@@ -17,8 +17,9 @@
 // it back, and a look left then right marks a moment (as a double clench does when there is no sound to pause); each
 // with a soft tone, never while the drift-off detector says probably asleep.
 //
-// Time: seconds after lights off are the larger of the samples received (holes held at their length) and the clock,
-// so a test can stream a session in a fraction of a second, and a headband out of range does not stop the timers.
+// Time: seconds after lights off are the larger of the samples received (holes held at their length) and a monotonic
+// clock (session_clock.dart: a correction of the phone's clock moves nothing), so a test can stream a session in a
+// fraction of a second, and a headband out of range does not stop the timers.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -36,6 +37,7 @@ import '../meditation/controller.dart' show gapPauseS, gapSamples;
 import '../recorder/chunk_writer.dart';
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
+import '../session_clock.dart';
 import '../session_keeper.dart';
 import '../sound/gesture_tone.dart';
 import '../sound/state_sound.dart';
@@ -54,11 +56,15 @@ class StatesTiming {
     this.noDataAfter = const Duration(seconds: 2),
     this.quietCleanS = 60,
     this.quietMaxS = 120,
+    this.saveEvery = const Duration(seconds: 60),
   });
 
   final LinkTiming link;
   final Duration tick;
   final Duration noDataAfter;
+
+  /// The session file is rewritten this often from lights off (so a killed app keeps the session so far).
+  final Duration saveEvery;
 
   /// The quiet minute ends once it has this many clean seconds, or after [quietMaxS] whatever it has.
   final int quietCleanS;
@@ -76,11 +82,14 @@ class StatesController extends ChangeNotifier {
     this.timing = const StatesTiming(),
     this.gestureTone,
     DateTime Function()? clock,
+    Duration Function()? monotonic,
   }) : _makeSound = sound,
-       _now = clock ?? DateTime.now;
+       _now = clock ?? DateTime.now,
+       _clock = SessionClock(wall: clock, monotonic: monotonic);
 
   final HeadbandFinder finder;
   final StateSound Function() _makeSound;
+  final SessionClock _clock;
 
   /// The hands-free confirmation tone (null: none).
   final GestureTone Function()? gestureTone;
@@ -90,6 +99,9 @@ class StatesController extends ChangeNotifier {
 
   /// The sound is paused by a double clench.
   bool paused = false;
+
+  /// A call or another app has the sound now ([audioFocus]): the sound is paused until it is back.
+  bool _interrupted = false;
 
   /// Where sessions are kept (null: nothing saved).
   SoundStore? store;
@@ -172,6 +184,7 @@ class StatesController extends ChangeNotifier {
   DriftOff? _drift;
   HandsFree? _hands;
   DateTime? _lightsOffAt;
+  Duration? _lightsOffMono;
   int? _soundStartS;
   int? _soundStartK;
   int? _fadeFromS;
@@ -181,6 +194,7 @@ class StatesController extends ChangeNotifier {
   TrialTag? _trial;
   Timer? _ticker;
   int _ticks = 0;
+  Duration? _lastSave;
   DateTime? _lastArrival;
   int? _lastPack;
   bool _gapPending = false;
@@ -235,7 +249,7 @@ class StatesController extends ChangeNotifier {
       _feed = SpectrumFeed();
       _readout = Readout();
       if (plan.state == SoundState.asleep) _drift = DriftOff(0); // lights off: the first sample
-      _lightsOffAt = _now();
+      _lightsOff();
       await link.startSignal();
       if (!_live(run)) return await link.close(); // Stop came while the stream started
       _ticker = Timer.periodic(timing.tick, (_) => _tick());
@@ -256,6 +270,7 @@ class StatesController extends ChangeNotifier {
     final k = keeper;
     if (k == null) return;
     k.onStop = () => unawaited(stop());
+    k.onFocus = audioFocus;
     bool kept;
     try {
       kept = await k.hold(KeepSpec(title: plan.preset.name, text: 'Sound session · ${plan.line}', headband: useHeadband));
@@ -310,7 +325,9 @@ class StatesController extends ChangeNotifier {
     _drift = null;
     _hands = null;
     paused = false;
+    _interrupted = false;
     _lightsOffAt = null;
+    _lightsOffMono = null;
     _soundStartS = null;
     _soundStartK = null;
     _fadeFromS = null;
@@ -319,6 +336,7 @@ class StatesController extends ChangeNotifier {
     _events.clear();
     _trial = null;
     _ticks = 0;
+    _lastSave = null;
     _lastArrival = null;
     _lastPack = null;
     _gapPending = false;
@@ -336,17 +354,22 @@ class StatesController extends ChangeNotifier {
 
   Future<void> _soundOnly(String why, String note) async {
     headband = why;
-    _lightsOffAt = _now();
+    _lightsOff();
     _ticker = Timer.periodic(timing.tick, (_) => _tick());
     message = note;
     await _startSound(note: note);
   }
 
+  void _lightsOff() {
+    _lightsOffAt = _now();
+    _lightsOffMono = _clock.now;
+  }
+
   double _t() {
-    final at = _lightsOffAt;
+    final at = _lightsOffMono;
     if (at == null) return 0;
     final samples = (_seen?.n ?? 0) / fs;
-    return math.max(samples, _now().difference(at).inMicroseconds / 1e6);
+    return math.max(samples, _clock.secondsSince(at));
   }
 
   // ---- the sound ----
@@ -369,6 +392,7 @@ class StatesController extends ChangeNotifier {
     _sound = sound;
     _soundStartS = _t().floor();
     _soundStartK = (_seen?.n ?? 0) ~/ fs;
+    if (_interrupted) sound.pause(on: true); // a call came while the sound was being made
     _event('sound on: ${plan!.line}');
     _set(SoundStage.playing, note);
     _saveRunning();
@@ -426,10 +450,31 @@ class StatesController extends ChangeNotifier {
     final sound = _sound;
     if (kind == GestureKind.clench && sound != null && stage == SoundStage.playing) {
       paused = !paused;
-      sound.pause(on: paused);
+      sound.pause(on: paused || _interrupted);
       _event('hands-free: ${paused ? 'sound paused' : 'sound back'} (${gestureWord(kind)})');
     } else {
       _event('hands-free: moment (${gestureWord(kind)})');
+    }
+    _notify();
+  }
+
+  /// A call or another app took the sound, or gave it back (the session keeper, DECISIONS row 468): the sound pauses
+  /// meanwhile (its timers go on); each change is an event in the session file.
+  void audioFocus(FocusChange f) {
+    if (_ended) return;
+    switch (f) {
+      case FocusChange.lost || FocusChange.paused:
+        if (_interrupted) return;
+        _interrupted = true;
+        _sound?.pause(on: true);
+        _event('audio focus lost: a call or another app (sound paused)');
+      case FocusChange.back:
+        if (!_interrupted) return;
+        _interrupted = false;
+        _sound?.pause(on: paused);
+        _event('audio focus back: sound on');
+      case FocusChange.duck:
+        _event('audio focus: a short sound over ours');
     }
     _notify();
   }
@@ -565,6 +610,8 @@ class StatesController extends ChangeNotifier {
     final last = _link?.lastData;
     noData = _link != null && last != null && _now().difference(last) > timing.noDataAfter;
     _check();
+    final saved = _lastSave;
+    if (!_ended && (saved == null || _clock.now - saved >= timing.saveEvery)) _saveRunning();
     _notify();
   }
 
@@ -639,8 +686,12 @@ class StatesController extends ChangeNotifier {
     );
   }
 
-  /// The session so far, written when the sound starts, so a session cut short by the phone still leaves a file.
-  void _saveRunning() => _save(_session(_t(), SoundEnd.running));
+  /// The session so far, written at lights off, when the sound starts and every [StatesTiming.saveEvery], so a
+  /// session cut short by the phone still leaves a file with its sound time and events.
+  void _saveRunning() {
+    _lastSave = _clock.now;
+    _save(_session(_t(), SoundEnd.running));
+  }
 
   void _save(SoundSession s) {
     final st = store;

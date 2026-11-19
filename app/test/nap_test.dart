@@ -1,6 +1,7 @@
 // The nap coach without a phone: its rules, its file, and whole naps through the controller with the dream
 // catcher's fake headband (a synthetic eyes-closed signal streamed fast, alpha fading on cue) and a scripted sleep
 // model (ONNX cannot run in `flutter test`; the real model is checked in analysis/tests).
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -12,6 +13,7 @@ import 'package:eeg_tracker/nap/rules.dart';
 import 'package:eeg_tracker/nap/store.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart' show recordBytes;
 import 'package:eeg_tracker/recorder/nights.dart';
+import 'package:eeg_tracker/session_keeper.dart';
 import 'package:eeg_tracker/sleep/live_stager.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -222,6 +224,48 @@ void main() {
       c.dispose();
     });
 
+    test('a model call that never returns: Stop still ends and saves the nap at once', () async {
+      final band = DriftBand((t) => 1);
+      final model = ScriptedModel((_) => 'W')..gate = Completer<void>(); // never completed
+      final c = controller(band, SilentNapSound(), model: () => model);
+      await c.start(lengthMin: 90);
+      await until(c, () => model.seen.isNotEmpty);
+      await c.stop().timeout(const Duration(seconds: 5));
+      expect(c.stage, NapStage.done);
+      expect(c.last!.end, NapEnd.stopped);
+      expect(store.list().single.end, NapEnd.stopped, reason: 'the final record, not the last once-a-minute save');
+      expect(band.calls.last, 'disconnect');
+      expect(model.closed, isFalse, reason: 'never closed under a call that is still running');
+      c.dispose();
+    });
+
+    test('a model call past its deadline: the timer alone ends the nap, and the screen says why', () async {
+      final model = ScriptedModel((_) => 'W')..gate = Completer<void>();
+      final c = NapController(
+        finder: OneFinder(DriftBand((t) => 1)),
+        sound: SilentNapSound.new,
+        model: () => model,
+        store: store,
+        recordingsDir: recordings,
+        scale: scaleNow,
+        timing: const NapTiming(
+          link: LinkTiming(contactFor: Duration(milliseconds: 5), settle: Duration.zero, reconnectWaits: [Duration(milliseconds: 5)]),
+          tick: Duration(milliseconds: 20),
+          modelDeadline: Duration(milliseconds: 300),
+        ),
+      );
+      await c.start(lengthMin: 20);
+      await until(c, () => c.live == NapLive.timer);
+      expect(c.liveNote, contains('did not answer'));
+      expect(model.seen.length, 1, reason: 'no new call after one that hung');
+      await until(c, () => c.stage == NapStage.waking);
+      await c.awake();
+      expect(c.last!.live.mode, LiveMode.timer);
+      model.gate!.complete(); // the hung call ends at last: only now is the model closed
+      await until(c, () => model.closed);
+      c.dispose();
+    });
+
     test('without the model the timer works from the start', () async {
       final sound = SilentNapSound();
       final c = controller(DriftBand((t) => 1), sound);
@@ -357,6 +401,94 @@ void main() {
       c.dispose();
     });
 
+    test('Lights off holds the session service until the nap is saved; its Stop is "I\'m awake"', () async {
+      final band = DriftBand((t) => 1);
+      final sound = SilentNapSound();
+      String? atRelease;
+      final keeper = _WatchKeeper(() => atRelease = store.list().singleOrNull?.end?.name);
+      final c = NapController(
+        finder: OneFinder(band),
+        sound: () => sound,
+        store: store,
+        recordingsDir: recordings,
+        scale: scaleNow,
+        timing: fast,
+        keeper: keeper,
+        clock: () => DateTime(2026, 11, 19, 14, 30),
+      );
+      await c.start(lengthMin: 20);
+      expect(keeper.held, isTrue, reason: 'a locked phone must not freeze the nap: the wake cue depends on it');
+      expect((keeper.spec!.title, keeper.spec!.text, keeper.spec!.headband), ('Nap', 'Wakes you by 14:50', true));
+      expect(keeper.spec!.focus, isFalse, reason: 'nothing plays until the wake: a podcast you fall asleep to goes on');
+      await until(c, () => c.stage == NapStage.waking);
+      keeper.onStop!(); // Stop on the lock screen while the cue plays: "I'm awake"
+      await until(c, () => c.stage == NapStage.done);
+      expect(c.last!.upS, isNotNull);
+      expect(keeper.log, ['hold', 'release']);
+      expect(atRelease, NapEnd.length.name, reason: 'released only after the final record');
+      c.dispose();
+    });
+
+    test('Stop on the notification before the wake ends the nap; a failed start lets the service go', () async {
+      final keeper = FakeSessionKeeper();
+      final c = NapController(finder: OneFinder(DriftBand((t) => 1)), sound: SilentNapSound.new, store: store, timing: fast, keeper: keeper);
+      await c.start(lengthMin: 20);
+      keeper.onStop!();
+      await until(c, () => c.stage == NapStage.done);
+      expect((c.last!.end, keeper.held), (NapEnd.stopped, false));
+      final none = FakeSessionKeeper();
+      final failed = NapController(finder: OneFinder(null), sound: SilentNapSound.new, store: store, timing: fast, keeper: none);
+      await failed.start();
+      expect(failed.stage, NapStage.failed);
+      expect(none.log, ['hold', 'release']);
+      c.dispose();
+      failed.dispose();
+    });
+
+    test('a clock correction does not move the wake: the nap counts on a monotonic clock', () async {
+      var wall = DateTime(2026, 11, 19, 14);
+      var mono = Duration.zero;
+      final band = DriftBand((t) => 1);
+      final c = NapController(
+        finder: OneFinder(band),
+        sound: SilentNapSound.new,
+        store: store,
+        recordingsDir: recordings,
+        scale: scaleNow,
+        timing: fast,
+        clock: () => wall,
+        monotonic: () => mono,
+      );
+      await c.start(lengthMin: 20);
+      band.paused = true;
+      final at = c.seconds;
+      wall = wall.add(const Duration(hours: 2)); // the phone's clock corrected two hours ahead
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(c.stage, NapStage.resting, reason: 'not woken by the wall clock');
+      expect(c.seconds, closeTo(at, 1));
+      mono += const Duration(minutes: 21);
+      await until(c, () => c.stage == NapStage.waking);
+      expect(c.end, NapEnd.length);
+      await c.stop();
+      c.dispose();
+    });
+
+    test('Stop while the sound starts: the sound that just started is stopped too (no engine left open)', () async {
+      final band = DriftBand((t) => 1);
+      final sound = _GatedNapSound();
+      final c = controller(band, sound);
+      final started = c.start(lengthMin: 20);
+      await until(c, () => sound.asked);
+      await c.stop();
+      sound.gate.complete();
+      await started;
+      expect(sound.started, isTrue);
+      expect(sound.stopped, isTrue, reason: 'the engine opened during Stop is closed');
+      expect(c.stage, NapStage.setup);
+      expect(band.calls.last, 'disconnect');
+      c.dispose();
+    });
+
     test('the drift-off detector\'s states reach the screen', () async {
       final c = controller(DriftBand((t) => t < 90 ? 1 : 0.3), SilentNapSound());
       await c.start(lengthMin: 20);
@@ -368,4 +500,29 @@ void main() {
       c.dispose();
     });
   });
+}
+
+/// A nap sound whose start waits for the test.
+class _GatedNapSound extends SilentNapSound {
+  final Completer<void> gate = Completer<void>();
+  bool asked = false;
+
+  @override
+  Future<void> start() async {
+    asked = true;
+    await gate.future;
+    await super.start();
+  }
+}
+
+/// A keeper that looks at the files when it is let go.
+class _WatchKeeper extends FakeSessionKeeper {
+  _WatchKeeper(this.onRelease);
+  final void Function() onRelease;
+
+  @override
+  Future<void> release() async {
+    if (held) onRelease();
+    await super.release();
+  }
 }

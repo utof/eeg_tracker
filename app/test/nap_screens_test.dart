@@ -9,6 +9,8 @@ import 'package:eeg_tracker/nap/controller.dart';
 import 'package:eeg_tracker/nap/rules.dart';
 import 'package:eeg_tracker/nap/store.dart';
 import 'package:eeg_tracker/sleep/live_stager.dart' show LiveMode;
+import 'package:eeg_tracker/sound/audio_route.dart';
+import 'package:eeg_tracker/ui/cue_sound_check.dart';
 import 'package:eeg_tracker/ui/nap_view.dart';
 import 'package:eeg_tracker/ui/theme.dart';
 import 'package:flutter/material.dart';
@@ -136,6 +138,46 @@ void main() {
     expect(awake, isTrue);
   });
 
+  testWidgets('the setup says where the wake sound plays and that the phone may be locked', (tester) async {
+    tester.view.physicalSize = const Size(1210, 2695);
+    tester.view.devicePixelRatio = 2.75;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: _view(states['first']!)));
+    expect(find.textContaining('or from Bluetooth headphones when they are connected'), findsOneWidget);
+    expect(find.textContaining('locking the phone can stop the nap'), findsNothing);
+    expect(find.textContaining('If you lock the phone, the nap goes on'), findsOneWidget);
+  });
+
+  testWidgets('Lights off with the media volume off: a dialog says so; Not now stops, the other button goes on', (tester) async {
+    bool? answer;
+    await tester.pumpWidget(MaterialApp(
+      theme: nightTheme(),
+      home: Builder(
+        builder: (context) => TextButton(
+          onPressed: () async => answer = await confirmCueSound(
+            context,
+            cue: 'the wake cue',
+            go: 'Lights off anyway',
+            routes: FixedAudioRoute(const AudioRoute(RouteKind.speaker)),
+            volume: () async => (volume: 0, max: 15),
+          ),
+          child: const Text('Lights off'),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('Lights off'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('media volume is off'), findsOneWidget);
+    await tester.tap(find.text('Not now'));
+    await tester.pumpAndSettle();
+    expect(answer, isFalse);
+    await tester.tap(find.text('Lights off'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lights off anyway'));
+    await tester.pumpAndSettle();
+    expect(answer, isTrue);
+  });
+
   testWidgets('the report says why it woke you and how the model ran', (tester) async {
     tester.view.physicalSize = const Size(1210, 2695);
     tester.view.devicePixelRatio = 2.75;
@@ -147,5 +189,28 @@ void main() {
     expect(find.textContaining('1 of its 3 runs'), findsOneWidget);
     expect(find.text('after 9 min'), findsOneWidget);
     expect(napLine(_stopped), '30 min · no sleep seen · stopped');
+  });
+
+  testWidgets('a nap the timer alone ended: no stage minutes, "not scored", beside the alpha rule\'s onset', (tester) async {
+    tester.view.physicalSize = const Size(1210, 2695);
+    tester.view.devicePixelRatio = 2.75;
+    addTearDown(tester.view.reset);
+    final timerOnly = _nap(
+      DateTime(2026, 11, 19, 15),
+      stages: '.' * 40,
+      end: NapEnd.length,
+      length: 20,
+      onsetS: 540,
+      live: const NapLiveInfo(mode: LiveMode.timer, why: 'The sleep model stopped (no ONNX Runtime), so the timer alone ends the nap.'),
+    );
+    await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: _view(NapViewModel(stage: NapStage.done, latest: timerOnly, justEnded: true))));
+    expect(find.text('after 9 min'), findsOneWidget);
+    expect(find.text('0 min'), findsNothing, reason: 'nothing was scored: no "Asleep 0 min" beside "Fell asleep after 9 min"');
+    expect(find.text('light 0, deep 0, dream 0 min'), findsNothing);
+    expect(find.text('not scored (timer only)'), findsNWidgets(2));
+    expect(find.textContaining('last 2 minutes'), findsNothing);
+    // with the model on, the last 2 minutes and the wake are never scored, and the report says so
+    await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: _view(states['ended_length']!)));
+    expect(find.textContaining('leave out the last 2 minutes'), findsOneWidget);
   });
 }

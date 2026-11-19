@@ -326,9 +326,14 @@ responding", and Stop ended the service and the night (`active: false`, `lightsO
 The **i** button shows what the research says (`docs/evidence/meditation-feedback.md`): a guided practice, not
 a treatment, and no "meditation depth" is measured. Each session is kept in the app's private folder,
 `files/meditations/<time>.meditation.json` (the summary) and `<time>.session.json` (every sample and decision,
-in the laptop page's session format, so it can be replayed). **Export data** copies them out (below).
+in the laptop page's session format, so it can be replayed). **Export data** copies them out (below). Both are
+written every minute while the session runs (the summary then says `"end": "running"`) and once more at the end,
+before the sound fades, so a closed app or a crash loses at most the last minute.
 
-If the headband drops out, the countdown pauses ("No signal") and the app reconnects by itself.
+If the headband drops out, the countdown pauses ("No signal") and the app reconnects by itself. After 5 minutes
+with no signal at all, or at the length + the silent minutes + 20 minutes from Start, the session ends by itself
+and the report says so; a calibration still short of quiet signal after 10 minutes ends the session too (nothing is
+saved). The same holds for alpha-theta.
 
 ### Owner step: the silent minutes and the Bluetooth note (one session, about 15 minutes)
 
@@ -467,12 +472,15 @@ sleep model 3 min after lights off, agreeing. The headband, the phone's speed an
 About 6 minutes after waking, between nights (the headband talks to one thing at a time). The phone does what the
 laptop's morning page did and works the numbers out itself, the same way (DECISIONS rows 120-129).
 
-1. Stop the night first. Headband on, switched on; sit comfortably, sound on.
+1. Stop the night first. Headband on, switched on; sit comfortably, sound on. Start says so if the media volume is
+   off or low, or if the tones would go to Bluetooth headphones: the tone to open your eyes must be heard.
 2. On the main screen, **Morning** section: **Morning check-in**, then **Check contact**. Each electrode gets a word
    (good, fair, noisy, not touching). The back two (O1, O2) matter most: part the hair, press, sit still, **Check
    contact again** if needed. Then **Start: eyes closed**.
 3. A low tone: eyes closed for 2 minutes (the screen goes dim). A rising pair of tones: look at the dot for 2
    minutes. A last tone ends the recording. Without signal the countdown waits and says so. **Stop** keeps nothing.
+   You may lock the phone (a notification with **Stop** keeps it going). A phone call or another app's sound
+   stops the check-in and keeps nothing, as a drop does: start again when it is quiet.
 4. The questions: sleepiness (1-9, the words of each step shown), mood, tension, yesterday's cups of coffee or
    strong tea (and whether one came in the 8 hours before sleep), drinks of alcohol, caffeine this morning. Then,
    if you like, the 1-minute reaction test (tap when the green dot appears). **Save**.
@@ -751,7 +759,9 @@ memories or feelings, and leave you drowsy for a while.
    confirm you have talked to someone. After 10 sessions it asks you to decide whether to go on.
 
 Sessions are kept in `files/alpha-theta/` (`<time>.alphatheta.json`, `<time>.session.json` and `journal.json` with
-your answers), app-private like the meditations; the replay check's files are in `files/replay-check/`.
+your answers), app-private like the meditations; the replay check's files are in `files/replay-check/`. If
+`journal.json` is ever there but cannot be read, the app keeps a copy (`journal.json.damaged`), asks the screening
+again and pauses alpha-theta, saying why: a pause that was in the lost notebook is not lifted by the damage.
 
 ## Dream catcher
 
@@ -785,7 +795,10 @@ you drift again, 3 or 4 times. For ideas, not for sleep. The **i** button shows 
 
 The screen stays on (black and dim) during a session. You can lock the phone: the session goes on and still
 records your answers, but the **Drifting / Awake** halves need the screen, so a locked round counts as not
-answered. Do not swipe the app away. Files, app-private like the meditations: `files/dream-catcher/<time>.dream.json`
+answered. With **Record the night** and the app not yet allowed to run in the background, Lights off asks for it
+(the same system dialog as sound for states) and that session's screen says **Do not lock the phone**: Android
+starts the night recording from a locked phone only for an app allowed to. During a phone call or another app's
+sound no question is asked. Do not swipe the app away. Files, app-private like the meditations: `files/dream-catcher/<time>.dream.json`
 (the rounds, the drift-off detector's epochs), `<time>-r<n>.wav` (your answers) and `<time>-r<n>.text.json` (their
 words: the phone's and yours, `docs/data-format.md`), your prompts in `files/dream-catcher/prompts/`; the speech
 model in `files/models/` (not exported). The session's EEG is a normal recording in `files/recordings/` with every question
@@ -836,16 +849,20 @@ research says (`docs/evidence/nap-coach.md`).
    screen shows the rule: Awake, then Light sleep; it wakes you where Deep would start, or at your length.
 3. Set the phone's media volume to where you would hear an alarm. Headband on and switched on, lie on your side or
    half reclined (lying flat presses the back electrodes), phone near you with the screen up. Tap **Lights off**.
+   If the media volume is off or under a third, or the sound would go to Bluetooth headphones, a dialog says so
+   first (**Lights off anyway** goes on): the wake sound is the nap's only way to wake you.
 4. The screen goes black and dim. Close your eyes; the first minute sets your starting level. One dim word says
    what the app sees (Eyes closed, Resting, Drifting, Asleep), with the minutes and whether the sleep model is on.
-   From 5 minutes in the sleep model checks every 30 seconds; if it is too slow, fails, or the signal is lost, the
-   line says "timer" and the length alone ends the nap.
+   From 5 minutes in the sleep model checks every 30 seconds; if it is too slow, does not answer within a minute,
+   fails, or the signal is lost, the line says "timer" and the length alone ends the nap.
 5. The wake: the screen comes up and three soft rising notes play, a little louder every 20 seconds. Tap the big
    **I'm awake**. **Stop** (or Back) ends the nap at any time.
 6. The report: when you fell asleep (the alpha rule), minutes of light, deep and dream sleep (the live model, a
-   first guess), why it woke you, how long you took to tap, and how fast the model was. Earlier naps are below.
+   first guess; "not scored" when the timer alone ran, and never the last 2 minutes and the wake), why it woke you,
+   how long you took to tap, and how fast the model was. Earlier naps are below.
 
-Keep the app open with the screen on during a nap: locking the phone can stop it. Files, app-private:
+The screen stays on during a nap. You may lock the phone: a notification **Nap**, "Wakes you by ..." with **Stop**
+keeps the nap and its wake sound going (Stop there is "I'm awake"). Do not swipe the app away. Files, app-private:
 `files/naps/<time>.nap.json` (the length, the onset, the live stages one letter per 30 s, why it ended, the model's
 time per check). The nap's EEG is a normal recording in `files/recordings/` with markers (lights off, drowsy,
 asleep, deep sleep starting, the wake), so the sleep report scores it in full afterwards and Export copies it. While
@@ -1095,15 +1112,20 @@ volume, the locked phone over hours, or the headband's comfort.
 
 ## Sessions with the phone locked
 
-Sound for states, meditation, alpha-theta and the dream catcher go on when the phone is locked (since 2026-11-19,
-DECISIONS rows 190-197). While a session runs, the app shows a notification with the session's name and **Stop**,
+Sound for states, meditation, alpha-theta, the dream catcher, the nap coach and the morning check-in go on when the
+phone is locked (since 2026-11-19, DECISIONS rows 190-197 and 460). While a session runs, the app shows a notification with the session's name and **Stop**,
 also on the lock screen; Android then treats the app like a music player and does not put it to sleep. The night
 recording is separate and unchanged.
 
 - **Sound for states**: the screen is not kept on any more. Lock the phone or let it turn off.
   **Screen: Stays on** on the setup page brings the old lit screen back.
-- **Meditation, alpha-theta, dream catcher**: the screen still stays on by itself; press the power button if you
-  want it dark.
+- **Meditation, alpha-theta, dream catcher, nap coach, morning check-in**: the screen still stays on by itself;
+  press the power button if you want it dark.
+- **A phone call or another app's sound** (DECISIONS row 468): the session asks Android for the sound, so music
+  from another app pauses when it starts. When a call rings or another app takes the sound, meditation and
+  alpha-theta go quiet with no bells, sound for states pauses, and the dream catcher asks no question, until the
+  sound is back; the session file notes it. The morning check-in stops and keeps nothing. The nap asks for nothing
+  (a podcast you fall asleep to goes on) and its wake sound plays regardless.
 - **Fall asleep, then Record the night**: the night starts by itself on a locked phone. The first time, if the app
   is not yet allowed to run in the background, Start asks for it and that one session keeps its screen on.
 - Do not swipe the app away from Recents during a session: that ends it.

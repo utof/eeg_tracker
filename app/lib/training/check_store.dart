@@ -16,6 +16,14 @@ import 'check.dart';
 import 'control.dart';
 import 'reveal.dart' as rv;
 
+/// Writes [text] to a new file and renames it over [f]: storage full or a kill mid-write leaves the old [f] whole
+/// (a write in place truncates it first).
+void writeReplacing(File f, String text) {
+  final tmp = File('${f.path}.tmp');
+  tmp.writeAsStringSync(text, flush: true);
+  tmp.renameSync(f.path);
+}
+
 /// The app's files folder for its recordings folder (files/recordings -> files).
 Directory filesDirFor(String recordingsDir) => Directory(recordingsDir).parent;
 
@@ -45,7 +53,7 @@ class SettingsStore {
 
   void save(TrainingSettings s) {
     filesDir.createSync(recursive: true);
-    _file.writeAsStringSync(jsonEncode(s.toJson()), flush: true);
+    writeReplacing(_file, jsonEncode(s.toJson()));
   }
 }
 
@@ -89,18 +97,15 @@ class CheckStore {
     if (plan != null && sealed != null) return;
     dir.createSync(recursive: true);
     final s = Sealed.draw(newSalt(random));
-    _f('sealed.json').writeAsStringSync(jsonEncode(s.toJson()), flush: true);
+    writeReplacing(_f('sealed.json'), jsonEncode(s.toJson()));
     final p = CheckPlan(kind: kind, frozen: now, allocationSha256: s.sha);
-    _f(
-      'plan.json',
-    ).writeAsStringSync(const JsonEncoder.withIndent(' ').convert({'plan': p.toJson(), 'sha256': p.sha}), flush: true);
+    writeReplacing(_f('plan.json'), const JsonEncoder.withIndent(' ').convert({'plan': p.toJson(), 'sha256': p.sha}));
     event(now, 'plan frozen', {'sha256': p.sha});
   }
 
   void _writeRecords(List<CheckRecord> rs) {
     dir.createSync(recursive: true);
-    _f('records.json')
-        .writeAsStringSync(const JsonEncoder.withIndent(' ').convert([for (final r in rs) r.toJson()]), flush: true);
+    writeReplacing(_f('records.json'), const JsonEncoder.withIndent(' ').convert([for (final r in rs) r.toJson()]));
   }
 
   /// Keeps a randomised session (right after it ends, before the answers, so every session is counted).

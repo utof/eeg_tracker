@@ -2,13 +2,36 @@
 // Android foreground service (SessionService.kt: "playing sound", plus "connected device" with the headband and
 // "microphone" for the dream catcher), a wake lock and a notification with Stop. The session itself stays in the
 // screen's engine; the keeper only stops Android from freezing or silencing it. Never the night recorder's service.
+// It also asks Android for the sound (audio focus, DECISIONS row 468) and tells the session when a call or another
+// app takes it and when it comes back, so the session can go quiet meanwhile instead of playing on through a call.
 import 'dart:async';
 
 import 'package:flutter/services.dart';
 
+/// Android's audio focus, as a session sees it.
+enum FocusChange {
+  /// Another app's sound took over for good (music, a video): no "back" may come.
+  lost,
+
+  /// A call or a voice prompt for a while: "back" comes after it.
+  paused,
+
+  /// A short sound (a notification): Android lowers this session's sound by itself.
+  duck,
+
+  /// The sound is this session's again.
+  back,
+}
+
 /// What a session needs kept, and the words on its notification.
 class KeepSpec {
-  const KeepSpec({required this.title, this.text = 'Session running', this.headband = false, this.microphone = false});
+  const KeepSpec({
+    required this.title,
+    this.text = 'Session running',
+    this.headband = false,
+    this.microphone = false,
+    this.focus = true,
+  });
 
   /// The notification's title ("Fall asleep", "Meditation").
   final String title;
@@ -19,6 +42,10 @@ class KeepSpec {
 
   /// The session records answers later, with the phone possibly locked (the dream catcher).
   final bool microphone;
+
+  /// Ask for the sound (audio focus): other apps' sound pauses, and [SessionKeeper.onFocus] hears of calls. False for
+  /// a session that plays nothing for a long time (the nap until its wake).
+  final bool focus;
 }
 
 abstract class SessionKeeper {
@@ -31,6 +58,9 @@ abstract class SessionKeeper {
 
   /// Stop was tapped on the notification or the lock screen.
   void Function()? onStop;
+
+  /// A call or another app took the sound, or it came back (only with [KeepSpec.focus]).
+  void Function(FocusChange change)? onFocus;
 }
 
 /// The phone's keeper. One per screen; only the one that held last gets the Stop tap and may release.
@@ -44,6 +74,16 @@ class PhoneSessionKeeper implements SessionKeeper {
 
   @override
   void Function()? onStop;
+
+  @override
+  void Function(FocusChange change)? onFocus;
+
+  static const Map<String, FocusChange> _focusWords = {
+    'loss': FocusChange.lost,
+    'lossTransient': FocusChange.paused,
+    'duck': FocusChange.duck,
+    'gain': FocusChange.back,
+  };
 
   static Future<T> _next<T>(Future<T> Function() call) {
     final done = Completer<T>();
@@ -63,6 +103,8 @@ class PhoneSessionKeeper implements SessionKeeper {
       _listening = true;
       _channel.setMethodCallHandler((call) async {
         if (call.method == 'stopTapped') _holder?.onStop?.call();
+        final focus = call.method == 'focus' ? _focusWords[call.arguments] : null;
+        if (focus != null) _holder?.onFocus?.call(focus);
       });
     }
     _holder = this;
@@ -73,6 +115,7 @@ class PhoneSessionKeeper implements SessionKeeper {
           'text': spec.text,
           'headband': spec.headband,
           'microphone': spec.microphone,
+          'focus': spec.focus,
         });
         if (kept == null) return false;
         return (!spec.headband || kept.contains('headband')) && (!spec.microphone || kept.contains('microphone'));
@@ -113,6 +156,9 @@ class FakeSessionKeeper implements SessionKeeper {
 
   @override
   void Function()? onStop;
+
+  @override
+  void Function(FocusChange change)? onFocus;
 
   @override
   Future<bool> hold(KeepSpec spec) async {

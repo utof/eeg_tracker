@@ -15,9 +15,9 @@
 // gesture marks a moment. Off while the drift-off detector says probably asleep, except while the question waits
 // for its answer: the question has just woken you.
 //
-// Time: seconds after lights off are the larger of the samples received (holes held at their length) and the
-// clock, so a test can stream a session in a fraction of a second, and a headband out of range does not stop the
-// timers or the 45-minute cap.
+// Time: seconds after lights off are the larger of the samples received (holes held at their length) and a monotonic
+// clock (session_clock.dart: a correction of the phone's clock moves nothing), so a test can stream a session in a
+// fraction of a second, and a headband out of range does not stop the timers or the 45-minute cap.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -34,6 +34,8 @@ import '../meditation/controller.dart' show gapPauseS, gapSamples;
 import '../recorder/chunk_writer.dart';
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
+import '../session_clock.dart';
+import '../session_keeper.dart' show FocusChange;
 import '../sound/gesture_tone.dart';
 import 'audio.dart';
 import 'band_link.dart';
@@ -54,6 +56,7 @@ class DreamTiming {
     this.answerWall = const Duration(seconds: 33),
     this.promptMax = const Duration(seconds: 40),
     this.wakeRingOut = const Duration(seconds: 4),
+    this.micTimeout = const Duration(seconds: 10),
   });
 
   final LinkTiming link;
@@ -75,6 +78,9 @@ class DreamTiming {
 
   /// After the wake tone, before the sound stops.
   final Duration wakeRingOut;
+
+  /// The microphone's start and stop calls: a plugin stuck past this loses the answer, not the session.
+  final Duration micTimeout;
 }
 
 class DreamController extends ChangeNotifier {
@@ -88,10 +94,14 @@ class DreamController extends ChangeNotifier {
     this.timing = const DreamTiming(),
     this.gestureTone,
     DateTime Function()? clock,
+    Duration Function()? monotonic,
     double Function()? random,
   }) : _makeSound = sound,
        _now = clock ?? DateTime.now,
+       _clock = SessionClock(wall: clock, monotonic: monotonic),
        _random = random ?? math.Random().nextDouble;
+
+  final SessionClock _clock;
 
   final HeadbandFinder finder;
   final DreamSound Function() _makeSound;
@@ -166,6 +176,7 @@ class DreamController extends ChangeNotifier {
   DriftOff? _drift;
   RoundPlan? _plan;
   DateTime? _lightsOffAt;
+  Duration? _lightsOffMono;
   final List<DreamRound> _rounds = [];
   Map<String, String> _prompts = const {};
   int _epochsSeen = 0;
@@ -177,6 +188,7 @@ class DreamController extends ChangeNotifier {
   bool _gapPending = false;
   int _lostSamples = 0;
   bool _busy = false;
+  bool _interrupted = false;
   Future<void>? _roundFuture;
   Completer<AnswerEnd>? _answerDone;
   Completer<bool?>? _tap;
@@ -228,6 +240,7 @@ class DreamController extends ChangeNotifier {
       _listen(_seen!);
       _drift = DriftOff(0); // lights off: the first sample
       _lightsOffAt = _now();
+      _lightsOffMono = _clock.now;
       await link.startSignal();
       if (!_live(run)) return await link.close(); // Stop came while the stream started
       _ticker = Timer.periodic(timing.tick, (_) => _tick());
@@ -269,6 +282,7 @@ class DreamController extends ChangeNotifier {
     _hands = null;
     _plan = null;
     _lightsOffAt = null;
+    _lightsOffMono = null;
     _rounds.clear();
     _prompts = const {};
     _epochsSeen = 0;
@@ -279,6 +293,7 @@ class DreamController extends ChangeNotifier {
     _gapPending = false;
     _lostSamples = 0;
     _busy = false;
+    _interrupted = false;
     _roundFuture = null;
     _answerDone = null;
     _tap = null;
@@ -292,10 +307,10 @@ class DreamController extends ChangeNotifier {
   }
 
   double _t() {
-    final at = _lightsOffAt;
+    final at = _lightsOffMono;
     if (at == null) return 0;
     final samples = (_seen?.n ?? 0) / fs;
-    return math.max(samples, _now().difference(at).inMicroseconds / 1e6);
+    return math.max(samples, _clock.secondsSince(at));
   }
 
   // ---- the EEG file ----
@@ -449,16 +464,42 @@ class DreamController extends ChangeNotifier {
     _notify();
   }
 
+  /// A call or another app took the sound, or gave it back (the session keeper, DECISIONS row 468): no question is
+  /// asked meanwhile (an answer would record the call); each change is a marker in the recording.
+  void audioFocus(FocusChange f) {
+    if (_ended) return;
+    switch (f) {
+      case FocusChange.lost || FocusChange.paused:
+        if (_interrupted) return;
+        _interrupted = true;
+        _mark('dream catcher: audio focus lost: a call or another app (no question until it is back)');
+      case FocusChange.back:
+        if (!_interrupted) return;
+        _interrupted = false;
+        _mark('dream catcher: audio focus back');
+        _check();
+      case FocusChange.duck:
+        _mark('dream catcher: audio focus: a short sound over ours');
+    }
+  }
+
   // ---- rounds ----
 
   void _check() {
     final plan = _plan;
-    if (plan == null || _ended || _busy || _lightsOffAt == null) return;
+    if (plan == null || _ended || _lightsOffAt == null) return;
     final t = _t();
+    if (t >= DreamRule.capS) {
+      // the cap first, also while a round runs: a round that hangs must not hold the session past it
+      unawaited(_finish(plan.done >= plan.rounds ? DreamEnd.rounds : DreamEnd.cap));
+      return;
+    }
+    if (_busy) return;
     if (plan.over(t)) {
       unawaited(_finish(plan.done >= plan.rounds ? DreamEnd.rounds : DreamEnd.cap));
       return;
     }
+    if (_interrupted) return; // no question during a call
     final cause = plan.due(t, driftState);
     if (cause == null) return;
     _busy = true;
@@ -529,7 +570,7 @@ class DreamController extends ChangeNotifier {
     var end = AnswerEnd.failed;
     try {
       st.dir.createSync(recursive: true);
-      await mic.start(f.path);
+      await mic.start(f.path).timeout(timing.micTimeout);
       sub = mic.levels.listen((db) {
         final e = gate.add(db);
         if (e != null && !done.isCompleted) done.complete(e);
@@ -541,7 +582,7 @@ class DreamController extends ChangeNotifier {
       _answerDone = null;
       await sub?.cancel();
       try {
-        await mic.stop();
+        await mic.stop().timeout(timing.micTimeout);
       } catch (_) {}
     }
     final kept = f.existsSync() && f.lengthSync() > 44;

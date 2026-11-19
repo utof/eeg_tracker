@@ -50,6 +50,7 @@ class DreamViewModel {
     this.earlier = const [],
     this.words = const {},
     this.speech,
+    this.keepUnlocked = false,
   });
 
   final DreamStage stage;
@@ -71,6 +72,10 @@ class DreamViewModel {
 
   /// A night is being recorded: the headband is taken.
   final bool nightRunning;
+
+  /// The sleep ending must start the night recording, which Android allows from a locked phone only to an app
+  /// that may run in the background (DECISIONS rows 194 and 467): the face asks you not to lock the phone.
+  final bool keepUnlocked;
   final PromptInfo theme;
   final PromptInfo question;
 
@@ -475,6 +480,14 @@ class DreamView extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(sentence, style: text.bodyLarge?.copyWith(color: faceMuted, height: 1.4)),
+          if (m.keepUnlocked && started) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Do not lock the phone: the night recording must start afterwards. To lock it next time, allow the app '
+              'to run in the background (main screen, under Phone).',
+              style: text.bodyLarge?.copyWith(color: faceMuted, height: 1.4),
+            ),
+          ],
           if (m.noData && started) ...[
             const SizedBox(height: 10),
             Text(

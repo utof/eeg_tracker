@@ -64,6 +64,9 @@ class _DreamScreenState extends State<DreamScreen> {
   bool _face = false;
   final SessionKeeper _keeper = PhoneSessionKeeper();
   DreamStage _lastStage = DreamStage.setup;
+
+  /// The sleep ending must start the night, and the app may not do that from a locked phone (row 194's rule).
+  bool _keepUnlocked = false;
   List<DreamSession> _sessions = const [];
   final Map<PromptKind, double?> _promptS = {};
   PromptKind? _recordingPrompt;
@@ -237,6 +240,7 @@ class _DreamScreenState extends State<DreamScreen> {
     // (session_keeper.dart, DECISIONS row 195). It starts here, with the app on screen and the microphone allowed:
     // Android gives a locked app the microphone only then.
     _keeper.onStop = () => unawaited(_c.stop());
+    _keeper.onFocus = _c.audioFocus; // a call or another app's sound (DECISIONS row 468)
     unawaited(
       on
           ? _keeper.hold(const KeepSpec(title: 'Dream catcher', text: 'Session running', headband: true, microphone: true))
@@ -295,6 +299,11 @@ class _DreamScreenState extends State<DreamScreen> {
       // the session's notification (Stop for a locked phone) and the night recorder's; ask now, not half-asleep
       await FlutterForegroundTask.requestNotificationPermission();
     }
+    // Android starts the night recording from a locked phone only for an app allowed to run in the background (row
+    // 194, as sound for states does): the same system dialog, and this session's face asks you not to lock the phone
+    // whatever the answer (the next session reads it again)
+    _keepUnlocked = _ending == DreamEnding.sleep && !phone.ignoringBatteryOptimizations;
+    if (_keepUnlocked) await Phone.openSettings('batteryOptimization').catchError((Object _) => false);
     _justEnded = false;
     _c.handsFree = await activeGestures();
     await _c.start(rounds: _rounds, ending: _ending);
@@ -464,6 +473,7 @@ class _DreamScreenState extends State<DreamScreen> {
       contact: c.contact,
       notes: [?c.saveNote, ?c.micNote],
       nightRunning: _nightRunning,
+      keepUnlocked: active && _keepUnlocked,
       theme: PromptInfo(seconds: _promptS[PromptKind.theme]),
       question: PromptInfo(seconds: _promptS[PromptKind.question]),
       recording: _recordingPrompt,

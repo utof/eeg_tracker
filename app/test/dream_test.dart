@@ -16,6 +16,7 @@ import 'package:eeg_tracker/dream/band_link.dart';
 import 'package:eeg_tracker/feedback/demo.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
+import 'package:eeg_tracker/session_keeper.dart' show FocusChange;
 import 'package:eeg_tracker/recorder/nights.dart';
 import 'package:eeg_tracker/sound/synth.dart' show wav16;
 import 'package:flutter_test/flutter_test.dart';
@@ -530,6 +531,124 @@ void main() {
       c.dispose();
     });
 
+    test('Stop while the sound starts: the sound that just started is stopped too (no engine left open)', () async {
+      final band = DriftBand((_) => 1), sound = _GatedDreamSound();
+      final c = controller(band, FakeMic(spoken), sound);
+      final started = c.start(rounds: 3);
+      await until(c, () => sound.asked);
+      await c.stop();
+      sound.gate.complete();
+      await started;
+      expect(sound.started, isTrue);
+      expect(sound.stopped, isTrue, reason: 'the engine opened during Stop is closed');
+      expect(c.stage, DreamStage.setup);
+      expect(band.calls.last, 'disconnect');
+      c.dispose();
+    });
+
+    test('a clock correction does not move the 45-minute cap: the session counts on a monotonic clock', () async {
+      var wall = DateTime(2026, 11, 19, 23);
+      var mono = Duration.zero;
+      final band = DriftBand((_) => 1), sound = SilentDreamSound();
+      final c = DreamController(
+        finder: OneFinder(band),
+        sound: () => sound,
+        mic: FakeMic(spoken),
+        store: store,
+        recordingsDir: recordings,
+        timing: fast,
+        random: () => 1,
+        clock: () => wall,
+        monotonic: () => mono,
+      );
+      await c.start(rounds: 4);
+      await until(c, () => c.seconds > 30);
+      band.paused = true;
+      final at = c.seconds;
+      wall = wall.add(const Duration(minutes: 46)); // the phone's clock corrected ahead
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(c.active, isTrue, reason: 'not ended by the wall clock');
+      expect(c.seconds, closeTo(at, 1));
+      mono += const Duration(minutes: 46);
+      await until(c, () => c.stage == DreamStage.done);
+      expect(c.last!.endWhy, DreamEnd.cap);
+      c.dispose();
+    });
+
+    test('the 45-minute cap ends the session even while a round waits for its answer', () async {
+      var mono = Duration.zero;
+      final band = DriftBand((_) => 1), sound = SilentDreamSound();
+      final c = DreamController(
+        finder: OneFinder(band),
+        sound: () => sound,
+        mic: FakeMic(spoken),
+        store: store,
+        recordingsDir: recordings,
+        timing: const DreamTiming(
+          link: LinkTiming(contactFor: Duration(milliseconds: 5), settle: Duration.zero, reconnectWaits: [Duration(milliseconds: 5)]),
+          tick: Duration(milliseconds: 20),
+          tapWindow: Duration(minutes: 5), // "were you drifting?" waits long
+          wakeRingOut: Duration.zero,
+        ),
+        random: () => 0,
+        monotonic: () => mono,
+      );
+      await c.start(rounds: 4);
+      await until(c, () => c.stage == DreamStage.checking);
+      band.paused = true;
+      mono += const Duration(minutes: 46);
+      await until(c, () => c.stage == DreamStage.done, max: const Duration(seconds: 5));
+      expect(c.last!.endWhy, DreamEnd.cap);
+      expect(c.last!.rounds.length, 1, reason: 'the round under way is kept');
+      c.dispose();
+    });
+
+    test('a microphone that never answers: the round goes on after its deadline and says so', () async {
+      final band = DriftBand((_) => 1), mic = _HungMic(spoken);
+      final c = DreamController(
+        finder: OneFinder(band),
+        sound: SilentDreamSound.new,
+        mic: mic,
+        store: store,
+        recordingsDir: recordings,
+        timing: const DreamTiming(
+          link: LinkTiming(contactFor: Duration(milliseconds: 5), settle: Duration.zero, reconnectWaits: [Duration(milliseconds: 5)]),
+          tick: Duration(milliseconds: 20),
+          tapWindow: Duration(milliseconds: 100),
+          wakeRingOut: Duration.zero,
+          micTimeout: Duration(milliseconds: 200),
+        ),
+        random: () => 0,
+      );
+      await c.start(rounds: 3);
+      await until(c, () => c.roundsDone >= 1, max: const Duration(seconds: 5));
+      expect(c.micNote, contains('did not record'));
+      expect(mic.stopsAsked, greaterThanOrEqualTo(1), reason: 'its stop was asked too, and given up on');
+      await c.stop().timeout(const Duration(seconds: 5));
+      c.dispose();
+    });
+
+    test('a call or another app takes the sound: no question until it is back, and the markers say so', () async {
+      final band = DriftBand((_) => 1), sound = SilentDreamSound();
+      final c = controller(band, FakeMic(spoken), sound, u: 0);
+      await c.start(rounds: 3);
+      c.audioFocus(FocusChange.paused);
+      await until(c, () => c.seconds > 11 * 60); // past the first round's timer (10 min)
+      expect((c.roundsDone, c.roundNow), (0, null), reason: 'no question during a call');
+      c.audioFocus(FocusChange.back);
+      await until(c, () => c.roundsDone >= 1);
+      await c.stop();
+      final s = c.last!;
+      final markers = [
+        for (final l in File('${recordings.path}/${s.recording}.markers.jsonl').readAsLinesSync()) '${(jsonDecode(l) as Map)['text']}',
+      ];
+      expect(markers, containsAllInOrder([
+        'dream catcher: audio focus lost: a call or another app (no question until it is back)',
+        'dream catcher: audio focus back',
+      ]));
+      c.dispose();
+    });
+
     test('45 minutes after lights off the session ends even with the headband silent', () async {
       var shift = Duration.zero;
       final band = DriftBand((_) => 1), mic = FakeMic(spoken), sound = SilentDreamSound();
@@ -614,4 +733,32 @@ void main() {
       c.dispose();
     });
   });
+}
+
+/// A dream sound whose start waits for the test.
+class _GatedDreamSound extends SilentDreamSound {
+  final Completer<void> gate = Completer<void>();
+  bool asked = false;
+
+  @override
+  Future<void> start() async {
+    asked = true;
+    await gate.future;
+    await super.start();
+  }
+}
+
+/// A microphone plugin stuck in its calls: start and stop never return.
+class _HungMic extends FakeMic {
+  _HungMic(super.script);
+  int stopsAsked = 0;
+
+  @override
+  Future<void> start(String path) => Completer<void>().future;
+
+  @override
+  Future<void> stop() {
+    stopsAsked++;
+    return Completer<void>().future;
+  }
 }

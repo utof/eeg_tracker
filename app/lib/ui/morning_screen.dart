@@ -12,11 +12,14 @@ import 'experiments_screen.dart' show currentExperiment;
 import 'experiments_view.dart' show experimentLine;
 import '../recorder/brainbit.dart';
 import '../recorder/contact.dart';
+import '../session_keeper.dart';
 import '../sound/check_in_sound.dart';
 import '../trends/days.dart';
 import '../trends/trends.dart';
 import '../wearer/check.dart' show kindCheckIn;
 import '../wearer/wearer.dart';
+import '../sound/audio_route.dart' show toneVolumeFloor;
+import 'cue_sound_check.dart';
 import 'evidence_sheet.dart';
 import 'morning_view.dart';
 import 'nearby.dart';
@@ -63,7 +66,11 @@ class MorningScreen extends StatefulWidget {
 
 class _MorningScreenState extends State<MorningScreen> {
   final BrainBitFinder _finder = BrainBitFinder();
-  late final MorningController _c = MorningController(finder: _finder, sound: SoloudCheckInSound.new);
+  late final MorningController _c = MorningController(
+    finder: _finder,
+    sound: SoloudCheckInSound.new,
+    keeper: PhoneSessionKeeper(), // a locked phone must not freeze the recording part (DECISIONS row 460)
+  );
   String? _recordings;
   String? _doneAt, _experiment;
   bool _nightRunning = false;
@@ -174,6 +181,11 @@ class _MorningScreenState extends State<MorningScreen> {
     if (!phone.bluetoothOn) {
       _say('Turn Bluetooth on, then start.');
       await Phone.openSettings('bluetooth');
+      return;
+    }
+    // the tone to open your eyes must be heard: unheard, the eyes-open phase is recorded with the eyes closed
+    if (!mounted) return;
+    if (!await confirmCueSound(context, cue: 'the tone to open your eyes', go: 'Start anyway', floor: toneVolumeFloor)) {
       return;
     }
     _outcome = null;

@@ -17,6 +17,7 @@ import 'package:eeg_tracker/meditation/store.dart';
 import 'package:eeg_tracker/meditation/tracker.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
+import 'package:eeg_tracker/session_keeper.dart' show FocusChange;
 import 'package:eeg_tracker/sound/feedback_sound.dart';
 import 'package:eeg_tracker/training/control.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -303,6 +304,163 @@ void main() {
     c.dispose();
   });
 
+  test('a clock correction mid-session is not a hole in the signal: arrivals are timed on a monotonic clock', () async {
+    var wall = DateTime(2026, 11, 19, 21);
+    final band = DemoBand(DemoSignal(7)), sound = SilentSound();
+    final c = MeditationController(
+      finder: Finder([band]),
+      sound: () => sound,
+      timing: fast,
+      silentBlock: Duration.zero,
+      clock: () => wall,
+      monotonic: () => Duration.zero,
+    );
+    await c.start(const Duration(minutes: 1));
+    await until(c, () => c.stage == Stage.running);
+    wall = wall.add(const Duration(seconds: 30)); // the phone's clock corrected half a minute ahead
+    await until(c, () => c.stage == Stage.report);
+    final gaps = [for (final l in c.session!.log.lines) if (l['type'] == 'gap') l];
+    expect(gaps, isEmpty, reason: 'the signal never stopped');
+    c.dispose();
+  });
+
+  test('Stop saves before the slow steps: a sound that never finishes fading cannot lose the session', () async {
+    final dir = Directory.systemTemp.createTempSync('meditation');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final band = DemoBand(DemoSignal(7), perTick: 25), sound = _StuckSound();
+    final c = MeditationController(finder: Finder([band]), sound: () => sound, store: MeditationStore(dir), timing: fast);
+    await c.start(const Duration(minutes: 20));
+    await until(c, () => c.runSeconds > 30);
+    unawaited(c.stop());
+    await until(c, () => MeditationStore(dir).list().isNotEmpty, max: const Duration(seconds: 5));
+    final s = MeditationStore(dir).list().single;
+    expect(s.complete, isFalse);
+    expect(s.runS, greaterThan(30));
+    expect(File('${dir.path}/${s.logFile}').existsSync(), isTrue);
+    expect(c.stage, Stage.ending, reason: 'the sound is still fading; the session is already kept');
+  });
+
+  test('a session is kept as it goes: a checkpoint every minute, then the final files (a killed app keeps it)', () async {
+    final dir = Directory.systemTemp.createTempSync('meditation');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    var mono = Duration.zero;
+    final band = DemoBand(DemoSignal(7), perTick: 25), sound = SilentSound();
+    final c = MeditationController(
+      finder: Finder([band]),
+      sound: () => sound,
+      store: MeditationStore(dir),
+      timing: fast,
+      monotonic: () => mono,
+    );
+    await c.start(const Duration(minutes: 20));
+    await until(c, () => c.runSeconds > 30);
+    expect(MeditationStore(dir).list(), isEmpty, reason: 'not a minute yet');
+    mono += const Duration(seconds: 61);
+    await until(c, () => MeditationStore(dir).list().isNotEmpty, max: const Duration(seconds: 5));
+    final cp = MeditationStore(dir).list().single;
+    expect((cp.complete, cp.end), (false, 'running'), reason: 'a checkpoint says the session had not ended');
+    final cpLog = jsonDecode(File('${dir.path}/${cp.logFile}').readAsStringSync()) as Map<String, Object?>;
+    expect(replaySession(cpLog).log.lines, isNotEmpty, reason: 'the checkpoint\'s log replays');
+    await c.stop();
+    final fin = MeditationStore(dir).list().single;
+    expect((fin.end, fin.start), (null, cp.start), reason: 'the final files replace the checkpoint');
+    expect(fin.runS, greaterThan(cp.runS));
+    expect(dir.listSync().where((f) => f.path.endsWith('.tmp')), isEmpty);
+    c.dispose();
+  });
+
+  group('clock limits', () {
+    late Directory dir;
+    setUp(() => dir = Directory.systemTemp.createTempSync('meditation'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    test('a headband that goes silent for 5 minutes ends the session, kept with what there was', () async {
+      var mono = Duration.zero;
+      final band = DemoBand(DemoSignal(7), perTick: 25), sound = SilentSound();
+      final c = MeditationController(
+        finder: Finder([band]),
+        sound: () => sound,
+        store: MeditationStore(dir),
+        timing: fast,
+        monotonic: () => mono,
+      );
+      await c.start(const Duration(minutes: 20));
+      await until(c, () => c.runSeconds > 30);
+      band.goOutOfRange(); // the battery dies: no signal, reconnect tries find nothing
+      mono += const Duration(minutes: 4);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(c.stage, Stage.running, reason: '4 minutes without signal: still waiting');
+      mono += const Duration(minutes: 1, seconds: 1);
+      await until(c, () => c.stage == Stage.report, max: const Duration(seconds: 5));
+      expect(c.report!.end, MeditationSummary.endNoSignal);
+      expect(c.report!.complete, isFalse);
+      expect(MeditationStore(dir).list().single.end, MeditationSummary.endNoSignal);
+      expect(sound.stopped, isTrue);
+      c.dispose();
+    });
+
+    test('a session that never reaches its length ends at length + silent minutes + 20 min from Start', () async {
+      var mono = Duration.zero;
+      final band = DemoBand(DemoSignal(7), perTick: 25), sound = SilentSound();
+      final c = MeditationController(
+        finder: Finder([band]),
+        sound: () => sound,
+        store: MeditationStore(dir),
+        timing: fast,
+        monotonic: () => mono,
+      );
+      await c.start(const Duration(minutes: 20));
+      await until(c, () => c.runSeconds > 30);
+      mono += const Duration(minutes: 41);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(c.stage, Stage.running);
+      mono += const Duration(minutes: 1, seconds: 1); // 20 + 2 + 20 minutes
+      await until(c, () => c.stage == Stage.report, max: const Duration(seconds: 5));
+      expect(c.report!.end, MeditationSummary.endClock);
+      c.dispose();
+    });
+
+    test('a calibration that never gets its clean seconds ends after 10 minutes and says why', () async {
+      var mono = Duration.zero;
+      final band = DemoBand(DemoSignal(7), perTick: 1), sound = SilentSound(); // slow: still calibrating
+      final c = MeditationController(
+        finder: Finder([band]),
+        sound: () => sound,
+        store: MeditationStore(dir),
+        timing: fast,
+        monotonic: () => mono,
+      );
+      await c.start(const Duration(minutes: 5));
+      expect(c.stage, Stage.calibrating);
+      mono += const Duration(minutes: 10, seconds: 1);
+      await until(c, () => c.stage == Stage.setup, max: const Duration(seconds: 5));
+      expect(c.message, contains('calibration'));
+      expect(MeditationStore(dir).list(), isEmpty, reason: 'nothing to report');
+      expect(band.calls.last, 'disconnect');
+      c.dispose();
+    });
+  });
+
+  test('a call or another app takes the sound: the bed goes quiet, no bells until it is back, the log says so', () async {
+    final band = DemoBand(DemoSignal(7), perTick: 25), sound = SilentSound();
+    final c = MeditationController(finder: Finder([band]), sound: () => sound, timing: fast, silentBlock: Duration.zero);
+    await c.start(const Duration(minutes: 20));
+    await until(c, () => c.stage == Stage.running && c.runSeconds > 20);
+    c.audioFocus(FocusChange.paused);
+    expect(sound.bedOn, isFalse);
+    final bells = sound.bells;
+    await until(c, () => c.runSeconds > 200);
+    expect(sound.bells, bells, reason: 'no bells during a call');
+    c.audioFocus(FocusChange.duck); // a short sound: Android lowers ours by itself
+    c.audioFocus(FocusChange.back);
+    expect(sound.bedOn, isTrue);
+    await until(c, () => sound.bells > bells);
+    await c.stop();
+    final events = [for (final i in c.session!.log.info) i['event']].whereType<String>();
+    expect(events, containsAllInOrder(['audio focus lost: a call or another app (sound paused)', 'audio focus back: sound on']));
+    c.dispose();
+  });
+
   test('the silent minutes: the sound stops after the length, the headband goes on, the block has its number', () async {
     final dir = Directory.systemTemp.createTempSync('meditation');
     addTearDown(() => dir.deleteSync(recursive: true));
@@ -584,4 +742,10 @@ void main() {
       c.dispose();
     });
   });
+}
+
+/// A sound whose fade never ends (a stuck audio thread).
+class _StuckSound extends SilentSound {
+  @override
+  Future<void> stop() => Completer<void>().future;
 }

@@ -3,6 +3,9 @@
 // eyes closed and 2 min eyes open on a dot with the page's tones, then the questions and the reaction test; the
 // numbers are worked out on the phone exactly as scripts/morning_check.py works them out (result.dart).
 //
+// With the phone locked the recording part goes on: a [SessionKeeper] (the phone's foreground service, DECISIONS rows
+// 190-195 and 460) is held from Start until the headband is let go; Stop on its notification ends the check-in.
+//
 // Like meditation (row 75) it owns the headband only between nights. The phases count seconds of signal, so a
 // stall pauses the countdown. A headband that drops out stops the check-in (nothing is kept): 5 minutes are
 // quicker to repeat than to patch, and a phase with a hole in it is not the routine the numbers assume.
@@ -18,6 +21,7 @@ import '../dream/band_link.dart' show BandLink;
 import '../recorder/chunk_writer.dart' show ChunkWriter, Sample, fileStem, unixSeconds;
 import '../recorder/contact.dart' show channelNames;
 import '../recorder/headband.dart';
+import '../session_keeper.dart';
 import '../sound/check_in_sound.dart';
 import 'live.dart';
 import 'measures.dart';
@@ -88,12 +92,16 @@ class MorningController extends ChangeNotifier {
     CheckInSound Function()? sound,
     this.store,
     this.timing = const MorningTiming(),
+    this.keeper,
     DateTime Function()? clock,
   }) : _makeSound = sound ?? SilentCheckInSound.new,
        _now = clock ?? DateTime.now;
 
   final HeadbandFinder finder;
   final CheckInSound Function() _makeSound;
+
+  /// Keeps the recording part alive with the phone locked (null: nothing does; the screen stays on as before).
+  final SessionKeeper? keeper;
 
   /// Where check-ins are kept (null: not saved; set by the screen once the app's folder is known).
   MorningStore? store;
@@ -168,6 +176,8 @@ class MorningController extends ChangeNotifier {
     _reset();
     final run = ++_run;
     _set(MorningStage.connecting, 'Looking for the headband.');
+    await _keep();
+    if (_ended) return; // stopped meanwhile
     try {
       // a headband the search brings after its deadline is let go; a search stuck behind an earlier one says so
       final band = await BandLink.within(
@@ -224,6 +234,33 @@ class MorningController extends ChangeNotifier {
     } catch (e) {
       await _fail('Could not start: $e', run);
     }
+  }
+
+  /// Asks the keeper to hold the check-in, so a locked phone does not freeze it; Stop on its notification ends it.
+  Future<void> _keep() async {
+    final k = keeper;
+    if (k == null) return;
+    k.onStop = () => unawaited(stop());
+    k.onFocus = _onFocus;
+    try {
+      await k.hold(const KeepSpec(title: 'Morning check-in', text: 'Check-in running', headband: true));
+    } catch (_) {
+      // the screen stays on as before
+    }
+  }
+
+  Future<void> _letGo() async {
+    try {
+      await keeper?.release();
+    } catch (_) {}
+  }
+
+  /// A call or another app's sound during the check-in (the session keeper, DECISIONS row 468) spoils the routine, as
+  /// a drop does: it stops and keeps nothing. A short notification sound does not.
+  void _onFocus(FocusChange f) {
+    if (!active || _ended || f == FocusChange.duck || f == FocusChange.back) return;
+    unawaited(_abort('A call or another app\'s sound came during the check-in, so it stopped and nothing was kept. '
+        'Start again when it is quiet.'));
   }
 
   /// Checks contact again (the laptop's "Check again"): the signal pauses for a few seconds.
@@ -361,6 +398,7 @@ class MorningController extends ChangeNotifier {
     _analysis = Isolate.run(() => _analyse(job));
     unawaited(_analysis!.then((_) {}, onError: (Object _) {})); // a failure is reported at Save
     await _release(); // before the stage changes: the screen lets the scanner go then
+    await _letGo(); // the questions need no service
     _writer?.close();
     _set(MorningStage.questions, '');
     unawaited(_sound?.stop()); // lets the end tone ring out
@@ -441,6 +479,7 @@ class MorningController extends ChangeNotifier {
     _ticker?.cancel();
     await _release();
     await _sound?.stop();
+    await _letGo();
     final w = _writer, st = store;
     _writer = null;
     if (w != null && st != null) {
@@ -472,6 +511,7 @@ class MorningController extends ChangeNotifier {
     _ticker?.cancel();
     await _release();
     await _sound?.stop();
+    await _letGo();
     if (!stopped) _set(MorningStage.failed, why);
   }
 

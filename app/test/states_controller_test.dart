@@ -72,6 +72,71 @@ void main() {
     c.dispose();
   });
 
+  test('a clock correction moves nothing: session time runs on a monotonic clock', () async {
+    var wall = DateTime(2026, 11, 18, 14);
+    var mono = Duration.zero;
+    final sound = SilentStateSound();
+    final c = StatesController(
+      finder: OneFinder(null),
+      sound: () => sound,
+      store: store,
+      timing: fast,
+      clock: () => wall,
+      monotonic: () => mono,
+    );
+    await c.start(SoundPlan.of(SoundState.relax), useHeadband: false);
+    wall = wall.add(const Duration(hours: 1)); // the phone's clock corrected an hour ahead
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(c.stage, SoundStage.playing, reason: 'no fade and no end from the wall clock');
+    expect(c.seconds, lessThan(1));
+    mono += const Duration(seconds: 581);
+    await until(c, () => c.stage == SoundStage.fading);
+    c.dispose();
+  });
+
+  test('the session file is rewritten every minute, from the quiet minute on (a killed app keeps the session so far)', () async {
+    var mono = Duration.zero;
+    final band = DriftBand((_) => 1)..paused = true; // the quiet minute waits: nothing streams yet
+    final c = StatesController(
+      finder: OneFinder(band),
+      sound: SilentStateSound.new,
+      store: store,
+      timing: fast,
+      monotonic: () => mono,
+    );
+    await c.start(SoundPlan.of(SoundState.relax));
+    expect(c.stage, SoundStage.quiet);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(store.list().single.end, SoundEnd.running, reason: 'a file from the quiet minute on');
+    expect(store.list().single.soundStartS, isNull);
+    mono += const Duration(seconds: 130); // the quiet minute gives up at 120 s and the sound starts
+    await until(c, () => c.stage == SoundStage.playing);
+    mono += const Duration(seconds: 70);
+    await until(c, () => (store.list().single.endS) >= 199);
+    final s = store.list().single;
+    expect((s.end, s.soundStartS), (SoundEnd.running, 130));
+    expect(s.events.map((e) => e.text), ['quiet minute (eyes closed)', 'sound on: Ocean, no beat']);
+    await c.stop();
+    c.dispose();
+  });
+
+  test('a call or another app takes the sound: it pauses until the sound is back, and the session file says so', () async {
+    final sound = SilentStateSound();
+    final keeper = FakeSessionKeeper();
+    final c = StatesController(finder: OneFinder(null), sound: () => sound, store: store, timing: fast, keeper: keeper);
+    await c.start(SoundPlan.of(SoundState.relax), useHeadband: false);
+    keeper.onFocus!(FocusChange.paused);
+    keeper.onFocus!(FocusChange.duck);
+    keeper.onFocus!(FocusChange.back);
+    expect(sound.pauses, [true, false]);
+    await c.stop();
+    expect(
+      store.list().single.events.map((e) => e.text),
+      containsAllInOrder(['audio focus lost: a call or another app (sound paused)', 'audio focus back: sound on']),
+    );
+    c.dispose();
+  });
+
   test("a session of a fair test's day keeps the test's tag; the next session has none", () async {
     var now = DateTime(2026, 11, 20, 10);
     final sound = SilentStateSound();

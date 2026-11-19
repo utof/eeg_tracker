@@ -9,12 +9,17 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 
@@ -25,6 +30,11 @@ import android.os.SystemClock
  * connectedDevice with the headband and microphone for the dream catcher), holds a partial wake lock and shows a
  * media notification with Stop. It is not the night recorder's service (flutter_foreground_task) and never
  * touches it. Started only from the open screen; never restarted by Android (the session would be gone).
+ *
+ * It also asks for the sound (audio focus, DECISIONS row 468) unless the session says not to (the nap, which plays
+ * nothing until its wake): other apps' sound pauses, and a call or another app taking the sound, or giving it back,
+ * reaches the session as "loss", "lossTransient", "duck" or "gain", so it can go quiet instead of playing through a
+ * call. Android lowers the session's sound by itself for a short sound ("duck").
  */
 class SessionService : Service() {
     companion object {
@@ -40,6 +50,10 @@ class SessionService : Service() {
         /** Stop was tapped on the notification or the lock screen; set by the screen's Activity. */
         @Volatile
         var onStopTapped: (() -> Unit)? = null
+
+        /** The audio focus changed ("loss", "lossTransient", "duck", "gain"); set by the screen's Activity. */
+        @Volatile
+        var onFocusChanged: ((String) -> Unit)? = null
 
         /** Answer to the last [hold]: what is kept ("headband", "microphone"), or the error. */
         @Volatile
@@ -60,6 +74,7 @@ class SessionService : Service() {
             text: String,
             headband: Boolean,
             microphone: Boolean,
+            focus: Boolean,
             done: (List<String>?, String?) -> Unit,
         ) {
             pending?.invoke(null, "replaced by a newer request")
@@ -71,7 +86,8 @@ class SessionService : Service() {
                         .putExtra("title", title)
                         .putExtra("text", text)
                         .putExtra("headband", headband)
-                        .putExtra("microphone", microphone),
+                        .putExtra("microphone", microphone)
+                        .putExtra("focus", focus),
                 )
             } catch (e: Exception) {
                 pending = null
@@ -86,6 +102,7 @@ class SessionService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var session: MediaSession? = null
+    private var focusRequest: AudioFocusRequest? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -130,12 +147,46 @@ class SessionService : Service() {
             // Every hold (re)arms the lock's timeout: a work session holds again every 20 minutes and can
             // run a whole day (DECISIONS 447); the others hold once and are released long before.
             wakeLock?.acquire(WAKE_LOCK_MS)
+            if (intent.getBooleanExtra("focus", true)) askFocus() else dropFocus()
             running = true
             answer?.invoke(kept, null)
         } catch (e: Exception) {
             answer?.invoke(null, e.message ?: e.javaClass.simpleName)
             stopSelf()
         }
+    }
+
+    /** Asks for the sound once per session; a refusal (a call already running) leaves the session as it was. */
+    private fun askFocus() {
+        if (focusRequest != null) return
+        val am = getSystemService(AudioManager::class.java) ?: return
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build(),
+            )
+            .setOnAudioFocusChangeListener({ change -> onFocusChanged?.invoke(focusWord(change)) }, Handler(Looper.getMainLooper()))
+            .build()
+        if (am.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_FAILED) focusRequest = request
+    }
+
+    private fun dropFocus() {
+        val request = focusRequest ?: return
+        focusRequest = null
+        try {
+            getSystemService(AudioManager::class.java)?.abandonAudioFocusRequest(request)
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun focusWord(change: Int): String = when (change) {
+        AudioManager.AUDIOFOCUS_LOSS -> "loss"
+        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> "lossTransient"
+        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> "duck"
+        AudioManager.AUDIOFOCUS_GAIN -> "gain"
+        else -> "other"
     }
 
     private fun foreground(notification: Notification, headband: Boolean, microphone: Boolean) {
@@ -232,6 +283,7 @@ class SessionService : Service() {
 
     override fun onDestroy() {
         running = false
+        dropFocus()
         try {
             wakeLock?.let { if (it.isHeld) it.release() }
         } catch (_: Exception) {
