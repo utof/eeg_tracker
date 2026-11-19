@@ -322,6 +322,51 @@ void main() {
     c.dispose();
   });
 
+  test('Stop saves before the slow steps: a sound that never finishes fading cannot lose the session', () async {
+    final dir = Directory.systemTemp.createTempSync('meditation');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final band = DemoBand(DemoSignal(7), perTick: 25), sound = _StuckSound();
+    final c = MeditationController(finder: Finder([band]), sound: () => sound, store: MeditationStore(dir), timing: fast);
+    await c.start(const Duration(minutes: 20));
+    await until(c, () => c.runSeconds > 30);
+    unawaited(c.stop());
+    await until(c, () => MeditationStore(dir).list().isNotEmpty, max: const Duration(seconds: 5));
+    final s = MeditationStore(dir).list().single;
+    expect(s.complete, isFalse);
+    expect(s.runS, greaterThan(30));
+    expect(File('${dir.path}/${s.logFile}').existsSync(), isTrue);
+    expect(c.stage, Stage.ending, reason: 'the sound is still fading; the session is already kept');
+  });
+
+  test('a session is kept as it goes: a checkpoint every minute, then the final files (a killed app keeps it)', () async {
+    final dir = Directory.systemTemp.createTempSync('meditation');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    var mono = Duration.zero;
+    final band = DemoBand(DemoSignal(7), perTick: 25), sound = SilentSound();
+    final c = MeditationController(
+      finder: Finder([band]),
+      sound: () => sound,
+      store: MeditationStore(dir),
+      timing: fast,
+      monotonic: () => mono,
+    );
+    await c.start(const Duration(minutes: 20));
+    await until(c, () => c.runSeconds > 30);
+    expect(MeditationStore(dir).list(), isEmpty, reason: 'not a minute yet');
+    mono += const Duration(seconds: 61);
+    await until(c, () => MeditationStore(dir).list().isNotEmpty, max: const Duration(seconds: 5));
+    final cp = MeditationStore(dir).list().single;
+    expect((cp.complete, cp.end), (false, 'running'), reason: 'a checkpoint says the session had not ended');
+    final cpLog = jsonDecode(File('${dir.path}/${cp.logFile}').readAsStringSync()) as Map<String, Object?>;
+    expect(replaySession(cpLog).log.lines, isNotEmpty, reason: 'the checkpoint\'s log replays');
+    await c.stop();
+    final fin = MeditationStore(dir).list().single;
+    expect((fin.end, fin.start), (null, cp.start), reason: 'the final files replace the checkpoint');
+    expect(fin.runS, greaterThan(cp.runS));
+    expect(dir.listSync().where((f) => f.path.endsWith('.tmp')), isEmpty);
+    c.dispose();
+  });
+
   test('the silent minutes: the sound stops after the length, the headband goes on, the block has its number', () async {
     final dir = Directory.systemTemp.createTempSync('meditation');
     addTearDown(() => dir.deleteSync(recursive: true));
@@ -529,4 +574,10 @@ void main() {
     expect(c.message, contains('not found'));
     c.dispose();
   });
+}
+
+/// A sound whose fade never ends (a stuck audio thread).
+class _StuckSound extends SilentSound {
+  @override
+  Future<void> stop() => Completer<void>().future;
 }

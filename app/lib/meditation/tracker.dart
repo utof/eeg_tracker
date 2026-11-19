@@ -168,8 +168,10 @@ class MeditationTracker {
     SilentBlock? silent,
     AudioRoute? audioRoute,
     bool bluetoothSound = false,
+    String? end,
   }) => MeditationSummary(
     kind: kind,
+    end: end,
     check: check,
     outcome: outcome,
     excludedShare: excludedShare,
@@ -203,6 +205,7 @@ double _round1(double v) => (v * 10).round() / 10;
 class MeditationSummary {
   const MeditationSummary({
     this.kind = SessionKind.meditation,
+    this.end,
     this.check,
     this.outcome,
     this.excludedShare,
@@ -230,6 +233,12 @@ class MeditationSummary {
 
   static const int version = 1;
   final SessionKind kind;
+
+  /// How the session ended when not the usual way (by its length, or Stop): [endRunning] for the minute-by-minute
+  /// copy of a session still under way (the app was closed before its end), [endNoSignal] when the headband sent
+  /// nothing for too long and [endClock] at the session's clock limit. Null otherwise.
+  final String? end;
+  static const String endRunning = 'running', endNoSignal = 'no signal', endClock = 'clock limit';
 
   /// While the replay check was on: {'phase': 'donor' | 'randomised' | 'finished', 'index': n}. Never the arm.
   final Map<String, Object?>? check;
@@ -285,6 +294,7 @@ class MeditationSummary {
   Map<String, Object?> toJson() => {
     'version': version,
     'kind': kind.name,
+    if (end != null) 'end': end,
     if (check != null) 'check': check,
     if (outcome != null) 'outcome': outcome,
     if (excludedShare != null) 'excludedShare': excludedShare,
@@ -350,6 +360,7 @@ class MeditationSummary {
     final iaf = j['iafHz'], asleep = num_(j['asleepS']), outcome = j['outcome'], check = j['check'], at = j['at'];
     return MeditationSummary(
       kind: kind,
+      end: j['end'] is String ? j['end'] as String : null,
       check: check is Map<String, Object?> ? check : null,
       outcome: outcome is num && outcome.isFinite ? outcome.toDouble() : null,
       excludedShare: num_(j['excludedShare']),

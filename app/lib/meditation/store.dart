@@ -3,6 +3,8 @@
 //   <stamp>.meditation.json  the small summary the report and the comparison read
 //   <stamp>.session.json     the whole session log (control stream and every input sample), replayable by
 //                            the Dart core and by the laptop page's core (same format)
+// Both are written every minute while a session runs (its summary then says "end": "running") and once more at its
+// end, each to a new file renamed over the old one, so a killed app keeps the session up to its last minute.
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
@@ -32,15 +34,21 @@ class MeditationStore {
   /// The stem a session started at [start] gets.
   String stemFor(DateTime start) => fileStem(start);
 
-  /// Writes the session log, then the summary (the summary last, so a listed summary always has its log).
+  /// Writes the session log, then the summary (the summary last, so a listed summary always has its log), each to
+  /// a new file renamed over the old one (a cut write never leaves a half file).
   /// The log is encoded off the screen's thread: 20 minutes are about 8 MB of JSON.
   Future<void> save(MeditationSummary summary, SessionLog log) async {
     dir.createSync(recursive: true);
     final logPath = '${dir.path}/${summary.logFile}';
     final summaryPath = '${dir.path}/${stemFor(summary.start)}$suffix';
     final json = log.toJson();
-    await Isolate.run(() => File(logPath).writeAsStringSync(jsonEncode(json), flush: true));
-    File(summaryPath).writeAsStringSync(const JsonEncoder.withIndent(' ').convert(summary.toJson()), flush: true);
+    await Isolate.run(() => _replace(logPath, jsonEncode(json)));
+    _replace(summaryPath, const JsonEncoder.withIndent(' ').convert(summary.toJson()));
+  }
+
+  static void _replace(String path, String text) {
+    final tmp = File('$path.tmp')..writeAsStringSync(text, flush: true);
+    tmp.renameSync(path);
   }
 
   /// Every readable summary, newest first. Damaged or foreign files are skipped.

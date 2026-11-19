@@ -32,6 +32,9 @@
 // running (its log replays as before); the log marks where the sound stopped, so a replay of this session in the
 // replay check plays only the time with sound. Stop in the silent minutes keeps the session whole. Alpha-theta has
 // none yet (its own after-session steps come first).
+// Kept as it goes (DECISIONS row 463): every minute after the first 10 s with sound the summary and the log are
+// written (the summary says "running"), and at the end they are written before the slow steps (the headband's
+// release, the ring-out, the fade), so a swipe, a kill or a crash loses at most the last minute.
 // Where the sound goes (sound/audio_route.dart, DECISIONS 424): read at the start and followed while the screen is
 // open, so the setup can warn about Bluetooth (0.25-0.5 s late); the session log keeps the route and every change,
 // and the summary whether any of it went over Bluetooth. The session goes on either way.
@@ -105,6 +108,7 @@ class MeditationTiming {
     this.reconnectWaits = const [Duration(seconds: 2), Duration(seconds: 5), Duration(seconds: 10)],
     this.rescanFor = const Duration(seconds: 10),
     this.endRingOut = const Duration(seconds: 3),
+    this.saveEvery = const Duration(seconds: 60),
   });
 
   final Duration scanFor;
@@ -132,6 +136,9 @@ class MeditationTiming {
 
   /// After the end cue, before the sound stops.
   final Duration endRingOut;
+
+  /// The session's files are rewritten this often while it runs (so a killed app keeps it up to then).
+  final Duration saveEvery;
 
   /// The shared headband link's timing: these same fields (the reconnect rules are in dream/band_link.dart).
   LinkTiming get link => LinkTiming(
@@ -295,6 +302,9 @@ class MeditationController extends ChangeNotifier {
   HandsFree? _hands;
   int _lostSamples = 0;
   DateTime? _startedAt;
+  Duration _startMono = Duration.zero;
+  Duration? _lastSave;
+  Future<void>? _saving;
   Timer? _ticker;
   Duration? _lastData;
   Duration? _signalAt;
@@ -444,6 +454,9 @@ class MeditationController extends ChangeNotifier {
 
   void _reset(Duration sessionLength) {
     length = sessionLength;
+    _startMono = _clock.now;
+    _lastSave = null;
+    _saving = null;
     _link = null;
     _session = null;
     _engine = null;
@@ -651,7 +664,45 @@ class MeditationController extends ChangeNotifier {
       }
     }
     _link?.tick(); // the stream that never started is restarted once (after restartStreamAfter)
+    _checkpoint();
     _notify();
+  }
+
+  /// Every [MeditationTiming.saveEvery]: the session so far, its summary saying "running" (one save at a time).
+  void _checkpoint() {
+    final st = store, t = _tracker;
+    if (st == null || t == null || _saving != null || t.runSeconds < minReportS) return;
+    if (_clock.now - (_lastSave ?? _startMono) < timing.saveEvery) return;
+    _lastSave = _clock.now;
+    final summary = _summary(complete: false, end: MeditationSummary.endRunning);
+    if (summary == null) return;
+    _saving = st
+        .save(summary, _session!.log)
+        .catchError((Object _) {}) // storage full: the final save says so
+        .whenComplete(() => _saving = null);
+  }
+
+  /// The summary of the session so far (null before there is one).
+  MeditationSummary? _summary({required bool complete, String? end}) {
+    final s = _session, t = _tracker, start = _startedAt;
+    if (s == null || t == null || start == null) return null;
+    final outcome = _outcome;
+    return t.summary(
+      start: start,
+      complete: complete || t.done, // Stop in the silent minutes: the time with sound was reached
+      iafHz: s.iaf,
+      note: s.note,
+      logFile: '${store?.stemFor(start) ?? fileStem(start)}.session.json',
+      kind: kind,
+      check: _slot == null ? null : _checkInfo(),
+      outcome: outcome?.value,
+      excludedShare: outcome == null ? null : (outcome.excludedShare * 1000).round() / 1000,
+      at: _tally?.toJson(),
+      silent: _silent?.block(silentLength.inSeconds.toDouble()),
+      audioRoute: _routeAtStart != null && audioRoute != null ? _routeAtStart : null,
+      bluetoothSound: _bluetoothUsed,
+      end: end,
+    );
   }
 
   /// What the shared link reports, as the session log's lines. A drop is a hole in the signal for the core.
@@ -691,30 +742,24 @@ class MeditationController extends ChangeNotifier {
     );
     if (complete) sound?.cue();
     sound?.bed(on: false);
+    // the session is kept first: the release (up to 30 s), the ring-out and the fade (up to 10 s) come after
+    final kept = s != null && t != null && start != null && t.runSeconds >= minReportS;
+    if (kept) await _keep(complete: complete, sound: sound);
     await _release();
     if (complete) await Future<void>.delayed(timing.endRingOut);
     await sound?.stop();
-    if (s == null || t == null || start == null || t.runSeconds < minReportS) {
+    if (!kept) {
       _set(Stage.setup, s == null ? '' : 'Stopped before the session began, so nothing was saved.');
       return;
     }
+    _set(kind == SessionKind.alphaTheta || asksGuess ? Stage.rating : Stage.report, '');
+  }
+
+  /// Saves the ended session (after a checkpoint still being written) and makes its report.
+  Future<void> _keep({required bool complete, SessionSound? sound}) async {
+    final s = _session!, t = _tracker!, start = _startedAt!;
     final st = store, stem = st?.stemFor(start) ?? fileStem(start);
-    final outcome = _outcome;
-    final summary = t.summary(
-      start: start,
-      complete: complete || t.done, // Stop in the silent minutes: the time with sound was reached
-      iafHz: s.iaf,
-      note: s.note,
-      logFile: '$stem.session.json',
-      kind: kind,
-      check: _slot == null ? null : _checkInfo(),
-      outcome: outcome?.value,
-      excludedShare: outcome == null ? null : (outcome.excludedShare * 1000).round() / 1000,
-      at: _tally?.toJson(),
-      silent: _silent?.block(silentLength.inSeconds.toDouble()),
-      audioRoute: _routeAtStart != null && audioRoute != null ? _routeAtStart : null,
-      bluetoothSound: _bluetoothUsed,
-    );
+    final summary = _summary(complete: complete)!;
     _seen?.finish();
     s.log.note({'sound': sound?.info(), 'end': complete ? 'length reached' : 'stopped', 'runS': t.runSeconds});
     final h = _hands;
@@ -733,6 +778,7 @@ class MeditationController extends ChangeNotifier {
     }
     if (st != null) {
       try {
+        await _saving; // a checkpoint's rename must not come after the final one
         await st.save(summary, s.log);
         earlier = [
           for (final e in st.list())
@@ -746,7 +792,6 @@ class MeditationController extends ChangeNotifier {
     report = summary;
     _keepCheckRecord(summary, stem); // first, so a set it completes is in the replay check's test below
     if (kind == SessionKind.meditation) learning = learningVerdict([...earlier, summary], tested: _silentTest());
-    _set(kind == SessionKind.alphaTheta || asksGuess ? Stage.rating : Stage.report, '');
   }
 
   /// The replay check's revealed test of the silent minutes (null before a set is revealed, or without one).
