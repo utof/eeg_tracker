@@ -146,7 +146,7 @@ Needs the owner's OK first:
 
 - **utof_tracker importer** for `eeg_*` events (row 11; utof_tracker does not read them yet).
 - **Packing old nights** (xz after 90 days); encryption and restic are deferred (see "Decisions waiting").
-- **Sleep-scorer upgrade** (proposal; needs the 58 GB download).
+- **Sleep-scorer upgrade, parked (owner, 2026-11-19)**: first look for a better way *without* fitting a model: faster or simpler scoring algorithms, other ready-made sleep scorers, adapting the current one without labels, rules on the headband's own signals. Only if none is clearly better: AnySleep fine-tuned on public nights reshaped to the headband's channels (needs the 58 GB download, over the weekly download budget).
 
 Later or only if the evidence grows (the "Ideas for later" and "Proposals" tables below):
 
@@ -260,7 +260,7 @@ or delete any of these.
 | Sleep cues for memory | soft sound cues in deep sleep, only as a sham-controlled self-test; no closed-loop clicks | weak: a 13-lab replication is due ~2027; cues that wake you hurt memory (B) |
 | Evening study, morning review (now row 34 above) | a plain reminder to study in the evening and review in the morning | **built 2026-11-19; off by default** (status row 34); some (B) |
 | Open BrainBit driver | our own Bluetooth code instead of the closed SDK; contact quality all night | protocol mostly public via Neiry's MIT package; legal for your own device (D) |
-| Sleep-scorer upgrade | AnySleep fine-tuned on public nights reshaped to the headband's channels (CHAT has them); adopt only if clearly better | some (C; needs the 58 GB download) |
+| Sleep-scorer upgrade (parked, owner 2026-11-19) | first: a better way without fitting (faster/simpler algorithms, other ready-made scorers, adapting without labels); only then AnySleep fine-tuned on public nights reshaped to the headband's channels (CHAT has them); adopt only if clearly better | some (C; the fine-tune needs the 58 GB download) |
 | Live sleep stages on the phone | built for the nap coach (row 26, DECISIONS 170-172): AnySleep itself, 2 min behind; a small model only if the phone is too slow | Traumschreiber (MIT, Nov 2026) already runs AnySleep on a phone (C, D) |
 | Helmet layout | 8 sites M1 M2 F7 F8 Fz C3 C4 Pz plus the forehead reference, then 16; noted in `eeg_ads1299_lab` as a planning assumption | some (B) |
 | Noise repair (ZUNA) | re-draw bad stretches on the laptop, mainly for the helmet | untested on 4 channels (C; Apache-2.0) |
