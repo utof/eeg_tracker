@@ -7,8 +7,9 @@ folder"), or the folder holding it: the Syncthing folder, or a copy taken with
 `adb pull /sdcard/Download/EEG/eeg-export`.
 
 - Raw nights (`recordings/<stamp>.f32 .idx .log .markers.jsonl`) go into `<dest>/recordings/`, next to the laptop's
-  own recordings; everything else keeps its place under `<dest>/phone/` (`phone/nights/<date>.report.json`,
-  `phone/meditations/...`, `phone/dream-catcher/...`).
+  own recordings; the DIY board's (`recordings-diy/...`) into `<dest>/recordings-diy/`, next to the laptop's DIY
+  recordings and never among the BrainBit nights (docs/diy-board.md); everything else keeps its place under
+  `<dest>/phone/` (`phone/nights/<date>.report.json`, `phone/meditations/...`, `phone/dream-catcher/...`).
 - A file is copied only when its size and SHA-256 match the manifest (the copy is checked, then renamed into place).
 - Nothing is overwritten silently: when the laptop already has a different copy, the phone's replaces it only if the
   phone changed it later, and the older copy is moved to `<dest>/phone/replaced/<import time>/`; otherwise the laptop's
@@ -118,10 +119,14 @@ def load_manifest(root: Path) -> tuple[dict, list[Entry]]:
     return m, entries
 
 
+RAW = ("recordings", "recordings-diy")  # the BrainBit's nights, and the DIY board's in their own folder
+
+
 def target_for(dest: Path, p: PurePosixPath) -> Path:
-    """Raw nights next to the laptop's own recordings; the rest in the phone's own layout under phone/."""
-    if len(p.parts) == 2 and p.parts[0] == "recordings":
-        return dest / "recordings" / p.name
+    """Raw recordings next to the laptop's own (BrainBit and DIY board apart); the rest in the phone's own layout under
+    phone/."""
+    if len(p.parts) == 2 and p.parts[0] in RAW:
+        return dest / p.parts[0] / p.name
     return dest.joinpath("phone", *p.parts)
 
 
@@ -304,8 +309,10 @@ def summary(rep: Report) -> list[str]:
     state = "complete" if m.get("complete") else "stopped early"
     out = [f'Phone export of {when} ("{m.get("mode")}", {state}): {_files(len(rep.entries))}, {_mb(total)} in its list.']
     if rep.new:
-        raw = sum(1 for e in rep.new if target_for(rep.dest, e.path).parent == rep.dest / "recordings")
-        where = f"{raw} into {rep.dest.name}/recordings, {len(rep.new) - raw} into {rep.dest.name}/phone"
+        raw = {d: sum(1 for e in rep.new if target_for(rep.dest, e.path).parent == rep.dest / d) for d in RAW}
+        where = ", ".join([f"{raw['recordings']} into {rep.dest.name}/recordings"]
+                          + [f"{n} into {rep.dest.name}/{d}" for d, n in raw.items() if n and d != "recordings"]
+                          + [f"{len(rep.new) - sum(raw.values())} into {rep.dest.name}/phone"])
         out.append(f"  {len(rep.new)} new, copied ({_mb(sum(e.bytes for e in rep.new))}): {where}")
     if rep.same:
         out.append(f"  {len(rep.same)} already here")

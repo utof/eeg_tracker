@@ -15,7 +15,10 @@
 // - so do the smart alarm (alarm/live_alarm.dart, DECISIONS 230-236: only from an hour before its window; the phone's
 //   own alarm at the window's end never depends on it) and the lucid dream cues (lucid/live_cues.dart, DECISIONS
 //   300-303), with the one live sleep model they share (sleep/night_scorer.dart, DECISIONS 330): one guard with a
-//   memory limit too covers all three; an exception in the alarm or the cues costs only that one.
+//   memory limit too covers all three; an exception in the alarm or the cues costs only that one;
+// - a board that is not a BrainBit (the DIY board, recorder/headband.dart `OtherBoard`) gets no contact check and no
+//   battery lines, and its samples never reach the drift-off detector, the smart alarm, the lucid cues or the live
+//   sleep model they share: they read O1 O2 T3 T4.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -138,6 +141,7 @@ class NightRecorder {
     this.alarm,
     this.cues,
     this.liveLimits = const GuardLimits(),
+    this.startNotes = const [],
     DateTime Function()? clock,
   }) : _now = clock ?? DateTime.now;
 
@@ -159,6 +163,9 @@ class NightRecorder {
 
   /// Makes the smart alarm's live model for a plan, an hour before its window; null: none (the phone's alarm alone).
   final AlarmWatch Function(AlarmPlan plan)? alarm;
+
+  /// Lines for the night's log at its start (and again after a restart by Android): which headband, what is off.
+  final List<String> startNotes;
 
   /// Makes tonight's lucid dream cues for the night's start (null from it: they are off); null: none.
   final CueFactory? cues;
@@ -232,6 +239,10 @@ class NightRecorder {
   AlarmWatch? _alarm;
   bool _alarmMade = false;
   AlarmLive? _alarmLast;
+
+  /// A board that is not a BrainBit was connected tonight: no detector, no alarm model, no lucid cues and no shared
+  /// sleep model from then on.
+  bool _noDetectors = false;
 
   RecorderStatus get status => _status;
   bool get _stopping => _stopSignal.isCompleted;
@@ -320,7 +331,7 @@ class NightRecorder {
         );
       }
       final t = _now();
-      _notes = [for (final n in notes) (t, n)];
+      _notes = [for (final n in [...startNotes, ...notes]) (t, n)];
       _lastLog = _newestLog(prior.startMs);
       final stem = _lastLog?.uri.pathSegments.last.replaceFirst(RegExp(r'\.log$'), '');
       if (prior.band != null) _drop = (lastDataMs: null, stem: stem, why: 'app process restarted');
@@ -336,6 +347,7 @@ class NightRecorder {
       final t = _now();
       // the drift-off line first, then any line _startDrift kept (hands-free), then the smart alarm's
       _notes = [
+        for (final n in startNotes) (t, n),
         if (_drift != null) (t, 'drift-off detector on; lights off counts from the first sample until Lights off'),
         ..._notes,
         if (plan != null)
@@ -506,14 +518,7 @@ class NightRecorder {
     var lost = false;
     bool isLost() => lost;
     final rangeSub = band.rangeChanges.listen((inRange) => lost = lost || !inRange);
-    // Our own connection writes its drops, reconnects and lost packets into the run's log, and says when the
-    // headband's packet numbers start again inside the run (BrainBit's SDK has no such notes).
-    final notesSub = band is BandNotes
-        ? (band as BandNotes).notes.listen((n) {
-            if (n.newStream) _packets.startRun();
-            if (n.line != null && !w.isClosed) w.log(n.line!);
-          })
-        : null;
+    StreamSubscription<BandNote>? notesSub;
     StreamSubscription<List<Sample>>? sigSub;
     var end = _End.failed;
     try {
@@ -521,18 +526,31 @@ class NightRecorder {
         w.log(line, at: t);
       }
       _notes = const [];
+      // Our own connection and the DIY board write their drops, reconnects and lost packets into the run's log (after
+      // the lines kept from before the run, so the log stays in time order), and say when the headband's packet
+      // numbers start again inside the run (BrainBit's SDK has no such notes).
+      if (band is BandNotes) {
+        notesSub = (band as BandNotes).notes.listen((n) {
+          if (n.newStream) _packets.startRun();
+          if (n.line != null && !w.isClosed) w.log(n.line!);
+        });
+      }
       for (final (t, text) in _pendingMarkers) {
         _marker(text, t);
       }
       _pendingMarkers = const [];
       _logReconnected(w);
       await _save();
-      final battery = await _battery(band);
+      final other = band is OtherBoard ? band as OtherBoard : null;
+      final battery = other == null ? await _battery(band) : null;
       final rssi = band.rssi;
       w.log(
-        'connected ${band.name} ${band.address} serial ${band.serial} battery $battery% '
-        'signal ${rssi == null ? 'unknown (no scan)' : '$rssi dBm'}',
+        other == null
+            ? 'connected ${band.name} ${band.address} serial ${band.serial} battery $battery% '
+                  'signal ${rssi == null ? 'unknown (no scan)' : '$rssi dBm'}'
+            : 'connected ${band.name} ${band.address} (no battery or signal-strength reading from this board)',
       );
+      if (other != null) _otherBoard(other.board);
       await _logPhone(w);
       await _logBattery(w);
       _set(
@@ -542,9 +560,10 @@ class NightRecorder {
           battery: battery,
           runs: _night.runs,
           note: 'connected',
+          board: other?.board,
         ),
       );
-      if (!_night.contactTried) await _contactCheck(band, w);
+      if (!_night.contactTried && other == null) await _contactCheck(band, w);
       sigSub = band.signal.listen((rows) => _onRows(w, rows));
       if (await _startSignal(band, w, isLost)) {
         w.log('recording started, 250 Hz');
@@ -698,7 +717,7 @@ class NightRecorder {
   /// Tonight's lucid dream cues, when they are on; a failure here costs only the cues.
   void _startCues() {
     final make = cues;
-    if (make == null) return;
+    if (make == null || _noDetectors) return;
     try {
       final c = make(_night.startMs);
       if (c == null) return;
@@ -773,7 +792,7 @@ class NightRecorder {
 
   void _startDrift() {
     final make = watch;
-    if (make == null) return;
+    if (make == null || _noDetectors) return;
     try {
       final d = _drift = make();
       _driftUsed = true;
@@ -845,7 +864,7 @@ class NightRecorder {
   /// Starts the smart alarm's live model once the hour before its window has come (once a process).
   void _startAlarm(DateTime now) {
     final plan = _plan, make = alarm;
-    if (plan == null || make == null || _night.alarmOff) return;
+    if (plan == null || make == null || _night.alarmOff || _noDetectors) return;
     final ms = now.millisecondsSinceEpoch;
     if (ms < plan.scoreFromMs || ms >= plan.endMs) return;
     _alarmMade = true;
@@ -867,6 +886,36 @@ class NightRecorder {
       _night = _night.copyWith(alarmOff: true);
       _logLine('smart alarm: the sleep model could not start: ${_short(e)}; the phone\'s alarm rings at ${_hm(plan.endMs)}');
     }
+  }
+
+  /// A board that is not a BrainBit: the drift-off detector (and its hands-free), the smart alarm's sleep model, the
+  /// lucid cues and the live sleep model they share read BrainBit's O1 O2 T3 T4, so they stop for the night before the
+  /// board's first sample, each with one line, and none starts again; the phone's alarm itself still rings.
+  void _otherBoard(BoardLive b) {
+    if (_noDetectors) return;
+    _noDetectors = true;
+    if (_drift != null) _driftOff("it reads BrainBit's O1 O2 T3 T4, not this board's ${b.names.join(' ')}");
+    final c = _cueWatch;
+    _cueWatch = null;
+    if (c != null) {
+      _cueLine("lucid cues: off with this board (the sleep model reads BrainBit's O1 O2 T3 T4); no cue plays tonight");
+      _offCues('off with the DIY board', c);
+    }
+    final plan = _plan;
+    if (plan != null && !_night.alarmOff) {
+      final a = _alarm;
+      _alarm = null;
+      _night = _night.copyWith(alarmScoring: false, alarmOff: true);
+      _alarmLast = const AlarmLive(phase: AlarmPhase.off, note: "Off with the DIY board: the sleep model reads BrainBit's O1 O2 T3 T4.");
+      _logLine(
+        "smart alarm: the sleep model is off with this board (it reads BrainBit's O1 O2 T3 T4); the phone's alarm still "
+        'rings at ${_hm(plan.endMs)}',
+      );
+      if (a != null) unawaited(_closeAlarm(a));
+    }
+    // nothing is left under the guard: the shared model never gets a sample
+    _live.release();
+    if (scorer != null) unawaited(_closeScorer());
   }
 
   /// The model is done (it woke you, the window ended, or it gave up by itself).
@@ -1031,10 +1080,11 @@ class NightRecorder {
     var ticks = 0;
     var lastTotal = w.samplesReceived;
     var stalled = 0;
+    final other = band is OtherBoard ? band as OtherBoard : null;
     while (true) {
       await _pause(timing.tick);
       w.append();
-      _set(_withAlarm(_withDrift(_status)));
+      _set(_withAlarm(_withDrift(other == null ? _status : _status.copyWith(board: other.board))));
       if (_stopping) return _End.stopped;
       if (lost()) {
         w.log('headband out of range; saving');
@@ -1052,9 +1102,13 @@ class NightRecorder {
         w.log('headband out of range; saving');
         return _End.lost;
       }
-      final battery = await _battery(band) ?? _status.battery;
-      _set(_status.copyWith(battery: battery));
-      w.log('samples ${w.samplesWritten} (+$got) battery $battery%');
+      if (other == null) {
+        final battery = await _battery(band) ?? _status.battery;
+        _set(_status.copyWith(battery: battery));
+        w.log('samples ${w.samplesWritten} (+$got) battery $battery%');
+      } else {
+        w.log('samples ${w.samplesWritten} (+$got)');
+      }
       if (_now().millisecondsSinceEpoch - _batteryLoggedMs >= timing.phoneLogEvery.inMilliseconds) {
         await _logBattery(w);
       }
@@ -1110,7 +1164,7 @@ class NightRecorder {
       } else {
         try {
           await _sdk('stop signal', band.stopSignal);
-          w.log('stopped, battery ${await _battery(band)}%');
+          w.log(band is OtherBoard ? 'stopped' : 'stopped, battery ${await _battery(band)}%');
         } on SdkStuck {
           rethrow;
         } catch (e) {

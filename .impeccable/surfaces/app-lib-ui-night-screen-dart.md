@@ -80,3 +80,18 @@ wake up" and one I'm awake filling the screen; the same page is native Android o
 (AlarmActivity.kt). Refused: a section in the scrolling page (set at bedtime, next to Start, not scrolled to); a
 clock-face dial; a stage chip in colour; a snooze button (the window already is the snooze). Checked as test renders
 (build/screens/alarm_*.png) at 440 dp with 100 and 130 % text and at the owner's 393 dp with 130 % text.
+
+## Addition 2026-11-19: DIY board (test) (DECISIONS rows 360-369)
+
+A narrow addition inside this surface and the Headband connection page it leads to, no new direction (headless run,
+`/impeccable` with the brief standing in for the owner; mode Operate). The device choice "Headband: BrainBit / DIY
+board (test)" is the app's own segmented row on the Headband connection page, under the status; choosing the board
+turns the page into the board's sections (Safety first, then where the board sends, its channel names, what is off)
+with no pinned action, because nothing on it is a step forward. On the night screen the board takes the BrainBit's
+places, never new ones: the status words say what the chip records and "It is not EEG", the Headband block puts each
+channel's swing over the last second where the contact cells are (numbers without colour: a swing is not a quality
+judgement) and the mode as an amber ringed dot with its words. Refused: a separate DIY screen (two places to start a
+night), a live trace (bright, moving, and it would read as EEG), colour-coded levels (no threshold is known for the
+board), a toggle switch for the choice (it is one of two, not on/off). Checked as test renders at 393 dp, 100 and
+130 % text (`app/test/diy_screens_test.dart`, `build/screens/diy_*.png`), which found the swing values running into
+each other at 130 % (the unit moved into the label) and the page's values left-aligned (fixed); not on the phone.

@@ -11,6 +11,7 @@ import '../alarm/live_alarm.dart';
 import '../alarm/record.dart';
 import '../alarm/rule.dart';
 import '../handsfree/store.dart' show nightGestures;
+import '../headband/diy/night.dart';
 import '../lucid/bell.dart' show ChannelCueBell;
 import '../lucid/live_cues.dart' show CueFactory, lucidCuesFor;
 import '../phone.dart';
@@ -170,19 +171,29 @@ class RecorderTaskHandler extends TaskHandler {
   ShareHost? _share;
   String? _filesDir;
 
+  /// The DIY board's night (DECISIONS rows 360-369), or null for the BrainBit.
+  DiyNight? _diy;
+
+  /// Who holds the Wi-Fi lock: the DIY board's datagrams, Share on Wi-Fi (one lock for the process, PhoneChannel.kt).
+  bool _wifiDiy = false, _wifiShare = false;
+
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
-    final dir = await _recordingsDir();
-    _filesDir = Directory(dir).parent.path;
+    final rec = await _recordingsDir();
+    final diy = _diy = this.finder == null ? diyNightFor(rec) : null;
+    final dir = diy?.dir.path ?? rec;
+    _filesDir = Directory(rec).parent.path;
     final HeadbandFinder finder;
     if (this.finder != null) {
       finder = this.finder!();
     } else {
-      final b = BrainBitFinder();
+      final b = diy == null ? BrainBitFinder() : BrainBitFinder(pick: () async => diy.finder());
       _finder = b;
       finder = b;
     }
-    final scorer = nightScorer(dir);
+    // the night's one live sleep model: none for the DIY board (it reads BrainBit's O1 O2 T3 T4), so neither the smart
+    // alarm's model nor the lucid cues run with it
+    final scorer = diy == null ? nightScorer(rec) : null;
     final recorder = NightRecorder(
       finder: finder,
       dir: Directory(dir),
@@ -190,18 +201,32 @@ class RecorderTaskHandler extends TaskHandler {
       probe: ChannelPhoneProbe(),
       onStatus: _onStatus,
       onStuck: _restartProcess,
-      // the owner's hands-free double clench, read when the detector starts (DECISIONS 247)
-      watch: () => LiveDrift(handsFree: nightGestures(Directory(dir).parent)),
+      timing: diy == null ? const RecorderTiming() : diyRecorderTiming,
+      // the owner's hands-free double clench, read when the detector starts (DECISIONS 247); none of the BrainBit's
+      // detectors for the DIY board (they read O1 O2 T3 T4)
+      watch: diy == null ? () => LiveDrift(handsFree: nightGestures(Directory(rec).parent)) : null,
       // one live sleep model for the smart alarm and the lucid cues, fed by the recorder (DECISIONS 330)
       scorer: scorer,
       alarmPlan: await _alarmPlan(),
-      alarm: alarm(dir, scorer),
+      alarm: scorer == null ? null : alarm(rec, scorer),
       // lucid dream cues when they are on: the shared model, the phone's media player (DECISIONS 303)
-      cues: cues(dir, scorer),
+      cues: scorer == null ? null : cues(rec, scorer),
+      startNotes: diy?.notes ?? const [],
     );
     _recorder = recorder;
+    if (diy != null) {
+      // the board's datagrams keep arriving with the screen off
+      _wifiDiy = true;
+      unawaited(_wifi());
+    }
     unawaited(recorder.run(restartedBySystem: starter == TaskStarter.system));
     unawaited(_sharing(() async => _applyShare(await loadShareConfig())));
+  }
+
+  Future<void> _wifi() async {
+    try {
+      await Phone.wifiLock(on: _wifiDiy || _wifiShare).timeout(const Duration(seconds: 5));
+    } catch (_) {}
   }
 
   Future<void> _sharing(Future<void> Function() what) async {
@@ -227,7 +252,10 @@ class RecorderTaskHandler extends TaskHandler {
         FlutterForegroundTask.sendDataToMain(shareMessage(s));
         _shownAtMs = 0; // the notification's next line says where it is shared
       },
-      wifiLock: (on) => Phone.wifiLock(on: on),
+      wifiLock: (on) {
+        _wifiShare = on;
+        return _wifi();
+      },
     );
     final r = _recorder;
     if (r != null) host.setLive(r.status.toMap(nowMs: DateTime.now().millisecondsSinceEpoch));
@@ -275,8 +303,13 @@ class RecorderTaskHandler extends TaskHandler {
     // Sharing in the background: its port is free again within about 4 s, while the recorder saves and stops.
     unawaited(_sharing(() async => _share?.stop()));
     await r?.stop(endNight: endNight);
-    // The scanner kept for direct reconnects goes too, unless a headband was left out of range.
+    // The scanner kept for direct reconnects goes too, unless a headband was left out of range (the DIY board's
+    // listener always goes).
     _finder?.dispose(anyLost: r == null || !r.finished || r.abandoned.isNotEmpty);
+    if (_wifiDiy) {
+      _wifiDiy = false;
+      await _wifi();
+    }
     FlutterForegroundTask.sendDataToMain(stoppedMessage);
   }
 
@@ -287,7 +320,9 @@ class RecorderTaskHandler extends TaskHandler {
     if (s.phase != _shownPhase || now - _shownAtMs >= 10000) {
       _shownPhase = s.phase;
       _shownAtMs = now;
-      unawaited(FlutterForegroundTask.updateService(notificationText: notificationText(s, _share?.status)));
+      unawaited(
+        FlutterForegroundTask.updateService(notificationText: notificationText(s, _share?.status, _diy != null)),
+      );
     }
   }
 
@@ -320,9 +355,9 @@ class RecorderTaskHandler extends TaskHandler {
   }
 }
 
-/// The notification's line; while sharing is on it says so, with the address.
-String notificationText(RecorderStatus s, [ShareStatus? share]) {
-  final line = _phaseText(s);
+/// The notification's line; while sharing is on it says so, with the address. [diy]: the DIY board's words.
+String notificationText(RecorderStatus s, [ShareStatus? share, bool diy = false]) {
+  final line = diy ? _diyText(s) : _phaseText(s);
   if (share == null || !share.up) return line;
   final at = shareAddress(share);
   return '$line · shared on Wi-Fi${at == null ? '' : ' at $at'}';
@@ -336,6 +371,17 @@ String _phaseText(RecorderStatus s) {
     Phase.connecting => 'Connecting to the headband',
     Phase.checkingContact => 'Checking contact',
     Phase.reconnecting => 'Reconnecting · $minutes min saved',
+    Phase.stopping => 'Stopping',
+    Phase.idle => 'Idle',
+  };
+}
+
+String _diyText(RecorderStatus s) {
+  final minutes = s.minutesRecorded.floor();
+  return switch (s.phase) {
+    Phase.recording => 'Recording the DIY board · $minutes min · not EEG',
+    Phase.searching || Phase.connecting || Phase.checkingContact => 'Listening for the DIY board',
+    Phase.reconnecting => 'Listening for the DIY board · $minutes min saved',
     Phase.stopping => 'Stopping',
     Phase.idle => 'Idle',
   };

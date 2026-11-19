@@ -126,7 +126,9 @@ has passed. See [docs/own-ble-driver.md](docs/own-ble-driver.md).
 **The DIY ADS1299 board.** `DRIVER=diy scripts/record_night.sh` records the owner's self-built board
 (eeg_ads1299_lab's bench firmware, its "E9" frames over USB serial or Wi-Fi) into `_local/recordings-diy/` with the
 same files, live pages and LSL bridge. It only reads from the board: answer the board's prompts in a serial terminal
-first. Tested on a fake board only; the board is not assembled yet. See [docs/diy-board.md](docs/diy-board.md).
+first. The phone app records it too, over Wi-Fi ("Headband connection", **DIY board (test)**: files in its own
+`recordings-diy/` folder; the sleep report, check-in and detectors stay with the BrainBit; app/README.md "The DIY
+board"). Tested on a fake board only; the board is not assembled yet. See [docs/diy-board.md](docs/diy-board.md).
 
 BrainBit's NeuroSDK2 core is a closed binary from BrainBit; it is not part of this repository.
 

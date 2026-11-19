@@ -26,6 +26,7 @@ class RecorderStatus {
     this.lightsOffMs,
     this.driftOnsetMs,
     this.alarm,
+    this.board,
   });
 
   final Phase phase;
@@ -71,6 +72,9 @@ class RecorderStatus {
   /// Tonight's smart alarm (alarm/live_alarm.dart); null without one.
   final AlarmStatus? alarm;
 
+  /// The DIY board's channels, mode and levels while one is connected (headband/diy/); null for the BrainBit.
+  final BoardLive? board;
+
   double get minutesRecorded => nightSamples / sampleRateHz / 60;
 
   Contact contactOf(String channel) => classifyOhms(contactOhms[channel]);
@@ -88,6 +92,7 @@ class RecorderStatus {
     int? runs,
     String? note,
     Map<int, int>? slots,
+    BoardLive? board,
   }) => RecorderStatus(
     phase: phase ?? this.phase,
     nightStartMs: nightStartMs ?? this.nightStartMs,
@@ -104,6 +109,7 @@ class RecorderStatus {
     lightsOffMs: lightsOffMs,
     driftOnsetMs: driftOnsetMs,
     alarm: alarm,
+    board: board ?? this.board,
   );
 
   /// The same status with the smart alarm replaced (null: none).
@@ -123,6 +129,7 @@ class RecorderStatus {
     lightsOffMs: lightsOffMs,
     driftOnsetMs: driftOnsetMs,
     alarm: alarm,
+    board: board,
   );
 
   /// The same status with the drift-off fields replaced (null clears them).
@@ -142,6 +149,7 @@ class RecorderStatus {
     lightsOffMs: lightsOffMs,
     driftOnsetMs: onsetMs,
     alarm: alarm,
+    board: board,
   );
 
   Map<String, Object?> toMap({required int nowMs}) => {
@@ -164,6 +172,7 @@ class RecorderStatus {
     'lightsOffMs': lightsOffMs,
     'driftOnsetMs': driftOnsetMs,
     'alarm': alarm?.toMap(),
+    'board': board?.toMap(),
   };
 
   /// Parses a message from the recorder; returns null for anything else.
@@ -196,6 +205,77 @@ class RecorderStatus {
       lightsOffMs: _int(data['lightsOffMs']),
       driftOnsetMs: _int(data['driftOnsetMs']),
       alarm: AlarmStatus.fromMap(data['alarm']),
+      board: BoardLive.fromMap(data['board']),
+    );
+  }
+}
+
+/// The DIY board as the night screen sees it (headband/diy/board.dart): its channel names, what it records ("test
+/// signal: ... not EEG"), each channel's swing over the last second, and its link.
+class BoardLive {
+  const BoardLive({
+    required this.names,
+    required this.mode,
+    required this.modeText,
+    required this.notEeg,
+    this.levelsUv = const [],
+    this.link = '',
+    this.sender,
+    this.lost = 0,
+    this.boardMissed = 0,
+    this.bad = 0,
+  });
+
+  /// CH1.. in order, from the montage setting.
+  final List<String> names;
+
+  /// `test`, `short`, `synthetic` or `electrodes`, and the sentence for it.
+  final String mode;
+  final String modeText;
+
+  /// The chip records its own test signal, its shorted inputs or made-up data: whatever the names say, not EEG.
+  final bool notEeg;
+
+  /// Peak to peak over the last second per channel in microvolts; null before the first second.
+  final List<double?> levelsUv;
+
+  /// How the frames arrive (`UDP port 9000 ...`) and from whom.
+  final String link;
+  final String? sender;
+
+  /// Samples missing in this capture, of those the board's own misses, and damaged datagrams.
+  final int lost;
+  final int boardMissed;
+  final int bad;
+
+  Map<String, Object?> toMap() => {
+    'names': names,
+    'mode': mode,
+    'modeText': modeText,
+    'notEeg': notEeg,
+    'levelsUv': [for (final v in levelsUv) v == null || v.isNaN || v.isInfinite ? null : v],
+    'link': link,
+    'sender': sender,
+    'lost': lost,
+    'boardMissed': boardMissed,
+    'bad': bad,
+  };
+
+  static BoardLive? fromMap(Object? m) {
+    if (m is! Map || m['names'] is! List || m['mode'] is! String) return null;
+    final names = [for (final n in m['names'] as List) if (n is String) n];
+    final levels = m['levelsUv'];
+    return BoardLive(
+      names: names,
+      mode: m['mode'] as String,
+      modeText: m['modeText'] is String ? m['modeText'] as String : '',
+      notEeg: m['notEeg'] != false,
+      levelsUv: levels is List ? [for (final v in levels) _double(v)] : const [],
+      link: m['link'] is String ? m['link'] as String : '',
+      sender: m['sender'] is String ? m['sender'] as String : null,
+      lost: _int(m['lost']) ?? 0,
+      boardMissed: _int(m['boardMissed']) ?? 0,
+      bad: _int(m['bad']) ?? 0,
     );
   }
 }

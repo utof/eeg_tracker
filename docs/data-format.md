@@ -48,7 +48,12 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 ## Raw recording (DIY board)
 
 `scripts/record_diy.py` ([diy-board.md](diy-board.md)) writes the same four files for the owner's ADS1299 board, into
-`_local/recordings-diy/` (not `_local/recordings/`: the sleep and morning tools read O1 O2 T3 T4 only).
+`_local/recordings-diy/` (not `_local/recordings/`: the sleep and morning tools read O1 O2 T3 T4 only). The phone app
+writes the same layout for the 4-channel chip into its `files/recordings-diy/` (Wi-Fi route; diy-board.md "On the
+phone"): its `.log` names the link `UDP port 9000 on every IPv4 interface (Wi-Fi route)`, each sender (`datagrams
+from <address>`), `a new capture: board restarted (<why>)` at the start of a set after a restart, and has the phone
+recorder's own lines (`connected DIY board udp:9000 (no battery or signal-strength reading from this board)`,
+`samples N (+n)`, `reconnected (scan, try n) after a drop`).
 
 - `.f32`: records of `<I` + one `f` per channel (`<I4f`, 20 bytes, for the 4-channel chip, the BrainBit's record;
   `<I8f`, 36 bytes, for the 8-channel chip): the board's sequence number (its data-ready count since it started;
@@ -267,7 +272,9 @@ folder). It never changes or deletes anything in the app's folder, and never run
 - The layout is the app's own: `recordings/` (raw nights, the recorder's format above), `nights/<date>.report.json`,
   `mornings/`, `meditations/`, `alpha-theta/` (sessions and `journal.json`), `replay-check/<kind>/` and
   `settings.json`, `experiments/<made at>/` (self-experiments, below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers and their `<stamp>-r<n>.text.json` words, below, `prompts/`), `sound-states/`, `hands-free/` (below), `unusual/` (below), `lucid/` (below), `try-these/` (below), `own-ble/`
-  (`settings.json`: which headband connection is in use; `probe/<stamp>/`: the probe's result, docs/own-ble-driver.md), and any folder
+  (`settings.json`: which headband connection is in use; `probe/<stamp>/`: the probe's result, docs/own-ble-driver.md),
+  `recordings-diy/` (the DIY board's nights, the format of "Raw recording (DIY board)") and `diy-board/settings.json`
+  (`useDiy`: which headband; `names`: CH1-CH4), and any folder
   a later feature adds. Left on the phone: `models/` (copies of the app's model assets), `export/` (the export's own
   index), half-written `*.tmp` files, the scorer's `*.scoring` markers, and the two files Android and a plugin keep
   there for themselves (`profileInstalled`, `flutter_callback_cache.json`; DECISIONS row 160).
@@ -405,7 +412,8 @@ their UTC offset. A missing or damaged `progress.json` reads as nothing done.
 | `events.jsonl` | one line per change of state: `at`, `card`, `title`, `event` (`done`, `skipped`, `reopened`, `seen by the app`), with `seen` and the `note` at that moment; a note typed without a change of state is not logged |
 
 On the laptop, `scripts/import_phone.py <folder>` (standard library only) checks the manifest, copies
-`recordings/<stamp>.*` into `_local/recordings/` beside the laptop's own recordings and everything else into
+`recordings/<stamp>.*` into `_local/recordings/` beside the laptop's own recordings, `recordings-diy/<stamp>.*` into
+`_local/recordings-diy/` beside the laptop's DIY recordings, and everything else into
 `_local/phone/<path>`, and keeps `phone/manifests/<exported>.manifest.json`, one line per import in
 `phone/imports.jsonl` and the copies' SHA-256 in `phone/import-index.json`. A copy is renamed into place only when its
 size and SHA-256 match. A differing file on the laptop is replaced only by a copy the phone changed later (the old one

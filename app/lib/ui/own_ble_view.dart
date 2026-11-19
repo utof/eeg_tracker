@@ -2,9 +2,12 @@
 // that checks our own connection on the real headband, its result in plain sentences, and the switch. While the
 // probe runs the page is one instruction in large type, the seconds left, and Stop. Built from a view model only,
 // so tests render every state. Inside DESIGN.md: one column, hairline sections, state marks, one pinned action.
+// Under the status, the device choice "Headband: BrainBit / DIY board (test)" (diy_board_view.dart, DECISIONS rows
+// 360-369); with the board chosen the page is the board's section and has no pinned action.
 import 'package:flutter/material.dart';
 
 import '../headband/own/controller.dart' show OwnStage;
+import 'diy_board_view.dart';
 import 'form_parts.dart' show Para, PinnedAction;
 import 'meditation_view.dart' show MarkShape, StateMark;
 import 'parts.dart';
@@ -32,6 +35,7 @@ class OwnBleViewModel {
     this.fraction = 0,
     this.blocked,
     this.message = '',
+    this.diy,
   });
 
   final bool useOwn, triedAnyway, signalResist;
@@ -55,7 +59,12 @@ class OwnBleViewModel {
   final String? blocked;
   final String message;
 
+  /// The device choice and the DIY board's settings; null: the page without the choice.
+  final DiyPageModel? diy;
+
   bool get busy => stage != OwnStage.idle;
+
+  bool get diyOn => diy?.useDiy ?? false;
 }
 
 typedef OwnBleStatus = ({String title, String sentence, MarkShape mark, Color color});
@@ -74,6 +83,10 @@ String probeWhen(String stamp) {
 OwnBleStatus describeOwnBle(OwnBleViewModel m) {
   if (m.blocked != null) {
     return (title: 'Not now', sentence: m.blocked!, mark: MarkShape.ring, color: Night.caution);
+  }
+  if (m.diyOn) {
+    final d = describeDiyPage(m.diy!);
+    return (title: d.title, sentence: d.sentence, mark: MarkShape.ringedDot, color: Night.caution);
   }
   if (m.useOwn) {
     final warn = !m.probePassed;
@@ -124,6 +137,8 @@ class OwnBleView extends StatelessWidget {
     this.onSignalResist,
     this.onWorn,
     this.onPairFirst,
+    this.onDevice,
+    this.onNames,
   });
 
   final OwnBleViewModel model;
@@ -136,14 +151,20 @@ class OwnBleView extends StatelessWidget {
   final ValueChanged<bool>? onWorn;
   final ValueChanged<bool>? onPairFirst;
 
+  /// The device choice: true = the DIY board (test).
+  final ValueChanged<bool>? onDevice;
+
+  /// New channel names for the board (already checked).
+  final ValueChanged<List<String>>? onNames;
+
   @override
   Widget build(BuildContext context) {
     final m = model;
     final text = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(title: Text('Headband connection', style: text.titleMedium?.copyWith(color: Night.ink))),
-      body: m.busy ? _Running(m) : _Idle(m, this),
-      bottomNavigationBar: PinnedAction(child: _action(m)),
+      body: m.busy ? _Running(m) : (m.diyOn ? _DiyIdle(m, this) : _Idle(m, this)),
+      bottomNavigationBar: m.diyOn && !m.busy ? null : PinnedAction(child: _action(m)),
     );
   }
 
@@ -214,6 +235,10 @@ class _Idle extends StatelessWidget {
       children: [
         _Head(describeOwnBle(m)),
         if (m.message.isNotEmpty) Para(m.message, color: Night.caution),
+        if (m.diy != null) ...[
+          const SectionHeading('Headband'),
+          DeviceChoice(diy: false, onChanged: free ? v.onDevice : null),
+        ],
         const SectionHeading('Which connection'),
         _SwitchRow(
           title: 'Use our own connection (test)',
@@ -277,6 +302,28 @@ class _Idle extends StatelessWidget {
             style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.4),
           ),
         ],
+      ],
+    );
+  }
+}
+
+/// The page with the DIY board chosen: status, the choice, the board's section.
+class _DiyIdle extends StatelessWidget {
+  const _DiyIdle(this.m, this.v);
+  final OwnBleViewModel m;
+  final OwnBleView v;
+
+  @override
+  Widget build(BuildContext context) {
+    final free = m.blocked == null;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
+      children: [
+        _Head(describeOwnBle(m)),
+        if (m.message.isNotEmpty) Para(m.message, color: Night.caution),
+        const SectionHeading('Headband'),
+        DeviceChoice(diy: true, onChanged: free ? v.onDevice : null),
+        DiySection(model: m.diy!, onNames: free ? v.onNames : null),
       ],
     );
   }
@@ -414,9 +461,12 @@ class _Running extends StatelessWidget {
 
 /// The night screen's way in, between nights: which connection is in use, and the page behind it.
 class OwnBleEntryView extends StatelessWidget {
-  const OwnBleEntryView({super.key, required this.useOwn, required this.onOpen});
+  const OwnBleEntryView({super.key, required this.useOwn, required this.onOpen, this.useDiy = false});
   final bool useOwn;
   final VoidCallback? onOpen;
+
+  /// The DIY board is chosen: the line says so instead of the connection.
+  final bool useDiy;
 
   @override
   Widget build(BuildContext context) {
@@ -427,7 +477,9 @@ class OwnBleEntryView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            useOwn ? 'Connection: our own (test).' : "Connection: BrainBit's library.",
+            useDiy
+                ? 'Headband: DIY board (test), over Wi-Fi.'
+                : (useOwn ? 'Connection: our own (test).' : "Connection: BrainBit's library."),
             style: text.bodyMedium?.copyWith(color: Night.inkMuted),
           ),
           const SizedBox(height: 12),
