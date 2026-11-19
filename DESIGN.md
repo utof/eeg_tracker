@@ -282,6 +282,18 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   minute an empty `rule` cell, the sound's loudness a `track` band that fades in and out, the beat's rate an ink
   line (log scale, its two ends worded in Hz), minute ticks; a thin green rule where a session is, and afterwards the
   played part in `saved` with an ink rule where it ended.
+- **Comparison ledger** (sound for states, "What works for you", near the end of the page for the chosen state): one
+  log row per sound played, its line in bodyLarge ink and its median at the right in tabular titleMedium (the count
+  "6 of 14" in ink-muted while collecting); under it the watch strip's own cells (12 dp tall, a wider gap after 7)
+  filling `saved` toward 14, then, once there, a lane on one scale for every row of the state (0-45 min; half to
+  double against the quiet minute with an ink-muted hairline in the middle; 1-5): `track` ground, the middle half a
+  `saved` band, the median a 2 dp ink tick; the legend and "Seen together, not tested" in muted words. "A fair
+  test" follows as the self-experiments' answer's place: the offer with an outlined Plan a fair test, then "Day 9 of
+  28" in titleLarge, today's drawn sound in ink, "The answer opens" as a log row, Stop this test as a text button;
+  afterwards the sentence in titleLarge and log rows. On a test day the Sound chips and the Length row are locked:
+  the drawn ones keep their chosen look (surface-high, ink), the others fade like any disabled control, and one ink
+  line above them says why. The setup is a page of chips (First sound, Second sound), Length, weeks, What counts and
+  Before you start, with Start tomorrow pinned.
 - **Questions** (training pages): the question in body text, then a Material segmented row (a 1-5 scale with both
   ends worded under it, or a few words like Live / Replay / Not sure), a slider that reads "not set" until moved, or a
   checklist with the box first. Nothing is preselected; the forward button says "Answer each question" until done.

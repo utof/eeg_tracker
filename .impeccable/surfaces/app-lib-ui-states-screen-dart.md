@@ -60,3 +60,23 @@ from the next one's; the score's right label says minutes of sound ("sound: 30 m
 quiet minute's cell is narrow on a 45-minute score (its label says it); the face is words only. DESIGN.md gained the
 sound score component and the session-face line. Open for the owner: levels and beds not yet heard; whether a
 locked phone should keep playing (DECISIONS row 135).
+
+## Over weeks (2026-11-19): the comparison ledger and the fair test
+
+Added inside the settled world (refinement, not a redesign; a subagent run with no question channel, so this brief
+stood in). Structure 7, declined above for want of a comparison engine, now has one (`app/lib/states/weeks.dart`,
+`trial.dart`) and takes its place near the end of the page, after the last session and before the earlier ones:
+"What works for you" for the chosen state (a row per sound, cells toward 14, then a lane with the middle half and
+the median on one scale, "seen together, not tested"), then "A fair test" (offer, running day with today's drawn
+sound, the tested answer). On a test day the Sound chips and the Length row lock, the drawn ones keeping their
+chosen look. The setup is its own page (`FairTestSetup`) with Start tomorrow pinned; Start stays the screen's one
+filled button. Code: `app/lib/ui/states_weeks_view.dart`.
+
+Finish review (in-thread, test renders at 100 and 130 % text, `build/screens/states_weeks_*.png` and
+`states_test_*.png`): applied: the locked chip's label stayed dimmed like a disabled chip and the locked length lost
+its highlight, so the drawn ones now keep surface-high and ink; "sealed until Sat 19 Dec" broke across lines at
+130 %, so the row reads "The answer opens: Sat 19 Dec, sealed until then"; the lead now reads "For Fall asleep:
+minutes from lights off ...". Seen and kept: the ledger's legend is one muted paragraph rather than axis labels
+under each lane. Verdict: ship. Open for the owner: whether 14 sessions per sound feels too slow (DECISIONS row
+432), and whether a locked sound on test days is acceptable (row 436). Not yet seen on the phone.
+

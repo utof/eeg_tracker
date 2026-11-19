@@ -6,7 +6,10 @@
 // choose "Stays on", when the service did not start, or when the night must start afterwards and the app is not yet
 // allowed to run in the background. A "fall asleep" session that ends by itself leaves the screen dim and lets it time
 // out, so nothing lights the bedroom; a touch brings the brightness back.
-// Layout in states_view.dart.
+// Over weeks (ROADMAP row 18, DECISIONS rows 430-439): the chosen state's sounds compared (states/weeks.dart, with
+// the sleep reports' falling-asleep results), and its fair test (states/trial.dart): on a day of a test the sound
+// and the length are the day's draw, and the session carries the test's tag.
+// Layout in states_view.dart and states_weeks_view.dart.
 import 'dart:async';
 import 'dart:io';
 
@@ -20,13 +23,19 @@ import '../phone.dart';
 import '../recorder/brainbit.dart';
 import '../recorder/recorder_service.dart';
 import '../session_keeper.dart';
+import '../sleep/drift.dart' show DriftResult;
+import '../sleep/report.dart' show NightReportStore, nightsDirFor;
 import '../sound/soloud_state_sound.dart';
 import '../states/controller.dart';
 import '../states/presets.dart';
 import '../states/store.dart';
+import '../states/trial.dart';
+import '../states/trial_store.dart';
+import '../states/weeks.dart';
 import 'evidence_sheet.dart';
 import 'nearby.dart';
 import 'states_view.dart';
+import 'states_weeks_view.dart';
 
 /// A session holds the headband and, for fall asleep, writes a recording now: the night screen must not score that
 /// night meanwhile (as for the dream catcher).
@@ -63,6 +72,17 @@ class _StatesScreenState extends State<StatesScreen> {
   Timer? _listenTimer;
   String? _recordings;
   List<SoundSession> _sessions = const [];
+
+  /// The sleep reports' falling-asleep results (fall asleep's number when the session did not see sleep).
+  List<DriftResult> _nights = const [];
+  TrialStore? _trials;
+
+  /// The chosen state's fair test under way, or its latest; today is one of its days ([_locked]).
+  TrialState? _test;
+  bool _locked = false;
+
+  /// Answers already worked out, by test (the test runs over every possible order).
+  final Map<String, TrialResults> _answers = {};
   SoundStage _lastStage = SoundStage.setup;
   bool _face = false;
   bool _keptOn = false;
@@ -88,6 +108,7 @@ class _StatesScreenState extends State<StatesScreen> {
       if (rec != null) {
         _recordings = rec;
         _c.store = SoundStore(soundStatesDirFor(rec));
+        _trials = TrialStore(trialsDirFor(soundStatesDirFor(rec)));
         _staysOn = _c.store!.screenStaysOn;
         _c.recordingsDir = Directory(rec);
       }
@@ -102,7 +123,46 @@ class _StatesScreenState extends State<StatesScreen> {
     });
   }
 
-  void _load() => _sessions = _c.store?.list() ?? const [];
+  void _load() {
+    _sessions = _c.store?.list() ?? const [];
+    _nights = _readNights();
+    _answers.clear();
+    _pickTest();
+  }
+
+  List<DriftResult> _readNights() {
+    final rec = _recordings;
+    if (rec == null) return const [];
+    try {
+      return [for (final r in NightReportStore(nightsDirFor(rec)).all()) ?r.driftOff];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// The chosen state's test; on one of its days its draw sets the sound and the length.
+  void _pickTest() {
+    TrialState? t;
+    try {
+      t = _trials?.shownFor(_state, DateTime.now());
+    } catch (_) {
+      t = null; // an unreadable folder: no test
+    }
+    _test = t;
+    final sound = t?.todaySound;
+    _locked = sound != null;
+    if (sound != null) {
+      _bed = sound.bed;
+      _beat = sound.beat;
+      _minutes = t!.plan.minutes;
+    }
+  }
+
+  TrialResults? get _answer {
+    final t = _test;
+    if (t == null || !t.open) return null;
+    return _answers[t.plan.id] ??= trialResults(t, _sessions, nights: _nights);
+  }
 
   SoundPlan get _plan => SoundPlan.of(_state, bed: _bed, beat: _beat, minutes: _minutes);
 
@@ -212,7 +272,73 @@ class _StatesScreenState extends State<StatesScreen> {
     _state = s;
     _bed = _beat == Beat.none || _bed != Bed.none ? presets[s]!.bed : Bed.none;
     _minutes = presets[s]!.defaultMinutes;
+    _pickTest();
   });
+
+  /// The sound and the length, unless today's draw set them.
+  void _chooseSound(void Function() change) {
+    if (!_locked) _choose(change);
+  }
+
+  // ---- the fair test ----
+
+  Future<void> _planTest() async {
+    final trials = _trials;
+    if (trials == null) return _say('The app\'s folder is not known, so a test cannot be saved.');
+    await _stopListening();
+    if (!mounted) return;
+    final state = _state;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (ctx) => FairTestSetup(
+          state: state,
+          first: SoundPick(_bed, _beat),
+          minutes: _minutes,
+          now: DateTime.now(),
+          onInfo: () => showEvidence(ctx, 'sound-for-states'),
+          onStart: (c) {
+            try {
+              trials.create(state: state, a: c.a, b: c.b, minutes: c.minutes, weeks: c.weeks, now: DateTime.now());
+            } catch (e) {
+              ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('The test could not be saved: $e')));
+              return;
+            }
+            Navigator.of(ctx).pop();
+          },
+        ),
+      ),
+    );
+    if (mounted) setState(_pickTest);
+  }
+
+  Future<void> _stopTest() async {
+    final t = _test, trials = _trials;
+    if (t == null || trials == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Stop this test?'),
+        content: const Text(
+          'The days that are over stay counted, and the answer opens now, marked as stopped early. The days ahead '
+          'are never shown.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Keep going')),
+          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Stop the test')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      trials.stop(t.plan.id, DateTime.now());
+    } catch (e) {
+      return _say('The test could not be stopped: $e');
+    }
+    setState(() {
+      _answers.remove(t.plan.id);
+      _pickTest();
+    });
+  }
 
   // ---- listen ----
 
@@ -263,11 +389,13 @@ class _StatesScreenState extends State<StatesScreen> {
     }
     _justEnded = false;
     _c.handsFree = await activeGestures();
+    if (mounted) setState(_pickTest); // the day may have turned since the page opened
     await _c.start(
       _plan,
       useHeadband: measure,
       why: night ? HeadbandUse.nightRecording : HeadbandUse.soundOnly,
       thenNight: _thenNight,
+      trial: _test?.tagFor(_state),
     );
   }
 
@@ -323,6 +451,10 @@ class _StatesScreenState extends State<StatesScreen> {
       last: latest,
       justEnded: _justEnded && latest != null,
       earlier: _sessions.length > 1 ? _sessions.sublist(1, _sessions.length.clamp(1, 11)) : const [],
+      comparison: active ? null : compareSounds(_state, _sessions, nights: _nights),
+      test: _test,
+      testResults: active ? null : _answer,
+      soundLocked: _locked && !active,
     );
     return Listener(
       onPointerDown: (_) => _undim(),
@@ -334,9 +466,9 @@ class _StatesScreenState extends State<StatesScreen> {
         child: StatesView(
           model: model,
           onState: _onState,
-          onBed: (v) => _choose(() => _bed = v),
-          onBeat: (v) => _choose(() => _beat = v),
-          onMinutes: (v) => _choose(() => _minutes = v),
+          onBed: (v) => _chooseSound(() => _bed = v),
+          onBeat: (v) => _chooseSound(() => _beat = v),
+          onMinutes: (v) => _chooseSound(() => _minutes = v),
           onHeadband: (v) => _choose(() => _useHeadband = v),
           onThenNight: (v) => _choose(() => _thenNight = v),
           onScreen: (v) => _choose(() {
@@ -362,6 +494,8 @@ class _StatesScreenState extends State<StatesScreen> {
             setState(_load);
           },
           onInfo: () => showEvidence(context, 'sound-for-states'),
+          onPlanTest: () => unawaited(_planTest()),
+          onStopTest: () => unawaited(_stopTest()),
         ),
       ),
     );

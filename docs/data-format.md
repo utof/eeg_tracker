@@ -203,9 +203,30 @@ the start of the quiet minute with the headband, the start of the sound without 
 | `engine` | the audio engine's report (sample rate, buffer, lead, output delay) |
 | `night` | fall asleep with "Record the night": `started`, or why it did not start |
 | `rating` | your answer to "did it help you get there?", 1 (not at all) to 5 (clearly), `null` = not answered |
+| `trial` | only on a session played for a fair test of two sounds (below): `plan` (the test's id), `day` (the day key it counts for, `2026-11-20`; a day runs 04:00 to 04:00) and `sound` (`a` or `b`, that day's draw). Absent in files from before fair tests; such sessions count in the comparison over weeks but never in a test |
 
 Next to the sessions, `files/sound-states/settings.json` holds one choice, `{"screenStaysOn": true}` (Screen:
 Stays on; absent or false: the phone can be locked during a session, DECISIONS row 193).
+
+### Fair tests of two sounds: `files/sound-states/plans/<id>/`
+
+One folder per test (`app/lib/states/trial_store.dart`, DECISIONS rows 434-438), `<id>` = when it was made and the
+state, `2026-11-19-090000-asleep`; the self-experiments' layout:
+
+- `sealed.json`: `salt` (the 32-byte secret, hex) and `allocation` (one character a day, `1` = sound a, `0` =
+  sound b), drawn by the self-experiments' `drawDays`; written once, before the plan.
+- `plan.json`: `{plan, sha256}`. The plan: `version` 1, `id`, `created`, `state`, `sounds` (`a` and `b`, each `bed`,
+  `beat` and the `line` as shown), `minutes` (every session of the test), `start` (day 1, the day after it was made),
+  `days`, `unlocks` (the day the answer opens: start + days + 1), `primary` (the number: `label`, `how`, `compared`,
+  `matters`, `weak`), `design`, `analysis`, `words`, `honesty` (in words, as the app applies them) and
+  `allocationSha256` (SHA-256 of `sealed.json`'s canonical JSON); `sha256` is the plan's own. Written once.
+- `progress.json`: `stopped` (`at`, `day`, `daysDone`) when the test was stopped early; the self-experiments'
+  `kept` and `early_looks` stay empty.
+- `events.jsonl`: `plan frozen` (with the plan's hash), `stopped`.
+
+A day's number is the first session of that day with the test's `trial` tag, the day's sound and a number (the
+comparison's rules: `app/lib/states/weeks.dart`); the answer is worked out on the phone each time it is shown, never
+saved.
 
 ## Morning check-in markers and `<start>.morning.json`
 

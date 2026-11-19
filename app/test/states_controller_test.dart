@@ -71,6 +71,21 @@ void main() {
     c.dispose();
   });
 
+  test("a session of a fair test's day keeps the test's tag; the next session has none", () async {
+    var now = DateTime(2026, 11, 20, 10);
+    final sound = SilentStateSound();
+    final c = StatesController(finder: OneFinder(null), sound: () => sound, store: store, timing: fast, clock: () => now);
+    await c.start(SoundPlan.of(SoundState.focus), useHeadband: false, trial: const TrialTag('2026-11-19-090000-focus', '2026-11-20', 'a'));
+    await c.stop();
+    expect(store.list().single.trial!.plan, '2026-11-19-090000-focus');
+    c.again();
+    now = now.add(const Duration(hours: 1));
+    await c.start(SoundPlan.of(SoundState.focus, beat: Beat.pulsed), useHeadband: false);
+    await c.stop();
+    expect([for (final s in store.list()) s.trial?.day], [null, '2026-11-20']);
+    c.dispose();
+  });
+
   test('fall asleep without the headband: the timer alone, never past 45 minutes', () async {
     var now = DateTime(2026, 11, 18, 23);
     final sound = SilentStateSound();

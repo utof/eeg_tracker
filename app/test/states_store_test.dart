@@ -8,7 +8,7 @@ import 'package:eeg_tracker/states/readout.dart';
 import 'package:eeg_tracker/states/store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-SoundSession session(DateTime start, {SoundState state = SoundState.relax, Beat beat = Beat.pulsed, int? rating}) => SoundSession(
+SoundSession session(DateTime start, {SoundState state = SoundState.relax, Beat beat = Beat.pulsed, int? rating, TrialTag? trial}) => SoundSession(
   start: start,
   plan: SoundPlan.of(state, beat: beat),
   headband: HeadbandUse.used,
@@ -27,6 +27,7 @@ SoundSession session(DateTime start, {SoundState state = SoundState.relax, Beat 
   stalls: 0,
   engine: const {'engine': 'flutter_soloud'},
   rating: rating,
+  trial: trial,
 );
 
 void main() {
@@ -89,6 +90,17 @@ void main() {
     st.save(s);
     expect(st.list().single.rating, 2);
     expect(dir.listSync().length, 1);
+  });
+
+  test('a session played for a fair test carries its tag; files from before the tag still read', () {
+    final s = session(DateTime(2026, 11, 20, 23), state: SoundState.asleep, trial: const TrialTag('2026-11-19-090000', '2026-11-20', 'b'));
+    final back = SoundSession.fromJson(jsonDecode(jsonEncode(s.toJson())))!;
+    expect(back.toJson(), s.toJson());
+    expect((back.trial!.plan, back.trial!.day, back.trial!.sound), ('2026-11-19-090000', '2026-11-20', 'b'));
+    final old = session(DateTime(2026, 11, 18, 23)).toJson()..remove('trial');
+    expect(SoundSession.fromJson(old)!.trial, isNull, reason: 'a file written before fair tests existed');
+    expect(SoundSession.fromJson({...s.toJson(), 'trial': {'plan': 'x', 'day': '2026-11-20', 'sound': 'c'}}), isNull);
+    expect(SoundSession.fromJson({...s.toJson(), 'trial': 'b'}), isNull);
   });
 
   test('the folder sits next to the recordings, like the other sessions', () {

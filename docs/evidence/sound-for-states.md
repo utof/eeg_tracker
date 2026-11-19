@@ -6,7 +6,8 @@ In the phone app (not yet heard on a phone) and on a laptop page. Pick a state (
 wake up) and a calm sound: rain, pink or brown noise, ocean. A beat is an optional extra: pulsed noise, isochronic
 tones or binaural beats. "No beat" plays the same sound at the same loudness, so you can compare. With the headband
 on, a quiet minute comes first, then the app shows what your brain does during the sound. "Fall asleep" stops by
-itself once you are probably asleep. Without the headband the sound plays by its timer.
+itself once you are probably asleep. Without the headband the sound plays by its timer. Over the weeks the app
+compares the sounds you used for each state, and a fair test can let chance pick between two sounds.
 
 ## Evidence for this headband: weak
 
@@ -65,7 +66,19 @@ your whole brain into a chosen state.
   start by itself when the sound has stopped.
 - Without the headband (or while the night records) the sound simply plays for its minutes.
 - After each session: one question, "did it help you get there?" (1-5). Each session is saved with its sound,
-  timings, readout and answer, so a later comparison over weeks can say what works for you.
+  timings, readout and answer.
+- What works for you: one number per session for each state. Fall asleep: minutes from lights off until probably
+  asleep (the detector, else that night's sleep report; still awake at 45 minutes counts as 45). Relax: alpha
+  against the quiet minute. Break: slow waves, that is drowsiness. Focus and wake up: your answer, which is weak
+  because you knew what played. A sound shows its median and middle half from 14 sessions with a number: the
+  research's floor for any pattern seen together (14 with, 14 without), stricter than the 3 + 3 or 7 + 7 of
+  commercial apps. It is seen together, not tested: you chose the sound, and those days can differ in other ways.
+- A fair test: for one state the app draws one of two sounds for each day, in shuffled blocks of 4 days with both
+  sounds on every weekday, for 4, 6 or 8 weeks; the plan is frozen before day 1. At the end it uses the
+  self-experiments' randomisation test, which counts only the draw the app itself made, so a difference cannot come
+  from the days you happened to choose. It needs 5 days of each sound with a number. You still hear which sound
+  plays, so expectation can be part of any difference. The research's adaptive rule (play the better sound more
+  often) found the best sound no faster than plain rotation, so the app keeps to fixed blocks.
 - Keep the volume low, never while driving, and prefer the phone's speaker to earbuds overnight.
 - On the laptop page: the same presets with beats on by default; its markers go into the recording.
 
@@ -96,4 +109,4 @@ your whole brain into a chosen state.
 - [SBaGenX](https://github.com/lm7137/SBaGenX) and the other open beat generators are GPL: ideas only, no code
   copied.
 
-Checked: 2026-11-18
+Checked: 2026-11-19

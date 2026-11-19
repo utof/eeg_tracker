@@ -31,6 +31,25 @@ abstract final class SoundEnd {
 
 typedef SoundEvent = ({int s, String text});
 
+/// A session played for a fair test of two sounds (states/trial.dart): the plan's id, the day it counts for and the
+/// sound that day drew (`a` or `b`). Files from before fair tests have none.
+class TrialTag {
+  const TrialTag(this.plan, this.day, this.sound);
+  final String plan;
+  final String day;
+  final String sound;
+
+  Map<String, Object?> toJson() => {'plan': plan, 'day': day, 'sound': sound};
+
+  /// Null when damaged.
+  static TrialTag? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final plan = j['plan'], day = j['day'], sound = j['sound'];
+    if (plan is! String || day is! String || !RegExp(r'^\d{4}-\d\d-\d\d$').hasMatch(day)) return null;
+    return sound == 'a' || sound == 'b' ? TrialTag(plan, day, sound as String) : null;
+  }
+}
+
 double? _num(Object? v) => v is num && v.isFinite && v >= 0 ? v.toDouble() : null;
 int? _int(Object? v) => v is int && v >= 0 ? v : null;
 
@@ -55,6 +74,7 @@ class SoundSession {
     this.engine = const {},
     this.night,
     this.rating,
+    this.trial,
   });
 
   static const int version = 1;
@@ -108,6 +128,9 @@ class SoundSession {
   /// Your answer afterwards, 1 (not at all) to 5 (clearly): did it help you get there? Null: not answered.
   int? rating;
 
+  /// The fair test this session was played for (null: none, or a file from before fair tests).
+  final TrialTag? trial;
+
   String get stem => fileStem(start);
   String get fileName => '$stem.sound.json';
 
@@ -132,6 +155,7 @@ class SoundSession {
     'engine': engine,
     'night': night,
     'rating': rating,
+    if (trial != null) 'trial': trial!.toJson(),
   };
 
   static SoundSession? fromJson(Object? j) {
@@ -156,7 +180,8 @@ class SoundSession {
     }
     final summary = j['summary'] == null ? null : ReadSummary.fromJson(j['summary']);
     if (j['summary'] != null && summary == null) return null;
-    final drift = j['drift'], engine = j['engine'];
+    final drift = j['drift'], engine = j['engine'], trial = TrialTag.fromJson(j['trial']);
+    if (j['trial'] != null && trial == null) return null;
     return SoundSession(
       start: start,
       plan: plan,
@@ -177,6 +202,7 @@ class SoundSession {
       engine: engine is Map ? {for (final e in engine.entries) '${e.key}': e.value} : const {},
       night: night as String?,
       rating: rating as int?,
+      trial: trial,
     );
   }
 }

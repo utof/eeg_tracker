@@ -37,6 +37,7 @@ void main() {
       expect(readme['Sleep report'], ['how long does the phone take?', 'the night extras']);
       expect(readme['Dream catcher'], ['the first try', 'answers as words']);
       expect(readme['Self-experiments'], ['start a first experiment']);
+      expect(readme['Sound for states'], ['the first sound sessions', 'a fair test of two sounds']);
       expect(readme['Meditate'], ['the silent minutes and the Bluetooth note', 'eight meditations, then the first learning verdict']);
       expect(readme.values.expand((s) => s).length, greaterThanOrEqualTo(17));
     });
@@ -120,7 +121,7 @@ void main() {
           for (final c in tryCards)
             if (c.weakEvidence) c.id,
         },
-        {'smart-alarm', 'meditation', 'meditation-learning', 'sound', 'alpha-theta', 'lucid', 'was-this-you'},
+        {'smart-alarm', 'meditation', 'meditation-learning', 'sound', 'alpha-theta', 'lucid', 'was-this-you', 'sound-test'},
       );
       expect(tryCards.firstWhere((c) => c.id == 'sharp').weakEvidence, isFalse);
     });
@@ -341,6 +342,7 @@ void main() {
       put('dream-catcher/2026-11-20-160000-r1.text.json', '{}');
       put('alpha-theta/2026-11-20-170000.alphatheta.json', '{}');
       put('experiments/2026-11-20-120000/plan.json', '{}');
+      put('sound-states/plans/2026-11-20-120000-asleep/plan.json', '{}');
       put('settings.json', jsonEncode({'replayCheck': true}));
       put(
         'sharp-hours/ratings.jsonl',
@@ -365,6 +367,7 @@ void main() {
       expect(seen['sharp'], 'Answers on 2 days.');
       expect(seen['study'], 'An evening and a morning answered.');
       expect(seen['replay'], 'Switched on.');
+      expect(seen['sound-test'], 'A fair test of two sounds started.');
       expect(seen['lucid'], 'Lucid dream questions answered on Sat 21 Nov.');
       expect(seen['diy-board'], 'The board recorded 10 min on this phone, the newest on Sat 21 Nov.');
     });
@@ -381,6 +384,7 @@ void main() {
               '${jsonEncode({'at': '2026-11-20T15:40:00+03:00', 'sharp': 3})}\nnot json\n',
         );
         put('sound-states/2026-11-20-230000.sound.json', jsonEncode({'recording': null}));
+        Directory('${files.path}/sound-states/plans/2026-11-20-120000-asleep').createSync(recursive: true); // no plan saved
         put('settings.json', jsonEncode({'replayCheck': false}));
         put('lucid/mornings/2026-11-20-070000.json', jsonEncode({'night': '2026-11-20-070000'}));
         board('2026-11-21-200000', 9.9); // under the card's 10 minutes
