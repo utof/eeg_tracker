@@ -187,8 +187,8 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   draw): faint `rule` outline ahead (sealed), `saved` when answered, `track` when not, a `ground` dot for a lucid
   morning, the next night outlined green while the cues are on; once the results open, a short `ink` bar under each
   night that had sound. The legend says it in words.
-- **Choice column** (lucid dreams' morning): four longer answers as a vertical segmented column, full width, 52 dp
-  rows, 16 dp corners, the question's choice styling otherwise.
+- **Choice column** (lucid dreams' morning): every morning question's answers as a vertical segmented column, full
+  width, 52 dp rows, 16 dp corners, the Questions styling otherwise (one shape for the whole form; answers never wrap).
 - **Buttons:** one filled button per screen: Start night on the night screen (Lights off while a night records), Start on the meditation screen, and on
   each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before
   stopping, except in alpha-theta, where stopping must be instant. Session faces (dream catcher, sound for states)

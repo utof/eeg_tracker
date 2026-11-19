@@ -427,6 +427,13 @@ class LiveCues implements CueWatch {
 CueFactory lucidCuesFor(String recordingsDir, {required LiveModel Function() model, required CueBell bell}) =>
     (nightStartMs) {
       final store = LucidStore(lucidDirFor(recordingsDir));
-      ensureCueWav(store.cueWav);
-      return LiveCues.open(store: store, nightStartMs: nightStartMs, model: model, bell: bell, now: DateTime.now());
+      final cues = LiveCues.open(
+        store: store,
+        nightStartMs: nightStartMs,
+        model: model,
+        bell: bell,
+        now: DateTime.now(),
+      );
+      if (cues != null) ensureCueWav(store.cueWav); // only for a night with the cues on: no folder otherwise
+      return cues;
     };

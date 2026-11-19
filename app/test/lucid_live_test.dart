@@ -136,6 +136,16 @@ void main() {
       expect(store.nights(), isEmpty);
     });
 
+    test('the recorder\'s factory: nothing, not even the folder, while off; the cue file once on', () {
+      final make = lucidCuesFor('${dir.path}/recordings', model: () => ScriptedModel((_) => 'R'), bell: FakeBell());
+      expect(make(startMs), isNull);
+      expect(store.dir.existsSync(), isFalse);
+      store.setLevel(0.1, DateTime(2026, 11, 24, 22));
+      store.setOn(true, DateTime(2026, 11, 24, 22));
+      expect(make(startMs), isNotNull);
+      expect(store.cueWav.lengthSync(), cueWavBytes().length);
+    });
+
     test('a cue night: the model from an hour before, cues in dream sleep 30 s apart, louder each time', () async {
       store.setLevel(0.1, DateTime(2026, 11, 24, 22), mediaVolume: 7, mediaVolumeMax: 15);
       store.setOn(true, DateTime(2026, 11, 24, 22));

@@ -244,8 +244,13 @@ class LucidView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              StateMark(shape: mark, color: color),
+              // on the first line's middle when the word wraps
+              Padding(
+                padding: EdgeInsets.only(top: _firstLineMid(context) - 7),
+                child: StateMark(shape: mark, color: color),
+              ),
               const SizedBox(width: 14),
               Expanded(child: Text(word, style: text.displaySmall)),
             ],
@@ -268,6 +273,12 @@ class LucidView extends StatelessWidget {
     );
   }
 
+  static double _firstLineMid(BuildContext context) {
+    final d = Theme.of(context).textTheme.displaySmall;
+    final line = (d?.fontSize ?? 36) * (d?.height ?? 1.22);
+    return MediaQuery.textScalerOf(context).scale(line) / 2;
+  }
+
   Widget _questions(BuildContext context, LucidLastNight last) {
     final d = model.draft;
     final text = Theme.of(context).textTheme;
@@ -279,14 +290,14 @@ class LucidView extends StatelessWidget {
           '${last.record.index + 1} of the test.',
           style: text.bodyMedium?.copyWith(color: Night.inkMuted),
         ),
-        ChoiceQuestion<String>(
+        _StackQuestion<String>(
           question: 'In a dream, did you know that you were dreaming?',
           choices: const [('yes', 'Yes'), ('no', 'No'), ('unsure', 'Not sure')],
           value: d.lucid,
           onChanged: (v) => onDraft(d.copyWith(lucid: v)),
         ),
         if (d.lucid == 'yes')
-          ChoiceQuestion<String>(
+          _StackQuestion<String>(
             question: 'Did you make the eye signal, left-right-left-right?',
             choices: const [('yes', 'Yes'), ('no', 'No')],
             value: d.signal,
@@ -390,8 +401,8 @@ class LucidView extends StatelessWidget {
   }
 }
 
-/// A question over a full-width column of choices (four longer answers that would wrap in one row); nothing
-/// preselected, as [ChoiceQuestion].
+/// A question over a full-width column of choices, one 52 dp row each, so every answer fits at any text size and the
+/// morning's questions share one shape; nothing preselected, as [ChoiceQuestion].
 class _StackQuestion<T extends Object> extends StatelessWidget {
   const _StackQuestion({required this.question, required this.choices, required this.value, required this.onChanged});
   final String question;
