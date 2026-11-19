@@ -301,6 +301,25 @@ void main() {
     expect(udp.describe, contains('UDP port ${udp.boundPort}'));
   });
 
+  test('a port another program holds with address reuse: shared, said in the log, frames still arrive', () async {
+    // the emulator's OpenThread simulator holds UDP 9000 on a multicast address; a phone can have a neighbour too
+    final other = await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0, reuseAddress: true);
+    final udp = UdpLink(port: other.port, host: InternetAddress.loopbackIPv4);
+    finder = DiyFinder(link: () => udp, timing: fast);
+    final found = finder.find(const Duration(seconds: 3));
+    await waitFor(() => udp.boundPort != null);
+    expect(udp.shared, isTrue);
+    expect(udp.describe, contains('shared with another program on this phone'));
+    final out = await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
+    for (final f in board.next(5)) {
+      out.send(f, InternetAddress.loopbackIPv4, other.port);
+    }
+    final band = await found; // the last socket bound gets unicast datagrams
+    expect(band, isNotNull);
+    out.close();
+    other.close();
+  });
+
   test('the host never sends: no send or write call in the link or the board', () {
     for (final f in ['lib/headband/diy/link.dart', 'lib/headband/diy/board.dart', 'lib/headband/diy/e9.dart']) {
       final code = File(f).readAsStringSync();

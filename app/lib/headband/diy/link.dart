@@ -31,8 +31,10 @@ abstract class DiyLink {
 }
 
 /// UDP on the phone. Bound on every IPv4 interface (the laptop's 0.0.0.0, scripts/diy_board.py): the board sends to
-/// the phone's Wi-Fi address, which DHCP can change, and the emulator's UDP redirection arrives on its own interface;
-/// mobile data does not deliver unasked datagrams, and senders outside the local network are ignored (board.dart).
+/// the phone's Wi-Fi address, which DHCP can change; mobile data does not deliver unasked datagrams, and senders
+/// outside the local network are ignored (board.dart). The port is taken alone when it can be; when another program
+/// already holds it with address reuse (the emulator's OpenThread simulator listens on a multicast address at 9000),
+/// it is shared and the log says so: datagrams sent to the phone's own address still come here.
 class UdpLink implements DiyLink {
   UdpLink({this.port = diyUdpPort, InternetAddress? host}) : host = host ?? InternetAddress.anyIPv4;
 
@@ -41,22 +43,31 @@ class UdpLink implements DiyLink {
   RawDatagramSocket? _socket;
   StreamSubscription<RawSocketEvent>? _sub;
 
+  /// Another program holds the port too (bound with address reuse).
+  bool shared = false;
+
   /// The port actually bound (differs from [port] only when that is 0, in tests); null until open.
   int? get boundPort => _socket?.port;
 
   @override
   String get describe =>
       'UDP port ${boundPort ?? port} on ${host == InternetAddress.anyIPv4 ? 'every IPv4 interface' : host.address} '
-      '(Wi-Fi route)';
+      '(Wi-Fi route${shared ? '; shared with another program on this phone' : ''})';
 
   @override
   Future<void> open(void Function(Uint8List data, InternetAddress from) onDatagram, void Function(Object error) onError) async {
-    final RawDatagramSocket s;
+    RawDatagramSocket s;
     try {
-      // Not shared: a second app on the same port would silently take some of the board's datagrams.
+      // Alone when possible: a second app on the same port could take some of the board's datagrams.
       s = await RawDatagramSocket.bind(host, port, reuseAddress: false);
-    } on SocketException catch (e) {
-      throw LinkFailed('port $port is in use or not allowed (${e.osError?.message ?? e.message})');
+      shared = false;
+    } on SocketException {
+      try {
+        s = await RawDatagramSocket.bind(host, port, reuseAddress: true);
+        shared = true;
+      } on SocketException catch (e) {
+        throw LinkFailed('port $port is in use or not allowed (${e.osError?.message ?? e.message})');
+      }
     }
     _socket = s;
     _sub = s.listen(
