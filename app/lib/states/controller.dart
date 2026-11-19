@@ -178,6 +178,7 @@ class StatesController extends ChangeNotifier {
   int? _offAtS;
   StopWhy? _stopWhy;
   final List<SoundEvent> _events = [];
+  TrialTag? _trial;
   Timer? _ticker;
   int _ticks = 0;
   DateTime? _lastArrival;
@@ -190,11 +191,19 @@ class StatesController extends ChangeNotifier {
   bool _disposed = false;
 
   /// Starts a session of [plan]. [useHeadband]: connect and measure (falls back to the sound alone if the headband is
-  /// not found); [why]: the [HeadbandUse] when the headband is not used. Errors end in [SoundStage.failed].
-  Future<void> start(SoundPlan plan, {bool useHeadband = true, String why = HeadbandUse.soundOnly, bool thenNight = false}) async {
+  /// not found); [why]: the [HeadbandUse] when the headband is not used; [trial]: the fair test this session is
+  /// played for (saved with it). Errors end in [SoundStage.failed].
+  Future<void> start(
+    SoundPlan plan, {
+    bool useHeadband = true,
+    String why = HeadbandUse.soundOnly,
+    bool thenNight = false,
+    TrialTag? trial,
+  }) async {
     if (active) return;
     _reset();
     this.plan = plan;
+    _trial = trial;
     this.thenNight = thenNight && useHeadband && plan.state == SoundState.asleep;
     headband = useHeadband ? HeadbandUse.used : why;
     _set(useHeadband ? SoundStage.connecting : SoundStage.starting, useHeadband ? 'Looking for the headband.' : '');
@@ -294,6 +303,7 @@ class StatesController extends ChangeNotifier {
     _offAtS = null;
     _stopWhy = null;
     _events.clear();
+    _trial = null;
     _ticks = 0;
     _lastArrival = null;
     _lastPack = null;
@@ -610,6 +620,7 @@ class StatesController extends ChangeNotifier {
       stalls: _sound?.stalls ?? 0,
       engine: _sound?.info() ?? const {},
       night: night,
+      trial: _trial,
     );
   }
 
