@@ -509,8 +509,15 @@ class BandProbe {
           ),
         );
         final wait = ready;
-        if (wait != null) await Future.any([wait(), _cancel.wait(const Duration(hours: 1))]);
-        if (_cancel.isSet) throw HeadbandError('stopped by you');
+        if (wait != null) {
+          final tapped = Flag();
+          unawaited(wait().then((_) => tapped.set(), onError: (_) {}));
+          final lost = drv.lost;
+          await Flag.either([tapped, _cancel, ?lost], const Duration(minutes: 30));
+          if (lost?.isSet ?? false) throw HeadbandLost('link dropped while waiting for Ready (${drv.lostReason})');
+          if (_cancel.isSet) throw HeadbandError('stopped by you');
+          if (!tapped.isSet) throw HeadbandError('nobody tapped Ready for 30 minutes');
+        }
       }
       await drv.command(cmdSignal);
       await _step('signal', 30, worn ? 'Sit still, eyes open, relax. 30 seconds.' : null, ProbeCue.next);
