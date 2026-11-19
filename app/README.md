@@ -79,7 +79,7 @@ core (`node app/test/fixtures/make_js_session.mjs` from the repo root remakes it
 The first build on the owner's laptop (2026-11-18) took about 5 minutes and fits under
 `systemd-run --user --scope -p MemoryMax=4500M`. Release builds work: `flutter build apk --release
 --target-platform android-arm64` (39 MB with the sleep model: 18 MB of models, ONNX Runtime's library 11 MB
-compressed; only the named ABI is packaged and native libraries are compressed, `android/app/build.gradle.kts`;
+compressed; 51 MB since the dream catcher's speech engine, DECISIONS row 257; only the named ABI is packaged and native libraries are compressed, `android/app/build.gradle.kts`;
 `android/app/proguard-rules.pro` keeps ONNX Runtime's Java classes). The neurosdk2 1.0.21 plugin shrinks its own release build without keep
 rules, which stripped its `Neurosdk2Plugin` class; `android/build.gradle.kts` builds that one plugin unshrunk.
 
