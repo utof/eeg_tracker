@@ -145,7 +145,7 @@ class LucidView extends StatelessWidget {
             '+${LucidRule.maxSteps} dB; a stir or a wake makes it quieter and pauses it.',
           ),
           const _Note(
-            Icons.visibility_outlined,
+            Icons.visibility_off_outlined,
             'Some nights are silent on purpose and you are not told which. Everything else is the same, so after 12 '
             'nights the app can test whether the sound did anything for you.',
           ),
@@ -212,8 +212,8 @@ class LucidView extends StatelessWidget {
         Night.inkMuted,
       ),
       LucidDue.answer => (
-        'Answer now',
-        'Three questions about last night, before the dream fades.',
+        'Answer this morning',
+        'A few questions about last night, before the dream fades.',
         MarkShape.ringedDot,
         Night.live,
       ),
@@ -224,13 +224,13 @@ class LucidView extends StatelessWidget {
         Night.caution,
       ),
       LucidDue.practise => (
-        'On',
+        'On tonight',
         'Practise in bed before you sleep, about 15 minutes. Then Start night as usual.',
         MarkShape.ringedDot,
         Night.live,
       ),
       LucidDue.ready => (
-        'On',
+        'On tonight',
         m.nightRunning
             ? 'The night recorder has the cues tonight. Sleep well.'
             : 'Practised at ${_hm(m.practisedAt!)}. Start the night when you are ready.',
@@ -252,6 +252,17 @@ class LucidView extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(sentence, style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4)),
+          if (m.results != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              'The test is open: ${switch (m.results!.verdict) {
+                LucidVerdict.likely => 'likely real for you',
+                LucidVerdict.notClear => 'not clear yet',
+                LucidVerdict.tooFew => 'too few answers to say',
+              }}. See The test below.',
+              style: text.bodyLarge?.copyWith(height: 1.4),
+            ),
+          ],
         ],
       ),
     );
@@ -281,18 +292,22 @@ class LucidView extends StatelessWidget {
             value: d.signal,
             onChanged: (v) => onDraft(d.copyWith(signal: v)),
           ),
-        ChoiceQuestion<String>(
+        _StackQuestion<String>(
           question: 'Did you hear the sound in the night?',
-          choices: const [('no', 'No'), ('dream', 'In a dream'), ('woke', 'Woke me'), ('unsure', 'Not sure')],
+          choices: const [
+            ('no', 'No'),
+            ('dream', 'Yes, in a dream'),
+            ('woke', 'Yes, it woke me'),
+            ('unsure', 'Not sure'),
+          ],
           value: d.heard,
           onChanged: (v) => onDraft(d.copyWith(heard: v)),
         ),
-        ChoiceQuestion<int>(
+        _StackQuestion<int>(
           question: 'How much of your dreams do you remember?',
-          choices: const [(0, 'Nothing'), (1, 'A bit'), (2, 'A dream'), (3, 'More')],
+          choices: const [(0, 'Nothing'), (1, 'A bit of one'), (2, 'One dream'), (3, 'More than one dream')],
           value: d.recall,
           onChanged: (v) => onDraft(d.copyWith(recall: v)),
-          ends: ('nothing at all', 'more than one dream'),
         ),
       ],
     );
@@ -337,7 +352,7 @@ class LucidView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        NightCells(nights: m.nights, next: m.nextIndex, arms: r?.arms),
+        NightCells(nights: m.nights, next: m.on ? m.nextIndex : -1, arms: r?.arms),
         const SizedBox(height: 10),
         Text(
           r == null
@@ -372,6 +387,59 @@ class LucidView extends StatelessWidget {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     final e = t.hour < 12 ? t.subtract(const Duration(days: 1)) : t;
     return '${days[e.weekday - 1]} ${e.day} ${months[e.month - 1]}';
+  }
+}
+
+/// A question over a full-width column of choices (four longer answers that would wrap in one row); nothing
+/// preselected, as [ChoiceQuestion].
+class _StackQuestion<T extends Object> extends StatelessWidget {
+  const _StackQuestion({required this.question, required this.choices, required this.value, required this.onChanged});
+  final String question;
+  final List<(T, String)> choices;
+  final T? value;
+  final ValueChanged<T> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(question, style: text.bodyLarge?.copyWith(height: 1.4)),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<T>(
+              direction: Axis.vertical,
+              segments: [
+                for (final (v, label) in choices)
+                  ButtonSegment(
+                    value: v,
+                    label: Align(alignment: Alignment.centerLeft, child: Text(label)),
+                  ),
+              ],
+              selected: {?value},
+              emptySelectionAllowed: true,
+              showSelectedIcon: false,
+              onSelectionChanged: (s) {
+                if (s.isNotEmpty) onChanged(s.first);
+              },
+              style: SegmentedButton.styleFrom(
+                minimumSize: const Size.fromHeight(52),
+                selectedBackgroundColor: Night.surfaceHigh,
+                selectedForegroundColor: Night.ink,
+                foregroundColor: Night.inkMuted,
+                side: const BorderSide(color: Night.rule),
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -678,7 +746,7 @@ class NightLane extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            height: 64,
+            height: signals.isEmpty ? 50 : 64,
             width: double.infinity,
             child: CustomPaint(painter: _LanePainter(this, labelStyle: small!)),
           ),
@@ -700,7 +768,8 @@ class _LanePainter extends CustomPainter {
     final l = lane;
     final span = math.max(1, l.endMs - l.startMs).toDouble();
     double x(int ms) => ((ms - l.startMs) / span).clamp(0.0, 1.0) * size.width;
-    const top = 14.0, laneH = 26.0;
+    final top = l.signals.isEmpty ? 0.0 : 14.0;
+    const laneH = 26.0;
     final laneRect = RRect.fromRectAndRadius(Rect.fromLTWH(0, top, size.width, laneH), const Radius.circular(6));
     canvas.drawRRect(laneRect, Paint()..color = Night.track);
     // the cue hours
@@ -885,7 +954,7 @@ class PracticeView extends StatelessWidget {
                   m.stage == PracticeStage.guided
                       ? 'With the words: ${m.cue} of ${PracticeRule.guided}'
                       : 'Eyes closed: ${m.cue} of ${PracticeRule.unguided}',
-                  style: text.bodyMedium?.copyWith(color: Night.inkMuted.withValues(alpha: 0.7)),
+                  style: text.bodyMedium?.copyWith(color: Night.inkMuted.withValues(alpha: 0.8)),
                 ),
                 const Spacer(),
                 if (m.stage == PracticeStage.guided && m.showWords)
@@ -893,7 +962,7 @@ class PracticeView extends StatelessWidget {
                 else if (m.stage == PracticeStage.unguided)
                   Text(
                     'Each time you hear it: am I dreaming? Notice your body and breathing.',
-                    style: text.bodyLarge?.copyWith(color: Night.inkMuted.withValues(alpha: 0.6), height: 1.45),
+                    style: text.bodyLarge?.copyWith(color: Night.inkMuted.withValues(alpha: 0.8), height: 1.45),
                   ),
                 const Spacer(),
                 Align(
@@ -948,13 +1017,13 @@ class PracticeView extends StatelessWidget {
             ? Row(
                 children: [
                   Expanded(
-                    flex: 2,
-                    child: OutlinedButton(onPressed: onStop, child: const Text('Stop')),
+                    flex: 3,
+                    child: FilledButton(onPressed: onHeard, child: const Text('I hear it')),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    flex: 3,
-                    child: FilledButton(onPressed: onHeard, child: const Text('I hear it')),
+                    flex: 2,
+                    child: OutlinedButton(onPressed: onStop, child: const Text('Stop')),
                   ),
                 ],
               )

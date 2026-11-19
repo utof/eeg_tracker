@@ -9,6 +9,7 @@ import 'package:eeg_tracker/lucid/plan.dart';
 import 'package:eeg_tracker/lucid/store.dart';
 import 'package:eeg_tracker/ui/lucid_screen.dart';
 import 'package:eeg_tracker/ui/lucid_view.dart';
+import 'package:eeg_tracker/ui/night_view.dart';
 import 'package:eeg_tracker/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -25,7 +26,16 @@ final LucidNightRecord _record = LucidNightRecord(
   cuesFromMs: _start + 270 * 60000,
   phase: 'ended',
   cues: [
-    for (final (h, m, p) in [(5, 41, 1), (5, 42, 1), (5, 42, 1), (5, 43, 1), (7, 2, 2), (7, 3, 2), (7, 5, 2), (7, 6, 2)])
+    for (final (h, m, p) in [
+      (5, 41, 1),
+      (5, 42, 1),
+      (5, 42, 1),
+      (5, 43, 1),
+      (7, 2, 2),
+      (7, 3, 2),
+      (7, 5, 2),
+      (7, 6, 2),
+    ])
       CueMoment(atMs: _at(h, m), step: 0, period: p, confidence: 0.82, aroused: h == 7 && m == 3),
   ],
 );
@@ -59,7 +69,9 @@ LucidResults _results() {
           arousedMoments: s.arms[i] == NightArm.cue ? 2 : 1,
           signalsInDreamSleep: i == 7 ? 1 : 0,
           practised: i.isEven,
-          answers: i == 5 ? null : LucidAnswers(lucid: i == 3 || i == 7 ? 'yes' : 'no', heard: i < 6 ? 'dream' : 'no', recall: 2),
+          answers: i == 5
+              ? null
+              : LucidAnswers(lucid: i == 3 || i == 7 ? 'yes' : 'no', heard: i < 6 ? 'dream' : 'no', recall: 2),
         ),
     ],
   )!;
@@ -164,9 +176,11 @@ void main() {
     final suffix = scale == 1.0 ? '' : '_text130';
     for (final e in states.entries) {
       for (final full in [false, true]) {
-        testWidgets('lucid ${e.key}${full ? ' (whole column)' : ''} at ${(scale * 100).round()} % text', (tester) async {
+        testWidgets('lucid ${e.key}${full ? ' (whole column)' : ''} at ${(scale * 100).round()} % text', (
+          tester,
+        ) async {
           // the Xiaomi 11T: 393 dp wide; the whole column on a tall canvas
-          tester.view.physicalSize = Size(1080, full ? 2.75 * 3400 : 2400);
+          tester.view.physicalSize = Size(1080, full ? 2.75 * 4900 : 2400);
           tester.view.devicePixelRatio = 2.75;
           addTearDown(tester.view.reset);
           final key = GlobalKey();
@@ -193,6 +207,40 @@ void main() {
     }
   }
 
+  // The night screen's new section, between nights: the whole column on a tall canvas, without and with its line.
+  for (final scale in [1.0, 1.3]) {
+    for (final (name, line) in [('night_lucid', null), ('night_lucid_on', 'On: practise before you sleep.')]) {
+      testWidgets('$name at ${(scale * 100).round()} % text', (tester) async {
+        tester.view.physicalSize = const Size(1080, 2.75 * 2600);
+        tester.view.devicePixelRatio = 2.75;
+        addTearDown(tester.view.reset);
+        final key = GlobalKey();
+        final view = NightView(
+          model: NightViewModel(
+            title: 'Ready',
+            sentence: 'Put the headband on, then Start night.',
+            tone: Tone.calm,
+            running: false,
+            lucidLine: line,
+          ),
+          onStart: () {},
+          onStop: () {},
+          onFix: (_) {},
+          onMeditate: () {},
+          onDream: () {},
+          onNap: () {},
+          onLucid: () {},
+          onSound: () {},
+        );
+        await tester.pumpWidget(_app(view, scale, key));
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(tester.takeException(), isNull);
+        expect(find.text('Lucid dreams'), findsWidgets);
+        await _shot(tester, key, '$name${scale == 1.0 ? '' : '_text130'}');
+      });
+    }
+  }
+
   testWidgets('the answers: nothing preselected, Save only once each question has one', (tester) async {
     tester.view.physicalSize = const Size(1080, 2.75 * 3400);
     tester.view.devicePixelRatio = 2.75;
@@ -203,7 +251,12 @@ void main() {
       MaterialApp(
         theme: nightTheme(),
         home: _view(
-          LucidViewModel(on: true, due: LucidDue.answer, last: LucidLastNight(record: _record), draft: draft),
+          LucidViewModel(
+            on: true,
+            due: LucidDue.answer,
+            last: LucidLastNight(record: _record),
+            draft: draft,
+          ),
           onDraft: (d) => draft = d,
           onSave: () => saved = true,
         ),
@@ -216,9 +269,9 @@ void main() {
     expect(find.textContaining('eye signal'), findsOneWidget, reason: 'asked only after a lucid yes');
     await tester.tap(find.text('No').at(1)); // the eye signal: no
     await show();
-    await tester.tap(find.text('In a dream'));
+    await tester.tap(find.text('Yes, in a dream'));
     await show();
-    await tester.tap(find.text('A dream'));
+    await tester.tap(find.text('One dream'));
     await show();
     expect(draft.complete, isTrue);
     await tester.tap(find.text('Save answers'));
@@ -248,7 +301,12 @@ void main() {
       store.setOn(true, DateTime(2026, 11, 26, 21));
       store.setLevel(0.03, DateTime(2026, 11, 26, 22));
       store.addPractice(
-        PracticeRecord(start: DateTime(2026, 11, 26, 22), end: DateTime(2026, 11, 26, 22, 16), cues: 16, completed: true),
+        PracticeRecord(
+          start: DateTime(2026, 11, 26, 22),
+          end: DateTime(2026, 11, 26, 22, 16),
+          cues: 16,
+          completed: true,
+        ),
       );
       final m = lucidModel(store: store, now: DateTime(2026, 11, 26, 23), nightRunning: false);
       expect(m.due, LucidDue.ready);
@@ -262,8 +320,11 @@ void main() {
       store.saveNight(LucidNightRecord(startMs: _start, index: 0, cuesFromMs: _start + 270 * 60000));
       final morning = DateTime(2026, 11, 26, 8, 30);
       expect(lucidModel(store: store, now: morning, nightRunning: false).due, LucidDue.answer);
-      expect(lucidModel(store: store, now: morning, nightRunning: true, runningStartMs: _start).due, isNot(LucidDue.answer));
-      expect(lucidNightLine('${dir.path}/recordings', now: morning), 'Three questions about last night are waiting.');
+      expect(
+        lucidModel(store: store, now: morning, nightRunning: true, runningStartMs: _start).due,
+        isNot(LucidDue.answer),
+      );
+      expect(lucidNightLine('${dir.path}/recordings', now: morning), 'Last night\'s questions are waiting.');
       store.saveAnswers(_record.stamp, const LucidAnswers(lucid: 'no', heard: 'no', recall: 1), morning);
       final m = lucidModel(store: store, now: morning, nightRunning: false);
       expect(m.due, LucidDue.practise);

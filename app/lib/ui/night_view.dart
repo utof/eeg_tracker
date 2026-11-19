@@ -641,7 +641,7 @@ class _Lucid extends StatelessWidget {
         ),
         if (line != null) ...[const SizedBox(height: 8), Text(line!, style: text.bodyLarge?.copyWith(height: 1.4))],
         const SizedBox(height: 16),
-        OutlinedButton.icon(onPressed: onLucid, icon: const Icon(Icons.graphic_eq), label: const Text('Lucid dreams')),
+        OutlinedButton.icon(onPressed: onLucid, icon: const Icon(Icons.visibility_outlined), label: const Text('Lucid dreams')),
       ],
     );
   }

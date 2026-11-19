@@ -106,7 +106,7 @@ String? lucidNightLine(String recordingsDir, {DateTime? now}) {
     final m = lucidModel(store: store, now: now ?? DateTime.now(), nightRunning: false);
     if (!m.on && m.last == null) return null;
     return switch (m.due) {
-      LucidDue.answer => 'Three questions about last night are waiting.',
+      LucidDue.answer => 'Last night\'s questions are waiting.',
       LucidDue.turnOn => 'Off.',
       LucidDue.practise =>
         m.level == null ? 'On: practise first, it sets the loudness.' : 'On: practise before you sleep.',
