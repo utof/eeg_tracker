@@ -246,6 +246,23 @@ test signal. It is not EEG." with 3750 µV on every channel and the alarm line "
 The emulator's OpenThread simulator holds UDP 9000 on a multicast address, so the `.log`'s link line says the port is
 shared.
 
+**Study reminders, the night pipeline fixes** (sixth integration, 2026-11-19, the arm64 release APK on the x86_64
+image, `hw.cpu.ncore=2`): Settings shows Study reminders and "Was this you?". With Sharp hours on (6 a day) and the
+study reminders on, the phone's one plan (`shared_prefs/sharp_hours.xml`, `plan`) held sharp questions (`s`), evening
+(`e`) and morning (`m`) reminders together. An evening time set by hand a few minutes ahead (Change, then the
+picker's text input) rang on time: the `study_review` notification "Good time to learn something you want to keep",
+`files/study-review/prompts.jsonl` `shown`, and the next alarm armed was the next sharp question. Tapping it opened
+"Did you study something tonight?"; **Yes** wrote the answer to `files/study-review/log.jsonl`. A BrainBit Start night
+without a headband searched (a 31 s scan every 41 s), Share on Wi-Fi switched off and on three times within seconds
+left one server answering for the recorder (`ss -ltn`: one listener pair on 8765), Stop (and its confirmation) ended
+the service, the app's own server took over, and switching Share off freed the port. **Once, in the first of three
+nights** (about 3 minutes in, right after the Share toggles), BrainBit's library blocked the app's main thread inside
+`Scanner.getSensors` (native, under the ARM translation) for good: the app showed "isn't responding", Stop could not
+be tapped, and the recorder's own 90 s scan timeout never fired, since with Flutter's merged platform and UI threads
+(3.47, the default) every Dart isolate of the process waits on that thread too. Two later nights (7 minutes each, one
+with the same toggles) and one on the previous head did not hang. Watch for it on the phone (a frozen night screen,
+no `.log` lines): if it happens there, BrainBit's calls need their own thread or the merged threads switched off.
+
 ## Meditate
 
 1. Make sure no night is being recorded (the headband talks to one thing at a time). Put the headband on and
