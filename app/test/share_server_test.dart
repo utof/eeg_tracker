@@ -401,6 +401,64 @@ void main() {
       expect(await shas('?sha=0'), full); // remembered
     });
 
+    test('SHA-256 are kept between runs (row 585): a restarted server reads only new or changed files', () async {
+      final night = put('recordings/2026-11-18-231200.f32', List.generate(3000, (i) => i % 251));
+      final log = put('recordings/2026-11-18-231200.log', utf8.encode('a night\n'));
+      final cache = File('${files.path}/cache/share-hashes.json');
+      Future<Map<String, Object?>> listFrom(ShareServer sv) async {
+        final req = await client.getUrl(Uri.parse('http://127.0.0.1:${sv.boundPort}/files'));
+        req.headers.set('Authorization', 'Bearer $token');
+        final res = await req.close();
+        expect(res.statusCode, 200);
+        return jsonDecode(await utf8.decodeStream(res)) as Map<String, Object?>;
+      }
+
+      ShareServer kept() => ShareServer(filesDir: files, token: token, port: 0, clock: () => now, hashCache: cache);
+      final first = kept();
+      await first.listen();
+      final one = await listFrom(first);
+      expect(first.hashed, 2);
+      expect(cache.existsSync(), isTrue);
+      expect(((one['files']! as List).cast<Map<String, Object?>>()).map((r) => r['path']), isNot(contains('cache/share-hashes.json')));
+      await first.close();
+
+      final second = kept(); // the app after an update
+      await second.listen();
+      expect(await listFrom(second), one);
+      expect(second.hashed, 0, reason: 'nothing read again');
+      log.writeAsStringSync('a night\nreconnected\n');
+      log.setLastModifiedSync(now.subtract(const Duration(minutes: 1)));
+      final rows = ((await listFrom(second))['files']! as List).cast<Map<String, Object?>>();
+      expect(second.hashed, 1, reason: 'only the changed file');
+      expect(rows.firstWhere((r) => r['path'] == 'recordings/2026-11-18-231200.log')['sha256'],
+          sha256.convert(log.readAsBytesSync()).toString());
+      expect(rows.firstWhere((r) => r['path'] == 'recordings/2026-11-18-231200.f32')['sha256'],
+          sha256.convert(night.readAsBytesSync()).toString());
+      await second.close();
+
+      cache.writeAsStringSync('{"format": "eeg-tracker-share-hashes", "files": {"recordings/2026-11-18-231200.f32": '
+          '{"bytes": 3000, "modified_ms": 1, "sha256": "not a digest"}}}');
+      final third = kept(); // a damaged list is worked out again, never trusted
+      await third.listen();
+      await listFrom(third);
+      expect(third.hashed, 2);
+      await third.close();
+    });
+
+    test('the laptop copying is counted while the list and each file are answered', () async {
+      put('recordings/2026-11-18-231200.f32', List.filled(40, 7));
+      final counts = <int>[];
+      final sv = ShareServer(filesDir: files, token: token, port: 0, clock: () => now, onCopying: counts.add);
+      await sv.listen();
+      for (final path in ['/files', '/files/recordings/2026-11-18-231200.f32', '/state']) {
+        final req = await client.getUrl(Uri.parse('http://127.0.0.1:${sv.boundPort}$path'));
+        req.headers.set('Authorization', 'Bearer $token');
+        await (await req.close()).drain<void>();
+      }
+      await sv.close();
+      expect(counts, [1, 0, 1, 0], reason: '/state is not copying');
+    });
+
     test('GET /files/<path>: whole, by Range, and a file that grows between two reads', () async {
       final f = put('recordings/2026-11-19-030000.f32', List.generate(100, (i) => i));
       var r = await ask('/files/recordings/2026-11-19-030000.f32');

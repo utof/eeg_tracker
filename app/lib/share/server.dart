@@ -12,7 +12,9 @@
 //   while the recorder is away
 //
 // Every request needs the token and a client inside the phone's Wi-Fi network, or the phone itself (DECISIONS row
-// 562). Nothing here writes, renames or deletes a file. Plain dart:io with no Flutter import: it runs in an isolate of its own (isolate.dart), and in tests.
+// 562). Nothing here writes, renames or deletes the app's files; it keeps one list of its own, the SHA-256 of finished
+// files in `files/cache/share-hashes.json` (row 585), so an app update does not read every night again. Plain
+// dart:io with no Flutter import: it runs in an isolate of its own (isolate.dart), and in tests.
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
@@ -74,6 +76,8 @@ class ShareServer {
     this.onMarker,
     this.clientOf,
     this.keepalive = const Duration(seconds: 10),
+    this.hashCache,
+    this.onCopying,
     DateTime Function()? clock,
   }) : _now = clock ?? DateTime.now;
 
@@ -88,7 +92,20 @@ class ShareServer {
   /// Tests: the client's address instead of the socket's.
   final InternetAddress? Function(HttpRequest request)? clientOf;
   final Duration keepalive;
+
+  /// Where the SHA-256 of finished files are kept between runs (`files/cache/share-hashes.json`, DECISIONS row 585), so
+  /// a restart or an app update does not read every night again for the laptop's list; null keeps them in memory.
+  final File? hashCache;
+
+  /// How many file requests (the list and the files) are being answered, at each change: the night's sleep scoring
+  /// waits while the laptop copies (DECISIONS row 583).
+  final void Function(int copying)? onCopying;
   final DateTime Function() _now;
+
+  /// SHA-256 worked out by this server (not taken from the cache or the export's index); for tests.
+  int hashed = 0;
+  bool _cacheRead = false;
+  int _copying = 0;
 
   HttpServer? _server;
   List<LanNet> _lan = const [];
@@ -258,11 +275,11 @@ class ShareServer {
       final path = req.uri.path;
       if (path == '/files' || path == '/files/') {
         if (method == 'POST') return await _json(res, 405, {'error': 'read-only'});
-        return await _json(res, 200, await _fileList(hash: req.uri.queryParameters['sha'] != '0'));
+        return await _copy(() async => _json(res, 200, await _fileList(hash: req.uri.queryParameters['sha'] != '0')));
       }
       if (path.startsWith('/files/')) {
         if (method == 'POST') return await _json(res, 405, {'error': 'read-only'});
-        return await _file(req, Uri.decodeComponent(path.substring('/files/'.length)));
+        return await _copy(() => _file(req, Uri.decodeComponent(path.substring('/files/'.length))));
       }
       final trimmed = path.endsWith('/') && path.length > 1 ? path.substring(0, path.length - 1) : path;
       final name = trimmed.substring(trimmed.lastIndexOf('/') + 1);
@@ -383,14 +400,80 @@ class ShareServer {
 
   // ---- files -------------------------------------------------------------------------------------------------
 
+  /// One file request, counted for [onCopying].
+  Future<void> _copy(Future<void> Function() answer) async {
+    _copying++;
+    _tellCopying();
+    try {
+      await answer();
+    } finally {
+      _copying--;
+      _tellCopying();
+    }
+  }
+
+  void _tellCopying() {
+    try {
+      onCopying?.call(_copying);
+    } catch (_) {}
+  }
+
+  /// The kept SHA-256, read once: entries whose file changed are worked out again when listed.
+  void _readCache() {
+    if (_cacheRead) return;
+    _cacheRead = true;
+    final f = hashCache;
+    if (f == null) return;
+    try {
+      final d = jsonDecode(f.readAsStringSync());
+      if (d is! Map || d['format'] != 'eeg-tracker-share-hashes' || d['files'] is! Map) return;
+      for (final e in (d['files'] as Map).entries) {
+        final v = e.value;
+        if (e.key is! String || v is! Map) continue;
+        final bytes = v['bytes'], ms = v['modified_ms'], sha = v['sha256'];
+        if (bytes is int && ms is int && sha is String && RegExp(r'^[0-9a-f]{64}$').hasMatch(sha)) {
+          _hashes.putIfAbsent(e.key as String, () => (bytes: bytes, modifiedMs: ms, sha256: sha));
+        }
+      }
+    } catch (_) {
+      // none yet, or damaged: worked out again
+    }
+  }
+
+  /// Keeps the SHA-256 of the files listed now (written to a temporary file, then renamed).
+  void _writeCache(Set<String> listed) {
+    final f = hashCache;
+    if (f == null) return;
+    try {
+      f.parent.createSync(recursive: true);
+      final tmp = File('${f.path}.${identityHashCode(this)}.tmp');
+      tmp.writeAsStringSync(
+        jsonEncode({
+          'format': 'eeg-tracker-share-hashes',
+          'files': {
+            for (final e in _hashes.entries)
+              if (listed.contains(e.key))
+                e.key: {'bytes': e.value.bytes, 'modified_ms': e.value.modifiedMs, 'sha256': e.value.sha256},
+          },
+        }),
+        flush: true,
+      );
+      tmp.renameSync(f.path);
+    } catch (_) {
+      // a list that cannot be kept is worked out again next time
+    }
+  }
+
   /// The list Export data's manifest holds (`path`, `bytes`, `sha256`, `modified_ms`), made now from the folder.
   /// A file still being written has `sha256: null` and `growing: true`; so has every file with [hash] false
   /// unless its SHA-256 is already known.
   Future<Map<String, Object?>> _fileList({required bool hash}) async {
+    _readCache();
     final stored = storedFiles(filesDir);
     final exported = _exportIndex();
     final nowMs = _now().millisecondsSinceEpoch;
     final files = <Map<String, Object?>>[];
+    final before = hashed;
     for (final f in stored) {
       final growing = nowMs - f.modifiedMs < _settled.inMilliseconds;
       String? sha;
@@ -413,6 +496,7 @@ class ShareServer {
         if (growing) 'growing': true,
       });
     }
+    if (hashed > before) _writeCache({for (final f in stored) f.path});
     return {
       'format': 'eeg-tracker-phone-files',
       'version': 1,
@@ -444,6 +528,7 @@ class ShareServer {
       if (st.size != f.bytes || st.modified.millisecondsSinceEpoch != f.modifiedMs) return null;
       final digest = out.value.toString();
       _hashes[f.path] = (bytes: f.bytes, modifiedMs: f.modifiedMs, sha256: digest);
+      hashed++;
       return digest;
     } catch (_) {
       return null;

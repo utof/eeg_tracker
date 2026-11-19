@@ -46,6 +46,9 @@ class ShareControl extends ChangeNotifier {
   Future<void> _queue = Future.value();
 
   ShareConfig get config => _config;
+
+  /// The laptop is copying files from the app's own server (between nights).
+  bool get copying => _host?.copying ?? false;
   ShareStatus get status => _status;
   bool get on => _config.activeAt(_now().millisecondsSinceEpoch);
 
