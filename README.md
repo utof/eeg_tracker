@@ -66,6 +66,12 @@ warms as eyes-closed alpha rises above your own line; a tight jaw, a blink or dr
 It reads the live stream, answers in about 0.3 s in training mode, and also has a demo signal. See
 [docs/brain-sound.md](docs/brain-sound.md). JS tests: `node --test tests/web/*.test.mjs`.
 
+**Hands-free controls** (phone app, off unless switched on in Settings): a firm double jaw clench or a look left, then
+right, as a switch during sessions (pause the sound, mark a moment, answer the dream catcher), with a 90-second
+calibration for your own head. The rules: `analysis/hands_free.py` (the reference) and `app/lib/detectors/gestures.dart`
+(the phone's line-by-line port); false triggers on a recorded night in [docs/detectors.md](docs/detectors.md); how
+to use it and the owner step in [app/README.md](app/README.md) ("Hands-free controls").
+
 **Why we believe each feature (evidence notes).** Every feature has a short note in
 [docs/evidence/](docs/evidence/README.md): what the research says, where the data supports it and where it does
 not, how the app uses it, the sources, and the libraries and models with their licences. Each carries one grade

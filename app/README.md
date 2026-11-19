@@ -573,6 +573,51 @@ minutes, the microphone recorded real sound, and the night recording started fro
    percent at lights off and in the morning. Send the session file's `stalls` and `end` (Export data has it).
 6. If a locked session stopped early: choose **Screen: Stays on** for now and say so; that is the old behaviour.
 
+## Hands-free controls (off unless you switch it on)
+
+A firm double clench of your teeth, or a look far left and then far right, works as a switch during sessions, with
+a soft tone when it is caught. The temple electrodes see jaw muscle and sideways eye movements best. The **i**
+button shows what the research says (`docs/evidence/hands-free.md`); the rules are in `docs/detectors.md`
+("Hands-free gestures").
+
+| Where | Double clench | Look left, then right |
+|---|---|---|
+| Sound for states, Meditation | pauses the sound; the next one brings it back | marks a moment |
+| Dream catcher | while "were you drifting?" waits: Drifting (a nod); else a moment | while it waits: Awake (a shake of the head); else a moment |
+| Alpha-theta, Nap coach | marks a moment | marks a moment |
+| Night recording | marks a moment (no tone) | not used at night (dream sleep is full of eye movements) |
+
+Never in the morning check-in (it would change the measurement), and never while the drift-off detector says you are
+probably asleep (except while the dream catcher's question waits for its answer). The tone comes 2-4 seconds after
+the gesture: the app waits for 2 quiet seconds first, so chewing, talking or looking around do not count.
+
+1. Between nights, tap the **gear** at the top of the main screen (Settings).
+2. Switch **Hands-free controls** on. The first time this opens the calibration (about 90 seconds, headband on,
+   sitting up): 30 seconds still, then on each low tone clench twice (short and firm, about a second apart), three
+   times, and on each rising tone look far left, then far right, then back (eyes only), three times. Two lanes show
+   your jaw and your eyes as you do it, and each try's cell fills when it was seen.
+3. The result says which gestures work (caught at least 2 of 3), each try in words, and the levels it set. Only the
+   gestures that work are used; **Calibrate again** any time.
+
+Files, app-private, exported by Export data: `files/hands-free/settings.json` (the switch), `calibration.json` (the
+levels and each try), `events.jsonl` (each change), and the calibration's EEG in `files/hands-free/recordings/`
+(never with the nights). Gestures act on a session as markers (`hands-free: moment (double clench)`, `hands-free:
+sound paused (double clench)`, ...): in the session's events or log, and in the recording's `.markers.jsonl`.
+
+### Owner step: calibrate and try it (about 10 minutes, once)
+
+Nobody has made these gestures with this headband yet: the levels are first guesses until your calibration.
+
+1. Between nights: Settings, switch **Hands-free controls** on, calibrate. Tell the assistant the result page's
+   lines: for each gesture "Works" or "Not used", the numbers after each try (for example "48 x" and "131 µV"),
+   and the reason for any miss.
+2. Then a 10-minute **Sound** session (Relax) with the headband: once the sound plays, clench twice: does the
+   sound pause, with two soft low notes? Clench twice again: does it come back? Look left, then right: one higher
+   note? Tell the assistant how many tries each took, and whether anything came up when you did nothing.
+3. Next time you use the dream catcher, answer one "were you drifting?" by gesture.
+4. Export data: the laptop can then check the calibration's own EEG (`files/hands-free/recordings/`) against the
+   Python reference (`analysis/hands_free.py`), the first real gestures this code has seen.
+
 ## If the headband drops out
 
 The app saves what it has and reconnects by itself: first straight to the same headband (no Bluetooth scan,

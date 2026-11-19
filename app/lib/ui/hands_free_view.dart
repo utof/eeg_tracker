@@ -64,7 +64,10 @@ class SettingsViewModel {
 /// The switch's line: what is on now, in words.
 String handsFreeStatus(SettingsViewModel m) {
   final c = m.calibration;
-  if (!m.on) return c == null || !c.usable ? 'Off. Calibrate first, then switch it on.' : 'Off.';
+  if (!m.on) {
+    if (c == null) return 'Off. Calibrate first, then switch it on.';
+    return c.usable ? 'Off.' : 'Off. No gesture was caught clearly; calibrate again.';
+  }
   if (c == null) return 'On, but not calibrated yet. Calibrate first.';
   if (!c.usable) return 'On, but no gesture was caught clearly enough. Calibrate again.';
   final s = c.settings;

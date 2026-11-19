@@ -70,6 +70,7 @@ final Map<String, Widget> states = {
     ),
   ),
   'settings_night': _settings(SettingsViewModel(calibration: _record(_none), nightRunning: true)),
+  'settings_on_uncalibrated': _settings(const SettingsViewModel(on: true)),
   'cal_setup': _cal(const CalViewModel(stage: CalStage.setup)),
   'cal_connecting': _cal(const CalViewModel(stage: CalStage.connecting, message: 'Found BrainBit Black. Connecting.')),
   'cal_still': _cal(
@@ -133,6 +134,8 @@ void main() {
     expect(handsFreeStatus(const SettingsViewModel()), startsWith('Off. Calibrate first'));
     expect(handsFreeStatus(SettingsViewModel(on: true, calibration: _record(_both))), 'On: both gestures.');
     expect(handsFreeStatus(SettingsViewModel(on: true, calibration: _record(_none))), startsWith('On, but no gesture'));
+    expect(handsFreeStatus(SettingsViewModel(calibration: _record(_none))), 'Off. No gesture was caught clearly; calibrate again.');
+    expect(handsFreeStatus(const SettingsViewModel(on: true)), startsWith('On, but not calibrated'));
   });
 
   test('every rule a try can break has words', () {
