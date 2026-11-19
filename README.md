@@ -54,7 +54,10 @@ Each line says what it does. In brackets: how well the research backs it **for t
   default. (some)
 - **Export data**: copies everything the app keeps to a folder you pick (with a checksum list) for the laptop.
 - **Share on Wi-Fi**: the laptop watches the phone's recording live and copies its files during the night. Off by
-  default, home Wi-Fi only.
+  default, home Wi-Fi only. **Connecting is one scan**: the laptop shows a QR code (`scripts/phone_link.py`), the
+  phone's camera opens the app, **Connect**; after that the phone tells the laptop where it is by itself.
+- **Packing old nights**: raw recordings nothing has written for a day are packed (lossless, checked) to save space;
+  every page and the laptop read them as before.
 - **Our own headband connection (test switch)**: our own Bluetooth code instead of BrainBit's library; BrainBit's
   stays the default until the 15-minute probe has passed on the real headband.
 - **The DIY board (test)**: records the self-built ADS1299 board over Wi-Fi. The board is not assembled yet, so this
@@ -71,6 +74,11 @@ Each line says what it does. In brackets: how well the research backs it **for t
   after 30 min away, and gives the break hints; one file per session. ([docs/laptop-tray.md](docs/laptop-tray.md))
 - **Tools for the phone's files**: `import_phone.py`, `phone_night_check.py`, `catalog.py`, `pull_phone.py`
   (below), and `pack_old.py`, which packs raw recordings older than a day (both sides pack: lossless, checked).
+- **Pairing with the phone** (`python3 scripts/phone_link.py`, also the tray's **Pair phone…**): a QR code to scan,
+  then the phone's files copied every 2 minutes and its live pages at `http://localhost:8770/`.
+  ([docs/phone-link.md](docs/phone-link.md))
+- **Every day's numbers for utof_tracker** (`python3 scripts/export_events.py --daily`): one event per day with what
+  the phone's Trends page shows, for the owner's life tracker. ([docs/utof-interface.md](docs/utof-interface.md))
 - **The same scoring and detectors in Python**: the phone's rules were written and checked there first (`analysis/`).
 
 ## Files in this repository

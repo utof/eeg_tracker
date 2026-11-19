@@ -56,6 +56,15 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
 - [Our own headband connection](#our-own-headband-connection-test-off-by-default): the probe (5 minutes), then one night with the switch on
 - [The DIY board](#the-diy-board-test-off-by-default): only after the board passes its bench steps
 
+**Beside the app, on the laptop** (no app steps of their own)
+
+- Packing old nights: nothing to do on the phone, which packs recordings older than a day by itself between nights;
+  on the laptop `python3 scripts/pack_old.py` once a day ([data format](../docs/data-format.md))
+- The laptop tray: `python3 scripts/tray.py`, then a working day ([laptop-tray.md](../docs/laptop-tray.md)); its
+  **Pair phone…** runs the one-scan pairing of [Share on Wi-Fi](#share-on-wi-fi-the-laptop-watches-and-copies-while-the-phone-records)
+- Every day's numbers for utof_tracker: `python3 scripts/export_events.py --daily` after each copy from the phone
+  ([utof-interface.md](../docs/utof-interface.md))
+
 - Files: `<stamp>.f32/.idx/.log` in the app's private folder (other apps cannot read it), the same format as
   `scripts/record_night.py` (`docs/data-format.md`); join a night with `scripts/to_bdf.py`. Only **Export data**
   (everything the app keeps) and **Export a night** copy anything out (below; DECISIONS rows 53, 56 and 150-156).

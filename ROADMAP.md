@@ -136,8 +136,8 @@ phone's speed for scoring (rows 3, 26, 27) is unmeasured until the owner's first
 ### 2. Left to build
 
 Needs no owner decision, only time or data:
-- **[research] Automatic recording and knowing what you're doing** (owner, 2026-11-20): when the headband is on, the app starts reading by itself (a setting: start automatically / ask / off) and works out what you are doing (working, meditating, about to sleep, asleep, walking) to run the right analysis on its own (work session, Lights off and sleep scoring, ...). First a research round on automatic activity/state detection from the headband's EEG plus the phone's sensors, screen, time of day and the laptop's ActivityWatch; no earlier research covers it (`_local/research/2026-11-20-*-auto-activity*.md` when done). Then build it phone-first.
 
+- **[research] Automatic recording and knowing what you're doing** (owner, 2026-11-20): when the headband is on, the app starts reading by itself (a setting: start automatically / ask / off) and works out what you are doing (working, meditating, about to sleep, asleep, walking) to run the right analysis on its own (work session, Lights off and sleep scoring, ...). First a research round on automatic activity/state detection from the headband's EEG plus the phone's sensors, screen, time of day and the laptop's ActivityWatch; no earlier research covers it (`_local/research/2026-11-20-*-auto-activity*.md` when done). Then build it phone-first.
 - **Fit the sleep-pressure constants** (row 10) once there are mornings of ratings.
 - **The laptop statistics engine** (row 14): observational screens and Bayesian models, after a month of days.
 - **ActivityWatch focus sessions** as a laptop importer beside Sharp hours' files (row 31, DECISIONS 289).
