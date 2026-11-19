@@ -6,7 +6,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:eeg_tracker/detectors/detectors.dart' show EpochQuality;
-import 'package:eeg_tracker/dream/band_link.dart' show LinkTiming;
+import 'package:eeg_tracker/dream/band_link.dart' show BandLink, LinkTiming;
 import 'package:eeg_tracker/detectors/drift_off.dart';
 import 'package:eeg_tracker/feedback/demo.dart';
 import 'package:eeg_tracker/feedback/session.dart';
@@ -549,6 +549,22 @@ void main() {
       expect((c.stage, c.message), (Stage.calibrating, ''));
       expect(late.calls, ['disconnect']);
       await c.stop();
+      c.dispose();
+    });
+
+    test('a search that never came back: the next session that times out says to open the app again (finding 15)', () async {
+      BandLink.forgetAbandoned();
+      addTearDown(BandLink.forgetAbandoned);
+      final finder = GateFinder(); // no search ever answers: BrainBit's call thread is stuck
+      const stuck = MeditationTiming(scanFor: Duration(milliseconds: 20), connectTimeout: Duration(milliseconds: 30));
+      final c = MeditationController(finder: finder, sound: SilentSound.new, timing: stuck);
+      await c.start(const Duration(minutes: 5));
+      expect(c.stage, Stage.failed);
+      expect(c.message, contains('Switch it off and on'), reason: 'once could be the headband');
+      await c.start(const Duration(minutes: 5));
+      expect(c.stage, Stage.failed);
+      expect(c.message, contains('Close the app'));
+      expect(c.message, isNot(contains('Switch it off and on')));
       c.dispose();
     });
 
