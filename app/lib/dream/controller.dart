@@ -55,6 +55,7 @@ class DreamTiming {
     this.answerWall = const Duration(seconds: 33),
     this.promptMax = const Duration(seconds: 40),
     this.wakeRingOut = const Duration(seconds: 4),
+    this.micTimeout = const Duration(seconds: 10),
   });
 
   final LinkTiming link;
@@ -76,6 +77,9 @@ class DreamTiming {
 
   /// After the wake tone, before the sound stops.
   final Duration wakeRingOut;
+
+  /// The microphone's start and stop calls: a plugin stuck past this loses the answer, not the session.
+  final Duration micTimeout;
 }
 
 class DreamController extends ChangeNotifier {
@@ -450,8 +454,14 @@ class DreamController extends ChangeNotifier {
 
   void _check() {
     final plan = _plan;
-    if (plan == null || _ended || _busy || _lightsOffAt == null) return;
+    if (plan == null || _ended || _lightsOffAt == null) return;
     final t = _t();
+    if (t >= DreamRule.capS) {
+      // the cap first, also while a round runs: a round that hangs must not hold the session past it
+      unawaited(_finish(plan.done >= plan.rounds ? DreamEnd.rounds : DreamEnd.cap));
+      return;
+    }
+    if (_busy) return;
     if (plan.over(t)) {
       unawaited(_finish(plan.done >= plan.rounds ? DreamEnd.rounds : DreamEnd.cap));
       return;
@@ -526,7 +536,7 @@ class DreamController extends ChangeNotifier {
     var end = AnswerEnd.failed;
     try {
       st.dir.createSync(recursive: true);
-      await mic.start(f.path);
+      await mic.start(f.path).timeout(timing.micTimeout);
       sub = mic.levels.listen((db) {
         final e = gate.add(db);
         if (e != null && !done.isCompleted) done.complete(e);
@@ -538,7 +548,7 @@ class DreamController extends ChangeNotifier {
       _answerDone = null;
       await sub?.cancel();
       try {
-        await mic.stop();
+        await mic.stop().timeout(timing.micTimeout);
       } catch (_) {}
     }
     final kept = f.existsSync() && f.lengthSync() > 44;

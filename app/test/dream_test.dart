@@ -572,6 +572,59 @@ void main() {
       c.dispose();
     });
 
+    test('the 45-minute cap ends the session even while a round waits for its answer', () async {
+      var mono = Duration.zero;
+      final band = DriftBand((_) => 1), sound = SilentDreamSound();
+      final c = DreamController(
+        finder: OneFinder(band),
+        sound: () => sound,
+        mic: FakeMic(spoken),
+        store: store,
+        recordingsDir: recordings,
+        timing: const DreamTiming(
+          link: LinkTiming(contactFor: Duration(milliseconds: 5), settle: Duration.zero, reconnectWaits: [Duration(milliseconds: 5)]),
+          tick: Duration(milliseconds: 20),
+          tapWindow: Duration(minutes: 5), // "were you drifting?" waits long
+          wakeRingOut: Duration.zero,
+        ),
+        random: () => 0,
+        monotonic: () => mono,
+      );
+      await c.start(rounds: 4);
+      await until(c, () => c.stage == DreamStage.checking);
+      band.paused = true;
+      mono += const Duration(minutes: 46);
+      await until(c, () => c.stage == DreamStage.done, max: const Duration(seconds: 5));
+      expect(c.last!.endWhy, DreamEnd.cap);
+      expect(c.last!.rounds.length, 1, reason: 'the round under way is kept');
+      c.dispose();
+    });
+
+    test('a microphone that never answers: the round goes on after its deadline and says so', () async {
+      final band = DriftBand((_) => 1), mic = _HungMic(spoken);
+      final c = DreamController(
+        finder: OneFinder(band),
+        sound: SilentDreamSound.new,
+        mic: mic,
+        store: store,
+        recordingsDir: recordings,
+        timing: const DreamTiming(
+          link: LinkTiming(contactFor: Duration(milliseconds: 5), settle: Duration.zero, reconnectWaits: [Duration(milliseconds: 5)]),
+          tick: Duration(milliseconds: 20),
+          tapWindow: Duration(milliseconds: 100),
+          wakeRingOut: Duration.zero,
+          micTimeout: Duration(milliseconds: 200),
+        ),
+        random: () => 0,
+      );
+      await c.start(rounds: 3);
+      await until(c, () => c.roundsDone >= 1, max: const Duration(seconds: 5));
+      expect(c.micNote, contains('did not record'));
+      expect(mic.stopsAsked, greaterThanOrEqualTo(1), reason: 'its stop was asked too, and given up on');
+      await c.stop().timeout(const Duration(seconds: 5));
+      c.dispose();
+    });
+
     test('45 minutes after lights off the session ends even with the headband silent', () async {
       var shift = Duration.zero;
       final band = DriftBand((_) => 1), mic = FakeMic(spoken), sound = SilentDreamSound();
@@ -617,5 +670,20 @@ class _GatedDreamSound extends SilentDreamSound {
     asked = true;
     await gate.future;
     await super.start();
+  }
+}
+
+/// A microphone plugin stuck in its calls: start and stop never return.
+class _HungMic extends FakeMic {
+  _HungMic(super.script);
+  int stopsAsked = 0;
+
+  @override
+  Future<void> start(String path) => Completer<void>().future;
+
+  @override
+  Future<void> stop() {
+    stopsAsked++;
+    return Completer<void>().future;
   }
 }
