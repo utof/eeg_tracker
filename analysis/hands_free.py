@@ -44,13 +44,13 @@ TICKS = FS // TICK  # 10 ticks a second
 BUSY_X = det.MUSCLE_X  # a jaw tick: one side over 4x its own rest level and both over 2x (the detectors' jaw rule,
 BOTH_X = det.MUSCLE_BOTH_X  # at 0.1 s); one-sided muscle (a pillow, a hand, an electrode rubbing) does not count
 CLENCH_X = 10.0  # each clench: both sides over this many times their rest at its strongest tick
-CLENCH_X_RANGE = (10.0, 60.0)  # what the calibration may set (under 10x: false triggers awake, DECISIONS 242)
+CLENCH_X_RANGE = (10.0, 60.0)  # what the calibration may set (under 10x: false triggers awake, DECISIONS 243)
 MERGE_TICKS = 1  # a dip of one quiet tick inside a clench does not split it
 BURST_TICKS = (2, 10)  # each clench 0.2-1.0 s long
 PAUSE_TICKS = (3, 15)  # 0.3-1.5 s between the two
 QUIET_TICKS = 20  # nothing else within 2 s before the first clench and after the second
 
-# ---- glance (planning values) ----
+# ---- look left, then right (planning values; DECISIONS 242) ----
 GLANCE_UV = 80.0  # each of the first two steps of T3-T4 at least this (the eye-movement detector starts at 40)
 GLANCE_UV_RANGE = (70.0, 250.0)
 GLANCE_STEP_S = 1.5  # each step within 1.5 s of the one before
