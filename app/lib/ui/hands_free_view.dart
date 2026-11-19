@@ -98,6 +98,8 @@ class SettingsView extends StatelessWidget {
     this.onWearerInfo,
     this.studyOn,
     this.onStudy,
+    this.memoryOn,
+    this.onMemory,
   });
 
   final SettingsViewModel model;
@@ -110,6 +112,10 @@ class SettingsView extends StatelessWidget {
   /// The study reminders' switch (null while it is not known) and the page that holds them.
   final bool? studyOn;
   final VoidCallback? onStudy;
+
+  /// The memory cues' switch (null while it is not known) and their page (DECISIONS 508).
+  final bool? memoryOn;
+  final VoidCallback? onMemory;
 
   @override
   Widget build(BuildContext context) {
@@ -138,6 +144,23 @@ class SettingsView extends StatelessWidget {
                 child: Text(
                   '${studyOn == true ? 'On' : 'Off'}. The assistant\'s idea: a nudge to study in the evening and to recall it in the morning.',
                   style: text.bodyLarge?.copyWith(color: studyOn == true ? Night.live : Night.inkMuted, height: 1.4),
+                ),
+              ),
+              trailing: const Icon(Icons.chevron_right, color: Night.inkMuted),
+            ),
+            const Divider(height: 24),
+          ],
+          if (onMemory != null) ...[
+            ListTile(
+              onTap: onMemory,
+              contentPadding: EdgeInsets.zero,
+              title: Text('Memory cues', style: text.titleLarge),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '${memoryOn == true ? 'On' : 'Off'}. Soft sounds in deep sleep for half of an evening task, as a '
+                  'self-test: the assistant\'s proposal; evidence weak.',
+                  style: text.bodyLarge?.copyWith(color: memoryOn == true ? Night.live : Night.inkMuted, height: 1.4),
                 ),
               ),
               trailing: const Icon(Icons.chevron_right, color: Night.inkMuted),
