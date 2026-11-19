@@ -714,6 +714,14 @@ Files, app-private, exported by Export data: `files/sharp-hours/settings.json`, 
 `prompts.jsonl` (what happened to each planned question: shown, skipped and why, late, postponed, swiped away) and
 `events.jsonl` (each change); format in `docs/data-format.md`.
 
+**On the laptop: focus sessions (the research's third measure).** `python3 scripts/aw_focus.py` reads ActivityWatch
+and counts **focus sessions** (35 minutes or more of related work in terminals, editors, AI-assistant windows and
+documentation, with short switches allowed and no break of 5 minutes) per day and per 2-hour block, into
+`_local/phone/sharp-hours/focus-YYYY-MM.jsonl` beside the imported ratings. Sessions are counted, never summed as
+hours, and no window title is stored. `python3 scripts/aw_focus.py --show` prints them next to your ratings, block by
+block, "seen together, not tested". The rule and the files: `docs/break-hints.md` ("Focus sessions"), `docs/data-format.md`
+(DECISIONS rows 510-514).
+
 ### Owner step: switch it on and watch the first two days (2 minutes, then a tap a few times a day)
 
 Nothing of this has run on a phone yet, and HyperOS may hold notifications back.

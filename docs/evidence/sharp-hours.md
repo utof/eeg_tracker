@@ -67,7 +67,8 @@ own weeks can show.
   (5 % quicker for reaction time). Everything is labelled "seen together, not tested".
 - Trends shows the day's mean sharpness and the middle of the day's reaction tests; self-experiments can test either
   as the next day's number.
-- Computer focus sessions (ActivityWatch) belong to the laptop and are not part of this yet.
+- Computer focus sessions (ActivityWatch) belong to the laptop: `scripts/aw_focus.py` counts them per day and per
+  2-hour block and shows them beside your ratings (never summed as hours; the phone does not use them).
 
 ## Sources
 

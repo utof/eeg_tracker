@@ -415,6 +415,27 @@ The moments themselves are not stored: they are drawn again from `seed`, the day
 60 minutes apart; two of them suggest the test. The Trends page reads two day numbers from these files (a day runs
 04:00 to 04:00): `sharp`, the mean of the day's ratings, and `dayrt`, the median of the day's tests' medians.
 
+#### Focus sessions beside the ratings (`focus-YYYY-MM.jsonl`, written by the laptop)
+
+Not from the phone: `scripts/aw_focus.py` (DECISIONS rows 510-514) reads ActivityWatch on the laptop and writes
+`_local/phone/sharp-hours/focus-YYYY-MM.jsonl` next to the imported `ratings.jsonl`. One line per day (a day runs
+04:00 to 04:00, local time), sorted; a re-run replaces the lines of the days it recomputes and keeps the others, and
+unchanged data gives the same bytes. Import and pull never touch these files (the phone has none of this name).
+
+| Field | Content |
+|---|---|
+| `version` | 1 |
+| `day` | `YYYY-MM-DD` |
+| `sessions` | the number of focus sessions that started that day (0 is a real zero: the laptop was on for 35 minutes or more) |
+| `blocks` | `{"08-10": 1, ...}`: sessions by the 2-hour block of the clock they STARTED in (a longer one is not counted again in later blocks); blocks with none are left out |
+| `list` | one entry per session: `start` (local ISO time), `min` (its active minutes, per session: never summed into hours), `app` (the app that held most of it) |
+| `through` | the last moment of laptop data that day (the day may still be going on) |
+| `rule` | `focus-v1 min=35 switch=3`: the rule that made the line |
+
+A day with under 35 active minutes on the laptop has no line: "no data" is not "no sessions". Window titles are used
+in memory to tell documentation from other browsing and are never written; nothing here holds anything but app
+names, times and counts. The rule is in the script's header and in `docs/break-hints.md`.
+
 ### Study reminders (`study-review/`)
 
 The assistant's proposal "Evening study, morning review" (DECISIONS rows 400-401), off unless switched on in Settings.

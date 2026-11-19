@@ -68,6 +68,35 @@ Add flags to the `ExecStart=` line in `~/.config/systemd/user/break-hints.servic
 The other numbers (45 min spacing, +15 back-off, 3 / 5 min gaps, 30 min break window, 20 min snooze) are in
 `Config` at the top of `scripts/break_hints.py`.
 
+## Focus sessions (the same ActivityWatch data, counted for the Sharp-hours log)
+
+`scripts/aw_focus.py` reads the same AFK bucket and the window bucket and counts **focus sessions**: the research's
+third measure of a good hour (Brown 2023, Google: the number of sessions of related work lasting 35-60 minutes
+tracked self-reported focus; total hours did not, so hours are never summed). It reuses this script's reading code
+and rules (AFK spans, the 04:00 day, a real break is 5 minutes away).
+
+- **A session** is at least **35 minutes of active time** in one family of windows, with no real break. A longer run is
+  one session.
+- **Related** (chosen simply, DECISIONS row 510): one family = terminals, editors and IDEs, AI-assistant windows
+  (Claude, ChatGPT) and browser pages whose title names documentation or code hosting; writing and reading apps
+  (office, notes, PDFs) are another. Everything else (other browsing, chat, video) is not work, unless `--any-app`.
+  The word lists are at the top of the script.
+- **Short switches** are allowed: up to **3 minutes** away from the family in total between two stretches of it (a
+  quick chat reply); more ends the session. A pause under 5 minutes keeps it; the time is not counted.
+- It counts per **day** (04:00-04:00) and per **2-hour block of the clock** the session started in.
+- Window titles are read in memory only; the file holds counts, start times, minutes and app names.
+
+```bash
+python3 scripts/aw_focus.py --dry-run            # what the last 7 days would give; writes nothing
+python3 scripts/aw_focus.py --since 2026-11-01   # (re)compute from a day; safe to repeat
+python3 scripts/aw_focus.py --show               # sessions beside the sharp-hours ratings, per 2-hour block
+```
+
+Files: `_local/phone/sharp-hours/focus-YYYY-MM.jsonl` ([format](data-format.md)). Flags: `--min` (35), `--switch` (3),
+`--any-app`, `--host`, `--dest`. The count is sensitive to the switch allowance (the owner's last 14 days: 12
+sessions at 3 minutes, 22 at 5): compare only numbers made with the same rule (every line records it). No
+ActivityWatch window or app name leaves the laptop. See [Sharp hours](../app/README.md#sharp-hours-the-assistants-proposal-off-unless-you-switch-it-on).
+
 ## Later stages
 
 1. **One-tap sleepiness rating** in the hint (how sleepy are you, 1-9, the Karolinska scale): your own
