@@ -14,10 +14,13 @@ oldest recording in the folder, so the same files always give the same nights.
 """
 from __future__ import annotations
 
-import json, os, re, shutil, struct, subprocess, threading, time
+import json, os, re, shutil, struct, subprocess, sys, threading, time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import packed  # noqa: E402  (a raw file packed after a day, <stamp>.f32.xz, reads as the plain one)
 
 VERSION = 2  # of <night>.report.json; a report of another version is rebuilt (2: adds `extras`)
 FS = 250
@@ -35,10 +38,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 @dataclass(frozen=True)
 class Rec:
-    path: Path
+    path: Path  # <stamp>.f32 by its plain name, also when it is packed (open it with packed.open_raw)
     start: float  # unix time from the file name
     end: float  # arrival time of the last batch in the .idx
-    size: int  # bytes of the .f32
+    size: int  # bytes of the .f32 (unpacked)
 
     @property
     def minutes(self) -> float:
@@ -94,12 +97,12 @@ def _end(path: Path, start: float, size: int) -> float:
 
 
 def recordings(folder: Path) -> list[Rec]:
-    """Every recording with at least one sample, oldest first."""
+    """Every recording with at least one sample, oldest first; a packed one by its plain name."""
     out = []
-    for p in Path(folder).glob("*.f32"):
+    for p in packed.raw_files(folder):
         start = stamp_time(p)
         try:
-            size = p.stat().st_size
+            size = packed.size(p)
         except OSError:
             continue
         if start is not None and size >= REC_BYTES:

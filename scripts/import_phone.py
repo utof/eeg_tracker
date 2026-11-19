@@ -19,6 +19,11 @@ folder"), or the folder holding it: the Syncthing folder, or a copy taken with
 - `<dest>/phone/manifests/` keeps every manifest imported, `<dest>/phone/imports.jsonl` one line per import, and
   `<dest>/phone/import-index.json` the SHA-256 of the copies (by size and modified time), so a later import does not
   read every old file again (`--rehash` does).
+- A raw file the phone packed after a day (`recordings/<stamp>.f32.gz`, DECISIONS 540-549) is listed with its
+  `original` (the `.f32`'s path, bytes and SHA-256). It is checked as sent (the gzip file's size and SHA-256), unpacked
+  and checked again (the original's), and lands as the plain `<stamp>.f32`, where scripts/pack_old.py packs it with
+  xz after a day like any other. It is "already here" when the laptop holds the same `.f32`, plain or packed: a night
+  is never copied twice because the phone renamed it.
 
 Exit status: 0 when everything in the phone's list is on the laptop, 1 when something is damaged, missing or not yet
 exported, 2 when the manifest cannot be used. Standard library only.
@@ -30,6 +35,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Callable
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import packed  # noqa: E402  (raw files packed after a day: the phone's .f32.gz, the laptop's .f32.xz)
 
 FORMAT = "eeg-tracker-phone-export"
 VERSION = 1
@@ -45,11 +53,45 @@ class ManifestError(Exception):
 
 
 @dataclass(frozen=True)
+class Original:
+    """What a packed phone file holds: the plain file's path, bytes and SHA-256."""
+    path: PurePosixPath
+    bytes: int
+    sha256: str
+
+
+@dataclass(frozen=True)
 class Entry:
     path: PurePosixPath
     bytes: int
     sha256: str
     modified_ms: int
+    original: Original | None = None  # set for the phone's packed form (`.f32.gz`)
+
+    @property
+    def lands(self) -> tuple[PurePosixPath, int, str]:
+        """Path, bytes and SHA-256 of what lands on the laptop: the plain file, also for a packed one."""
+        o = self.original
+        return (o.path, o.bytes, o.sha256) if o else (self.path, self.bytes, self.sha256)
+
+
+def is_sha256(v: object) -> bool:
+    return isinstance(v, str) and len(v) == 64 and all(c in "0123456789abcdef" for c in v)
+
+
+def original_of(p: PurePosixPath, o: object) -> Original | None:
+    """A file list's `original` (DECISIONS 540-549): None when absent; ValueError when it is not the plain form of
+    [p] (`<path>.gz` holds `<path>`) with a size and SHA-256."""
+    if o is None:
+        return None
+    if not isinstance(o, dict):
+        raise ValueError("original is not an object")
+    op = safe_path(o.get("path"))
+    size, digest = o.get("bytes"), o.get("sha256")
+    if str(p) != f"{op}.gz" or not op.name.endswith(packed.RAW) or not (isinstance(size, int) and size >= 0) \
+            or not is_sha256(digest):
+        raise ValueError(f"original of {p} is not its plain .f32")
+    return Original(op, size, str(digest))
 
 
 @dataclass
@@ -109,13 +151,16 @@ def load_manifest(root: Path) -> tuple[dict, list[Entry]]:
             raise ManifestError("manifest.json has a damaged file entry")
         p = safe_path(f.get("path"))
         size, digest, mod = f.get("bytes"), f.get("sha256"), f.get("modified_ms")
-        if not (isinstance(size, int) and size >= 0 and isinstance(mod, int) and isinstance(digest, str)
-                and len(digest) == 64 and all(c in "0123456789abcdef" for c in digest)):
+        if not (isinstance(size, int) and size >= 0 and isinstance(mod, int) and is_sha256(digest)):
             raise ManifestError(f"manifest.json has a damaged entry for {p}")
+        try:
+            orig = original_of(p, f.get("original"))
+        except (ValueError, ManifestError) as e:
+            raise ManifestError(f"manifest.json has a damaged entry for {p} ({e})") from e
         if p in seen:
             raise ManifestError(f"manifest.json lists {p} twice")
         seen.add(p)
-        entries.append(Entry(p, size, digest, mod))
+        entries.append(Entry(p, size, str(digest), mod, orig))
     return m, entries
 
 
@@ -138,8 +183,23 @@ def hash_file(f: Path) -> str:
     return h.hexdigest()
 
 
+def on_laptop(f: Path) -> Path | None:
+    """The laptop's copy of [f]: the file itself, or for a raw .f32 its packed form (.f32.xz) after a day."""
+    return packed.on_disk(f) if f.name.endswith(packed.RAW) else (f if f.is_file() else None)
+
+
+def size_of(f: Path) -> int:
+    """The bytes the laptop's copy holds (a packed .f32's original length)."""
+    d = on_laptop(f)
+    if d is None:
+        raise FileNotFoundError(str(f))
+    return packed.size(f) if packed.is_packed(d) else d.stat().st_size
+
+
 class Index:
-    """SHA-256 of the copies on the laptop, trusted while a copy's size and modified time are unchanged."""
+    """SHA-256 of the copies on the laptop, trusted while a copy's size and modified time are unchanged. A raw .f32
+    that the laptop packed after a day keeps its row under the plain name, with the original's SHA-256 (read from the
+    packed file's end, or unpacked with --rehash)."""
 
     def __init__(self, dest: Path, rehash: bool) -> None:
         self.file = dest / "phone" / "import-index.json"
@@ -155,16 +215,21 @@ class Index:
         return f.relative_to(self.dest).as_posix()
 
     def sha(self, f: Path) -> str:
-        st = f.stat()
+        d = on_laptop(f) or f
+        st = d.stat()
         row = self.rows.get(self._key(f))
         if not self.rehash and isinstance(row, list) and len(row) == 3 and row[:2] == [st.st_size, st.st_mtime_ns]:
             return str(row[2])
-        digest = hash_file(f)
+        if packed.is_packed(d):
+            o = None if self.rehash else packed.info(d)
+            digest = o.sha256 if o and o.sha256 else packed.content_sha256(d)
+        else:
+            digest = hash_file(d)
         self.put(f, digest)
         return digest
 
     def put(self, f: Path, digest: str) -> None:
-        st = f.stat()
+        st = (on_laptop(f) or f).stat()
         self.rows[self._key(f)] = [st.st_size, st.st_mtime_ns, digest]
 
     def save(self) -> None:
@@ -200,6 +265,29 @@ def copy_checked(src: Path, tmp: Path | None, e: Entry) -> bool:
     return ok
 
 
+def unpack_checked(src: Path, tmp: Path | None, e: Entry) -> bool:
+    """For the phone's packed form: checks [src] against the manifest (the gzip file's size and SHA-256), unpacks it
+    into [tmp] (or only checks it when tmp is None) and checks what came out against `original`."""
+    assert e.original is not None
+    out = None
+    try:
+        if tmp is not None:
+            tmp.parent.mkdir(parents=True, exist_ok=True)
+            out = tmp.open("wb")
+        with src.open("rb") as r:
+            ok = packed.gunzip_checked(r, out, packed.Original(e.bytes, e.sha256),
+                                       packed.Original(e.original.bytes, e.original.sha256))
+        if out:
+            out.flush()
+            os.fsync(out.fileno())
+    finally:
+        if out:
+            out.close()
+    if not ok and tmp is not None:
+        tmp.unlink(missing_ok=True)
+    return ok
+
+
 def _noise(rel: PurePosixPath) -> bool:
     """Syncthing's own files, which sit in a synced folder but are not data."""
     return any(p.startswith(".st") or ".syncthing." in p or "~syncthing~" in p for p in rel.parts)
@@ -227,35 +315,36 @@ def run(folder: Path, dest: Path, *, dry_run: bool = False, rehash: bool = False
     index = Index(dest, rehash)
     replaced = dest / "phone" / "replaced" / _stamp(now)
     for e in entries:
-        dst, src = target_for(dest, e.path), root.joinpath(*e.path.parts)
-        differs = dst.is_file()
-        if differs and dst.stat().st_size == e.bytes and index.sha(dst) == e.sha256:
+        path, size, digest = e.lands  # a packed phone file lands unpacked, under the plain name
+        dst, src = target_for(dest, path), root.joinpath(*e.path.parts)
+        have = on_laptop(dst)  # the laptop's copy, plain or packed after a day
+        if have is not None and size_of(dst) == size and index.sha(dst) == digest:
             rep.same.append(e)
             continue
-        if differs and e.modified_ms <= dst.stat().st_mtime_ns // 1_000_000:
+        if have is not None and e.modified_ms <= have.stat().st_mtime_ns // 1_000_000:
             rep.kept.append(e)  # the laptop's copy is as new or newer
             continue
         if not src.is_file():
             rep.missing.append(e)
             continue
         tmp = None if dry_run else dst.with_name(dst.name + ".importing")
-        if not copy_checked(src, tmp, e):
+        if not (unpack_checked if e.original else copy_checked)(src, tmp, e):
             rep.damaged.append(e)
             continue
-        if differs:
+        if have is not None:
             rep.updated.append(e)
             rep.replaced_dir = replaced
             if not dry_run:
-                old = replaced / dst.relative_to(dest)
+                old = replaced / have.relative_to(dest)
                 old.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(dst, old)
+                shutil.move(have, old)
         else:
             rep.new.append(e)
         if tmp is not None:
             os.replace(tmp, dst)
             ns = e.modified_ms * 1_000_000
             os.utime(dst, ns=(ns, ns))
-            index.put(dst, e.sha256)
+            index.put(dst, digest)
     rep.extra = extra_files(root, {e.path for e in entries})
     if not dry_run:
         _record(rep, root, dest, now)

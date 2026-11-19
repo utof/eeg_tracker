@@ -26,20 +26,27 @@ Raw files (.f32 .idx .log .markers.jsonl: the recorders only ever append to them
 bytes intact "grew"; any other change to one is a PROBLEM, as are a file whose bytes changed under the same size and
 time ("damaged", --check) and a raw file gone ("missing", said on every run until it is back). Reports, charts and
 BDFs are rebuilt by the scripts, so a new copy of one is only "rebuilt". Exit status 1 when there is a PROBLEM.
-Read-only on the data: it never deletes, moves or compresses a recording or a report. Standard library only.
+
+A raw .f32 packed after a day (<stamp>.f32.xz, scripts/pack_old.py and packed.py) is listed under its own name with
+its own size and SHA-256 (so `sha256sum -c` of the sidecar still works) and, in catalog.json, `original`: the path,
+bytes and SHA-256 of the .f32 it holds, read from the xz file's end. A .f32 that became a .f32.xz holding the same
+bytes is "packed", not missing; holding other bytes it is a PROBLEM ("changed"). --check unpacks every packed file
+and compares what comes out with `original` ("damaged" when it differs or does not unpack).
+Read-only on the data: it never deletes, moves or packs a recording or a report. Standard library only.
 """
 from __future__ import annotations
 
-import argparse, hashlib, json, os, re, sys
+import argparse, hashlib, json, lzma, os, re, sys
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import night_files as nf  # noqa: E402
+import packed  # noqa: E402
 
 FORMAT, VERSION = "eeg-tracker-catalog", 1
-RAW = (".f32", ".idx", ".log", ".markers.jsonl")
+RAW = (".f32", packed.PACKED, ".idx", ".log", ".markers.jsonl")
 LAPTOP_REPORT = (".report.json", ".sleep.json", ".hypnogram.png", ".bdf")  # scripts/sleep_report.py's files
 MORNING_WITHIN_S = 12 * 3600
 DIY = "recordings-diy"
@@ -75,7 +82,7 @@ def phone_recordings(local: Path) -> set[str]:
         for f in (_json(m) or {}).get("files") or []:
             p = f.get("path") if isinstance(f, dict) else None
             if isinstance(p, str) and p.startswith("recordings/") and p.count("/") == 1:
-                names.add(p.split("/", 1)[1])
+                names.add(p.split("/", 1)[1].removesuffix(".gz"))  # the phone's packed form names its .f32
     return names
 
 
@@ -126,9 +133,9 @@ def _recording_nights(local: Path, phone: set[str], folder: str = "recordings", 
         key = n.name + "-diy" if diy else n.name
         row["id"] = key
         rows[key], stems[key] = row, [r.path.stem for r in n.recs]
-    for p in where.glob("*.f32"):
+    for p in packed.raw_files(where):
         t = nf.stamp_time(p)
-        if t is not None and p.stat().st_size < nf.REC_BYTES:
+        if t is not None and packed.size(p) < nf.REC_BYTES:
             near = [d for d, r in rows.items() if r["start"] <= t < r["end"] + nf.CHAIN_GAP_S]
             if near:
                 stems[max(near)].append(p.stem)
@@ -173,7 +180,8 @@ def nights_on(local: Path) -> list[dict]:
 def _attach_mornings(local: Path, rows: list[dict]) -> None:
     """A check-in belongs to the night recorded in its `source` file, else to the last night that started before it
     and ended at most 12 hours before it. The phone's keep their raw signal beside them in phone/mornings/."""
-    by_file = {Path(rel).name: row for row in rows for rel, kind in row["paths"] if rel.endswith(".f32")}
+    by_file = {Path(rel).name.removesuffix(packed.SUFFIX): row for row in rows for rel, kind in row["paths"]
+               if rel.endswith((packed.RAW, packed.PACKED))}
     found = [(p, f"recordings/{p.name}") for p in sorted((local / "recordings").glob("*.morning.json"))]
     found += [(p, f"phone/mornings/{p.name}") for p in sorted((local / "phone" / "mornings").glob("*.morning.json"))]
     for p, rel in found:
@@ -193,13 +201,13 @@ def _attach_mornings(local: Path, rows: list[dict]) -> None:
                 _add(local, row, f"phone/mornings/{src[:-4]}{suffix}", "raw")
 
 
-def digest(path: Path, size: int, prefix: int | None = None) -> tuple[str, str | None]:
+def digest(path: Path, size: int, prefix: int | None = None, unpack: bool = False) -> tuple[str, str | None]:
     """SHA-256 of the file's first `size` bytes (a recording may grow while it is read) and, when asked, of its
-    first `prefix` bytes, in one read."""
+    first `prefix` bytes, in one read. With [unpack], of a packed file's original bytes."""
     h, pre, done = hashlib.sha256(), None, 0
     if prefix == 0:
         pre = h.hexdigest()
-    with open(path, "rb") as f:
+    with (packed.open_raw(path) if unpack else open(path, "rb")) as f:
         while done < size:
             want = min(CHUNK, size - done)
             if prefix is not None and done < prefix < done + want:
@@ -233,7 +241,61 @@ def _compare(path: Path, kind: str, st: os.stat_result, prev: dict | None, gone:
     return sha, "rebuilt"
 
 
+def _content(f: dict | None) -> tuple[int, str] | None:
+    """(bytes, SHA-256) of what a catalog file row holds: for a packed file, its original's."""
+    if f is None:
+        return None
+    o = f.get("original")
+    return (o["bytes"], o["sha256"]) if isinstance(o, dict) else (f["bytes"], f["sha256"])
+
+
+def _twin(rel: str) -> str | None:
+    """The other form of a raw .f32's path: packed for plain, plain for packed."""
+    if rel.endswith(packed.PACKED):
+        return rel[:-len(packed.SUFFIX)]
+    return rel + packed.SUFFIX if rel.endswith(packed.RAW) else None
+
+
+def _compare_packed(path: Path, rel: str, st: os.stat_result, prev: dict | None, gone: dict | None,
+                    check: bool) -> tuple[str, dict | None, str | None]:
+    """A packed raw file's own SHA-256, what it holds (`original`: path, bytes, SHA-256 of the .f32) and what happened
+    to it since the last catalog. With [check] it is unpacked whole and what comes out is hashed."""
+    if prev and not check and prev["bytes"] == st.st_size and prev["mtime_ns"] == st.st_mtime_ns \
+            and isinstance(prev.get("original"), dict):
+        return prev["sha256"], prev["original"], None
+    sha, _ = digest(path, st.st_size)
+    try:
+        o = packed.unpacked(path) if check else packed.info(path)
+        if o.sha256 is None:  # not packed by pack_old.py: its check is not a SHA-256
+            o = packed.unpacked(path)
+    except (OSError, lzma.LZMAError, EOFError):
+        return sha, (prev or {}).get("original"), "damaged"
+    original = dict(path=rel[:-len(packed.SUFFIX)], bytes=o.bytes, sha256=o.sha256)
+    old = prev or gone
+    if old is None:
+        return sha, original, "new"
+    if _content(old) == (o.bytes, o.sha256):
+        return sha, original, "back" if prev is None else None
+    if prev and prev["bytes"] == st.st_size and prev["mtime_ns"] == st.st_mtime_ns:
+        return sha, original, "damaged"
+    return sha, original, "changed"
+
+
+def _form_changed(path: Path, rel: str, twin: dict, content: tuple[int, str]) -> str:
+    """A raw .f32 that was plain at the last catalog and is packed now (or the other way round): "packed" or
+    "unpacked" when it holds the same bytes, "grew" when the earlier bytes are its start, else "changed"."""
+    if _content(twin) == content:
+        return "packed" if rel.endswith(packed.SUFFIX) else "unpacked"
+    before = _content(twin)
+    if before and before[0] <= content[0]:
+        _, pre = digest(path, content[0], before[0], unpack=rel.endswith(packed.SUFFIX))
+        if pre == before[1]:
+            return "grew"
+    return "changed"
+
+
 PROBLEMS = ("damaged", "changed", "missing")
+QUIET = ("new", "packed")  # counted, not listed one by one
 
 
 def build(local: Path, previous: dict | None, check: bool, now: datetime) -> tuple[dict, list[tuple[str, str, str]]]:
@@ -247,13 +309,25 @@ def build(local: Path, previous: dict | None, check: bool, now: datetime) -> tup
         for rel, kind in sorted(set(row.pop("paths"))):
             p = local / rel
             st = p.stat()
-            sha, what = _compare(p, kind, st, old.get(rel), gone.get(rel), check)
+            original = None
+            if kind == "raw" and rel.endswith(packed.PACKED):
+                sha, original, what = _compare_packed(p, rel, st, old.get(rel), gone.get(rel), check)
+            else:
+                sha, what = _compare(p, kind, st, old.get(rel), gone.get(rel), check)
+            twin = old.get(_twin(rel) or "") or gone.get(_twin(rel) or "") if kind == "raw" else None
+            if what in ("new", "back") and twin is not None:
+                content = (original["bytes"], original["sha256"]) if original else (st.st_size, sha)
+                what = _form_changed(p, rel, twin, content)
             if what:
                 events.append((what, rel, row["id"]))
-            files.append(dict(path=rel, bytes=st.st_size, mtime_ns=st.st_mtime_ns, sha256=sha, kind=kind))
+            f = dict(path=rel, bytes=st.st_size, mtime_ns=st.st_mtime_ns, sha256=sha, kind=kind)
+            if original:
+                f["original"] = original
+            files.append(f)
         row.update(files=len(files), bytes=sum(f["bytes"] for f in files), file_list=files,
                    start=_iso(row["start"]), end=_iso(row["end"]))
     listed = {f["path"] for r in rows for f in r["file_list"]}
+    listed |= {t for p in list(listed) if (t := _twin(p)) and (local / p).exists()}  # either form of a raw .f32
     before = dict(gone)  # raw files already missing last time, then everything the last catalog listed
     for n in (previous or {}).get("nights", []):
         for f in n.get("file_list", []):
@@ -308,6 +382,11 @@ def table(cat: dict, local: Path, others: list[Path]) -> list[str]:
                    f"{'yes' if n['morning'] else 'no'}{note}")
     out.append(f"not in any night: {len(others)} files, {sum(p.stat().st_size for p in others) / 1e6:.1f} MB"
                + (f" ({_names([str(p.relative_to(local)) for p in others])})" if others else ""))
+    packs = [f for n in rows for f in n["file_list"] if isinstance(f.get("original"), dict)]
+    if packs:
+        out.append(f"packed after a day (scripts/pack_old.py): {len(packs)} raw files, "
+                   f"{sum(f['bytes'] for f in packs) / 1e6:.1f} MB on disk for "
+                   f"{sum(f['original']['bytes'] for f in packs) / 1e6:.1f} MB of signal")
     return out
 
 
@@ -321,7 +400,7 @@ def changes(events: list[tuple[str, str, str]], previous: dict | None, check: bo
     out = [f"{head} the last catalog ({previous.get('made', '?')}): "
            + (", ".join(f"{v} {k}" for k, v in sorted(counts.items())) or "nothing changed")]
     for what, path, night in events:
-        if what != "new":
+        if what not in QUIET:
             out.append(f"{'PROBLEM: ' if what in PROBLEMS else ''}{what}: {path} (night {night})")
     return out
 
@@ -346,10 +425,11 @@ def save(cat: dict, out: Path, summary: list[str], events: list[tuple[str, str, 
         if p.name[:-len(".sha256")] not in per:
             p.unlink()
     with open(out / "history.log", "a", encoding="utf-8") as h:
+        packs = sum(1 for e in events if e[0] == "packed")
         h.write(f"{cat['made']} {len(cat['nights'])} nights, {sum(n['files'] for n in cat['nights'])} files, "
-                f"{sum(1 for e in events if e[0] == 'new')} new" + "".join(
+                f"{sum(1 for e in events if e[0] == 'new')} new" + (f", {packs} packed" if packs else "") + "".join(
                     f"\n  {'PROBLEM: ' if what in PROBLEMS else ''}{what}: {path} (night {night})"
-                    for what, path, night in events if what != "new") + "\n")
+                    for what, path, night in events if what not in QUIET) + "\n")
 
 
 def main(argv: list[str] | None = None, out: Callable[[str], object] = print) -> int:

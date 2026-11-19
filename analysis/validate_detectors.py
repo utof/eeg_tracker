@@ -25,7 +25,9 @@ from typing import Any
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(1, str(Path(__file__).resolve().parents[1] / "scripts"))
 import eeg_detectors as det  # noqa: E402
+import packed  # noqa: E402  (scripts/packed.py: a recording packed after a day, <stamp>.f32.xz, reads the same)
 
 Floats = det.Floats
 
@@ -176,8 +178,8 @@ def per_stage(bdf: Path, sleep: Path) -> dict[str, Any]:
 
 def load_run(f32: Path) -> tuple[Floats, det.Bools]:
     """A recorder run: <I4f records (packet, O1 O2 T3 T4 in volts). Lost packets (a skip in the packet
-    number) are filled with the last value and marked missing, as `to_bdf.py` does for gaps."""
-    raw = f32.read_bytes()
+    number) are filled with the last value and marked missing, as `to_bdf.py` does for gaps. Plain or packed."""
+    raw = packed.read_bytes(f32)
     n = len(raw) // 20
     rec = np.frombuffer(raw[: n * 20], dtype=np.dtype([("p", "<u4"), ("x", "<f4", (4,))]))
     pack = rec["p"].astype(np.int64)

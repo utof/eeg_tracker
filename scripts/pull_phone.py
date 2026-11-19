@@ -21,6 +21,11 @@ the list Export data's manifest holds) and fetches what the laptop lacks, into t
   `<dest>/phone/replaced/<time>/`; otherwise the laptop's copy is left alone. Nothing is ever deleted, on either side.
 - `<dest>/phone/pull-state.json` remembers the partial copies, `<dest>/phone/pulls.jsonl` gets a line per pass that
   fetched something or found a problem. A later import_phone.py of the same files finds them "already here".
+- Packed raw files (DECISIONS 540-549): the phone lists a night it packed after a day as `recordings/<stamp>.f32.gz`
+  with its `original` (the `.f32`'s path, bytes and SHA-256). It is "already here" when the laptop holds that `.f32`,
+  plain or packed (`.f32.xz`, scripts/pack_old.py), so a night is never fetched twice because the phone renamed it;
+  otherwise it is fetched whole, checked as sent, unpacked, checked again and saved as the plain `.f32`. A copy the
+  laptop packed is compared by what it holds and never continued in place.
 
 A phone that does not answer (asleep, out of Wi-Fi, sharing off) is tried again at the next pass. Exit status with
 --once: 0 everything listed is on the laptop (growing files up to their listed size), 1 something is damaged or the
@@ -36,10 +41,11 @@ from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # find import_phone.py even under `python3 -I`
 import import_phone as ip  # noqa: E402  (the layout, the index of copies and the path check are its own)
+import packed  # noqa: E402  (raw files packed after a day: the phone's .f32.gz, the laptop's .f32.xz)
 
 FORMAT = "eeg-tracker-phone-files"
 VERSION = 1
-RAW = (".f32", ".idx", ".log", ".markers.jsonl")
+RAW = (".f32", ".f32.gz", ".idx", ".log", ".markers.jsonl")
 LIST_TIMEOUT = 600  # the phone may be working out SHA-256 of files it never listed before
 FILE_TIMEOUT = 60
 
@@ -58,6 +64,13 @@ class Listed:
     bytes: int
     sha256: str | None  # None while the phone is still writing the file
     modified_ms: int
+    original: ip.Original | None = None  # set for the phone's packed form (`.f32.gz`)
+
+    @property
+    def lands(self) -> tuple[PurePosixPath, int, str | None]:
+        """Path, bytes and SHA-256 of what lands on the laptop: the plain file, also for a packed one."""
+        o = self.original
+        return (o.path, o.bytes, o.sha256) if o else (self.path, self.bytes, self.sha256)
 
 
 @dataclass
@@ -131,11 +144,16 @@ class Phone:
             size, digest, mod = f.get("bytes"), f.get("sha256"), f.get("modified_ms")
             ok_digest = digest is None or (isinstance(digest, str) and len(digest) == 64
                                            and all(c in "0123456789abcdef" for c in digest))
+            try:
+                orig = ip.original_of(p, f.get("original"))
+            except (ValueError, ip.ManifestError):
+                orig = None
+                ok_digest = False
             if not (isinstance(size, int) and size >= 0 and isinstance(mod, int) and ok_digest) or p in seen:
                 bad.append(str(p))
                 continue
             seen.add(p)
-            out.append(Listed(p, size, digest, mod))
+            out.append(Listed(p, size, digest, mod, orig))
         return out, bad
 
     def fetch(self, path: PurePosixPath, start: int, end: int, out, digest=None) -> int:
@@ -173,9 +191,10 @@ class State:
             self.partial, self.raw = {}, {}
 
     def checked(self, e: "Listed") -> None:
-        self.partial.pop(str(e.path), None)
-        if is_raw(e.path):
-            self.raw[str(e.path)] = e.bytes
+        path, size, _ = e.lands
+        self.partial.pop(str(path), None)
+        if is_raw(path):
+            self.raw[str(path)] = size
 
     def save(self) -> None:
         self.file.parent.mkdir(parents=True, exist_ok=True)
@@ -218,23 +237,88 @@ def _whole(phone: Phone, e: Listed, dst: Path) -> bool:
         tmp.unlink(missing_ok=True)
 
 
-def _replace(phone: Phone, e: Listed, dst: Path, old: Path, rep: Pass, index: ip.Index) -> bool:
-    """The phone's checked copy takes the place of the laptop's, which moves to [old]; if the phone's does not
-    arrive whole, the laptop's copy goes back where it was."""
+def _whole_packed(phone: Phone, e: Listed, dst: Path) -> bool:
+    """The phone's packed form (`.f32.gz`): fetched whole and checked as sent, unpacked and checked against its
+    `original`; True when the plain file now stands at [dst]."""
+    assert e.original is not None and e.sha256 is not None
+    gz, tmp = dst.with_name(dst.name + ".gz.pulling"), dst.with_name(dst.name + ".pulling")
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with gz.open("wb") as out:
+            n = phone.fetch(e.path, 0, e.bytes, out)
+        if n != e.bytes:
+            return False
+        with gz.open("rb") as r, tmp.open("wb") as out:
+            ok = packed.gunzip_checked(r, out, packed.Original(e.bytes, e.sha256),
+                                       packed.Original(e.original.bytes, e.original.sha256))
+            out.flush()
+            os.fsync(out.fileno())
+        if not ok:
+            return False
+        os.replace(tmp, dst)
+        _set_time(dst, e.modified_ms)
+        return True
+    finally:
+        gz.unlink(missing_ok=True)
+        tmp.unlink(missing_ok=True)
+
+
+def _replace(phone: Phone, e: Listed, dst: Path, old: Path, rep: Pass, index: ip.Index, *, have: Path | None = None,
+             whole: Callable[[Phone, Listed, Path], bool] = _whole) -> bool:
+    """The phone's checked copy takes the place of the laptop's ([have], else [dst]), which moves to [old]; if the
+    phone's does not arrive whole, the laptop's copy goes back where it was."""
+    have = have or dst
+    path, _, digest = e.lands
     old.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(dst, old)
+    shutil.move(have, old)
     ok = False
     try:
-        ok = _whole(phone, e, dst)
+        ok = whole(phone, e, dst)
     finally:
         if not ok:
-            shutil.move(old, dst)
+            shutil.move(old, have)
     if ok:
-        index.put(dst, e.sha256); rep.updated.append(str(e.path)); rep.fetched += e.bytes
+        index.put(dst, str(digest)); rep.updated.append(str(path)); rep.fetched += e.bytes
         rep.replaced_dir = old.parents[len(dst.relative_to(index.dest).parts) - 1]
     else:
-        rep.damaged.append(str(e.path))
+        rep.damaged.append(str(path))
     return ok
+
+
+def _pull_packed(phone: Phone, e: Listed, dest: Path, index: ip.Index, state: State, rep: Pass,
+                 replaced: Path) -> None:
+    """A raw file packed on either side (the phone's `.f32.gz`, or the laptop's `.f32.xz` after a day): compared by
+    what it holds; fetched whole when the laptop lacks it or holds another copy that the phone changed later, or that
+    is this script's own unfinished one (a packed file is never continued in place)."""
+    path, size, digest = e.lands
+    key, dst = str(path), ip.target_for(dest, path)
+    whole = _whole_packed if e.original else _whole
+    have = ip.on_laptop(dst)
+    if digest is None or e.sha256 is None:
+        rep.waiting.append(key)  # the phone is still writing it, or could not read it whole this time
+        return
+    if have is None:
+        if whole(phone, e, dst):
+            rep.new.append(key); rep.fetched += e.bytes
+            state.checked(e); index.put(dst, digest)
+        else:
+            rep.damaged.append(key)
+        return
+    have_bytes = ip.size_of(dst)
+    if have_bytes == size and index.sha(dst) == digest:
+        if key in state.partial:
+            rep.checked.append(key)
+        else:
+            rep.same += 1
+        state.checked(e)
+        return
+    ours = key in state.partial or state.raw.get(key) == have_bytes
+    if not ours and e.modified_ms <= have.stat().st_mtime_ns // 1_000_000:
+        rep.kept.append(key)  # the laptop's copy is as new or newer
+        return
+    state.partial.pop(key, None); state.raw.pop(key, None)
+    if _replace(phone, e, dst, replaced / have.relative_to(dest), rep, index, have=have, whole=whole):
+        state.checked(e)
 
 
 def pull(phone: Phone, dest: Path, *, raw_only: bool = False, now: datetime | None = None) -> Pass:
@@ -251,6 +335,9 @@ def pull(phone: Phone, dest: Path, *, raw_only: bool = False, now: datetime | No
             key, dst = str(e.path), ip.target_for(dest, e.path)
             if e.sha256 is None:
                 rep.growing += 1
+            if e.original is not None or packed.is_packed(ip.on_laptop(dst) or dst):
+                _pull_packed(phone, e, dest, index, state, rep, replaced)
+                continue
             if not dst.is_file():
                 if _whole(phone, e, dst):
                     rep.new.append(key); rep.fetched += e.bytes
