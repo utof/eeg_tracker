@@ -29,6 +29,10 @@ breaks people chose themselves. So the hints are soft, rare and easy to ignore, 
   `_local/export/events/<dev>/breaks-YYYY-MM.jsonl` ([data format](data-format.md#break_hint)), so later
   statistics can ask whether breaks change anything for you. Nothing leaves the laptop.
 
+**The laptop tray** (`python3 scripts/tray.py`, [laptop-tray.md](laptop-tray.md)) gives these same hints, with the
+same code and the same diary, but only during a work session, and adds the sessions themselves. Run the tray or
+this service, not both.
+
 ## Try it
 
 ```bash

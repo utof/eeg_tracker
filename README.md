@@ -63,6 +63,9 @@ Each line says what it does. In brackets: how well the research backs it **for t
 - **Recorder** for the BrainBit (`scripts/record_night.sh`) with live check pages, **sleep report** and **morning
   check-in** pages, a Lab Streaming Layer bridge, and **brain-reactive sound** (a bench for the phone's version).
 - **Break hints** from ActivityWatch with no headband (`scripts/break_hints.py`). (some)
+- **Work sessions in the tray** (`python3 scripts/tray.py`): an icon in the panel notices when you start working
+  (it asks first, or starts by itself when sure, or only when you press Start), counts breaks, ends the session
+  after 30 min away, and gives the break hints; one file per session. ([docs/laptop-tray.md](docs/laptop-tray.md))
 - **Tools for the phone's files**: `import_phone.py`, `phone_night_check.py`, `catalog.py`, `pull_phone.py`
   (below).
 - **The same scoring and detectors in Python**: the phone's rules were written and checked there first (`analysis/`).
