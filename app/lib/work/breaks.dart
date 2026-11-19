@@ -1,17 +1,23 @@
 // The work session's break hints (ROADMAP row 35, DECISIONS 443-445): the laptop's break-hint rules
 // (docs/break-hints.md, scripts/break_hints.py) on the time the headband is worn, plus a hint when drowsiness stays up.
 //
-// - Worn time counts while the headband sends a usable signal and you are not on a break. The headband off (or no
-//   usable signal) under 5 minutes only pauses the count; 5 minutes or more is a break from the moment it went off.
+// - Worn time counts while the headband sends a usable signal and you are not on a break (on a monotonic clock when
+//   the caller gives one, so a change of the phone's clock is not worn time). The headband off (or no usable signal)
+//   under 5 minutes only pauses the count; 5 minutes or more is a break from the moment it went off.
 //   "On a break" / "Back" taps make a break too; one of 5 minutes or more resets the stretch, a shorter one pauses.
+//   A tapped break whose Back was forgotten ends by itself: once the headband was off for a minute or more during it
+//   and has then been worn 2 minutes (it ends when it came back), or after 20 minutes' worth of readable half
+//   minutes with the headband on.
 // - A hint after 60 worn minutes in a stretch; each of today's hints that no break followed adds 15 minutes (counted
 //   once it was snoozed or its 30-minute window closed).
 // - A hint when the drowsiness level read getting drowsy or drowsy in 8 of the last 12 epochs (6 minutes), or the
-//   eyes were closed in 6 of them.
+//   eyes were closed in 6 of them; only epochs since the last break count (none from before or during one).
 // - At most 4 hints a day (a day runs 04:00 to 04:00, earlier sessions included), at least 45 minutes apart, none in
-//   the quiet hours 23:00-08:00. Snooze brings one hint back 20 minutes later (the spacing does not apply; a break
-//   cancels it). A break of 5 minutes or more that starts within 30 minutes of a hint marks it "break taken".
-// - Each break keeps the drowsiness median just before it and over the first 5 minutes after it.
+//   the quiet hours 23:00-08:00. Snooze brings one hint back 20 minutes later (the spacing does not apply; a break of
+//   5 minutes or more cancels it). A break of 5 minutes or more that starts within 30 minutes of a hint marks it
+//   "break taken". A hint is answered only within those 30 minutes.
+// - Each break keeps the drowsiness median just before it (for the headband off: before it went off) and over the
+//   first 5 minutes after it.
 // Pure: no clock of its own, no files.
 import 'dart:math' as math;
 
@@ -26,6 +32,11 @@ abstract final class BreakRule {
 
   /// After a break: the drowsiness median once this many epochs have passed (the level's own 5-minute window).
   static const int afterEpochs = 10, afterMaxEpochs = 20;
+
+  /// A tapped break ends by itself (Back forgotten): the headband off at least [autoOffMin] during it, then worn
+  /// [autoWornMin] (the break ends when it came back); or [autoReadEpochs] readable half minutes (20 minutes) of it.
+  static const double autoOffMin = 1, autoWornMin = 2;
+  static const int autoReadEpochs = 40;
 }
 
 enum HintReason { stretch, drowsy, eyesClosed, snooze }
@@ -33,6 +44,9 @@ enum HintReason { stretch, drowsy, eyesClosed, snooze }
 enum HintAnswer { onBreak, snoozed, notNow }
 
 enum BreakSource { tapped, headbandOff }
+
+/// How a break ended: Back tapped, by itself after a forgotten Back, the signal back after a headband-off break, Stop.
+enum BreakEnd { back, auto, signal, stop }
 
 /// The 04:00-to-04:00 day a moment belongs to.
 DateTime workDay(DateTime t) {
@@ -94,6 +108,7 @@ class WorkBreak {
   final DateTime start;
   final BreakSource source;
   DateTime? end;
+  BreakEnd? endSource;
 
   /// The drowsiness median just before, and over the first 5 minutes after (null: not known).
   final double? before;
@@ -111,6 +126,7 @@ class WorkBreak {
     'start': start.toIso8601String(),
     'end': end?.toIso8601String(),
     'source': source.name,
+    'end_source': endSource?.name,
     'before': before == null ? null : (before! * 1000).round() / 1000,
     'before_level': beforeLevel == null ? null : levelKey(beforeLevel!),
     'after': after == null ? null : (after! * 1000).round() / 1000,
@@ -131,8 +147,11 @@ class WorkRating {
 }
 
 class BreakPlanner {
-  /// [earlier]: hints of earlier sessions (any days; only today's count).
-  BreakPlanner({List<WorkHint> earlier = const []}) : _earlier = List.of(earlier);
+  /// [earlier]: hints of earlier sessions (any days; only today's count). [carriedStretchMin]: the stretch of a session
+  /// that ended under 5 minutes before this one began (a restart is not a break).
+  BreakPlanner({List<WorkHint> earlier = const [], double carriedStretchMin = 0})
+    : _earlier = List.of(earlier),
+      stretchS = carriedStretchMin * 60;
 
   final List<WorkHint> _earlier;
   final List<WorkHint> hints = [];
@@ -140,14 +159,29 @@ class BreakPlanner {
   final List<WorkRating> ratings = [];
 
   /// Worn seconds in all, and in the stretch since the last break that counted.
-  double activeS = 0, stretchS = 0;
+  double activeS = 0;
+  double stretchS;
   DateTime? _last;
+  Duration? _lastMono;
   DateTime? _offSince;
   DateTime? snoozeDue;
   WorkBreak? _open;
+
+  /// The epochs since the last break (none from before or during one), for the drowsiness hints.
   final List<DrowsyLevel> _levels = [];
   final List<bool> _closed = [];
   double? _window;
+  DrowsyLevel? _lastLevel;
+
+  /// The level when the headband went off (a headband-off break's "before").
+  double? _offWindow;
+  DrowsyLevel? _offLevel;
+
+  /// A tapped break: since when the headband is off now, whether it was off long enough, since when it is back on,
+  /// and its readable epochs.
+  DateTime? _breakOffSince, _breakBackAt;
+  bool _breakWasOff = false;
+  int _breakRead = 0;
 
   bool get onBreak => _open != null;
   WorkBreak? get currentBreak => _open;
@@ -165,13 +199,18 @@ class BreakPlanner {
 
   /// Each 30 s epoch of the drowsiness level.
   void epoch(DrowsyLevel level, {required bool eyesClosed, double? window}) {
-    _levels.add(level);
-    _closed.add(eyesClosed);
-    if (_levels.length > BreakRule.recentEpochs) {
-      _levels.removeAt(0);
-      _closed.removeAt(0);
+    if (_open == null) {
+      _levels.add(level);
+      _closed.add(eyesClosed);
+      if (_levels.length > BreakRule.recentEpochs) {
+        _levels.removeAt(0);
+        _closed.removeAt(0);
+      }
+    } else if (_open!.source == BreakSource.tapped && level != DrowsyLevel.unknown && !eyesClosed) {
+      _breakRead++;
     }
     if (window != null || level == DrowsyLevel.unknown) _window = window;
+    _lastLevel = level;
     for (final b in breaks) {
       if (b.end == null || b.after != null || b._epochsAfter >= BreakRule.afterMaxEpochs) continue;
       b._epochsAfter++;
@@ -193,21 +232,32 @@ class BreakPlanner {
     return BreakRule.firstMin + BreakRule.backoffMin * n;
   }
 
-  /// Call every few seconds. [worn]: the headband sends a usable signal now. Returns a hint to show, if any.
-  WorkHint? tick(DateTime now, {required bool worn}) {
-    final last = _last;
-    final dt = last == null ? 0.0 : math.max(0, now.difference(last).inMilliseconds / 1000).toDouble();
+  /// Call every few seconds. [worn]: the headband sends a usable signal now. [mono]: a monotonic clock's reading
+  /// (only differences count), for the worn time; without it the wall clock [now] is used. Returns a hint to show.
+  WorkHint? tick(DateTime now, {required bool worn, Duration? mono}) {
+    final last = _last, lastMono = _lastMono;
+    final step = mono != null && lastMono != null ? (mono - lastMono).inMilliseconds : last == null ? 0 : now.difference(last).inMilliseconds;
+    final dt = math.max(0, step / 1000).toDouble();
     _last = now;
+    _lastMono = mono;
     final open = _open;
     if (open != null) {
-      if (open.source == BreakSource.headbandOff && worn) _close(now);
+      if (open.source == BreakSource.headbandOff) {
+        if (worn) _close(now, BreakEnd.signal);
+      } else {
+        _forgotten(now, worn, dt);
+      }
       return null;
     }
     if (!worn) {
+      if (_offSince == null) {
+        _offWindow = _window;
+        _offLevel = _lastLevel;
+      }
       final off = _offSince ??= now;
       if (now.difference(off).inMilliseconds / 60000 >= BreakRule.breakMin) {
         _offSince = null;
-        _begin(off, BreakSource.headbandOff);
+        _begin(off, BreakSource.headbandOff, before: _offWindow, beforeLevel: _offLevel);
       }
       return null;
     }
@@ -218,6 +268,27 @@ class BreakPlanner {
       stretchS += dt;
     }
     return _maybeHint(now);
+  }
+
+  /// A tapped break whose Back was forgotten: it ends by itself once the headband, off for a minute or more during
+  /// it, has been worn again for 2 minutes (then at the moment it came back, and those minutes are worn time), or
+  /// after 20 minutes' worth of readable half minutes of it.
+  void _forgotten(DateTime now, bool worn, double dt) {
+    if (!worn) {
+      _breakBackAt = null;
+      final off = _breakOffSince ??= now;
+      if (now.difference(off).inMilliseconds / 60000 >= BreakRule.autoOffMin) _breakWasOff = true;
+      return;
+    }
+    _breakOffSince = null;
+    if (_breakRead >= BreakRule.autoReadEpochs) return _close(now, BreakEnd.auto);
+    if (!_breakWasOff) return;
+    final back = _breakBackAt ??= now;
+    final wornS = now.difference(back).inMilliseconds / 1000;
+    if (wornS < BreakRule.autoWornMin * 60) return;
+    _close(back, BreakEnd.auto);
+    activeS += wornS;
+    stretchS += wornS;
   }
 
   WorkHint? _maybeHint(DateTime now) {
@@ -251,21 +322,24 @@ class BreakPlanner {
     return h;
   }
 
-  /// The answer to the newest hint: On a break starts one, Snooze brings it back in 20 minutes.
+  /// The answer to the newest hint, within its 30 minutes (a later one answers nothing): On a break starts one
+  /// (also without a hint to answer), Snooze brings it back in 20 minutes.
   void answer(HintAnswer a, DateTime now) {
-    if (hints.isEmpty) return;
-    final h = hints.last
-      ..answer = a
-      ..answeredAt = now;
+    final h = hints.lastOrNull;
+    final fresh = h != null && now.difference(h.at).inMilliseconds / 60000 <= BreakRule.takenWindowMin;
+    if (fresh) {
+      h
+        ..answer = a
+        ..answeredAt = now;
+    }
     switch (a) {
       case HintAnswer.onBreak:
         startBreak(now);
       case HintAnswer.snoozed:
-        snoozeDue = now.add(Duration(seconds: (BreakRule.snoozeMin * 60).round()));
+        if (fresh) snoozeDue = now.add(Duration(seconds: (BreakRule.snoozeMin * 60).round()));
       case HintAnswer.notNow:
         break;
     }
-    assert(identical(h, hints.last));
   }
 
   /// "On a break" tapped (or a hint answered so).
@@ -275,25 +349,40 @@ class BreakPlanner {
     _last = now;
   }
 
-  void _begin(DateTime at, BreakSource source) {
-    snoozeDue = null;
-    final b = WorkBreak(start: at, source: source, before: _window, beforeLevel: _levels.isEmpty ? null : _levels.last);
+  void _begin(DateTime at, BreakSource source, {double? before, DrowsyLevel? beforeLevel}) {
+    final tapped = source == BreakSource.tapped;
+    final b = WorkBreak(start: at, source: source, before: tapped ? _window : before, beforeLevel: tapped ? _lastLevel : beforeLevel);
     breaks.add(b);
     _open = b;
+    _forget();
+    _breakOffSince = null;
+    _breakBackAt = null;
+    _breakWasOff = false;
+    _breakRead = 0;
   }
 
-  /// "Back" tapped (a headband-off break ends by itself when the signal comes back).
-  void endBreak(DateTime now) {
+  /// The drowsiness hints count only epochs since the last break.
+  void _forget() {
+    _levels.clear();
+    _closed.clear();
+  }
+
+  /// "Back" tapped (a headband-off break ends by itself when the signal comes back). [how]: Stop ends it too.
+  void endBreak(DateTime now, {BreakEnd how = BreakEnd.back}) {
     if (_open == null) return;
-    _close(now);
+    _close(now, how);
     _last = now;
   }
 
-  void _close(DateTime now) {
-    final b = _open!..end = now;
+  void _close(DateTime now, BreakEnd how) {
+    final b = _open!
+      ..end = now
+      ..endSource = how;
     _open = null;
     _offSince = null;
+    _forget();
     if (!b.counts) return;
+    snoozeDue = null;
     stretchS = 0;
     for (final h in hints) {
       final since = b.start.difference(h.at).inMilliseconds / 60000;
@@ -313,6 +402,7 @@ class BreakPlanner {
 
   Map<String, Object?> toJson() => {
     'active_min': (activeS / 6).round() / 10,
+    'stretch_min': (stretchS / 6).round() / 10,
     'hints': [for (final h in hints) h.toJson()],
     'breaks': [for (final b in breaks) b.toJson()],
     'ratings': [for (final r in ratings) r.toJson()],
