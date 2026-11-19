@@ -55,6 +55,45 @@ abstract interface class CueWatch {
 /// Makes tonight's cues when they are on, or null. Never throws past the recorder's guard: the guard catches.
 typedef CueFactory = CueWatch? Function(int nightStartMs);
 
+/// One kind of cue a night (the lucid and the memory cues never share a night: cues mixed in one night can cancel
+/// each other's effect, research 2026-11-18 pass 2): the first of [kinds] that is on tonight. A kind that throws ends
+/// the choice there (the recorder's guard logs it), so a second kind never runs because the first one failed to say
+/// it was on.
+CueFactory oneKindANight(List<CueFactory> kinds) => (nightStartMs) {
+  for (final make in kinds) {
+    final c = make(nightStartMs);
+    if (c != null) return c;
+  }
+  return null;
+};
+
+/// Cues that are on but cannot run tonight: one line in the night's markers, then nothing (no model, no record).
+class NoCuesTonight implements CueWatch {
+  NoCuesTonight(this.who, String line) : _line = line;
+  @override
+  final String who;
+  String? _line;
+
+  @override
+  void add(DateTime arrival, List<Sample> rows, {bool firstOfFile = false}) {}
+
+  @override
+  void check(DateTime now, {int? lightsOffMs, String? drift}) {}
+
+  @override
+  List<String> takeEvents() {
+    final l = _line;
+    _line = null;
+    return l == null ? const [] : [l];
+  }
+
+  @override
+  bool get finished => true;
+
+  @override
+  Future<void> close() async {}
+}
+
 /// One cue a rule let play: its second, its step (dB against the evening's loudness: up for the lucid cues, down for
 /// the memory cues) and its period (from 1).
 class RuleCue {

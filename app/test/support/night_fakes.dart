@@ -58,10 +58,11 @@ Future<Float32List> zeros(LiveWindow w) async => Float32List(w.epochs * 3840 * 4
 final int startMs = DateTime(2026, 11, 25, 1).millisecondsSinceEpoch;
 
 /// Sample [i] in volts: a quiet back of the head, the temples held apart by a sideways eye movement each 20 s, back
-/// 1 s later (a burst of two movements); from [jawFrom] seconds on a little jaw muscle each 7 s.
-Sample sampleAt(int i, {double? jawFromS}) {
+/// 1 s later (a burst of two movements; none with [eyes] false, as in deep sleep); from [jawFrom] seconds on a little
+/// jaw muscle each 7 s.
+Sample sampleAt(int i, {double? jawFromS, bool eyes = true}) {
   final t = i / 250;
-  final inLook = t % 20 >= 10 && t % 20 < 11;
+  final inLook = eyes && t % 20 >= 10 && t % 20 < 11;
   final eye = inLook ? 60.0 : 0.0;
   var t3 = 20000 + eye + 2 * math.sin(i * 0.7), t4 = -15000 - eye + 2 * math.cos(i * 0.9);
   if (jawFromS != null && t >= jawFromS && t % 7 < 1) {
