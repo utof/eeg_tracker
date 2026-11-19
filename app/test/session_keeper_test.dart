@@ -1,4 +1,6 @@
 // The keeper that lets a session go on with the phone locked (DECISIONS rows 190-196), against a fake Android side.
+import 'dart:async';
+
 import 'package:eeg_tracker/session_keeper.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -75,10 +77,19 @@ void main() {
   });
 
   test('a release never overtakes the hold before it', () async {
+    final answered = Completer<List<String>>(); // Android is slow to answer the hold
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return call.method == 'hold' ? answered.future : null;
+    });
     final k = PhoneSessionKeeper();
     final held = k.hold(const KeepSpec(title: 'Relax'));
     final released = k.release();
-    await Future.wait([held, released]);
+    await pumpEventQueue();
+    expect(calls.map((c) => c.method), ['hold'], reason: 'the release waits until the hold is answered');
+    answered.complete(['headband', 'microphone']);
+    expect(await held, isTrue);
+    await released;
     expect(calls.map((c) => c.method), ['hold', 'release']);
   });
 }
