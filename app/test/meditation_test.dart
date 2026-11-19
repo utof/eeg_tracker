@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:eeg_tracker/detectors/detectors.dart' show EpochQuality;
+import 'package:eeg_tracker/dream/band_link.dart' show LinkTiming;
 import 'package:eeg_tracker/detectors/drift_off.dart';
 import 'package:eeg_tracker/feedback/demo.dart';
 import 'package:eeg_tracker/feedback/session.dart';
@@ -378,6 +379,23 @@ void main() {
     final tries = c.session!.log.info.where((i) => i['event'] == 'reconnect try').toList();
     expect([for (final t in tries) (t['try'], t['scan'], t['ok'])], [(1, false, false), (2, false, false), (3, true, false), (4, false, true)]);
     c.dispose();
+  });
+
+  test('the reconnect rules are the shared link\'s: the timing maps one to one, and the controller has no copy', () {
+    const t = MeditationTiming(), l = LinkTiming();
+    expect(
+      [t.link.scanFor, t.link.connectTimeout, t.link.sdkTimeout, t.link.contactFor, t.link.settle, t.link.restartStreamAfter, t.link.rescanFor],
+      [l.scanFor, l.connectTimeout, l.sdkTimeout, l.contactFor, l.settle, l.restartStreamAfter, l.rescanFor],
+      reason: 'the defaults are the link\'s',
+    );
+    expect(t.link.reconnectWaits, l.reconnectWaits);
+    const custom = MeditationTiming(contactFor: Duration(milliseconds: 7), reconnectWaits: [Duration(milliseconds: 9)]);
+    expect([custom.link.contactFor, custom.link.reconnectWaits], [const Duration(milliseconds: 7), const [Duration(milliseconds: 9)]]);
+    final source = File('lib/meditation/controller.dart').readAsStringSync();
+    expect(source, contains('BandLink('));
+    for (final own in ['connectDirect', 'rangeChanges', 'startResist', 'stopSignal', 'disconnectAndDispose']) {
+      expect(source, isNot(contains(own)), reason: 'no own copy of the headband rules ($own)');
+    }
   });
 
   test('a stream that never starts is restarted once after restartStreamAfter, then the session goes on', () async {

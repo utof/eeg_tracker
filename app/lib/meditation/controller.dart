@@ -3,8 +3,9 @@
 // Meditation is its own mode: it owns the headband connection while it runs, from the app's screen, and only
 // when no night is being recorded (the night recorder's service owns the headband during a night; a headband
 // takes one connection). The connection follows the night recorder's rules where they matter for 5-20
-// minutes: contact checked once at the start, no SDK call on a headband that went out of range, reconnect
-// straight to the same headband with a scan every third try, every SDK call with a deadline.
+// minutes (the shared headband link, dream/band_link.dart, DECISIONS 270): contact checked once at the start,
+// no SDK call on a headband that went out of range, reconnect straight to the same headband with a scan every
+// third try, every SDK call with a deadline.
 //
 // Time: the session length counts seconds of signal after calibration (the core's sample clock), so a drop
 // pauses the countdown instead of eating the session, and a test can run a session in a fraction of a second.
@@ -30,14 +31,15 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 
 import '../alphatheta/engine.dart';
+import '../dream/band_link.dart';
 import '../detectors/detectors.dart';
 import '../detectors/drift_off.dart';
 import '../detectors/gestures.dart';
-import '../feedback/features.dart' show channelNames, fs;
+import '../feedback/features.dart' show fs;
 import '../feedback/mapping.dart';
 import '../feedback/session.dart';
 import '../recorder/chunk_writer.dart' show Sample, fileStem;
-import '../recorder/headband.dart';
+import '../recorder/headband.dart' show HeadbandFinder;
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
 import '../handsfree/live.dart';
 import '../sound/feedback_sound.dart';
@@ -116,6 +118,18 @@ class MeditationTiming {
 
   /// After the end cue, before the sound stops.
   final Duration endRingOut;
+
+  /// The shared headband link's timing: these same fields (the reconnect rules are in dream/band_link.dart).
+  LinkTiming get link => LinkTiming(
+    scanFor: scanFor,
+    connectTimeout: connectTimeout,
+    sdkTimeout: sdkTimeout,
+    contactFor: contactFor,
+    settle: settle,
+    restartStreamAfter: restartStreamAfter,
+    reconnectWaits: reconnectWaits,
+    rescanFor: rescanFor,
+  );
 }
 
 class MeditationController extends ChangeNotifier {
@@ -191,7 +205,7 @@ class MeditationController extends ChangeNotifier {
   String comparison = '';
 
   /// A headband was left out of range (the finder must not dispose its scanner then).
-  bool get leftLost => _lostBands.isNotEmpty;
+  bool get leftLost => _link?.leftLost ?? false;
 
   /// Alpha-theta: the drift-off detector says probably asleep now, so the bed has faded.
   bool asleepGuard = false;
@@ -219,8 +233,7 @@ class MeditationController extends ChangeNotifier {
   @visibleForTesting
   Session? get session => _session;
 
-  Headband? _band;
-  final List<Headband> _lostBands = [];
+  BandLink? _link;
   SessionSound? _sound;
   Session? _session;
   AlphaThetaEngine? _engine;
@@ -236,8 +249,6 @@ class MeditationController extends ChangeNotifier {
   HandsFree? _hands;
   int _lostSamples = 0;
   DateTime? _startedAt;
-  StreamSubscription<List<Sample>>? _signalSub;
-  StreamSubscription<bool>? _rangeSub;
   Timer? _ticker;
   DateTime? _lastData;
   DateTime? _signalAt;
@@ -245,9 +256,7 @@ class MeditationController extends ChangeNotifier {
   int? _lastPack;
   int _closedFromN = 0;
   bool _gapPending = false;
-  bool _lost = false;
   bool _ended = false;
-  bool _restartedStream = false;
   bool _quiet = false;
   bool _disposed = false;
 
@@ -260,17 +269,21 @@ class MeditationController extends ChangeNotifier {
     _set(Stage.connecting, 'Looking for the headband.');
     try {
       await _prepareCheck(sessionLength);
-      final band = await finder
-          .find(timing.scanFor, onFound: (name, _) => _set(Stage.connecting, 'Found $name. Connecting.'))
-          .timeout(timing.scanFor + timing.connectTimeout);
-      if (band == null) {
+      final link = BandLink(
+        finder: finder,
+        timing: timing.link,
+        onBatch: _onBatch,
+        onEvent: _onLinkEvent,
+        onTry: _onTry,
+        clock: _now,
+      );
+      _link = link;
+      if (!await link.connect(onFound: (name) => _set(Stage.connecting, 'Found $name. Connecting.'))) {
         return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?');
       }
-      _band = band;
       if (_ended) return await _release();
-      _rangeSub = band.rangeChanges.listen(_onRange);
       _set(Stage.contact, 'Checking contact. Keep still for a few seconds.');
-      contact = await _checkContact(band);
+      contact = await link.contact();
       if (_ended) return await _release();
 
       SessionSound sound = kind == SessionKind.meditation ? MeditationSound(_makeSound()) : _makeAtSound();
@@ -292,7 +305,7 @@ class MeditationController extends ChangeNotifier {
       s.log.note({
         'app': 'eeg_tracker ${kind.name}',
         'lengthS': sessionLength.inSeconds,
-        'headband': band.name,
+        'headband': link.name,
         if (_slot != null) 'check': _checkInfo(),
       });
       _session = s;
@@ -305,8 +318,7 @@ class MeditationController extends ChangeNotifier {
       _startedAt = _now();
       calPhase = 'open';
       calSecondsLeft = Cal.openS.toInt();
-      _signalSub = band.signal.listen(_onBatch);
-      await _sdk(band.startSignal(), 'start signal');
+      await link.startSignal();
       _signalAt = _now();
       _ticker = Timer.periodic(timing.tick, (_) => _tick());
       _set(Stage.calibrating, '');
@@ -349,7 +361,7 @@ class MeditationController extends ChangeNotifier {
 
   void _reset(Duration sessionLength) {
     length = sessionLength;
-    _band = null;
+    _link = null;
     _session = null;
     _engine = null;
     _slot = null;
@@ -371,9 +383,7 @@ class MeditationController extends ChangeNotifier {
     _signalAt = null;
     _lastPack = null;
     _gapPending = false;
-    _lost = false;
     _ended = false;
-    _restartedStream = false;
     _quiet = false;
     chip = Moment.calibrating;
     calPhase = null;
@@ -385,35 +395,10 @@ class MeditationController extends ChangeNotifier {
     comparison = '';
   }
 
-  Future<T> _sdk<T>(Future<T> call, String what) => call.timeout(timing.sdkTimeout, onTimeout: () {
-    throw TimeoutException(what, timing.sdkTimeout);
-  });
-
-  /// The headband's resistance for [MeditationTiming.contactFor]: ohms per channel, null where it has none
-  /// (infinite), channels it did not report left out (unknown, not held against them).
-  Future<Map<String, double?>> _checkContact(Headband band) async {
-    final readings = <Map<String, double>>[];
-    final sub = band.resistance.listen(readings.add);
-    try {
-      await _sdk(band.startResist(), 'contact check');
-      await Future<void>.delayed(timing.contactFor);
-      await _sdk(band.stopResist(), 'contact check end');
-    } finally {
-      await sub.cancel();
-    }
-    await Future<void>.delayed(timing.settle);
-    if (readings.isEmpty) return const {};
-    final last = readings.last;
-    return {
-      for (final n in channelNames)
-        if (last.containsKey(n)) n: last[n]!.isFinite && !last[n]!.isNaN ? last[n] : null,
-    };
-  }
-
-  void _onBatch(List<Sample> batch) {
+  void _onBatch(DateTime now, List<Sample> batch) {
     final s = _session;
     if (s == null || _ended || batch.isEmpty) return;
-    final now = _now(), last = _lastData;
+    final last = _lastData;
     if (last != null && now.difference(last).inMicroseconds / 1e6 > gapPauseS + batch.length / fs) {
       _gapPending = true;
       _lostSamples = 0; // unknown length
@@ -557,76 +542,32 @@ class MeditationController extends ChangeNotifier {
         final t = mapState(z: null, jaw: null, quality: 'none', veto: null);
         _sound?.play((level: kind == SessionKind.meditation ? t.calm : AtRule.startMix, rough: 0, reward: null, gated: true));
       }
-      if (last == null && !_restartedStream && !_lost && quiet > timing.restartStreamAfter) {
-        _restartedStream = true;
-        unawaited(_restartStream());
-      }
     }
+    _link?.tick(); // the stream that never started is restarted once (after restartStreamAfter)
     _notify();
   }
 
-  /// No data since the start: stop and start the stream once (a stream right after a contact check once sent
-  /// nothing on the laptop; the night recorder restarts it the same way).
-  Future<void> _restartStream() async {
-    final band = _band;
-    if (band == null) return;
-    _session?.log.note({'event': 'stream restarted', 'n': _session?.n});
-    try {
-      await _sdk(band.stopSignal(), 'stop signal');
-      await _sdk(band.startSignal(), 'start signal');
-    } catch (_) {}
-  }
-
-  void _onRange(bool inRange) {
-    if (inRange || _lost || _ended || _session == null) return;
-    _lost = true;
-    _gapPending = true;
-    _lastPack = null;
-    _session!.log.note({'event': 'drop', 'n': _session!.n, 'at': _now().toIso8601String()});
-    unawaited(_reconnect());
-  }
-
-  Future<void> _reconnect() async {
-    final old = _band!;
-    _lostBands.add(old); // no SDK call goes near a headband that is out of range
-    await _signalSub?.cancel();
-    await _rangeSub?.cancel();
-    _signalSub = null;
-    _rangeSub = null;
-    _band = null;
-    for (var tries = 1; !_ended; tries++) {
-      await Future<void>.delayed(timing.reconnectWaits[math.min(tries - 1, timing.reconnectWaits.length - 1)]);
-      if (_ended) return;
-      final scan = tries % 3 == 0;
-      Headband? band;
-      try {
-        band = scan
-            ? await finder.find(timing.rescanFor).timeout(timing.rescanFor + timing.connectTimeout)
-            : await finder.connectDirect(old.id).timeout(timing.connectTimeout);
-      } catch (_) {
-        band = null;
-      }
-      _session?.log.note({'event': 'reconnect try', 'try': tries, 'scan': scan, 'ok': band != null});
-      if (band == null) continue;
-      if (_ended) {
-        _band = band;
-        return _release();
-      }
-      _band = band;
-      _lastPack = null;
-      _gapPending = true;
-      _rangeSub = band.rangeChanges.listen(_onRange);
-      _signalSub = band.signal.listen(_onBatch);
-      try {
-        await _sdk(band.startSignal(), 'start signal');
-        _lost = false;
-        _session?.log.note({'event': 'reconnected', 'n': _session?.n, 'at': _now().toIso8601String()});
-        return;
-      } catch (_) {
-        continue;
-      }
+  /// What the shared link reports, as the session log's lines. A drop is a hole in the signal for the core.
+  void _onLinkEvent(LinkEvent e, String line) {
+    final s = _session;
+    if (s == null) return;
+    switch (e) {
+      case LinkEvent.drop:
+        if (_ended) return;
+        _gapPending = true;
+        _lastPack = null;
+        s.log.note({'event': 'drop', 'n': s.n, 'at': _now().toIso8601String()});
+      case LinkEvent.reconnected:
+        s.log.note({'event': 'reconnected', 'n': s.n, 'at': _now().toIso8601String()});
+      case LinkEvent.streamRestarted:
+        s.log.note({'event': 'stream restarted', 'n': s.n});
+      case LinkEvent.reconnectTry:
+        break; // logged as fields by _onTry
     }
   }
+
+  void _onTry(int tries, bool scan, bool connected) =>
+      _session?.log.note({'event': 'reconnect try', 'try': tries, 'scan': scan, 'ok': connected});
 
   Future<void> _finish({required bool complete}) async {
     if (_ended) return;
@@ -736,21 +677,7 @@ class MeditationController extends ChangeNotifier {
   }
 
   /// Stops the signal and lets the headband go (only one still in range; a lost one is never touched).
-  Future<void> _release() async {
-    await _signalSub?.cancel();
-    await _rangeSub?.cancel();
-    _signalSub = null;
-    _rangeSub = null;
-    final band = _band;
-    _band = null;
-    if (band == null || _lost) return;
-    try {
-      await _sdk(band.stopSignal(), 'stop signal');
-    } catch (_) {}
-    try {
-      await _sdk(band.disconnectAndDispose(), 'disconnect');
-    } catch (_) {}
-  }
+  Future<void> _release() async => await _link?.close();
 
   Future<void> _fail(String why) async {
     final stoppedByUser = _ended; // a stop during connecting already went back to the start
