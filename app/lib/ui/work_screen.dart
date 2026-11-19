@@ -7,6 +7,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
+import '../auto/work_start.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
 import '../session_keeper.dart';
@@ -24,7 +25,10 @@ import 'work_view.dart';
 bool workSessionRunning = false;
 
 class WorkScreen extends StatefulWidget {
-  const WorkScreen({super.key});
+  const WorkScreen({super.key, this.auto});
+
+  /// Opened by the headband watcher (lib/auto): the session starts at once, as [AutoWorkStart] says.
+  final AutoWorkStart? auto;
 
   @override
   State<WorkScreen> createState() => _WorkScreenState();
@@ -34,7 +38,7 @@ class _WorkScreenState extends State<WorkScreen> {
   final BrainBitFinder _finder = BrainBitFinder();
   late final WorkController _c = WorkController(
     finder: _finder,
-    sound: SoloudWorkSound(),
+    sound: widget.auto?.quiet == true ? QuietWorkSound(SoloudWorkSound()) : SoloudWorkSound(),
     keeper: PhoneSessionKeeper(),
     inCall: phoneInCall,
     mediaVolume: phoneMediaVolume,
@@ -46,7 +50,7 @@ class _WorkScreenState extends State<WorkScreen> {
   WorkStage _lastStage = WorkStage.setup;
   int? _rated;
   WorkHint? _ratedFor;
-  Timer? _clock;
+  Timer? _clock, _autoStop;
 
   @override
   void initState() {
@@ -71,6 +75,14 @@ class _WorkScreenState extends State<WorkScreen> {
       _nightRunning = running;
       _load();
     });
+    if (widget.auto != null && !running) unawaited(_autoStart());
+  }
+
+  /// The watcher's start: at once, and stopping itself at the battery guard's limit.
+  Future<void> _autoStart() async {
+    await _start();
+    final limit = widget.auto?.limit;
+    if (limit != null && mounted && _c.active) _autoStop = Timer(limit, () => unawaited(_c.stop()));
   }
 
   void _load() {
@@ -112,6 +124,7 @@ class _WorkScreenState extends State<WorkScreen> {
   @override
   void dispose() {
     _clock?.cancel();
+    _autoStop?.cancel();
     _c.removeListener(_changed);
     _c.dispose(); // ends a running session and saves it
     if (_screenOn) unawaited(Phone.keepScreenOn(on: false).catchError((Object _) {}));

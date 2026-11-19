@@ -8,6 +8,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'dream/speech_model.dart' show parakeetNotice;
 import 'recorder/recorder_service.dart';
 import 'sharp/prompts.dart';
+import 'ui/auto_hooks.dart';
 import 'ui/night_screen.dart';
 import 'ui/sharp_rating_screen.dart';
 import 'ui/study_screen.dart' show StudyLogScreen;
@@ -40,6 +41,7 @@ class EegTrackerApp extends StatefulWidget {
 class _EegTrackerAppState extends State<EegTrackerApp> {
   final GlobalKey<NavigatorState> _navigator = GlobalKey<NavigatorState>();
   late final SharpPhone _sharp = widget.sharp ?? ChannelSharpPhone();
+  late final AutoHooks _auto = AutoHooks(_navigator); // the headband watcher (lib/auto, DECISIONS 600)
   bool _asking = false;
 
   @override
@@ -48,10 +50,12 @@ class _EegTrackerAppState extends State<EegTrackerApp> {
     // A tap on a sharp-hours question or a study reminder opens it (DECISIONS rows 283, 401): at a cold start, and while the app runs.
     _sharp.onOpen = () => unawaited(_openQuestion());
     WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_openQuestion()));
+    _auto.install();
   }
 
   @override
   void dispose() {
+    _auto.dispose();
     _sharp.onOpen = null;
     super.dispose();
   }

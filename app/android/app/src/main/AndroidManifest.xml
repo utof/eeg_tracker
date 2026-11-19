@@ -63,7 +63,15 @@
          in Doze need no permission, and they never use the smart alarm's exact alarms above: a few minutes' delay
          does not matter. Re-armed after a phone restart (RECEIVE_BOOT_COMPLETED, above). -->
 
+    <!-- Automatic recording (lib/auto, AutoWatch.kt; DECISIONS 600-609): the headband is paired once through Android's
+         companion pairing, which can watch for it (presence observing) and lets the app start its check, a short
+         foreground service of type connectedDevice, from the background. Both are install-time permissions; the
+         pairing itself is a system dialog the owner confirms. -->
+    <uses-permission android:name="android.permission.REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND" />
+    <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE" />
+
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+    <uses-feature android:name="android.software.companion_device_setup" android:required="false" />
 
     <!-- No backup of any kind: recordings and night state are EEG (DECISIONS row 57). -->
     <application
@@ -142,6 +150,32 @@
             android:exported="false" />
         <receiver
             android:name=".SharpBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- The headband watcher (AutoWatch.kt): the check service with its own engine, Android's presence binding,
+             the bedtime checks' alarms and the notification buttons, and the re-arm after a restart or an update. -->
+        <service
+            android:name=".AutoWatchService"
+            android:foregroundServiceType="connectedDevice"
+            android:exported="false" />
+        <service
+            android:name=".HeadbandPresenceService"
+            android:exported="true"
+            android:permission="android.permission.BIND_COMPANION_DEVICE_SERVICE">
+            <intent-filter>
+                <action android:name="android.companion.CompanionDeviceService" />
+            </intent-filter>
+        </service>
+        <receiver
+            android:name=".AutoReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".AutoBootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

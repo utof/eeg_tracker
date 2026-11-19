@@ -85,6 +85,10 @@ class BrainBitFinder implements HeadbandFinder {
   Future<HeadbandFinder>? _picked;
   HeadbandFinder? _finder;
 
+  /// Called before a finder's first search in this engine: the screen's engine makes the headband watcher let go of a
+  /// headband it holds while asking (lib/auto, DECISIONS 600); null in the recorder's and the watcher's own engines.
+  static Future<void> Function()? beforeUse;
+
   /// True once our own connection was chosen (null before the first use).
   bool? get usesOwn => _finder == null ? null : _finder is OwnFinder;
 
@@ -105,7 +109,12 @@ class BrainBitFinder implements HeadbandFinder {
   static HeadbandFinder chooseFor(OwnBleSettings settings, OwnBleStore? store, Directory? recordings, DiyBoardSettings diy) =>
       diy.useDiy ? const DiyRefusal() : choose(settings, store, recordings);
 
-  Future<HeadbandFinder> _pick() => _picked ??= _pickWith().then((f) => _finder = f);
+  Future<HeadbandFinder> _pick() => _picked ??= () async {
+    try {
+      await beforeUse?.call();
+    } catch (_) {}
+    return _finder = await _pickWith();
+  }();
 
   @override
   Future<Headband?> find(Duration scanFor, {void Function(String name, int rssi)? onFound}) async =>
