@@ -5,6 +5,7 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 | Layer | Files | Written by |
 |---|---|---|
 | Raw recording | `<stamp>.f32`, `<stamp>.idx`, `<stamp>.log`, `<stamp>.markers.jsonl` (one set per recorder run) | `scripts/record_night.py` or `scripts/record_ble.py` (laptop, both through `scripts/recorder_hub.py`); the phone app will write the same kind of add-only chunks |
+| Raw recording, DIY board | the same four files in `_local/recordings-diy/` (one set per board capture) | `scripts/record_diy.py` (through `scripts/recorder_hub.py`; below) |
 | One night | `<night>.bdf` (BDF+, 24-bit, µV), `<night>.sleep.json`, `<night>.hypnogram.png` | `scripts/to_bdf.py`, `scripts/score_sleep.py` |
 | Sleep report | `_local/nights/<date>.report.json` beside that night's `<date>.bdf`, `.sleep.json`, `.hypnogram.png` | `scripts/sleep_report.py` (the Sleep page starts it) |
 | Sleep report on the phone | `files/nights/<date>.report.json` in the app's private folder | the phone app after Stop (`app/lib/sleep/scorer.dart`) |
@@ -43,6 +44,26 @@ Three layers, from raw to summary. Each is written once and never edited in plac
   the end `drift-off detector: <s> s of work for <h> h of signal (<s> s an hour)`.
 - The device's Bluetooth address and serial number are in the `.log`. They stay on the owner's machine
   (`_local/` is never committed).
+
+## Raw recording (DIY board)
+
+`scripts/record_diy.py` ([diy-board.md](diy-board.md)) writes the same four files for the owner's ADS1299 board, into
+`_local/recordings-diy/` (not `_local/recordings/`: the sleep and morning tools read O1 O2 T3 T4 only).
+
+- `.f32`: records of `<I` + one `f` per channel (`<I4f`, 20 bytes, for the 4-channel chip, the BrainBit's record;
+  `<I8f`, 36 bytes, for the 8-channel chip): the board's sequence number (its data-ready count since it started;
+  a jump is a missing frame, never filled in), then the channels in **volts** (counts x VREF / (gain x 2^23)).
+- `.log`: the same kind of lines, plus, when the file set opens: `driver DIY board ...; link <USB serial port and
+  baud | UDP host:port>`, `channels <names> (montage <file>: reference ...; bias ...)`, `board <n> channels, <fs> Hz,
+  gain <g>, vref <V> V (assumed ...)`, `format .f32 records <I<n>f: board sequence number, then <names> in volts;
+  <fs> Hz` and `mode <test signal | shorted inputs | ...>: ..., not EEG (flags 0x..)`. Later: `lost N samples in M
+  gaps (board missed X, link lost Y)`, `bad frames N, bytes skipped N`, `repeated N, late N frames dropped`, `board
+  says: <the firmware's own text line>`, `board link lost or not found: ...` / `board link back after N s`, `no data
+  from the board for 5 s`, and at a board restart `board restarted (<why>): this file set ends here` in the old log
+  and `continues <old stamp> after a board restart (<why>)` in the new one. The 10 s line says `battery ?%` (the
+  board reports none).
+- `.idx` and `.markers.jsonl`: as for the BrainBit. A USB drop while the board keeps running stays in one file set,
+  with the gap in the `.idx` times.
 
 ## One night (BDF+)
 

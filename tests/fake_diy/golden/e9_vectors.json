@@ -1,0 +1,6 @@
+[
+{"name": "native_core_test", "size": 37, "hex": "453901040418fa00ffffffff87d6120009000000c00000800000ffffff0000007fffffdd8f", "channels": 4, "gain": 24, "fs": 250, "flags": 4, "seq": 4294967295, "tick": 1234567, "overruns": 9, "status": 12582912, "codes": [-8388608, -1, 0, 8388607]},
+{"name": "breadboard_test_signal", "size": 37, "hex": "453901040118fa0001000000a00f000000000000c000000147ae0147aefeb852000000bedf", "channels": 4, "gain": 24, "fs": 250, "flags": 1, "seq": 1, "tick": 4000, "overruns": 0, "status": 12582912, "codes": [83886, 83886, -83886, 0]},
+{"name": "eight_channels_short_overrun", "size": 49, "hex": "453901080a18fa00e803000000f0ffff03000000cff0f5000001fffffe00012cfff06000c350f6d8406acfc085ee0080d1", "channels": 8, "gain": 24, "fs": 250, "flags": 10, "seq": 1000, "tick": 4294963200, "overruns": 3, "status": 13627637, "codes": [1, -2, 300, -4000, 50000, -600000, 7000000, -8000000]},
+{"name": "six_channels_gain_1", "size": 43, "hex": "453901060101fa00000000800000000000000000c123458000007fffff000001ffffff001234ffedcc8c0d", "channels": 6, "gain": 1, "fs": 250, "flags": 1, "seq": 2147483648, "tick": 0, "overruns": 0, "status": 12657477, "codes": [-8388608, 8388607, 1, -1, 4660, -4660]}
+]

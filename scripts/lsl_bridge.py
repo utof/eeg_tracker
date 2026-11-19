@@ -4,7 +4,8 @@ usage: uv run --no-project --with pylsl python scripts/lsl_bridge.py [--url http
 
 The recorder (scripts/record_night.py) owns the headband's single Bluetooth connection and records to disk; this
 bridge is one of any number of consumers of its /stream endpoint. It creates two LSL outlets:
-  "BrainBit"          type EEG, 4 channels O1 O2 T3 T4 in microvolts, 250 Hz
+  "BrainBit"          type EEG, the recorder's channels in microvolts: O1 O2 T3 T4 at 250 Hz for the BrainBit,
+                      the montage's names (or Ch1..ChN) for the DIY board (scripts/record_diy.py, same name)
   "BrainBit-markers"  type Markers, the text of every page marker
 Readers: MNE-LSL (mne_lsl.stream.StreamLSL), OpenViBE, BrainFlow's LSL board, LabRecorder, any pylsl script.
 The phone app's recording works too: switch Share on Wi-Fi on there and pass `--url http://<phone-ip>:8765/stream
