@@ -160,6 +160,19 @@ void main() {
     expect(plan.notes.join('\n'), contains("off for the DIY board: they read BrainBit's O1 O2 T3 T4"));
   });
 
+  test('the service asks the setting once: the board when it is on, the BrainBit when off or damaged', () {
+    final rec = '${root.path}/files/recordings';
+    expect(diyNightFor(rec), isNull); // no file: the BrainBit
+    final store = DiyBoardStore(diyBoardDirFor(rec));
+    store.save(const DiyBoardSettings(useDiy: true));
+    expect(diyNightFor(rec)?.dir.path, '${root.path}/files/recordings-diy');
+    expect(diyNightFor(rec)?.settings.names, defaultDiyNames);
+    store.save(const DiyBoardSettings());
+    expect(diyNightFor(rec), isNull);
+    store.file.writeAsStringSync('[1, 2');
+    expect(diyNightFor(rec), isNull);
+  });
+
   test('a night on the board: its own folder, the laptop\'s layout, its lines, no contact check, no detectors', () async {
     final dir = Directory('${root.path}/files/recordings-diy');
     final drift = SpyDrift();

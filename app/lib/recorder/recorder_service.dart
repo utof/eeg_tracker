@@ -11,7 +11,6 @@ import '../alarm/live_alarm.dart';
 import '../alarm/record.dart';
 import '../alarm/rule.dart';
 import '../headband/diy/night.dart';
-import '../headband/diy/settings.dart';
 import '../phone.dart';
 import '../share/isolate.dart';
 import '../share/protocol.dart';
@@ -167,7 +166,7 @@ class RecorderTaskHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     final rec = await _recordingsDir();
-    final diy = _diy = this.finder == null ? _diyNight(rec) : null;
+    final diy = _diy = this.finder == null ? diyNightFor(rec) : null;
     final dir = diy?.dir.path ?? rec;
     _filesDir = Directory(rec).parent.path;
     final HeadbandFinder finder;
@@ -201,16 +200,6 @@ class RecorderTaskHandler extends TaskHandler {
     }
     unawaited(recorder.run(restartedBySystem: starter == TaskStarter.system));
     unawaited(_sharing(() async => _applyShare(await loadShareConfig())));
-  }
-
-  /// The DIY board's night when "Headband: DIY board (test)" is on; null (the BrainBit) when off or unreadable.
-  static DiyNight? _diyNight(String recordingsDir) {
-    try {
-      final s = DiyBoardStore(diyBoardDirFor(recordingsDir)).load();
-      return s.useDiy ? DiyNight(s, recordingsDir) : null;
-    } catch (_) {
-      return null;
-    }
   }
 
   Future<void> _wifi() async {

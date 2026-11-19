@@ -884,6 +884,67 @@ What only this test can show: every protocol guess (the probe), whether the phon
 without a scan, the packet size it gets, pairing, drops with the screen off on HyperOS, and the battery a night
 costs compared with BrainBit's library (the `phone battery summary` line of each night's `.log`).
 
+## The DIY board (test, off by default)
+
+The app can also record the ADS1299 board you build (eeg_ads1299_lab's bench firmware, its "E9" frames) over
+**Wi-Fi**: the board's ESP32 sends one frame per UDP datagram to the phone's port 9000, and the night recorder only
+listens (DECISIONS rows 360-369, `docs/diy-board.md`). Same files as the laptop's DIY recorder, in their own folder.
+
+> **Safety.** The app never sends the board anything and nothing in it authorises connecting the board to a body,
+> powering it, or changing its safety gates: follow eeg_ads1299_lab's bring-up card. Its prompts (R, V, then T or N)
+> are yours to answer in a serial terminal. Today's firmware records only the chip's own test signal or its shorted
+> inputs: **not EEG**, whatever the channel names say. The page and the night screen say so too.
+
+Night screen, Headband section, **Headband connection** (between nights only), **Headband: BrainBit / DIY board
+(test)**:
+
+- **DIY board (test)**: Start night listens for the board instead of looking for the BrainBit. Its nights go to
+  `files/recordings-diy/` (`.f32 .idx .log .markers.jsonl`, the laptop's `<I4f` layout: the board's sequence
+  number, then CH1-CH4 in volts at 4.5 V reference and gain 24), never among the BrainBit nights. The page shows
+  this phone's Wi-Fi address for the firmware's `UDP_HOST`, and the channel names (default O1 O2 Fz Fp1, the
+  breadboard's plan; four names, CH1 to CH4).
+- **While it records**: the night screen shows each channel's swing over the last second (the test square reads
+  about 3750 µV), "Test signal, not EEG" (or "Shorted inputs, not EEG"), where the frames come from and how many
+  samples were lost. A board restart or a new mode starts a new file set, never joined to the old one; lost frames
+  are counted in the `.log`, never filled in; damaged, repeated and late datagrams are counted and dropped.
+- **Off with the board**: the sleep report, the morning check-in, meditation and the other sessions (they say so
+  when started), the drift-off detector, hands-free and the smart alarm's sleep model: all read the BrainBit's O1 O2
+  T3 T4. The phone's alarm itself still rings. No contact or battery reading from the board.
+- **Not built**: USB (OTG serial) to the phone, the 8-channel chip (the laptop records it), Bluetooth (the firmware
+  has none).
+- **Your data**: Export data takes `recordings-diy/` with everything else; `scripts/import_phone.py` files it under
+  `_local/recordings-diy/`, beside the laptop's DIY recordings. Export a night lists BrainBit nights only.
+
+The code: `lib/headband/diy/` (`e9.dart`, the decoder, a line-for-line port of `scripts/diy_board.py`; `link.dart`,
+the UDP socket; `board.dart`, the board behind the app's headband interface; `night.dart`, the recorder's settings
+for it; `settings.dart`), `lib/ui/diy_board_view.dart`. Tests run on a fake board (`test/diy/fake_board.dart`) and
+on a real UDP socket on the test machine; `test/fixtures/diy_vectors.json` pins the Dart decoder to the Python one
+(make it again with `python3 app/test/fixtures/make_diy_vectors.py`).
+
+### Owner step: the board on the phone (15 minutes, once the board passes its bench steps)
+
+Only after eeg_ads1299_lab's bring-up card has passed its steps on the bench; nothing here replaces any of them.
+
+1. In the firmware's `board_config.h` (eeg_ads1299_lab `docs/PROTOCOL.md`, "Host behavior"): `USE_WIFI_UDP = true`,
+   your home Wi-Fi's name and password in `WIFI_SSID` / `WIFI_PASSWORD`, and `UDP_HOST` = the phone's address that
+   the app shows on Headband connection (DIY board chosen); port 9000 stays. Build and flash it as the card says.
+   Phone and board on the **same Wi-Fi** (a private network: the frames are not encrypted). If the phone's address
+   changes later, reserve it in the router or change `UDP_HOST`.
+2. Install the new APK. Night screen, Headband section, **Headband connection**, choose **DIY board (test)**. Check
+   the address and the channel names.
+3. Power the board as the card says and answer its prompts in a serial terminal on the laptop (R, V, then T for the
+   test signal). Close the terminal.
+4. On the phone: **Start night**. Within a minute the screen should say "Recording the board's test signal. It is
+   not EEG." and show about 3750 µV on every channel (the test square, 1.875 mV each way).
+5. After 10 minutes: **Stop**, **Export data**, and on the laptop `python3 scripts/import_phone.py <folder>`; tell
+   the assistant. In `_local/recordings-diy/<time>.log` it looks for `driver DIY board`, `datagrams from <board>`,
+   the `mode` line, and any `lost N samples in M gaps (board missed X, link lost Y)` lines.
+6. Choose **BrainBit** again on Headband connection before a BrainBit night or session.
+
+What only this test can show: whether the board's datagrams reach the phone with the screen off (HyperOS and the
+Wi-Fi lock the app holds during a board night), the loss rate over Wi-Fi, and whether the 4.5 V reference matches
+the meter (the test square cancels it).
+
 ## If the headband drops out
 
 With our own connection switched on (above) a short drop is mended inside the same recording; what follows is the

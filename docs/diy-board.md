@@ -1,8 +1,9 @@
-# The DIY ADS1299 board on the laptop
+# The DIY ADS1299 board on the laptop and the phone
 
 A host driver and recorder for the owner's self-built ADS1299 board (hardware, firmware and build guides in the
 sibling repo [eeg_ads1299_lab](https://github.com/utof/eeg_ads1299_lab)), so the board records into the same files,
-live pages and LSL bridge as the BrainBit the day it is assembled (DECISIONS rows 5 and 350-359, ROADMAP row 13).
+live pages and LSL bridge as the BrainBit the day it is assembled (DECISIONS rows 5 and 350-359, ROADMAP row 13), and
+the phone app that records it over Wi-Fi (below, "On the phone"; DECISIONS rows 360-369).
 
 **Status (2026-11-19): built and tested on a fake board only.** The board is not assembled yet. The frame format is
 checked byte for byte against the firmware's own framing code; everything about the real board is marked
@@ -96,6 +97,52 @@ montage starts with O1 O2, so it lines up). That is why the board records into i
 the reports. Making them work for any positions is DECISIONS row 4 ("calibration for any electrode positions"),
 after the helmet exists.
 
+## On the phone
+
+The phone app (`app/`, branch `feat/app-diy-board`) records the board over **Wi-Fi only**: the firmware's UDP route,
+one E9 frame per datagram to the phone's port 9000. USB OTG serial to the phone is not built (it would need a USB
+host plugin and the DevKit's bridge driver; the laptop has the USB route). The app only listens: there is no send call
+in `app/lib/headband/diy/`, and a test keeps it so.
+
+- **Switch.** Night screen, Headband section, **Headband connection**: **Headband: BrainBit / DIY board (test)**, off by
+  default (`files/diy-board/settings.json`), locked while a night records or a session runs. The page states the
+  safety rule (the app only listens; nothing in it makes the board safe for a body or power or changes its gates),
+  shows this phone's Wi-Fi address for the firmware's `UDP_HOST`, and holds the channel names (four, CH1 to CH4;
+  default O1 O2 Fz Fp1, as on the laptop).
+- **The night.** The recorder's service builds the board's finder itself (`app/lib/headband/diy/night.dart`): one UDP
+  listener all night on every IPv4 interface, a Wi-Fi lock while it records (shared with Share on Wi-Fi), and the
+  app's night recorder unchanged in its rules (one file set per run, `.log` lines, markers, Lights off as a marker,
+  the phone's alarm). The board object (`board.dart`) holds one capture; the decoder (`e9.dart`) is a line-for-line
+  port of `scripts/diy_board.py` and both are pinned to the same results by `app/test/fixtures/diy_vectors.json`
+  (made by the Python driver from the firmware's golden frames, the fake board and damaged frames;
+  `analysis/tests/test_diy_vectors.py` fails when it is stale).
+- **Files.** `files/recordings-diy/<stamp>.f32 .idx .log .markers.jsonl`, byte for byte the laptop's DIY layout
+  (`<I4f`: the board's sequence number, then CH1-CH4 in volts); about 10 frames per `.idx` row (the laptop's 40 ms).
+  The `.log` names the driver, the link and every sender, the channels, scaling (vref 4.5 V assumed), format and mode
+  ("not EEG"). Export data takes the folder; `scripts/import_phone.py` files it under `_local/recordings-diy/`.
+- **Same rules as the laptop**: missing frames counted ("lost N samples in M gaps (board missed X, link lost Y)" every
+  10 s), never filled in; damaged, repeated and late datagrams counted and dropped; a restart (sequence far back, clock
+  back) or a new mode, channel count, gain or rate ends the file set ("board restarted (...): this file set ends here")
+  and the next one starts with the new capture ("a new capture: board restarted (...)"), never joined silently.
+- **Differences from the laptop.** A run also ends after 40 s without frames (the phone recorder's rule for every
+  headband) and the next frames start a new file set, where the laptop keeps one set through a USB drop. Frames that
+  arrive while no file set is open (between two sets) are kept, up to 10 s, and go into the next one. Datagrams from
+  outside the local network are ignored and counted. The 8-channel chip is refused in words (the phone keeps the
+  BrainBit's 20-byte record; the owner's chip is the ADS1299-4). No contact check, no battery lines.
+- **Refused with the board** (DECISIONS row 358's reason): the sleep report (the board's nights are never in
+  `files/recordings/`, and the Sleep section says so), the morning check-in and every session (their finder refuses in
+  words: "The DIY board (test) is chosen as the headband. This needs the BrainBit: it reads O1 O2 T3 T4."), the
+  drift-off detector, hands-free and the smart alarm's sleep model (the recorder never gives them the board's
+  samples and logs that they are off; the phone's alarm still rings). Share on Wi-Fi's live pages carry the board's
+  channel names.
+- **Night screen.** "Recording the board's test signal. It is not EEG."; the Headband block shows each channel's
+  swing over the last second in µV (the test square: about 3750), "Test signal, not EEG", the sender and lost samples.
+
+The owner's steps are in `app/README.md`, "The DIY board". TO VERIFY on the real board, beyond the laptop's list: the
+board's datagrams reaching the phone with the screen off (HyperOS, the Wi-Fi lock), the Wi-Fi loss rate over a night,
+and whether Android starts the night's service with Bluetooth never allowed (the app declares `CHANGE_WIFI_STATE` for
+that; checked on the emulator only).
+
 ## Verified and TO VERIFY
 
 | Fact | Source | State |
@@ -112,6 +159,16 @@ after the helmet exists.
 | O1 O2 Fz Fp1 on CH1-CH4 | the lab's breadboard guide review (finding BB-23); its committed card names only O1 | a plan; no electrode mode yet |
 
 ## Tests
+
+Phone: `flutter test test/diy_e9_test.dart test/diy_board_test.dart test/diy_night_test.dart test/diy_switch_test.dart
+test/diy_screens_test.dart` (in `app/`): the decoder against the Python one on the shared vectors (every frame case,
+every single-bit flip, five byte streams chunk by chunk, seven tracker sequences, bit for bit); the board object on the
+fake board (damage, gaps, repeats, late datagrams, restarts, a new mode, the 8-channel chip, foreign senders, a dead
+socket) and on a real UDP socket; whole nights through the night recorder (its folder, layout and lines, no contact
+check, no detectors, three file sets for a restart and a new mode, holes left as holes); the switch, the refusals, the
+export; the pages rendered at 393 dp, 100 and 130 % text. Python: `analysis/tests/test_diy_vectors.py`.
+
+Laptop:
 
 `uv run --project analysis --with pytest pytest -q analysis/tests/test_diy_board.py` (about 15 s): the golden frames
 decode; every single-bit flip, wrong length, wrong field and missing 0xC status prefix is refused; volts by hand;

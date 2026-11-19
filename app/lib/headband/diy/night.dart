@@ -39,3 +39,14 @@ class DiyNight {
         "O2 T3 T4 (the phone's alarm itself still rings)",
   ];
 }
+
+/// The DIY board's night when "Headband: DIY board (test)" is on (files/diy-board/settings.json); null, the BrainBit,
+/// when it is off or cannot be read. The recorder's service asks this once when it starts.
+DiyNight? diyNightFor(String recordingsDir) {
+  try {
+    final s = DiyBoardStore(diyBoardDirFor(recordingsDir)).load();
+    return s.useDiy ? DiyNight(s, recordingsDir) : null;
+  } catch (_) {
+    return null;
+  }
+}
