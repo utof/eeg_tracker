@@ -1,6 +1,7 @@
 // The nap coach without a phone: its rules, its file, and whole naps through the controller with the dream
 // catcher's fake headband (a synthetic eyes-closed signal streamed fast, alpha fading on cue) and a scripted sleep
 // model (ONNX cannot run in `flutter test`; the real model is checked in analysis/tests).
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -218,6 +219,48 @@ void main() {
       expect(c.last!.live.mode, LiveMode.timer);
       expect(c.last!.live.why, contains('no ONNX Runtime'));
       expect(c.last!.stages, matches(RegExp(r'^\.+$')));
+      c.dispose();
+    });
+
+    test('a model call that never returns: Stop still ends and saves the nap at once', () async {
+      final band = DriftBand((t) => 1);
+      final model = ScriptedModel((_) => 'W')..gate = Completer<void>(); // never completed
+      final c = controller(band, SilentNapSound(), model: () => model);
+      await c.start(lengthMin: 90);
+      await until(c, () => model.seen.isNotEmpty);
+      await c.stop().timeout(const Duration(seconds: 5));
+      expect(c.stage, NapStage.done);
+      expect(c.last!.end, NapEnd.stopped);
+      expect(store.list().single.end, NapEnd.stopped, reason: 'the final record, not the last once-a-minute save');
+      expect(band.calls.last, 'disconnect');
+      expect(model.closed, isFalse, reason: 'never closed under a call that is still running');
+      c.dispose();
+    });
+
+    test('a model call past its deadline: the timer alone ends the nap, and the screen says why', () async {
+      final model = ScriptedModel((_) => 'W')..gate = Completer<void>();
+      final c = NapController(
+        finder: OneFinder(DriftBand((t) => 1)),
+        sound: SilentNapSound.new,
+        model: () => model,
+        store: store,
+        recordingsDir: recordings,
+        scale: scaleNow,
+        timing: const NapTiming(
+          link: LinkTiming(contactFor: Duration(milliseconds: 5), settle: Duration.zero, reconnectWaits: [Duration(milliseconds: 5)]),
+          tick: Duration(milliseconds: 20),
+          modelDeadline: Duration(milliseconds: 300),
+        ),
+      );
+      await c.start(lengthMin: 20);
+      await until(c, () => c.live == NapLive.timer);
+      expect(c.liveNote, contains('did not answer'));
+      expect(model.seen.length, 1, reason: 'no new call after one that hung');
+      await until(c, () => c.stage == NapStage.waking);
+      await c.awake();
+      expect(c.last!.live.mode, LiveMode.timer);
+      model.gate!.complete(); // the hung call ends at last: only now is the model closed
+      await until(c, () => model.closed);
       c.dispose();
     });
 

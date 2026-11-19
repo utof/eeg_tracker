@@ -67,6 +67,7 @@ class NapTiming {
     this.tick = const Duration(milliseconds: 250),
     this.noDataAfter = const Duration(seconds: 2),
     this.saveEvery = const Duration(seconds: 60),
+    this.modelDeadline = const Duration(seconds: 60),
   });
 
   final LinkTiming link;
@@ -79,6 +80,9 @@ class NapTiming {
 
   /// The session file is rewritten this often (so a killed app keeps the nap so far).
   final Duration saveEvery;
+
+  /// A sleep model call still running after this is given up: the timer alone ends the nap (DECISIONS row 461).
+  final Duration modelDeadline;
 }
 
 class NapController extends ChangeNotifier {
@@ -245,7 +249,14 @@ class NapController extends ChangeNotifier {
       final m = model;
       _stager = m == null
           ? null
-          : LiveStager(model: m(), scale: scale, mayRun: mayRunModel, onStage: _onStage, onChange: _onLiveChange);
+          : LiveStager(
+              model: m(),
+              scale: scale,
+              mayRun: mayRunModel,
+              onStage: _onStage,
+              onChange: _onLiveChange,
+              deadline: timing.modelDeadline,
+            );
       _lightsOffAt = _now();
       _lastSave = _lightsOffAt;
       await link.startSignal();
@@ -523,11 +534,12 @@ class NapController extends ChangeNotifier {
     _mark('nap coach: end (${why.name})');
     _seen?.finish();
     _closeWriter();
+    // the final record first: the headband's release, the fade and a model call still running may all be slow
+    last = _save(endS: endS, why: why);
     await _release();
     await _sound?.stop();
-    await _stager?.close();
-    last = _save(endS: endS, why: why);
     _set(NapStage.done, '');
+    unawaited(_stager?.close()); // after a running call, which may never end: nothing waits for it
   }
 
   NapSession? _save({double? endS, NapEnd? why}) {
@@ -597,7 +609,7 @@ class NapController extends ChangeNotifier {
     _closeWriter();
     await _release();
     await _sound?.stop();
-    await _stager?.close();
+    unawaited(_stager?.close());
     if (!stoppedByUser) _set(NapStage.failed, why);
   }
 
