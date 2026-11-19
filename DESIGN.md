@@ -178,6 +178,14 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   six tries above them are the watch strip's cells under two words: a faint outline to come, a green ring while
   cued, filled `saved` when seen or caught, a `track` cell with an amber dash when not, an `ink-muted` ring while not
   yet judged.
+- **Unusual for you** (trends, the slot after the summary line): a hairline heading with its "i" and a Material switch
+  beside it, the same place in every state; most days one muted bodyLarge line ("Learning your usual: 12 of 28 days",
+  "Nothing unusual for you lately" with its record); a card is the day's first entry, one sentence in titleLarge ink,
+  further numbers in bodyLarge ink, what it is based on and the everyday causes in muted body, "If you can, take it
+  easy today", then "What might explain it?" as Material filter chips (ground, rule outline; chosen: surfaceHigh, an
+  ink check mark and an ink-muted outline). "Back in your usual range" and "Paused until ..." (with a Resume now text
+  button) take the same place. No colour means anything here; while there is a card the Morning section on the night
+  screen adds one bodyLarge ink line above its buttons.
 - **Buttons:** one filled button per screen: Start night on the night screen (Lights off while a night records), Start on the meditation screen, and on
   each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before
   stopping, except in alpha-theta, where stopping must be instant. Session faces (dream catcher, sound for states)
