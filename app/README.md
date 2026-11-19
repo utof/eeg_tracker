@@ -141,9 +141,10 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    the newest `files/sound-states/*.sound.json`). Reinstall
    the app afterwards.
 
-The night of 2026-11-17 (58 recordings, 12.9 h) scored on the emulator in 99 s with a peak of 438 MB (PSS; 561 MB
-RSS) and the same stages as the laptop's ONNX check (96.6 % of epochs agree with the laptop's one-pass scoring; see
-`assets/models/README.md`). The emulator's speed is the laptop's, not a phone's.
+The night of 2026-11-17 (58 recordings, 12.9 h) scored on the emulator in 99 s with a peak of 448 MB (PSS) and the
+laptop's stage on every scored epoch (two passes, 2026-11-19; the 1-hour pieces before took 69 s, peaked at 442 MB
+and agreed on 96.6 %, measured in the same session; see `assets/models/README.md`). The emulator's speed is the
+laptop's, not a phone's.
 
 ## Meditate
 
@@ -180,6 +181,17 @@ periods numbered), each period's start and end, deep, dream and light sleep, wak
 minutes, and the past nights. It is a first guess: the model is not validated on this headband (the **i** button
 shows `docs/evidence/sleep-scoring.md`).
 
+**Same stages as the laptop (since 2026-11-19).** To keep memory low the phone feeds the model about an hour of the
+night at a time. AnySleep weighs its four electrodes by how they look over everything it is given, so an hour alone
+weighed them a little differently from the laptop's one pass over the whole night (96.6 % of 30-second stretches
+the same). Now each of the three runs goes over the night twice: first it adds up, hour by hour, what that weighing
+needs for the whole night; then it scores every hour with the whole night's weighing. The hours also start and end
+on an 8-minute grid, which the model's own halving of the signal needs. On the three recorded nights the phone now
+gives the laptop's stage for every scored 30 seconds, and the same totals (night of 2026-11-17: asleep 387 min,
+deep 42.5, dream 114; before 382.5, 42 and 105.5). The model takes longer (laptop: 30 instead of 17 s for a 12.9-hour night; emulator:
+the whole scoring 99 instead of 69 s); memory per hour is the same. Nights the phone scored before this update are scored once more the next time the app opens
+(their report names the old model). Details: DECISIONS rows 260-264, `analysis/two_pass.py`.
+
 The night extras come from the shared detectors (`lib/detectors/`), run over the same samples in a second background
 isolate while the model works: the note under the totals says how much of your sleep was read through noise; a
 **Signal** line under the chart marks noisy stretches (amber dots) and stretches with no usable electrode (solid
@@ -201,12 +213,12 @@ report is missing or 10+ minutes behind, and never while a night records.
 ### Owner step: how long does the phone take? (once, about 15 minutes)
 
 Nothing about the phone's speed or memory has been measured yet. On the laptop a 12.9-hour night took 17 s to
-prepare and 26 s for the model; a phone is likely 3-10 times slower.
+prepare and 30 s for the model (two passes); a phone is likely 3-10 times slower.
 
 1. Record a night as usual (or use the first real one). In the morning press **Stop** and leave the app open on
    the main screen, phone on the charger or not (write down which).
 2. Note the clock time. The Sleep section says "Scoring the night of ...: Preparing the recording", then "Sleep
-   model, run 1 of 3, part 1 of 8" and so on.
+   model, run 1 of 3, part 1 of 26" and so on (13 parts, each twice).
 3. When the time asleep appears, note the clock time again; open **Sleep report**: the line at the bottom says
    "Scored on this phone in ..." (that is the measured time). If "Counting jaw, movement and signal" showed after
    the model's last part, note for how long: that is the detectors' pass running behind the model.

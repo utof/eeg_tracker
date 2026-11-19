@@ -42,8 +42,10 @@ headband has never been checked against a lab recording, and the five-stage deta
   the O1-T3 pair is the second opinion on the laptop. Where they disagree, the chart shows low confidence.
 - The phone scores the night itself after you press Stop, with the same three AnySleep runs made smaller for
   the phone; on a test stretch of a recorded night they gave the same stage as on the laptop for every 30
-  seconds. The phone goes through the night one hour at a time, which changes about 3 in every 100 thirty-second
-  stretches compared with the laptop's single pass. The phone has no second opinion.
+  seconds. The phone goes through the night about an hour at a time to save memory, and twice: first it learns how
+  much to trust each electrode over the whole night, then it scores each hour that way. On the three recorded
+  nights that gave the laptop's stage for every thirty seconds (hour by hour alone had changed about 3 in 100).
+  The phone has no second opinion.
 - A 30-second stretch missing more than 5 seconds of data is not scored: missing data never becomes "awake" or
   "deep".
 - Noise is shown, not hidden: the report says how much of your sleep the model read through a noisy signal

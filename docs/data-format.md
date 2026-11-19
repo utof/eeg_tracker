@@ -137,7 +137,8 @@ The phone app scores a finished night itself (`app/lib/sleep/`, DECISIONS rows 9
 night into its private `files/nights/` folder, next to `files/recordings/`. Nights are cut by the same chain rule,
 the report is rebuilt by the same 10-minute rule, and it has the fields of the laptop's report above, with these
 differences: `source` is `phone`; `model` names the phone's version (`anysleep-mid-fusion-3runs@88e13e3 onnx-f16
-pieces-1h+15min`); there is no picture, BDF or second model, so `hypnogram`, `sleep_json`, `bdf`, `cross_check`
+two-pass-64min+8min` since 2026-11-19, `... pieces-1h+15min` before; a scored report naming another version is
+scored again once); there is no picture, BDF or second model, so `hypnogram`, `sleep_json`, `bdf`, `cross_check`
 and each period's `agreement` are `null`; `epoch_s` is 30 and `stages` holds one character per 30 s from
 `data_start` (`W 1 2 3 R`, `-` where over 5 s of the epoch was missing), like the `hypnogram` of
 `eeg_sleep_night`. `extras` and `extras_error` are as above (the phone runs the detectors beside the sleep model;
