@@ -178,7 +178,13 @@ class ShareSheet extends StatelessWidget {
             alignment: Alignment.centerRight,
             child: TextButton(onPressed: onNewToken, child: const Text('New code')),
           ),
-          Text('A new code shuts out every laptop that has the old one.', style: text.bodyMedium?.copyWith(color: Night.inkMuted)),
+          Text(
+            m.laptop != null
+                ? 'A new code shuts out every laptop that has the old one. ${m.laptop!.name} is told the new one: '
+                      'forget it first to shut it out too.'
+                : 'A new code shuts out every laptop that has the old one.',
+            style: text.bodyMedium?.copyWith(color: Night.inkMuted),
+          ),
         ],
       ),
     );

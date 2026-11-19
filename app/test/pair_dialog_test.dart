@@ -121,6 +121,7 @@ void main() {
     expect(find.text('my-laptop'), findsOneWidget);
     await t.scrollUntilVisible(find.textContaining('Paired with my-laptop'), 100, scrollable: find.byType(Scrollable).first);
     await t.scrollUntilVisible(find.text('Forget this laptop'), 100, scrollable: find.byType(Scrollable).first);
+    await t.scrollUntilVisible(find.textContaining('my-laptop is told the new one'), 100, scrollable: find.byType(Scrollable).first);
     await t.tap(find.text('Forget this laptop'));
     expect(forgot, 1);
   });

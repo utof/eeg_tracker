@@ -1449,14 +1449,16 @@ Good to know:
 
 Off unless you switch it on. With it on, the phone answers the laptop over your home Wi-Fi: the live signal with
 contact, battery and drops (the same pages the laptop recorder has), and every file the app keeps, so the laptop has
-a copy of the night within minutes instead of after Stop and Export data. Nothing is sent anywhere by itself, nothing
-goes to the internet, and nothing on the phone can be changed or deleted this way.
+a copy of the night within minutes instead of after Stop and Export data. Nothing is sent anywhere by itself (only a
+paired laptop is told where the phone is), nothing goes to the internet, and nothing on the phone can be changed or
+deleted this way.
 
 **Safety, in plain words.** It is your brain data, so: every request needs the code the app shows (12 characters);
 only devices on the same local network are answered; it turns itself off 12 hours after you switched it on, and 15
 minutes after Stop. It is **not encrypted** (plain HTTP; encryption is deferred, DECISIONS rows 37 and 225): a device
 on the same Wi-Fi could listen in, so use it on your home Wi-Fi only, never on a shared or public one. **New code**
-on the sheet shuts out every laptop that has the old one.
+on the sheet shuts out every laptop that has the old one; a paired laptop is told the new one, so tap **Forget this
+laptop** first to shut it out too.
 
 **Connecting the laptop by one scan** (DECISIONS rows 530-539, `../docs/phone-link.md`). The square code on the
 laptop works once, for 5 minutes. The app asks before anything is sent, and it sends its own code only to the laptop
