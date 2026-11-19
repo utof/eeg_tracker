@@ -448,6 +448,38 @@ void main() {
     await running;
   });
 
+  test('a night begun through our own connection and continued with the SDK scans at once, not every third try', () async {
+    // The switch was moved during the night and the process restarted: the saved headband has no SDK sensor family.
+    store.state = const NightState(
+      active: true,
+      startMs: 1000,
+      runs: 1,
+      contactTried: true,
+      band: BandId(name: 'BB Black', address: 'AA:BB', serial: '123', family: 'own'),
+    );
+    final band = FakeBand('a');
+    final finder = _SdkLikeFinder([band]);
+    final r = recorder(finder);
+    final running = r.run(restartedBySystem: true);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await r.stop();
+    await running;
+
+    expect(finder.calls, ['direct AA:BB', 'scan']);
+    expect(band.calls, contains('startSignal'));
+    final log = files('log').single.readAsStringSync();
+    expect(
+      log,
+      contains(
+        "reconnect try 1 (direct to AA:BB): the night's headband was reached through our own connection; BrainBit's "
+        'SDK needs a scan first; scanning instead',
+      ),
+    );
+    expect(log, contains('reconnect try 1 (scan): connected'));
+    expect(store.state.band?.family, 'leBrainBitBlack', reason: 'the next drop goes direct again');
+    expect(store.state.directPending, isFalse);
+  });
+
   test('a process that died during a direct connection scans only', () async {
     store.state = const NightState(
       active: true,
@@ -827,5 +859,17 @@ class _SlowBand extends FakeBand {
       await Completer<void>().future;
     }
     return super.battery();
+  }
+}
+
+/// BrainBit's SDK as the finder sees it: it cannot reach a headband directly by an id our own connection made.
+class _SdkLikeFinder extends FakeFinder {
+  _SdkLikeFinder(super.bands);
+
+  @override
+  Future<Headband> connectDirect(BandId id) async {
+    if (id.family != 'own') return super.connectDirect(id);
+    calls.add('direct ${id.address}');
+    throw NeedsScan("the night's headband was reached through our own connection; BrainBit's SDK needs a scan first");
   }
 }

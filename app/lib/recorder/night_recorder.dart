@@ -468,12 +468,22 @@ class NightRecorder {
     _set(_status.copyWith(phase: Phase.reconnecting));
     await _pause(waits.isEmpty ? Duration.zero : waits[min(n, waits.length) - 1]);
     if (_stopping) return null;
-    final scan = _night.directOff || timing.scanEvery <= 1 || n % timing.scanEvery == 0;
-    final how = scan ? 'scan' : 'direct to ${id.address}';
+    var scan = _night.directOff || timing.scanEvery <= 1 || n % timing.scanEvery == 0;
+    var how = scan ? 'scan' : 'direct to ${id.address}';
     final t0 = _now();
     String took() => '${(_now().difference(t0).inMilliseconds / 1000).toStringAsFixed(1)} s';
     try {
-      final band = scan ? await _scan(timing.rescanFor) : await _direct(id);
+      Headband? band;
+      try {
+        band = scan ? await _scan(timing.rescanFor) : await _direct(id);
+      } on NeedsScan catch (e) {
+        // The connection in use cannot reach this headband directly (the switch moved during the night): a scan now
+        // rather than at every third try; once it connects, the night's headband is one it can reach.
+        _note('reconnect try $n ($how): $e; scanning instead');
+        scan = true;
+        how = 'scan';
+        band = await _scan(timing.rescanFor);
+      }
       if (band != null) {
         _via = (how: scan ? 'scan' : 'direct', tryNo: n);
         _note('reconnect try $n ($how): connected after ${took()}');
