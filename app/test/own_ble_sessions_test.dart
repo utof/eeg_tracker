@@ -191,6 +191,71 @@ void main() {
       expect(stuck, isEmpty, reason: 'our connection never needs a process restart');
     });
 
+    /// The recorder and the object at the phone's own ratios, 1 s = 10 ms: the recorder checks every 10 s and gives a
+    /// run up after 40 s without data; the object mends for 30 s with its 1, 2, 5, 10, 20, 30 s pauses (DECISIONS 213).
+    NightRecorder atPhoneRatios(FakeHeadband hb) => NightRecorder(
+      finder: own(
+        hb,
+        timing: OwnTiming(
+          callTimeout: _ms * 120,
+          healFor: _ms * 300,
+          stall: _ms * 50,
+          backoffs: [_ms * 10, _ms * 20, _ms * 50, _ms * 100, _ms * 200, _ms * 300],
+          contactFor: _ms * 60,
+          notesEvery: _ms * 100,
+          poll: _ms * 3,
+          stopWait: _ms * 300,
+        ),
+      ),
+      dir: dir,
+      store: store,
+      onStatus: statuses.add,
+      onStuck: (r) async => stuck.add(r),
+      timing: const RecorderTiming(
+        tick: Duration(milliseconds: 10),
+        ticksPerCheck: 10,
+        scanFor: Duration(milliseconds: 300),
+        contactFor: Duration(milliseconds: 60),
+        settle: Duration(milliseconds: 10),
+        retryWait: Duration(milliseconds: 30),
+        sdkTimeout: Duration(seconds: 2),
+        connectTimeout: Duration(seconds: 2),
+        notFoundWait: Duration(milliseconds: 100),
+        notFoundWaitLong: Duration(milliseconds: 600),
+        stopTimeout: Duration(seconds: 2),
+        reconnectWaits: [Duration(milliseconds: 20), Duration(milliseconds: 50), Duration(milliseconds: 100)],
+        rescanFor: Duration(milliseconds: 150),
+      ),
+    );
+
+    test('at the phone\'s ratios a 15 s drop is left to the object: no stream restart undoes its mending', () async {
+      final hb = FakeHeadband(dropAfter: _ms * 400, dropFor: _ms * 150, maxDrops: 1);
+      final r = atPhoneRatios(hb);
+      final running = r.run(restartedBySystem: false);
+      await waitFor(() => hb.drops == 1 && hb.connects == 2 && hb.packets > 200);
+      await Future<void>.delayed(_ms * 300);
+      await r.stop();
+      await running;
+      final log = files('log').single.readAsStringSync();
+      expect(log, isNot(contains('restarting stream')));
+      expect(log, contains(RegExp(r'reconnected after \d+\.\d s away \(try [2-9]\)')), reason: 'its tries went on counting');
+      expect(files('f32'), hasLength(1));
+    });
+
+    test('at the phone\'s ratios a 2 min drop: the object gives up after its 30 s and hands over', () async {
+      final hb = FakeHeadband(dropAfter: _ms * 400, dropFor: _ms * 1200, maxDrops: 1);
+      final r = atPhoneRatios(hb);
+      final running = r.run(restartedBySystem: false);
+      await waitFor(() => files('f32').length == 2 && files('f32').last.lengthSync() > 2000);
+      await r.stop();
+      await running;
+      final first = files('log').first.readAsStringSync();
+      expect(first, isNot(contains('restarting stream')));
+      expect(first, contains("handing over to the app's reconnect"));
+      expect(first, contains('drop (out of range)'));
+      expect(r.abandoned, hasLength(1));
+    });
+
     test('lost packets are counted, by the driver and by the night\'s packet line alike', () async {
       final hb = FakeHeadband(loseEvery: 7);
       final r = recorder(own(hb));

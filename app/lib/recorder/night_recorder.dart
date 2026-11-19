@@ -1108,7 +1108,12 @@ class NightRecorder {
         w.log('still no data; reconnecting');
         return _End.stalled;
       }
-      await _restartStream(band, w, stalled);
+      if (band is MendsDrops) {
+        w.log('no data; the headband is mending the link itself (check $stalled)');
+        _set(_status.copyWith(note: 'no data; the headband is reconnecting'));
+      } else {
+        await _restartStream(band, w, stalled);
+      }
     }
   }
 
