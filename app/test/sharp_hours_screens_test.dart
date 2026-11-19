@@ -1,10 +1,12 @@
 // Renders the sharp-hours page and the one-tap question in their states at the owner's phone width (393 dp) with
 // real fonts, writes build/screens/sharp_*.png for a human look, and fails on any layout overflow (also at 130 %
 // text). Then the flows on a fake app folder with a fake phone: switch on, change the count, rate, delete.
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:eeg_tracker/alphatheta/rules.dart' show ReactionTest;
 import 'package:eeg_tracker/sharp/hours.dart';
 import 'package:eeg_tracker/sharp/page.dart';
 import 'package:eeg_tracker/sharp/prompts.dart';
@@ -144,38 +146,58 @@ Widget _page(SharpPageModel m, [SharpAxis axis = SharpAxis.clock]) => SharpHours
 final _launch = SharpLaunch(planned: DateTime(2026, 11, 28, 14, 2), shown: DateTime(2026, 11, 28, 14, 3), test: true);
 final _rated = SharpRating(at: DateTime(2026, 11, 28, 14, 5), sharp: 4, prompt: DateTime(2026, 11, 28, 14, 2));
 
-final Map<String, Widget Function()> states = {
+/// The page's states: each shot as the first screen and at full length, at 100 and 130 % text.
+final Map<String, Widget Function()> pages = {
   'page_new': () => _page(_model()),
   'page_collecting': () => _page(_model(saved: _on(), days: 9)),
   'page_held_back': () => _page(_model(saved: _on(), days: 5, share: 0.5, notifications: false)),
   'page_open_clock': () => _page(_model(saved: _on(), days: 30, peak: true)),
   'page_open_since_waking': () => _page(_model(saved: _on(), days: 30, peak: true), SharpAxis.sinceWake),
   'page_open_pressure': () => _page(_model(saved: _on(), days: 30), SharpAxis.pressure),
-  'question_ask': () => SharpQuestionView(stage: QuestionStage.ask, launch: _launch, onRate: (_) {}),
-  'question_ask_page': () => SharpQuestionView(stage: QuestionStage.ask, onRate: (_) {}),
-  'question_saved': () => SharpQuestionView(stage: QuestionStage.saved, saved: _rated, canTest: true, onTest: _no, onDone: _no),
-  'question_test': () => SharpQuestionView(stage: QuestionStage.test, saved: _rated, launch: _launch, testSeed: 1, onDone: _no),
   'trends_section': () => TrendsView(
     model: buildTrends((nights: const [], mornings: const [], sessions: const []), _now, extra: {
       'sharp': {dayKey(_now): 3.4},
     }),
-    onSharp: () {},
+    onSharp: _no,
+    onExperiments: _no,
     sharpLine: 'On. Collecting: 23 of about 60 ratings, day 9 of 21.',
   ),
 };
 
+/// The question's steps: one screen each.
+final Map<String, Widget Function()> questions = {
+  'question_ask': () => SharpQuestionView(stage: QuestionStage.ask, launch: _launch, onRate: (_) {}),
+  'question_ask_page': () => SharpQuestionView(stage: QuestionStage.ask, onRate: (_) {}),
+  'question_saved': () => SharpQuestionView(stage: QuestionStage.saved, saved: _rated, canTest: true, onTest: _no, onDone: _no),
+  'question_test': () => SharpQuestionView(stage: QuestionStage.test, saved: _rated, launch: _launch, testSeed: 1, onDone: _no),
+  'question_tested': () => SharpQuestionView(
+    stage: QuestionStage.test,
+    saved: _rated,
+    launch: _launch,
+    tested: true,
+    onDone: _no,
+    finished: ReactionTest()
+      ..times.addAll(const [298, 312, 305, 341, 287, 330, 296, 318, 309, 352, 301, 294, 325])
+      ..falseStarts = 1,
+  ),
+};
+
+/// Pushes [w] over a stub page (as the app opens it, so the app bar has its Back arrow), checks for overflow and
+/// writes build/screens/[name].png; [height] in dp (873 = the owner's first screen; more = the whole page).
 Future<void> _shoot(WidgetTester tester, Widget w, String name, double scale, {double height = 873}) async {
   tester.view.physicalSize = Size(1080, height * 1080 / 393); // the owner's Xiaomi 11T: 393 dp wide
   tester.view.devicePixelRatio = 1080 / 393;
   addTearDown(tester.view.reset);
   final key = GlobalKey();
+  final nav = GlobalKey<NavigatorState>();
   await tester.pumpWidget(
     MediaQuery(
       data: MediaQueryData.fromView(tester.view).copyWith(textScaler: TextScaler.linear(scale), disableAnimations: true),
-      child: MaterialApp(debugShowCheckedModeBanner: false, theme: nightTheme(), home: RepaintBoundary(key: key, child: w)),
+      child: MaterialApp(navigatorKey: nav, debugShowCheckedModeBanner: false, theme: nightTheme(), home: const Scaffold()),
     ),
   );
-  await tester.pump(const Duration(milliseconds: 100));
+  unawaited(nav.currentState!.push(MaterialPageRoute<void>(builder: (_) => RepaintBoundary(key: key, child: w))));
+  await tester.pumpAndSettle();
   expect(tester.takeException(), isNull);
   final boundary = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
   await tester.runAsync(() async {
@@ -191,17 +213,19 @@ void main() {
   setUpAll(loadFonts);
 
   for (final scale in [1.0, 1.3]) {
-    for (final e in states.entries) {
-      testWidgets('sharp ${e.key} at ${(scale * 100).round()} % text', (tester) async {
+    final pct = (scale * 100).round();
+    for (final e in pages.entries) {
+      testWidgets('sharp ${e.key} at $pct % text, first screen and full length', (tester) async {
+        await _shoot(tester, e.value(), 'sharp_${e.key}', scale);
+        await _shoot(tester, e.value(), 'sharp_${e.key}_full', scale, height: scale == 1.0 ? 2700 : 3500);
+      });
+    }
+    for (final e in questions.entries) {
+      testWidgets('sharp ${e.key} at $pct % text', (tester) async {
         await _shoot(tester, e.value(), 'sharp_${e.key}', scale);
       });
     }
   }
-
-  testWidgets('the whole page, scrolled out (one tall render to read every section)', (tester) async {
-    await _shoot(tester, _page(_model(saved: _on(), days: 30, peak: true)), 'sharp_page_open_full', 1.0, height: 2600);
-    await _shoot(tester, _page(_model(saved: _on(), days: 9)), 'sharp_page_collecting_full', 1.0, height: 2400);
-  });
 
   group('the words', () {
     test('status, delivery and the collecting sentence', () {
@@ -217,7 +241,7 @@ void main() {
     test('after 30 days with a morning peak the clock names it; the reaction tests too', () {
       final m = _model(saved: _on(), days: 30, peak: true);
       expect(m.gate.open, isTrue);
-      expect(ratingWords(m, SharpAxis.clock), startsWith('Sharpest 08:00 to 12:00'), reason: 'the made-up peak covers both morning blocks');
+      expect(ratingWords(m, SharpAxis.clock), startsWith('Sharpest 09:30 to 12:00'), reason: 'both morning blocks, from the window\'s start');
       expect(reactionWords(m, SharpAxis.clock), startsWith('Quickest 10:00 to 12:00'));
       expect(axisNote(SharpAxis.sinceWake, 2), contains('2 answers have no recorded wake-up'));
     });

@@ -96,6 +96,29 @@ def test_self_experiments_arrive_whole_and_their_hidden_order_is_never_printed(t
     assert len(list((dest / "phone" / "replaced").rglob("progress.json"))) == 1
 
 
+def test_the_sharp_hours_log_arrives_and_a_later_answer_replaces_the_growing_files(tmp_path: Path) -> None:
+    sharp = {
+        "sharp-hours/settings.json": b'{"version": 1, "on": true, "per_day": 4}',
+        "sharp-hours/ratings.jsonl": b'{"version": 1, "at": "2026-11-19T14:05:12+03:00", "sharp": 4, "scale": "1-5"}\n',
+        "sharp-hours/reactions.jsonl": b'{"version": 1, "at": "2026-11-19T14:07:00+03:00", "median_ms": 312}\n',
+        "sharp-hours/prompts.jsonl": b'{"planned": "2026-11-19T14:02:00+03:00", "event": "shown"}\n',
+        "sharp-hours/events.jsonl": b'{"at": "2026-11-19T09:00:00+03:00", "event": "on"}\n',
+    }
+    exp, dest = make_export(tmp_path / "eeg-export", dict(FILES, **sharp)), tmp_path / "_local"
+    code, text = run(exp, dest)
+    assert code == 0, text
+    assert "13 new" in text and "10 into _local/phone" in text
+    for p, b in sharp.items():
+        assert (dest / "phone" / p).read_bytes() == b
+    # the answers file only grows on the phone: a later export's longer copy replaces the laptop's, the old one kept
+    newer = dict(FILES, **sharp)
+    newer["sharp-hours/ratings.jsonl"] = sharp["sharp-hours/ratings.jsonl"] * 2
+    code, text = run(make_export(tmp_path / "later", newer, modified=T0 + 86_400_000), dest)
+    assert code == 0, text
+    assert len((dest / "phone" / "sharp-hours" / "ratings.jsonl").read_bytes().splitlines()) == 2
+    assert len(list((dest / "phone" / "replaced").rglob("ratings.jsonl"))) == 1
+
+
 def test_importing_the_same_folder_again_copies_nothing(tmp_path: Path) -> None:
     exp, dest = make_export(tmp_path / "eeg-export"), tmp_path / "_local"
     run(exp, dest)

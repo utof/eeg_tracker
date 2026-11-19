@@ -4,6 +4,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:eeg_tracker/export/store.dart' show storedFiles;
 import 'package:eeg_tracker/sharp/schedule.dart';
 import 'package:eeg_tracker/sharp/store.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -115,6 +116,23 @@ void main() {
     final lines = File('${store.dir.path}/events.jsonl').readAsLinesSync();
     expect(lines, hasLength(2));
     expect(jsonDecode(lines.first), containsPair('event', 'on'));
+  });
+
+  test('Export data takes the whole folder, the Android side\'s log included; a half-written file stays', () {
+    final files = Directory('${tmp.path}/files');
+    store.saveSettings(const SharpSettings(on: true, perDay: 4, fromMin: 600, untilMin: 1320, seed: 'abc'));
+    store.addRating(SharpRating(at: DateTime(2026, 11, 20, 14), sharp: 3));
+    store.addReaction(SharpReaction(at: DateTime(2026, 11, 20, 14, 2), ratingAt: DateTime(2026, 11, 20, 14), timesMs: const [300]));
+    store.logEvent(DateTime(2026, 11, 20, 9), 'on');
+    File('${store.dir.path}/prompts.jsonl').writeAsStringSync('{}\n');
+    File('${store.dir.path}/settings.json.tmp').writeAsStringSync('{');
+    expect([for (final f in storedFiles(files)) f.path], [
+      'sharp-hours/events.jsonl',
+      'sharp-hours/prompts.jsonl',
+      'sharp-hours/ratings.jsonl',
+      'sharp-hours/reactions.jsonl',
+      'sharp-hours/settings.json',
+    ]);
   });
 
   test('delete everything removes the folder; reading afterwards is empty', () {

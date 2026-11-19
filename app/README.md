@@ -356,6 +356,46 @@ minutes of sleep on average.
    runs 04:00 to 04:00); was anything unclear in the words.
 5. The answer opens after 4 weeks and 2 days. Export data as usual in between: the experiment travels with it.
 
+## Sharp hours (the assistant's proposal; off unless you switch it on)
+
+Not something you asked for: the assistant built it from the research on when people are sharpest (DECISIONS rows
+280-289; the **i** button shows `docs/evidence/sharp-hours.md`). A few times a day, at random moments while you are
+awake, a notification asks **How sharp do you feel?** One tap answers (1 Foggy to 5 Very sharp). Two of the day's
+questions also suggest the 1-minute reaction test; Skip is always fine.
+
+- Trends, scroll to **Sharp hours**, tap **Sharp hours**. Switch **Questions during the day** on (Android asks once
+  to allow notifications). The waking hours are suggested from your recorded nights; **Change** them if they are wrong,
+  and pick 3, 4 or 6 a day.
+- Never in the quiet hours, during a night recording or during a session. A question you miss goes after an hour;
+  **In 15 min** on the notification puts it off once. **Rate now** answers without a question (marked as such).
+- Weeks 1-3: the page shows how far it is from a first pattern ("Collecting: 23 of about 60 ratings, day 9 of 21"),
+  your answers as dots, and today's answers. No best time yet: a few days can look like a pattern by chance.
+- After 3 weeks and about 60 answers: your answers by 2-hour blocks of the clock, of hours since you woke, or of sleep
+  pressure, each block with its range, and one sentence such as "Sharpest 10:00 to 12:00: 0.8 points above your
+  other times (probably 0.4 to 1.2)", or "No clear best time yet" (a likely answer: the hour moves how sharp people
+  feel very little). Reaction times the same once 30 tests are in. Everything is "seen together, not tested".
+- Trends shows the day's mean sharpness and reaction time; a self-experiment can use either as its number.
+- **Switch it off** with the same switch (your answers stay), or **Delete my sharp-hours data** at the bottom of the
+  page (asks once; exported copies stay where they are). **Sound of the questions** opens the phone's setting for
+  them (make them silent there if you like).
+
+Files, app-private, exported by Export data: `files/sharp-hours/settings.json`, `ratings.jsonl`, `reactions.jsonl`,
+`prompts.jsonl` (what happened to each planned question: shown, skipped and why, late, postponed, swiped away) and
+`events.jsonl` (each change); format in `docs/data-format.md`.
+
+### Owner step: switch it on and watch the first two days (2 minutes, then a tap a few times a day)
+
+Nothing of this has run on a phone yet, and HyperOS may hold notifications back.
+
+1. Trends, Sharp hours, switch on, allow notifications. Check the waking hours (Change if needed).
+2. On a Xiaomi: Settings, Apps, EEG Tracker: **Autostart** on and **Battery saver: No restrictions** (the recorder
+   needs the same). Without them the questions can come late or not at all.
+3. Answer what comes for two days. Then open the page: under the switch it says how many of the last days' questions
+   arrived. If it shows an amber "Only N of M questions reached you", tap its Autostart and Battery buttons and tell
+   the assistant the numbers.
+4. Tell the assistant: did any question come at a bad moment (asleep, in a session); was the sound too much; did the
+   reaction test feel too long to do twice a day. To stop it: the same switch, off.
+
 ## Replay check (off unless you switch it on)
 
 Does the live link to your brain matter, or would a similar sound do as well? The replay check finds out for you.

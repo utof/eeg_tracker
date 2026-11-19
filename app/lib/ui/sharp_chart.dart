@@ -40,6 +40,8 @@ class SharpChart extends StatelessWidget {
     this.profile,
     this.reaction = false,
     required this.label,
+    this.fromMin = 600,
+    this.untilMin = 1320,
   });
 
   final SharpAxis axis;
@@ -50,6 +52,9 @@ class SharpChart extends StatelessWidget {
   /// Reaction times (ms, quicker at the top) instead of 1-5 ratings.
   final bool reaction;
   final String label;
+
+  /// The waking window: the clock's end ticks show where the questions start and stop.
+  final int fromMin, untilMin;
 
   @override
   Widget build(BuildContext context) {
@@ -79,6 +84,8 @@ class SharpChart extends StatelessWidget {
             scaler: scaler,
             gutter: gutter,
             plot: plot,
+            fromMin: fromMin,
+            untilMin: untilMin,
           ),
         ),
       ),
@@ -97,6 +104,8 @@ class _ChartPainter extends CustomPainter {
     required this.scaler,
     required this.gutter,
     required this.plot,
+    required this.fromMin,
+    required this.untilMin,
   });
 
   final SharpAxis axis;
@@ -107,6 +116,7 @@ class _ChartPainter extends CustomPainter {
   final TextStyle tick;
   final TextScaler scaler;
   final double gutter, plot;
+  final int fromMin, untilMin;
 
   TextPainter _tp(String s, TextStyle st) =>
       TextPainter(text: TextSpan(text: s, style: st), textScaler: scaler, textDirection: TextDirection.ltr)..layout();
@@ -206,17 +216,35 @@ class _ChartPainter extends CustomPainter {
       SharpAxis.sinceWake => b * 2.0,
       SharpAxis.pressure => b * 25.0,
     };
+    // labels never touch: the two ends first, then the inner edges that leave a gap to everything drawn
+    final taken = <(double, double)>[];
     void label(double x, String s, {double align = 0.5}) {
       final t = _tp(s, tick);
-      t.paint(canvas, Offset((x - t.width * align).clamp(0, size.width - t.width), plot + 6));
+      final x0 = (x - t.width * align).clamp(0.0, size.width - t.width), x1 = x0 + t.width;
+      if (taken.any((r) => x0 < r.$2 + 4 && x1 > r.$1 - 4)) return;
+      taken.add((x0, x1));
+      t.paint(canvas, Offset(x0, plot + 6));
     }
 
     String fmt(double v) => v.round().toString();
-    for (var i = 1; i < blocks.length; i++) {
-      label(left + i * colW, fmt(edge(blocks[i])));
+    switch (axis) {
+      case SharpAxis.pressure:
+        label(left, 'rested', align: 0);
+      case SharpAxis.sinceWake:
+        label(left, fmt(edge(blocks.first)), align: 0);
+      case SharpAxis.clock:
+        // the ends where the questions start and stop (no question is asked outside the waking window)
+        final first = blocks.first * 120, last = blocks.last * 120 + 120;
+        final from = fromMin > first && fromMin < first + 120 ? fromMin : first;
+        final until = untilMin > last - 120 && untilMin < last ? untilMin : last;
+        String hm(int m) => m % 60 == 0 ? '${(m ~/ 60) == 24 ? 24 : (m ~/ 60) % 24}' : '${(m ~/ 60) % 24}:${(m % 60).toString().padLeft(2, '0')}';
+        label(left, hm(from), align: 0);
+        label(left + w, hm(until), align: 1);
     }
-    if (axis != SharpAxis.pressure) label(left, fmt(edge(blocks.first)), align: 0);
-    if (axis == SharpAxis.clock) label(left + w, '${blocks.last == 11 ? 24 : edge(blocks.last + 1).round()}', align: 1);
+    for (var i = 1; i < blocks.length; i++) {
+      // the pressure scale's 100 is a regular bedtime: worded, as on the Trends chart
+      label(left + i * colW, axis == SharpAxis.pressure && blocks[i] == 4 ? 'bedtime' : fmt(edge(blocks[i])));
+    }
   }
 
   @override

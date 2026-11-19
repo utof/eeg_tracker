@@ -39,6 +39,7 @@ class SharpQuestionView extends StatelessWidget {
     this.onDone,
     this.error,
     this.testSeed,
+    this.finished,
   });
 
   final QuestionStage stage;
@@ -52,6 +53,9 @@ class SharpQuestionView extends StatelessWidget {
   final ValueChanged<ReactionTest>? onTestDone;
   final String? error;
   final int? testSeed;
+
+  /// Renders only: the panel starts from this finished test (ReactionPanel.finished).
+  final ReactionTest? finished;
 
   @override
   Widget build(BuildContext context) {
@@ -90,11 +94,17 @@ class SharpQuestionView extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          'Saved: ${s!.sharp}, ${sharpWords[s.sharp - 1]}. The test is optional.',
+          'Saved: ${s!.sharp}, ${sharpWords[s.sharp - 1]}. ${tested ? 'The test is saved with it.' : 'The test is optional.'}',
           style: muted,
         ),
         const SizedBox(height: 20),
-        ReactionPanel(onDone: (_) {}, onTest: onTestDone, seed: testSeed),
+        // ignore: invalid_use_of_visible_for_testing_member
+        ReactionPanel(onDone: (_) {}, onTest: onTestDone, seed: testSeed, filledStart: true, finished: finished),
+        if (!tested)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(onPressed: onDone, child: const Text('Skip the test')),
+          ),
       ],
     };
     return Scaffold(
@@ -106,10 +116,10 @@ class SharpQuestionView extends StatelessWidget {
           if (error != null) ...[const SizedBox(height: 16), Text(error!, style: text.bodyLarge?.copyWith(color: Night.problem))],
         ],
       ),
-      // the test's own Start is the step forward; until a test is done, leaving is a skip, not the action
+      // the test's own Start is the step forward (filled, in the panel); Done is pinned only once a test is done
       bottomNavigationBar: switch (stage) {
         QuestionStage.ask => null,
-        QuestionStage.test when !tested => PinnedAction(child: OutlinedButton(onPressed: onDone, child: const Text('Skip the test'))),
+        QuestionStage.test when !tested => null,
         _ => PinnedAction(child: FilledButton(onPressed: onDone, child: const Text('Done'))),
       },
     );

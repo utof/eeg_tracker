@@ -15,6 +15,9 @@ import 'theme.dart';
 
 String _clock(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
+const String _howWords = 'Never in the quiet hours, during a night recording or during a session. Each question comes '
+    'at a random minute; two a day suggest the 1-minute reaction test.';
+
 /// "10:00 to 22:00".
 String windowWords(SharpSettings s) => '${clockText(s.fromMin)} to ${clockText(s.untilMin)}';
 
@@ -63,7 +66,7 @@ String ratingWords(SharpPageModel m, SharpAxis a) {
   }
   final b = m.ratings[a]!.profile?.best;
   return b != null
-      ? bestWords(a, b)
+      ? bestWords(a, b, fromMin: m.settings.fromMin, untilMin: m.settings.untilMin)
       : 'No clear best time yet: your hours look alike so far, or the differences are still within chance.';
 }
 
@@ -75,7 +78,9 @@ String? reactionWords(SharpPageModel m, SharpAxis a) {
     return 'Dots only until 3 weeks and ${SharpGate.tests} tests: ${m.gate.tests} so far.';
   }
   final b = v.profile?.best;
-  return b != null ? bestWords(a, b, reaction: true) : 'No clearly quicker time yet.';
+  return b != null
+      ? bestWords(a, b, reaction: true, fromMin: m.settings.fromMin, untilMin: m.settings.untilMin)
+      : 'No clearly quicker time yet.';
 }
 
 class SharpHoursView extends StatelessWidget {
@@ -173,12 +178,7 @@ class SharpHoursView extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            'Never in the quiet hours, during a night recording or during a session. Each question comes at a random '
-            'minute; two a day suggest the 1-minute reaction test.',
-            style: muted,
-          ),
+          if (!m.on) ...[const SizedBox(height: 6), Text(_howWords, style: muted)],
           if (reach != null)
             m.reach.heldBack
                 ? _Warning(
@@ -208,26 +208,28 @@ class SharpHoursView extends StatelessWidget {
               style: muted,
             ),
           ],
+          if (m.on) ...[const SizedBox(height: 12), Text(_howWords, style: muted)],
           const SectionHeading('By the hour'),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final a in SharpAxis.values)
-                // the chips of Sound for states (states_view.dart)
-                ChoiceChip(
-                  label: Text(axisName(a)),
-                  selected: a == axis,
-                  showCheckmark: false,
-                  labelPadding: const EdgeInsets.symmetric(horizontal: 4),
-                  onSelected: onAxis == null ? null : (_) => onAxis!(a),
-                  materialTapTargetSize: MaterialTapTargetSize.padded,
-                  selectedColor: Night.surfaceHigh,
-                  backgroundColor: Night.ground,
-                  side: BorderSide(color: a == axis ? Night.inkMuted : Night.rule),
-                  labelStyle: text.bodyLarge?.copyWith(color: a == axis ? Night.ink : Night.inkMuted),
-                ),
-            ],
+          // the app's segmented rows (form_parts.dart); a long label wraps inside its own segment at large text
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<SharpAxis>(
+              segments: [
+                for (final a in SharpAxis.values)
+                  ButtonSegment(value: a, label: Text(axisName(a), textAlign: TextAlign.center, maxLines: 2)),
+              ],
+              selected: {axis},
+              showSelectedIcon: false,
+              onSelectionChanged: onAxis == null ? null : (s) => onAxis!(s.first),
+              style: SegmentedButton.styleFrom(
+                minimumSize: const Size.fromHeight(52),
+                selectedBackgroundColor: Night.surfaceHigh,
+                selectedForegroundColor: Night.ink,
+                foregroundColor: Night.inkMuted,
+                side: const BorderSide(color: Night.rule),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+              ),
+            ),
           ),
           const SizedBox(height: 12),
           Text(axisNote(axis, rv.left), style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.4)),
@@ -239,6 +241,8 @@ class SharpHoursView extends StatelessWidget {
             points: rv.points,
             blocks: blocks,
             profile: rv.profile,
+            fromMin: m.settings.fromMin,
+            untilMin: m.settings.untilMin,
             label: 'How sharp, ${axisName(axis).toLowerCase()}: ${rv.points.length} answers. ${ratingWords(m, axis)}',
           ),
           const SizedBox(height: 12),
@@ -260,6 +264,8 @@ class SharpHoursView extends StatelessWidget {
               blocks: blocks,
               profile: tv.profile,
               reaction: true,
+              fromMin: m.settings.fromMin,
+              untilMin: m.settings.untilMin,
               label: 'Reaction time, ${axisName(axis).toLowerCase()}: ${tv.points.length} tests. ${rWords ?? ''}',
             ),
             if (rWords != null) ...[const SizedBox(height: 12), Text(rWords, style: text.bodyLarge?.copyWith(height: 1.45))],

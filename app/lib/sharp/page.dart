@@ -138,7 +138,7 @@ String sharpTrendsLine(SharpSettings? s, List<SharpRating> ratings, List<SharpRe
     axisPoints(SharpAxis.clock, [for (final r in ratings) (at: r.at, value: r.sharp.toDouble())]).placed,
     higherBetter: true,
   ).best;
-  return '$state${best == null ? 'No clear best time yet.' : bestWords(SharpAxis.clock, best)}';
+  return '$state${best == null ? 'No clear best time yet.' : bestWords(SharpAxis.clock, best, fromMin: s?.fromMin, untilMin: s?.untilMin)}';
 }
 
 /// The tests already done today (the question page offers one while fewer than [SharpRule.testsMax]).

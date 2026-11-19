@@ -51,3 +51,16 @@ FORM: the proposal and its switch first (dealt lead, position 6 of 7), with the 
 and the day raster (4) declined to the hours chart's columns; seed:cfef118e0666b681.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+
+## Finish review (2026-11-19)
+
+A fresh reviewer agent (no shared context) judged the renders against this contract and DESIGN.md: first a
+recapture (the harness had shot only the first screen and pages without their Back arrow; fixed: every page pushed
+over a stub route, every state also at full length, 100 and 130 % text), then five material fixes, all applied and
+scored resolved, disposition ship: the "how it works" sentence below the ledger once on, so the ledger reaches the
+first screen at 100 %; the test's Start as the one filled step with Skip as a text button and Done pinned only after a
+test; one full-width segmented row for the three groupings instead of wrapping chips; the pressure axis worded
+("rested", "bedtime", "of 100"); clock spans and end ticks kept inside the waking window ("09:30 to 12:00"); plus
+tick labels that never touch. Not taken (the reviewer's "ceiling", optional): today's cell outlined green in the Days
+row, and a "now" hairline with today's answers ringed in the charts. At 130 % text the ledger starts just below the
+first screen (accepted: the larger text forces the reflow).

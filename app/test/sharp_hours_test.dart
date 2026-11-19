@@ -82,8 +82,9 @@ void main() {
       expect(blockOf(SharpAxis.pressure, 25), 1);
       expect(blockOf(SharpAxis.pressure, 99), 3);
       expect(blockOf(SharpAxis.pressure, 130), 4);
-      expect(blockWords(SharpAxis.pressure, 0), 'sleep pressure under 25');
-      expect(blockWords(SharpAxis.pressure, 4), 'sleep pressure 100 or more');
+      expect(blockWords(SharpAxis.pressure, 0), 'sleep pressure under 25 of 100');
+      expect(blockWords(SharpAxis.pressure, 2), 'sleep pressure 50 to 75 of 100');
+      expect(blockWords(SharpAxis.pressure, 4), 'sleep pressure past a regular bedtime (100 or more)');
     });
 
     test('hours since waking come from the latest recorded wake-up within 24 hours before the answer', () {
@@ -229,8 +230,14 @@ void main() {
       );
       const two = [SharpBlock(index: 1, n: 9, days: 8), SharpBlock(index: 2, n: 9, days: 8)];
       expect(spanWords(SharpAxis.sinceWake, two), '2 to 6 hours after waking');
-      expect(spanWords(SharpAxis.pressure, two), 'sleep pressure 25 to 75');
+      expect(spanWords(SharpAxis.pressure, two), 'sleep pressure 25 to 75 of 100');
       expect(spanWords(SharpAxis.clock, const [SharpBlock(index: 11, n: 9, days: 8)]), '22:00 to 24:00');
+      // the clock's ends are kept inside the waking window: no question is asked before 09:30 or after 22:30
+      const morning = [SharpBlock(index: 4, n: 9, days: 8), SharpBlock(index: 5, n: 9, days: 8)];
+      expect(spanWords(SharpAxis.clock, morning, fromMin: 570, untilMin: 1350), '09:30 to 12:00');
+      expect(spanWords(SharpAxis.clock, const [SharpBlock(index: 11, n: 9, days: 8)], fromMin: 570, untilMin: 1350), '22:00 to 22:30');
+      expect(spanWords(SharpAxis.clock, const [SharpBlock(index: 5, n: 9, days: 8)], fromMin: 570, untilMin: 1350), '10:00 to 12:00');
+      expect(spanWords(SharpAxis.sinceWake, two, fromMin: 570, untilMin: 1350), '2 to 6 hours after waking');
     });
   });
 

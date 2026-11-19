@@ -286,6 +286,25 @@ asleep` (sound for states in the session's `events`, meditation and alpha-theta 
 catcher and the nap coach in the recording's `.markers.jsonl`). The night recording marks `hands-free: moment (double
 clench)` and its `.log` says when hands-free is on and how many moments it marked.
 
+### Sharp-hours log (`sharp-hours/`)
+
+The assistant's proposal (DECISIONS rows 280-289), off unless switched on. Times are local with their UTC offset
+(`2026-11-20T14:05:12+03:00`). The JSON-lines files only grow; a line cut off by a crash is skipped when read.
+`settings.json` is written under a temporary name, then renamed. Nothing here holds EEG.
+
+| File | Content |
+|---|---|
+| `settings.json` | `version` 1, `on`, `per_day` (3, 4 or 6), `awake_from` and `awake_until` (`HH:MM`; the rest of the day is quiet; past midnight when `awake_until` is earlier), `seed` (32 hex characters: the phone-made secret the moments are drawn from), `first_on`, `changed` (local ISO times) |
+| `ratings.jsonl` | one line per answer: `version` 1, `at` (when answered: the moment it is about), `sharp` (1 Foggy, 2 Slow, 3 Okay, 4 Sharp, 5 Very sharp), `scale` `1-5`, `prompt` (the planned moment it answers; `null` when rated from the page), `shown` (when its notification appeared), `test_asked` (the question suggested the reaction test) |
+| `reactions.jsonl` | one line per 1-minute reaction test: `version` 1, `at`, `rating_at` (the answer it followed), `length_s` 60, `median_ms` (`null` under 5 taps), `taps`, `false_starts` (taps under 100 ms or with no dot), `lapses` (taps over 500 ms), `times_ms` (every tap, 100-1500 ms) |
+| `prompts.jsonl` | written by the Android side: one line per thing that happened to a planned moment: `planned`, `at`, `event` (`shown`; `skipped` with `reason` `night recording`, `sound session`, `session on screen` or `notifications off`; `late`: rang over an hour late, or came due while another waited; `snoozed`: "In 15 min"; `dismissed`: swiped away), `test` when it suggested the reaction test. A planned moment with no line never rang (the phone held it back) |
+| `events.jsonl` | one line per change: `on`, `off`, `window`, `per day`, each with `per_day`, `awake_from`, `awake_until` |
+
+The moments themselves are not stored: they are drawn again from `seed`, the day and the settings
+(`app/lib/sharp/schedule.dart`): the waking window cut into `per_day` equal parts, one random minute in each, at least
+60 minutes apart; two of them suggest the test. The Trends page reads two day numbers from these files (a day runs
+04:00 to 04:00): `sharp`, the mean of the day's ratings, and `dayrt`, the median of the day's tests' medians.
+
 On the laptop, `scripts/import_phone.py <folder>` (standard library only) checks the manifest, copies
 `recordings/<stamp>.*` into `_local/recordings/` beside the laptop's own recordings and everything else into
 `_local/phone/<path>`, and keeps `phone/manifests/<exported>.manifest.json`, one line per import in

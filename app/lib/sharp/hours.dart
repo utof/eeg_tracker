@@ -81,7 +81,9 @@ String _two(int h) => h.toString().padLeft(2, '0');
 String blockWords(SharpAxis axis, int i) => switch (axis) {
   SharpAxis.clock => '${_two(i * 2)}:00 to ${_two(i * 2 + 2)}:00',
   SharpAxis.sinceWake => i >= 8 ? '16 hours or more after waking' : '${i * 2} to ${i * 2 + 2} hours after waking',
-  SharpAxis.pressure => i == 0 ? 'sleep pressure under 25' : (i >= 4 ? 'sleep pressure 100 or more' : 'sleep pressure ${i * 25} to ${i * 25 + 25}'),
+  SharpAxis.pressure => i == 0
+      ? 'sleep pressure under 25 of 100'
+      : (i >= 4 ? 'sleep pressure past a regular bedtime (100 or more)' : 'sleep pressure ${i * 25} to ${i * 25 + 25} of 100'),
 };
 
 /// The chart's tick under a block: `10`, `2`, `25`.
@@ -297,24 +299,31 @@ SharpProfile sharpProfile(
   return SharpProfile(axis: axis, blocks: blocks, best: best);
 }
 
-/// `10:00 to 12:00`, `08:00 to 12:00`, `2 to 6 hours after waking`, `sleep pressure 25 to 75`: one block or two
-/// neighbouring ones.
-String spanWords(SharpAxis axis, List<SharpBlock> span) {
+/// `10:00 to 12:00`, `09:30 to 12:00`, `2 to 6 hours after waking`, `sleep pressure 25 to 75 of 100`: one block or
+/// two neighbouring ones. On the clock, ends inside the waking window [fromMin]..[untilMin] are kept to it: no
+/// question is asked outside it.
+String spanWords(SharpAxis axis, List<SharpBlock> span, {int? fromMin, int? untilMin}) {
   final a = span.map((b) => b.index).reduce(math.min), z = span.map((b) => b.index).reduce(math.max);
+  if (axis == SharpAxis.clock && (fromMin != null || untilMin != null)) {
+    var start = a * 120, end = z * 120 + 120;
+    if (fromMin != null && fromMin > start && fromMin < start + 120) start = fromMin;
+    if (untilMin != null && untilMin > end - 120 && untilMin < end) end = untilMin;
+    return '${clockText(start)} to ${end == 1440 ? '24:00' : clockText(end)}';
+  }
   if (a == z) return blockWords(axis, a);
   return switch (axis) {
     SharpAxis.clock => '${_two(a * 2)}:00 to ${_two(z * 2 + 2)}:00',
     SharpAxis.sinceWake => z >= 8 ? '${a * 2} hours or more after waking' : '${a * 2} to ${z * 2 + 2} hours after waking',
     SharpAxis.pressure => a == 0
-        ? 'sleep pressure under ${z * 25 + 25}'
-        : (z >= 4 ? 'sleep pressure ${a * 25} or more' : 'sleep pressure ${a * 25} to ${z * 25 + 25}'),
+        ? 'sleep pressure under ${z * 25 + 25} of 100'
+        : (z >= 4 ? 'sleep pressure ${a * 25} of 100 or more' : 'sleep pressure ${a * 25} to ${z * 25 + 25} of 100'),
   };
 }
 
 /// "Sharpest 10:00 to 12:00: 0.8 points above your other times (probably 0.4 to 1.2)." or, for reaction times,
 /// "Quickest 10:00 to 12:00: 12 % quicker than at your other times (probably 6 to 18 %)."
-String bestWords(SharpAxis axis, BestTime b, {bool reaction = false}) {
-  final where = spanWords(axis, b.blocks);
+String bestWords(SharpAxis axis, BestTime b, {bool reaction = false, int? fromMin, int? untilMin}) {
+  final where = spanWords(axis, b.blocks, fromMin: fromMin, untilMin: untilMin);
   if (!reaction) {
     return 'Sharpest $where: ${b.gap.toStringAsFixed(1)} points above your other times '
         '(probably ${b.low.toStringAsFixed(1)} to ${b.high.toStringAsFixed(1)}).';

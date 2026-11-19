@@ -72,6 +72,16 @@ calibration for your own head. The rules: `analysis/hands_free.py` (the referenc
 (the phone's line-by-line port); false triggers on a recorded night in [docs/detectors.md](docs/detectors.md); how
 to use it and the owner step in [app/README.md](app/README.md) ("Hands-free controls").
 
+**Sharp hours** (phone app, the assistant's proposal, off unless switched on in Trends): a few one-tap "how sharp do
+you feel?" questions a day at random waking moments, two with a 1-minute reaction test, never during a night or a
+session; after 3 weeks and about 60 answers, your answers by time of day, hours since waking and sleep pressure, with
+ranges, "seen together, not tested". Code in `app/lib/sharp/`; files in [docs/data-format.md](docs/data-format.md);
+how to use it, switch it off and the owner step in [app/README.md](app/README.md) ("Sharp hours"). Computer focus
+sessions from ActivityWatch are not part of it yet: a later laptop importer could read ActivityWatch's local REST API
+(`aw-server`, port 5600), count focus sessions the way the research found valid (runs of related work of 35-60 minutes,
+counted, never summed as hours) per 2-hour block of each 04:00-04:00 day, and write them beside the phone's imported
+`_local/phone/sharp-hours/` files for the laptop's statistics (DECISIONS row 289).
+
 **Why we believe each feature (evidence notes).** Every feature has a short note in
 [docs/evidence/](docs/evidence/README.md): what the research says, where the data supports it and where it does
 not, how the app uses it, the sources, and the libraries and models with their licences. Each carries one grade
