@@ -187,6 +187,20 @@ Set<String> _pausedDays(List<Ill> ill, UnusualSettings settings) {
   return out;
 }
 
+/// The first day after the pause that holds [day]; null when [day] is not paused.
+String? pauseEnd(List<Ill> ill, String day, {UnusualSettings settings = const UnusualSettings()}) {
+  final p = _pausedDays(ill, settings);
+  if (!p.contains(day)) return null;
+  var d = day;
+  while (p.contains(d)) {
+    d = addDays(d, 1);
+  }
+  return d;
+}
+
+/// The log's and the reference's name of a state ("in" for in range).
+String stateName(StreamState s) => s == StreamState.inRange ? 'in' : s.name;
+
 List<String> _epochStarts(List<String> dataDays, int gap) => [
   for (final (i, d) in dataDays.indexed)
     if (i == 0 || daysBetween(dataDays[i - 1], d) - 1 > gap) d,
