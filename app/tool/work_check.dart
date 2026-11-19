@@ -11,6 +11,7 @@ import 'dart:io';
 
 import 'package:eeg_tracker/detectors/detectors.dart';
 import 'package:eeg_tracker/sleep/night_signal.dart';
+import 'package:eeg_tracker/work/breaks.dart';
 import 'package:eeg_tracker/work/drowsiness.dart';
 
 class _Window {
@@ -114,5 +115,14 @@ void main(List<String> args) {
     final closed = w.rows.where((r) => r.$1.eyesClosed).length;
     final scored = w.rows.where((r) => r.$1.scored).length;
     stdout.writeln('epochs ${w.rows.length}, scored $scored, eyes closed $closed');
+    // the break planner on the same epochs, worn all along, its clock moved to 10:00 (out of the quiet hours)
+    final p = BreakPlanner();
+    final shift = DateTime(day.year, day.month, day.day, 10).millisecondsSinceEpoch ~/ 1000 - (start + w.from);
+    for (final (e, _) in w.rows) {
+      p.epoch(e.level, eyesClosed: e.eyesClosed, window: e.window);
+      final at = DateTime.fromMillisecondsSinceEpoch((start + w.from + e.startS + 30 + shift) * 1000);
+      final h = p.tick(at, worn: true);
+      if (h != null) stdout.writeln('hint (${h.reason.name}) at ${_hms(start + w.from + e.startS + 30)}');
+    }
   }
 }

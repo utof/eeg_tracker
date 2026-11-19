@@ -34,7 +34,9 @@ recorded morning the level rose 8 minutes before the sleep model saw the owner d
   use them; it uses eyes-open alpha and how still the eyes are (fewer blinks and glances).
 - Still eyes can also mean deep focus. Still eyes alone never raise the level above alert; alpha must rise too.
 - Tested on one morning only: an hour with eyes open after a short, restless night, where the owner then fell
-  asleep. Working days, coffee, talking and other people are untested.
+  asleep. The level read alert until 08:42, getting drowsy from 08:43 and drowsy from 08:48, and a drowsy hint would
+  have come at 08:47, 9 minutes before the sleep model saw him doze; 2 hours awake in bed earlier gave no drowsy
+  reading. Working days, coffee, talking and other people are untested.
 - With eyes closed (resting, or dozing at the desk) alpha falls as you drift off, so the level cannot follow it;
   the screen says "Eyes closed" instead, and 3 minutes of it in 6 bring a hint.
 - If your first 4 minutes were not your usual awake work (tests, talking, already drowsy), every later reading is
