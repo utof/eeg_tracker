@@ -1,19 +1,23 @@
 // The sleep report's layout, from a report and plain values, so it renders in tests without a phone: the asleep
 // total and missing time, the honest note (with how much of the sleep was read through noise), the chart with its
 // Signal lane, the sleep periods as numbered log entries, jaw and movement with the night hour by hour
-// (sleep_extras_view.dart), and the past nights. Design: DESIGN.md and .impeccable/surfaces/app-lib-ui-sleep-report-screen-dart.md.
+// (sleep_extras_view.dart), "Was this you?" (wearer_view.dart: a question right after the honest note, otherwise a
+// remark after the night's entries), and the past nights. Design: DESIGN.md and
+// .impeccable/surfaces/app-lib-ui-sleep-report-screen-dart.md.
 import 'package:flutter/material.dart';
 
 import '../detectors/detectors.dart' show EpochQuality;
 import '../recorder/nights.dart' show nightLabel;
 import '../sleep/drift.dart' show driftCheck;
 import '../sleep/report.dart';
+import '../wearer/wearer.dart' show WearerLine;
 import 'alarm_view.dart' show WakingUp, WakingUpSection;
 import 'lights_off_view.dart';
 import 'parts.dart';
 import 'sleep_chart.dart';
 import 'sleep_extras_view.dart';
 import 'theme.dart';
+import 'wearer_view.dart';
 
 /// `6 h 27 min` as readout parts (numbers big, units small).
 List<(String, bool)> durationParts(double minutes) {
@@ -46,6 +50,9 @@ class SleepReportView extends StatelessWidget {
     this.onOpenNight,
     this.onRetry,
     this.onLicences,
+    this.wearer,
+    this.onWearerAnswer,
+    this.onWearerInfo,
   });
 
   final String nightOf;
@@ -75,6 +82,11 @@ class SleepReportView extends StatelessWidget {
   final void Function(SleepReport night)? onOpenNight;
   final VoidCallback? onRetry;
   final VoidCallback? onLicences;
+
+  /// "Was this you?" for this night (null: switched off or nothing to say), its answers and its "i".
+  final WearerLine? wearer;
+  final ValueChanged<String?>? onWearerAnswer;
+  final VoidCallback? onWearerInfo;
 
   @override
   Widget build(BuildContext context) {
@@ -147,6 +159,7 @@ class SleepReportView extends StatelessWidget {
         '${x == null ? '' : ' ${noiseSentence(x)}'}',
         style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
       ),
+      if (wearerLeads(wearer)) WearerQuestion(line: wearer!, onAnswer: onWearerAnswer, onInfo: onWearerInfo),
       const SizedBox(height: 28),
       SleepChart(
         start: r.dataStart,
@@ -186,6 +199,8 @@ class SleepReportView extends StatelessWidget {
         FallingAsleepSection(drift: drift, check: driftCheck([r, ...others]), onInfo: onDriftInfo),
       if (alarm != null) WakingUpSection(content: alarm!, onInfo: onAlarmInfo),
       if (x != null) ExtrasSection(extras: x, earlier: earlierJaw(r.nightOf, others), onInfo: onExtrasInfo),
+      if (wearer != null && !wearerLeads(wearer))
+        WearerRemark(line: wearer!, onAnswer: onWearerAnswer, onInfo: onWearerInfo),
     ];
   }
 }

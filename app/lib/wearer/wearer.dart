@@ -135,12 +135,16 @@ class WearerLine {
     this.detail,
     this.note,
     this.question = false,
+    this.asked = false,
     this.canSaySomeoneElse = false,
     this.canUndo = false,
   });
   final String text;
   final String? detail, note;
   final bool question, canSaySomeoneElse, canUndo;
+
+  /// The recording did not look like your usual signal (asked, answered or not): the block leads its page.
+  final bool asked;
 }
 
 String _unit(String kind, {bool plural = false}) =>
@@ -179,15 +183,21 @@ WearerLine? wearerLine(WearerResult r, String kind, String id) {
   final v = r.of(kind, id);
   if (v == null) return null;
   final answer = r.answers[_key(kind, id)];
+  final asked = v.state == WearerState.notLikeYou;
   if (answer == answerSomeoneElse) {
     return WearerLine(
       text: 'Someone else wore the headband: this ${_unit(kind)} is left out of your trends, the unusual card and '
           'experiments.',
+      asked: asked,
       canUndo: true,
     );
   }
   if (answer == answerMe) {
-    return const WearerLine(text: 'You said this was you. It now counts toward what your brain looks like.', canUndo: true);
+    return WearerLine(
+      text: 'You said this was you. It now counts toward what your brain looks like.',
+      asked: asked,
+      canUndo: true,
+    );
   }
   return switch (v.state) {
     WearerState.notLikeYou => WearerLine(
@@ -195,6 +205,7 @@ WearerLine? wearerLine(WearerResult r, String kind, String id) {
       detail: _biggest(v, r.signals[_key(kind, id)]),
       note: 'Loose contact, a moved headband, alcohol or a short night can change it too.',
       question: true,
+      asked: true,
     ),
     WearerState.likeYou => const WearerLine(text: 'Looks like your usual brain signal.', canSaySomeoneElse: true),
     WearerState.learning => WearerLine(

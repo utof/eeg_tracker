@@ -259,8 +259,8 @@ void main() {
     WearerResult result(WearerVerdict v, {String? answer, bool on = true, WearerSignal? signal}) => WearerResult(
       on: on,
       verdicts: {'${v.kind}:${v.id}': v},
-      answers: {if (answer != null) '${v.kind}:${v.id}': answer},
-      signals: {if (signal != null) '${v.kind}:${v.id}': signal},
+      answers: {'${v.kind}:${v.id}': ?answer},
+      signals: {'${v.kind}:${v.id}': ?signal},
     );
     const id = '2026-11-20-091205';
 
