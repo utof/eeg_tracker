@@ -115,6 +115,12 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    a minute per model part), but only with `hw.cpu.ncore=2` in the AVD's `config.ini`: the translator's stand-in
    `/proc/cpuinfo` lists 2 processors, and with 4 cores in sysfs ONNX Runtime's CPU detection (cpuinfo) crashes
    while the library loads, at app start. That crash is the emulator's, not the phone's.
+7. **Share on Wi-Fi** (2026-11-19): switch it on in Your data, read the code from the sheet (`tool/emu.py texts`),
+   `adb forward tcp:18765 tcp:8765`, then `curl -H "Authorization: Bearer <code>" http://127.0.0.1:18765/state`
+   (401 without the code), `scripts/page_server.py --recorder http://127.0.0.1:18765 --token <code>` and
+   `scripts/pull_phone.py http://127.0.0.1:18765 --token <code> --once --dest <scratch>`; Start night (the
+   recorder's service serves, status `reconnecting` without a headband), Stop (the app serves again), switch off
+   (the port closes). All of it passed; the emulator cannot show Wi-Fi with the screen off or the battery cost.
 
 The night of 2026-11-17 (58 recordings, 12.9 h) scored on the emulator in 99 s with a peak of 438 MB (PSS; 561 MB
 RSS) and the same stages as the laptop's ONNX check (96.6 % of epochs agree with the laptop's one-pass scoring; see
