@@ -228,6 +228,12 @@ class NightRecorder {
   /// Markers given before tonight's first file set opened, with their times.
   List<(DateTime, String)> _pendingMarkers = const [];
 
+  /// [run] has loaded or begun the night. Lights off and Alarm off that come before (the service hands over what came
+  /// in the first moments of a start) are kept here and applied then, so the new night cannot overwrite them.
+  bool _begun = false;
+  DateTime? _earlyLightsOff;
+  bool _earlyAlarmOff = false;
+
   /// The smart alarm while its live model runs; [_alarmLast] what it showed when it finished.
   AlarmWatch? _alarm;
   bool _alarmMade = false;
@@ -366,6 +372,10 @@ class NightRecorder {
         note: restartedBySystem && prior.active ? 'restarted by Android; reconnecting' : 'looking for the headband',
       ).withDrift(lightsOffMs: _night.lightsOffMs).withAlarm(_alarmStatus()),
     );
+    _begun = true;
+    final early = _earlyLightsOff;
+    if (early != null) lightsOff(at: early);
+    if (_earlyAlarmOff) alarmOff();
   }
 
   Future<void> _loop() async {
@@ -788,15 +798,20 @@ class NightRecorder {
   }
 
   /// The night screen's Lights off: a marker in the recording, kept in the saved night, and the drift-off detector
-  /// starts again from the night's next 30 s epoch (after a process restart it starts here).
-  void lightsOff() {
+  /// starts again from the night's next 30 s epoch (after a process restart it starts here). [at]: when it was tapped,
+  /// if earlier than now.
+  void lightsOff({DateTime? at}) {
     if (_stopping) return;
-    final at = _now();
-    _night = _night.copyWith(lightsOffMs: at.millisecondsSinceEpoch);
+    final t = at ?? _now();
+    if (!_begun) {
+      _earlyLightsOff = t;
+      return;
+    }
+    _night = _night.copyWith(lightsOffMs: t.millisecondsSinceEpoch);
     unawaited(_save().catchError((Object _) {})); // the next 10 s check saves it again
-    _marker(lightsOffMarker, at);
+    _marker(lightsOffMarker, t);
     if (_drift == null && !_driftUsed) _startDrift();
-    _guarded((d) => d.lightsOff(at));
+    _guarded((d) => d.lightsOff(t));
     _set(_withAlarm(_withDrift(_status)));
   }
 
@@ -939,6 +954,10 @@ class NightRecorder {
 
   /// The night screen's Alarm off: the live model stops; the screen takes the phone's alarm away itself.
   void alarmOff() {
+    if (!_begun) {
+      _earlyAlarmOff = true; // the plan is known once the night is
+      return;
+    }
     if (_plan == null || _alarmLast?.note == 'Turned off.') return;
     final a = _alarm;
     _alarm = null;

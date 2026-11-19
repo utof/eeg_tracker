@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:eeg_tracker/alarm/rule.dart';
 import 'package:eeg_tracker/recorder/battery.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
@@ -624,6 +625,37 @@ void main() {
     expect(f32Records(files('f32').single), band.emitted);
     expect(band.emitted, greaterThan(0));
     expect(RegExp('could not save the night state').allMatches(files('log').single.readAsStringSync()), hasLength(1));
+  });
+
+  test('Lights off and Alarm off that come before the night is set up are kept, not lost', () async {
+    // The service hands them over in the first moments of a start, before run() has loaded the saved night.
+    final end = DateTime.now().add(const Duration(hours: 8)).millisecondsSinceEpoch;
+    final band = FakeBand('a');
+    final r = NightRecorder(
+      finder: FakeFinder([band]),
+      dir: dir,
+      store: store,
+      onStatus: statuses.add,
+      onStuck: (r) async => stuck.add(r),
+      timing: fast,
+      watch: null,
+      alarmPlan: AlarmPlan(endMs: end, windowMin: 30),
+    );
+    final at = DateTime.now();
+    r.lightsOff(at: at);
+    r.alarmOff();
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect(r.status.lightsOffMs, at.millisecondsSinceEpoch);
+    await r.stop();
+    await running;
+
+    expect(store.state.lightsOffMs, at.millisecondsSinceEpoch);
+    expect(store.state.alarmOff, isTrue);
+    expect(store.state.alarmEndMs, end);
+    final log = files('log').single.readAsStringSync();
+    expect(RegExp(r' lights off\n').allMatches(log), hasLength(1), reason: log);
+    expect(log, contains('smart alarm: turned off'));
   });
 
   test('packet accounting: a restarted process continues the night\'s counts; a new run is not compared', () async {

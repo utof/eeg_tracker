@@ -127,6 +127,25 @@ void main() {
     await h.onDestroy(DateTime.now(), false);
   });
 
+  test('Lights off sent while the service is still starting is kept for the night, not dropped', () async {
+    dirAnswer = Completer<void>();
+    final h = handler(NoBand());
+    final starting = h.onStart(DateTime.now(), TaskStarter.developer);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    final sent = DateTime.now().millisecondsSinceEpoch;
+    h.onReceiveData(lightsOffCommand);
+    dirAnswer.complete();
+    await starting;
+    var saved = await loadNight();
+    for (var i = 0; i < 100 && saved.lightsOffMs == null; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      saved = await loadNight();
+    }
+    expect(saved.active, isTrue);
+    expect(saved.lightsOffMs, inInclusiveRange(sent, sent + 1000));
+    await h.onDestroy(DateTime.now(), false);
+  });
+
   test('a wedged SDK: the native restart ends the process; Dart exits only if it is still alive 2 s later', () async {
     // PhoneChannel.kt arms the restart alarm and answers at once; its killProcess comes 300 ms later.
     final exits = <int>[];

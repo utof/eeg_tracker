@@ -171,6 +171,11 @@ class RecorderTaskHandler extends TaskHandler {
   ShareHost? _share;
   String? _filesDir;
 
+  /// Lights off and Alarm off that came before the recorder existed (the first moments of a start): handed to it as
+  /// soon as it is made, so a tap the screen already shows as done is never lost.
+  DateTime? _lightsOffEarly;
+  bool _alarmOffEarly = false;
+
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     final dir = await _recordingsDir();
@@ -204,6 +209,9 @@ class RecorderTaskHandler extends TaskHandler {
       cues: cues(dir, scorer),
     );
     _recorder = recorder;
+    final early = _lightsOffEarly;
+    if (early != null) recorder.lightsOff(at: early);
+    if (_alarmOffEarly) recorder.alarmOff();
     unawaited(recorder.run(restartedBySystem: starter == TaskStarter.system));
     unawaited(_sharing(() async => _applyShare(await loadShareConfig())));
   }
@@ -254,6 +262,8 @@ class RecorderTaskHandler extends TaskHandler {
       if (r != null) {
         r.lightsOff();
         _send(r.status);
+      } else {
+        _lightsOffEarly = DateTime.now();
       }
     } else if (data is Map && data['kind'] == 'share') {
       unawaited(_sharing(() => _applyShare(ShareConfig.fromJson(data['config']))));
@@ -262,6 +272,8 @@ class RecorderTaskHandler extends TaskHandler {
       if (r != null) {
         r.alarmOff();
         _send(r.status);
+      } else {
+        _alarmOffEarly = true;
       }
     }
   }
