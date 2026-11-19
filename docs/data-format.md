@@ -591,9 +591,15 @@ de-duplicate by `id`; an update is a new event whose `data.replaces` is the old 
 {"v":1,"id":"eeg:3f2a…","dev":"eeg-pc-1a2b3c4d","seq":1,"ts":"2026-11-18T02:40:13+03:00","tz":"Europe/Moscow","type":"eeg_sleep_night","data":{…}}
 ```
 
+The contract for utof_tracker (what each number may be used for, exclusions, corrections, the daily command
+`python3 scripts/export_events.py --daily`) is [utof-interface.md](utof-interface.md); this section is the field list.
+
 - `dev`: `eeg-pc-` + 8 random hex characters, made once per export folder (`<root>/device_id`); the phone app
   will use `eeg-phone-…`.
-- `id`: `eeg:` + sha1 of the night's start, model and hypnogram, so exporting the same result twice adds nothing.
+- `id`: `eeg:` + sha1 of the event's content (a night: its start, model and hypnogram, plus the owner's answer when
+  there is one; a check-in: its start and result; a day: the day and its data), so exporting the same result twice
+  adds nothing.
+- `seq` counts per month file.
 - `ts`: the start of the recording that night, with the UTC offset.
 
 ### `eeg_sleep_night`
@@ -613,10 +619,16 @@ de-duplicate by `id`; an update is a new event whose `data.replaces` is the old 
 | `confidence` | mean top probability of the stager |
 | `validated` | `false` until the stager has been checked against nights scored by hand on this headband |
 | `device` | headband model and channels, e.g. `{"model": "BrainBit Black", "channels": ["O1","O2","T3","T4"]}` |
+| `wearer` | only when the owner answered "Was this you?" in either report: `me` or `someone else` (`--daily`) |
 | `replaces` | the `id` of an earlier result for the same night, when re-scored |
 
+With `--daily`, one per sleep report (the laptop's `_local/nights/` and the phone's `_local/phone/nights/`; the
+laptop's when both have the night): from the `.sleep.json` named in a laptop report, else from the report's `stages`
+(the phone's; then `cross_check` is the report's, `null` on the phone, and `confidence` is the periods' mean weighted
+by their time asleep). A report with neither gives no night event; its numbers are still in `eeg_day`.
+
 `sleep_night` in utof_tracker is the phone's own estimate; `eeg_sleep_night` is a separate type so neither
-overwrites the other. utof_tracker does not read these files yet: that needs a change there, made with the owner.
+overwrites the other. utof_tracker imports these files with `pc/eeg_import.py` (since 2026-11-19).
 
 ### `eeg_morning_check`
 
@@ -640,7 +652,40 @@ meant to be compared with their own earlier mornings, not with norms.
 | `method` | analysis version, e.g. `morning-v1` |
 | `validated` | `false`: the measures follow the literature but are not yet checked for day-to-day repeatability on this headband |
 | `device` | headband model and channels |
+| `reaction_ms`, `habits`, `wearer` | the phone's check-ins only: the reaction test's median (`null` under 5 taps), `habits` as in the phone's result, the owner's "Was this you?" answer |
 | `replaces` | the `id` of an earlier result for the same check-in, when re-analysed |
+
+With `--daily`, one per check-in in `_local/phone/mornings/` and `_local/recordings/` (the phone's first when both
+have the same start).
+
+### `eeg_day`
+
+One per day (04:00 to 04:00 local time), written by `--daily` from `scripts/day_summary.py`; `ts` is the day's start.
+The numbers follow the phone's Trends rules (`app/lib/trends/`), so they match what the phone shows.
+
+| Field | Meaning |
+|---|---|
+| `day` | `YYYY-MM-DD` |
+| `schema` | 1 (of this event) |
+| `measures` | the `eeg_measure_set` version the ids below mean (1) |
+| `complete` | `false` while the day is still going on when exported; a later event replaces it |
+| `numbers` | measure id -> value, to 2 decimals; only measures with a value that day (an absent id = no data, never 0) |
+| `counts` | what went into them: `nights`, `checkins`, `work_sessions`, `practice_sessions`, `sharp_ratings`, `sharp_tests` (absent = 0) |
+| `quality` | `night_noisy_share` (time asleep read as noisy or missing, over the day's scored nights, the left-out ones too), `checkin_clean_share` (the first check-in's back channels) |
+| `excluded` | `{what, id, why, ...}` per recording left out (utof-interface.md has the rules): `what` `night`, `check-in`, `work session`, `work`; `why` `someone else`, `unscored: under 5 minutes recorded`, `noisy` (+ `noisy_share`), `noisy: headband numbers left out` (+ `clean_share`), `under 30 readable minutes` (+ `minutes`) |
+| `sources` | `laptop` and/or `phone`: whose files gave numbers |
+| `replaces` | the `id` of the earlier event of the same day |
+
+### `eeg_measure_set`
+
+One per version of the measure list (`scripts/day_summary.py` `MEASURES`); a changed text within a version is a new
+event that `replaces` the old one. `ts` is when it was first exported.
+
+| Field | Meaning |
+|---|---|
+| `version` | 1 |
+| `measures` | one per id: `id`, `label`, `unit`, `group` (`sleep morning day work practice`), `about` (`night before`, `morning`, `day before`, `day`), `source` (`headband`, `self-report`, `tap test`, `app`, `laptop`), `evidence_note` (`docs/evidence/<name>.md`), `evidence` (`strong some weak none`, `null` = not a headband measure), `status` (`seen together`), `rule` (how the day's number is made, one line) |
+| `day_rule`, `status_rule`, `grades` | the rules in words |
 
 ### `break_hint`
 
