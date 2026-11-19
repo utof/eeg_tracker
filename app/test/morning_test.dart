@@ -13,6 +13,8 @@ import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/sound/check_in_sound.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/gates.dart';
+
 /// Streams the demo signal far faster than real time; the eyes follow the check-in's phase.
 class EyesBand implements Headband {
   EyesBand(this.demo, this.eyes, {this.resists = true});
@@ -222,6 +224,81 @@ void main() {
     expect(band.calls, isEmpty);
     expect(c.leftLost, isTrue);
     expect(tmp.listSync(), isEmpty);
+  });
+
+  test('after a drop, the next check-in in the same screen still lets its headband go (finding 8)', () async {
+    late MorningController c;
+    String eyes() => c.stage == MorningStage.closed ? 'closed' : 'open';
+    final finder = GateFinder(), first = EyesBand(DemoSignal(1), eyes), second = EyesBand(DemoSignal(2), eyes);
+    c = MorningController(finder: finder, store: MorningStore(tmp), timing: fast);
+    var starting = c.start();
+    await until(c, () => finder.finds.length == 1);
+    finder.finds[0].complete(first);
+    await starting;
+    c.begin();
+    first.goOutOfRange();
+    await until(c, () => c.stage == MorningStage.intro);
+    starting = c.start();
+    await until(c, () => finder.finds.length == 2);
+    finder.finds[1].complete(second);
+    await starting;
+    expect(c.stage, MorningStage.contact);
+    await c.stop();
+    expect(second.calls, containsAllInOrder(['startSignal', 'stopSignal', 'disconnect']));
+    expect(first.calls, isNot(contains('disconnect')), reason: 'the lost one is never touched');
+    expect(c.leftLost, isTrue, reason: 'the finder must still keep its scanner');
+  });
+
+  test('Stop, then Start again while the first search runs: a late headband is let go, not taken (finding 1)', () async {
+    late MorningController c;
+    String eyes() => c.stage == MorningStage.closed ? 'closed' : 'open';
+    final finder = GateFinder(), late = EyesBand(DemoSignal(1), eyes), band = EyesBand(DemoSignal(2), eyes);
+    c = MorningController(finder: finder, store: MorningStore(tmp), timing: fast);
+    final first = c.start();
+    await until(c, () => finder.finds.length == 1);
+    await c.stop();
+    final second = c.start();
+    await until(c, () => finder.finds.length == 2);
+    finder.finds[1].complete(band);
+    await second;
+    expect(c.stage, MorningStage.contact);
+    finder.finds[0].complete(late); // the first search finds the headband too, late
+    await first;
+    expect((c.stage, c.message), (MorningStage.contact, ''));
+    expect(late.calls, ['disconnect']);
+    await c.stop();
+    expect(band.calls, containsAllInOrder(['stopSignal', 'disconnect']));
+  });
+
+  test('Stop, then Start again: the first search finding nothing fails nothing (finding 1)', () async {
+    late MorningController c;
+    final finder = GateFinder(), band = EyesBand(DemoSignal(2), () => 'open');
+    c = MorningController(finder: finder, store: MorningStore(tmp), timing: fast);
+    final first = c.start();
+    await until(c, () => finder.finds.length == 1);
+    await c.stop();
+    final second = c.start();
+    await until(c, () => finder.finds.length == 2);
+    finder.finds[1].complete(band);
+    await second;
+    finder.finds[0].complete(null);
+    await first;
+    expect(c.stage, MorningStage.contact, reason: c.message);
+    await c.stop();
+  });
+
+  test('Stop while the stream is being started: the check-in stays stopped (finding 9)', () async {
+    final inner = EyesBand(DemoSignal(1), () => 'open'), band = SlowStart(inner);
+    final c = MorningController(finder: OneFinder(band), store: MorningStore(tmp), timing: fast);
+    final started = c.start();
+    await until(c, () => band.asked);
+    await c.stop();
+    band.gate.complete();
+    await started;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(c.stage, MorningStage.intro);
+    expect(c.active, isFalse);
+    expect(inner.calls, contains('disconnect'));
   });
 
   test('no headband: a plain failure', () async {

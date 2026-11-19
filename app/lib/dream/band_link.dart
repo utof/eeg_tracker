@@ -108,11 +108,16 @@ class BandLink {
   Future<T> _sdk<T>(Future<T> call, String what) =>
       call.timeout(timing.sdkTimeout, onTimeout: () => throw TimeoutException(what, timing.sdkTimeout));
 
-  /// [reach] (a search or a direct try) with a deadline. The SDK goes on past it: a headband the try brings later is
-  /// let go when it comes (a BrainBit held by a sensor object nobody has stops advertising, so the next scan, a
-  /// session's or the night recorder's, would find nothing). When an earlier abandoned try has not come back either,
-  /// the SDK is stuck: [LinkStuck].
-  Future<Headband?> _within(Future<Headband?> reach, Duration limit, String what) => reach.timeout(
+  /// [reach] (a search or a direct try) with a deadline of [limit]. The SDK goes on past it: a headband the try
+  /// brings later is let go when it comes (a BrainBit held by a sensor object nobody has stops advertising, so the
+  /// next scan, a session's or the night recorder's, would find nothing). When an earlier abandoned try has not come
+  /// back either, the SDK is stuck: [LinkStuck]. Every link's searches go through it, and the morning check-in's.
+  static Future<Headband?> within(
+    Future<Headband?> reach,
+    Duration limit, {
+    required Duration sdkTimeout,
+    String what = 'connection',
+  }) => reach.timeout(
     limit,
     onTimeout: () {
       final stuck = _abandoned.isNotEmpty;
@@ -122,7 +127,7 @@ class BandLink {
         reach.then<void>(
           (band) async {
             _abandoned.remove(token);
-            if (band != null) await _letGo(band, streaming: false);
+            if (band != null) await letGo(band, sdkTimeout, streaming: false);
           },
           onError: (Object _) => _abandoned.remove(token),
         ),
@@ -132,18 +137,25 @@ class BandLink {
     },
   );
 
-  /// Lets go of a headband the session does not keep (one still in range): its stream stopped when it may run,
-  /// then disconnected, each with a deadline; a failure leaves nothing more to do.
-  Future<void> _letGo(Headband band, {required bool streaming}) async {
+  /// Lets go of a headband a session does not keep (one still in range): its stream stopped when it may run, then
+  /// disconnected, each call with a deadline of [sdkTimeout]; a failure leaves nothing more to do.
+  static Future<void> letGo(Headband band, Duration sdkTimeout, {required bool streaming}) async {
+    Future<void> call(Future<void> f, String what) =>
+        f.timeout(sdkTimeout, onTimeout: () => throw TimeoutException(what, sdkTimeout));
     if (streaming) {
       try {
-        await _sdk(band.stopSignal(), 'stop signal');
+        await call(band.stopSignal(), 'stop signal');
       } catch (_) {}
     }
     try {
-      await _sdk(band.disconnectAndDispose(), 'disconnect');
+      await call(band.disconnectAndDispose(), 'disconnect');
     } catch (_) {}
   }
+
+  Future<Headband?> _within(Future<Headband?> reach, Duration limit, String what) =>
+      within(reach, limit, sdkTimeout: timing.sdkTimeout, what: what);
+
+  Future<void> _letGo(Headband band, {required bool streaming}) => letGo(band, timing.sdkTimeout, streaming: streaming);
 
   /// Scans and connects; false when no headband was found or the link was closed meanwhile. [onFound] fires between
   /// the scan and the connection (not after [close]).
