@@ -203,6 +203,7 @@ the start of the quiet minute with the headband, the start of the sound without 
 | `engine` | the audio engine's report (sample rate, buffer, lead, output delay) |
 | `night` | fall asleep with "Record the night": `started`, or why it did not start |
 | `rating` | your answer to "did it help you get there?", 1 (not at all) to 5 (clearly), `null` = not answered |
+| `audio` | where the sound went at the start (DECISIONS rows 471-472): `route` (`speaker wired bluetooth bluetoothLe other unknown`), `type` (Android's device type, e.g. `a2dp`) and `device` (its name) when known; absent when the phone could not say. A change during the session is an event (`audio route: ...`) |
 | `trial` | only on a session played for a fair test of two sounds (below): `plan` (the test's id), `day` (the day key it counts for, `2026-11-20`; a day runs 04:00 to 04:00) and `sound` (`a` or `b`, that day's draw). Absent in files from before fair tests; such sessions count in the comparison over weeks but never in a test |
 
 Next to the sessions, `files/sound-states/settings.json` holds one choice, `{"screenStaysOn": true}` (Screen:

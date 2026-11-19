@@ -71,6 +71,57 @@ String? routeWarning(AudioRoute r) {
   };
 }
 
+/// The route in plain words, without a sentence around it: "the phone's speaker", "wired headphones",
+/// "Bluetooth headphones (WH-1000XM4)".
+String routeWords(AudioRoute r) {
+  final device = r.device.isEmpty ? '' : ' (${r.device})';
+  return switch (r.kind) {
+    RouteKind.speaker => 'the phone\'s speaker',
+    RouteKind.wired => 'wired headphones$device',
+    RouteKind.bluetooth => 'Bluetooth headphones$device',
+    RouteKind.bluetoothLe => 'Bluetooth LE headphones$device',
+    RouteKind.other => 'another output$device',
+    RouteKind.unknown => 'not known',
+  };
+}
+
+/// Where the sound goes, in plain words, for sound for states (DECISIONS 470): its sounds are not feedback, so a
+/// Bluetooth delay changes nothing there. What matters is the beat: binaural beats need a different tone in each ear,
+/// so they do nothing on the phone's speaker ([warn]: that case only). Pulsed noise and isochronic tones carry the
+/// pulse in the sound and work anywhere.
+({String text, bool warn}) stateRouteNote(AudioRoute r, {required bool binaural}) {
+  switch (r.kind) {
+    case RouteKind.speaker:
+      return binaural
+          ? (
+              text:
+                  'Sound plays from the phone\'s speaker. A binaural beat needs a different tone in each ear, so on the '
+                  'speaker you will hear no beat. Put stereo headphones on, or choose pulsed noise or isochronic tones.',
+              warn: true,
+            )
+          : (text: 'Sound plays from the phone\'s speaker.', warn: false);
+    case RouteKind.wired:
+    case RouteKind.other:
+      return (text: 'Sound plays to ${routeWords(r)}.', warn: false);
+    case RouteKind.bluetooth:
+    case RouteKind.bluetoothLe:
+      return (
+        text:
+            'Sound plays to ${routeWords(r)}. These sounds are not feedback, so a Bluetooth delay does not matter '
+            'here.',
+        warn: false,
+      );
+    case RouteKind.unknown:
+      return (
+        text: binaural
+            ? 'The phone did not say where the sound goes. A binaural beat needs stereo headphones: on a speaker you '
+                  'will hear no beat.'
+            : 'The phone did not say where the sound goes.',
+        warn: false,
+      );
+  }
+}
+
 abstract class AudioRouteSource {
   /// The route now; [AudioRoute.unknown] when the phone cannot say.
   Future<AudioRoute> current();
