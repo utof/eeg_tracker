@@ -184,7 +184,7 @@ String? _experiment(Directory files) {
   return null;
 }
 
-/// A fair test of two sounds frozen (files/sound-states/plans/<id>/plan.json, lib/states/trial_store.dart).
+/// A fair test of two sounds frozen (`files/sound-states/plans/<id>/plan.json`, lib/states/trial_store.dart).
 String? _soundTest(Directory files) {
   final d = Directory('${files.path}/sound-states/plans');
   if (!d.existsSync()) return null;
