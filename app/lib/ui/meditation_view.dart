@@ -1,14 +1,19 @@
 // The meditation screen's layout from a plain view model, so every state renders in tests without a phone.
 // Structure (.impeccable/surfaces/app-lib-ui-meditation-screen-dart.md): status mark and word, the phase
 // track, two readouts (time left, bells), then the state's own section; one action pinned at the bottom.
+// A meditation ends with 2 silent minutes (the track's fourth cell, "Without sound"); its report adds their number
+// and the learning verdict; a Bluetooth route is said in amber words before and during the session.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../meditation/controller.dart' show Stage;
+import '../meditation/learning.dart';
+import '../meditation/silent_block.dart' show SilentBlock;
 import '../meditation/tracker.dart';
 import '../recorder/contact.dart';
 import '../recorder/nights.dart' show nightLabel;
+import '../sound/audio_route.dart';
 import '../training/check.dart';
 import '../training/control.dart';
 import 'check_views.dart';
@@ -34,6 +39,8 @@ class MeditationViewModel {
     this.openDone = 0,
     this.closedDone = 0,
     this.sessionDone = 0,
+    this.silentSeconds = 0,
+    this.silentDone = 0,
     this.live,
     this.timeLeft,
     this.timeLabel = 'left',
@@ -48,6 +55,8 @@ class MeditationViewModel {
     this.checkOn = false,
     this.checkStatus,
     this.lengths = sessionMinutes,
+    this.learning,
+    this.routeNote,
   });
 
   final SessionKind kind;
@@ -67,6 +76,9 @@ class MeditationViewModel {
   final MarkShape mark;
   final Color markColor;
   final double openDone, closedDone, sessionDone;
+
+  /// The silent minutes after the sound (0: none) and 0..1 of them done.
+  final double silentSeconds, silentDone;
   final TrackPart? live;
 
   /// Seconds left in the current part; null = no readout yet.
@@ -83,6 +95,12 @@ class MeditationViewModel {
 
   /// A night is being recorded: the headband is taken, so Start is off.
   final bool nightRunning;
+
+  /// The report's learning verdict (meditation only).
+  final Learning? learning;
+
+  /// Before the session: the sound goes to Bluetooth headphones (the warning, in amber); null otherwise.
+  final String? routeNote;
 }
 
 /// The model for the controller's state (pure; the screen passes the controller's fields).
@@ -108,10 +126,27 @@ MeditationViewModel meditationModel({
   String? checkStatus,
   List<int> lengths = sessionMinutes,
   bool asleepGuard = false,
+  int silentSeconds = 0,
+  double silentRun = 0,
+  bool inSilent = false,
+  AudioRoute route = AudioRoute.unknown,
+  Learning? learning,
 }) {
-  final lengthS = minutes * 60.0;
+  final lengthS = minutes * 60.0, silentS = silentSeconds.toDouble();
   final at = kind == SessionKind.alphaTheta;
-  final notes = [?soundNote, ?saveNote];
+  final during = stage.index >= Stage.contact.index && stage.index <= Stage.ending.index;
+  final lateSound = (during && route.bluetooth) || (stage == Stage.report && (report?.bluetoothSound ?? false));
+  final notes = [
+    ?soundNote,
+    ?saveNote,
+    if (lateSound)
+      stage == Stage.report
+          ? 'Some of this session\'s sound went to Bluetooth headphones, about 0.25-0.5 s late.'
+          : 'Sound goes to Bluetooth headphones: it comes about 0.25-0.5 s late.',
+  ];
+  final silentDone = stage == Stage.report
+      ? (report?.silent == null || silentS == 0 ? 0.0 : report!.silent!.seconds / silentS)
+      : (silentS == 0 ? 0.0 : silentRun / silentS);
   MeditationViewModel m(
     String title,
     String sentence,
@@ -121,6 +156,7 @@ MeditationViewModel meditationModel({
     double open = 0,
     double closed = 0,
     double session = 0,
+    double silent = 0,
     TrackPart? live,
     int? timeLeft,
     String timeLabel = 'left',
@@ -136,6 +172,8 @@ MeditationViewModel meditationModel({
     openDone: open,
     closedDone: closed,
     sessionDone: session,
+    silentSeconds: silentS,
+    silentDone: silent,
     live: live,
     timeLeft: timeLeft,
     timeLabel: timeLabel,
@@ -150,6 +188,8 @@ MeditationViewModel meditationModel({
     checkOn: checkOn,
     checkStatus: checkStatus,
     lengths: lengths,
+    learning: learning,
+    routeNote: stage == Stage.setup || stage == Stage.failed ? routeWarning(route) : null,
   );
 
   switch (stage) {
@@ -168,7 +208,8 @@ MeditationViewModel meditationModel({
         message.isNotEmpty
             ? message
             : 'Headband on, headphones in. First 1½ minutes in silence: 30 s eyes open, then a low tone and '
-                  '60 s eyes closed. Then the sound follows you.',
+                  '60 s eyes closed. Then the sound follows you.'
+                  '${silentS > 0 ? ' At the end, ${_minSecWords(silentS)} without sound: go on the same way.' : ''}',
         MarkShape.ring,
         Night.inkMuted,
       );
@@ -201,6 +242,25 @@ MeditationViewModel meditationModel({
         live: TrackPart.open,
         timeLeft: calSecondsLeft,
         timeLabel: 'eyes open, left',
+      );
+    case Stage.running when inSilent:
+      final lost = chip == Moment.noSignal;
+      return m(
+        lost ? 'No signal' : 'Without sound',
+        lost
+            ? 'Nothing from the headband. The silent minutes pause until it is back.'
+            : 'The sound has stopped. Go on the same way, eyes closed; a last tone ends the session.',
+        lost ? MarkShape.dash : MarkShape.ring,
+        lost ? Night.problem : Night.inkMuted,
+        sentenceColor: lost ? Night.problem : Night.inkMuted,
+        open: 1,
+        closed: 1,
+        session: 1,
+        silent: silentDone,
+        live: TrackPart.silent,
+        timeLeft: (silentS - silentRun).ceil().clamp(0, 1 << 20),
+        timeLabel: 'without sound, left',
+        bellCount: checkOn ? null : bells,
       );
     case Stage.running:
       // with the check on, alpha above or under the line is not shown: it would tell a replay from live
@@ -275,6 +335,7 @@ MeditationViewModel meditationModel({
         open: 1,
         closed: 1,
         session: runSeconds / lengthS,
+        silent: silentDone,
         timeLeft: (lengthS - runSeconds).ceil().clamp(0, 1 << 20),
         bellCount: checkOn ? null : bells,
       );
@@ -288,6 +349,7 @@ MeditationViewModel meditationModel({
         open: 1,
         closed: 1,
         session: r.runS / lengthS,
+        silent: silentDone,
         timeLeft: at ? r.runS.round() : r.settledS.round(),
         timeLabel: at
             ? 'with sound${r.complete ? '' : ' of $minutes min'}'
@@ -379,6 +441,8 @@ class MeditationView extends StatelessWidget {
             openDone: m.openDone,
             closedDone: m.closedDone,
             sessionDone: m.sessionDone,
+            silentSeconds: m.silentSeconds,
+            silentDone: m.silentDone,
             live: m.live,
             calm: m.stage == Stage.report ? m.report?.calm : null,
             marks: m.stage == Stage.report ? m.report?.marks ?? const [] : const [],
@@ -437,11 +501,14 @@ class MeditationView extends StatelessWidget {
             if (m.checkStatus != null) Para(m.checkStatus!, color: Night.inkMuted, top: 0),
           ],
           const SectionHeading('Before you start'),
-          const _Note(
-            Icons.headphones_outlined,
-            'Wired headphones or the phone\'s speaker. Bluetooth headphones add about 0.3 s, so the sound '
-            'follows you late.',
-          ),
+          if (m.routeNote != null)
+            _Note(Icons.bluetooth_audio, m.routeNote!, color: Night.caution)
+          else
+            const _Note(
+              Icons.headphones_outlined,
+              'Wired headphones or the phone\'s speaker. Bluetooth headphones add about 0.3 s, so the sound '
+              'follows you late.',
+            ),
           const _Note(
             Icons.smartphone_outlined,
             'The screen stays on while you meditate. You can lock the phone: the session goes on.',
@@ -508,7 +575,21 @@ class MeditationView extends StatelessWidget {
           '${r.drifting}',
           detail: r.drowsyS > 0 ? '${_minSecWords(r.drowsyS)} in all' : null,
         ),
-      _Row('Alpha peak', r.iafHz == null ? 'not clear' : '${(r.iafHz! * 4).round() / 4} Hz', rule: false),
+      _Row('Alpha peak', r.iafHz == null ? 'not clear' : '${(r.iafHz! * 4).round() / 4} Hz', rule: at == null && r.silent != null),
+      if (at == null && r.silent != null) _silentRow(r.silent!),
+      if (model.learning != null) ...[
+        const SectionHeading('Learning'),
+        for (final (i, line) in model.learning!.lines.indexed)
+          Padding(
+            padding: EdgeInsets.only(top: i == 0 ? 0 : 10),
+            child: Text(
+              line,
+              style: i == 0
+                  ? text.bodyLarge?.copyWith(color: Night.ink, height: 1.4)
+                  : text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.4),
+            ),
+          ),
+      ],
       const SectionHeading('Earlier sessions'),
       if (model.earlier.isEmpty)
         Text('This is the first session on this phone.', style: text.bodyLarge?.copyWith(color: Night.inkMuted))
@@ -535,6 +616,20 @@ class MeditationView extends StatelessWidget {
         ),
       ),
     ];
+  }
+
+  /// The silent minutes' one number, as a change against the silent eyes-closed minute before the sound.
+  Widget _silentRow(SilentBlock b) {
+    final short = b.seconds < b.plannedS - 0.5;
+    final a = b.alpha;
+    return _Row(
+      'Alpha without sound',
+      a == null ? 'not enough' : '${pct(a)} %',
+      detail: a == null
+          ? (short ? 'stopped after ${_minSecWords(b.seconds)}' : 'too little quiet signal (under 1 min)')
+          : 'against your silent minute before the sound${short ? '; stopped after ${_minSecWords(b.seconds)}' : ''}',
+      rule: false,
+    );
   }
 
   Widget _action() {
@@ -652,7 +747,11 @@ class _Legend extends StatelessWidget {
   Widget build(BuildContext context) {
     final style = Theme.of(context).textTheme.bodyMedium?.copyWith(color: Night.inkMuted);
     if (m.stage != Stage.report) {
-      return Text('30 s eyes open · 60 s eyes closed · ${m.minutes} min with sound', style: style);
+      // non-breaking spaces: "2 min without" wraps as one piece
+      final silent = m.silentSeconds > 0
+          ? ' · ${_minSecWords(m.silentSeconds).replaceAll(' ', '\u00a0')}\u00a0without'
+          : '';
+      return Text('30 s eyes open · 60 s eyes closed · ${m.minutes} min with sound$silent', style: style);
     }
     Widget tick(Color c) => Container(
       width: 3,
@@ -704,21 +803,24 @@ class _Readouts extends StatelessWidget {
 }
 
 class _Note extends StatelessWidget {
-  const _Note(this.icon, this.text, {this.onTap, this.chevron = false});
+  const _Note(this.icon, this.text, {this.onTap, this.chevron = false, this.color});
   final IconData icon;
   final String text;
   final VoidCallback? onTap;
   final bool chevron;
 
+  /// Text and icon colour (default: ink with a muted icon); amber for a warning, always worded.
+  final Color? color;
+
   @override
   Widget build(BuildContext context) {
-    final style = Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.4);
+    final style = Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.4, color: color);
     final row = Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(padding: const EdgeInsets.only(top: 1), child: Icon(icon, size: 22, color: Night.inkMuted)),
+          Padding(padding: const EdgeInsets.only(top: 1), child: Icon(icon, size: 22, color: color ?? Night.inkMuted)),
           const SizedBox(width: 16),
           Expanded(child: Text(text, style: style)),
           if (chevron) ...[

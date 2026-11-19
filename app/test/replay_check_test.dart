@@ -14,14 +14,22 @@ import 'package:eeg_tracker/training/replay.dart';
 import 'package:eeg_tracker/training/reveal.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-CheckRecord rec(int i, Arm arm, {double? outcome, double ex = 0.1, String guess = 'unsure', int control = 3}) =>
-    CheckRecord(
+CheckRecord rec(
+  int i,
+  Arm arm, {
+  double? outcome,
+  double? silent,
+  double ex = 0.1,
+  String guess = 'unsure',
+  int control = 3,
+}) => CheckRecord(
       index: i,
       stem: 's$i',
       start: DateTime(2026, 12, 1).add(Duration(days: i)),
       arm: arm,
       runS: 600,
       outcome: outcome,
+      silent: silent,
       excludedShare: ex,
       asleepS: 0,
       ratings: CheckRatings(calm: 3, guess: guess, confidence: 50, control: control, random: 3),
@@ -251,7 +259,44 @@ void main() {
     expect(r.note.join(' '), contains('theta-to-alpha'));
   });
 
+  test('plans frozen from now on (version 2) name the silent minutes as a secondary measure; version 1 stays valid', () {
+    final p = CheckPlan(kind: SessionKind.meditation, frozen: DateTime(2026, 11, 19), allocationSha256: 'b' * 64);
+    expect(p.version, 2);
+    final secondary = (p.toJson()['secondary']! as List).cast<String>();
+    expect(secondary.last, startsWith('the silent minutes after the sound'));
+    final old = CheckPlan(kind: SessionKind.meditation, frozen: p.frozen, allocationSha256: p.allocationSha256, version: 1);
+    expect((old.toJson()['secondary']! as List).any((e) => '$e'.contains('silent')), isFalse);
+    // a version-1 plan as written before this change: the same text, so its saved hash still agrees
+    final back = CheckPlan.fromJson(jsonDecode(jsonEncode(old.toJson())))!;
+    expect(back.version, 1);
+    expect(back.sha, old.sha);
+    expect(CheckPlan.fromJson(jsonDecode(jsonEncode(p.toJson())))!.sha, p.sha);
+    final at = CheckPlan(kind: SessionKind.alphaTheta, frozen: p.frozen, allocationSha256: p.allocationSha256);
+    expect((at.toJson()['secondary']! as List).any((e) => '$e'.contains('silent')), isFalse, reason: 'none in alpha-theta');
+  });
+
+  test('reveal: the silent minutes, live against replay, with the same within-block test, when the plan named them', () {
+    final sealed = Sealed.draw('silent');
+    final plan = CheckPlan(kind: SessionKind.meditation, frozen: DateTime(2026, 11, 19), allocationSha256: sealed.sha);
+    final records = [
+      for (var i = 0; i < 12; i++)
+        rec(i, sealed.arms[i], outcome: 0.1, silent: i == 4 ? null : (sealed.arms[i] == Arm.live ? 0.3 : 0.1)),
+    ];
+    final r = reveal(plan: plan, planSha: plan.sha, sealed: sealed, records: records)!;
+    expect(r.silent!.diff, closeTo(0.2, 1e-12));
+    expect(r.silent!.live + r.silent!.replay, 11, reason: 'a session without the silent minutes is left out');
+    expect(r.silent!.p, lessThan(0.05));
+    expect(r.note.join(' '), contains('silent minutes'));
+    final v1 = CheckPlan(kind: SessionKind.meditation, frozen: plan.frozen, allocationSha256: sealed.sha, version: 1);
+    expect(reveal(plan: v1, planSha: v1.sha, sealed: sealed, records: records)!.silent, isNull,
+        reason: 'not in a plan frozen before: never tested after the fact');
+  });
+
   test('records and ratings: JSON round trip; bad answers refused', () {
+    final withSilent = rec(4, Arm.live, outcome: 0.12, silent: 0.08);
+    expect(CheckRecord.fromJson(jsonDecode(jsonEncode(withSilent.toJson())))!.toJson(), withSilent.toJson());
+    expect(rec(4, Arm.live, outcome: 0.12).toJson(), isNot(contains('silent')), reason: 'older records unchanged');
+    expect(CheckRecord.fromJson(jsonDecode(jsonEncode(withSilent.withRatings(withSilent.ratings!).toJson())))!.silent, 0.08);
     final r = rec(3, Arm.replay, outcome: 0.12);
     expect(CheckRecord.fromJson(jsonDecode(jsonEncode(r.toJson())))!.toJson(), r.toJson());
     expect(CheckRatings.fromJson({'calm': 6, 'guess': 'live', 'confidence': 50, 'control': 3, 'random': 3}), isNull);

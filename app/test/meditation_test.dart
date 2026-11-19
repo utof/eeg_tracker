@@ -11,11 +11,14 @@ import 'package:eeg_tracker/detectors/drift_off.dart';
 import 'package:eeg_tracker/feedback/demo.dart';
 import 'package:eeg_tracker/feedback/session.dart';
 import 'package:eeg_tracker/meditation/controller.dart';
+import 'package:eeg_tracker/meditation/learning.dart';
+import 'package:eeg_tracker/meditation/silent_block.dart';
 import 'package:eeg_tracker/meditation/store.dart';
 import 'package:eeg_tracker/meditation/tracker.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/sound/feedback_sound.dart';
+import 'package:eeg_tracker/training/control.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Streams the demo signal (in volts, as the SDK gives it) far faster than real time: [perTick] samples
@@ -279,7 +282,7 @@ void main() {
     expect(stages, containsAllInOrder([Stage.connecting, Stage.contact, Stage.calibrating, Stage.running, Stage.ending, Stage.report]));
     expect(c.contact, {'O1': 4e5, 'O2': 6e5, 'T3': 1.2e6, 'T4': null}, reason: 'infinite resistance = no contact');
     expect(sound.started && sound.stopped, isTrue);
-    expect(sound.cues, 3, reason: 'close your eyes, sound begins, session over');
+    expect(sound.cues, 4, reason: 'close your eyes, sound begins, the silent minutes begin, session over');
     expect(sound.bedOn, isFalse);
     final r = c.report!;
     expect(r.complete, isTrue);
@@ -296,6 +299,66 @@ void main() {
     expect(jsonEncode(again.log.lines), jsonEncode(log['lines']), reason: 'the phone session replays line for line');
     expect((log['info']! as List).any((i) => (i as Map).containsKey('sound')), isTrue);
     expect(c.comparison, startsWith('Session 1.'));
+    c.dispose();
+  });
+
+  test('the silent minutes: the sound stops after the length, the headband goes on, the block has its number', () async {
+    final dir = Directory.systemTemp.createTempSync('meditation');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final band = DemoBand(DemoSignal(7)), sound = SilentSound();
+    final c = MeditationController(finder: Finder([band]), sound: () => sound, store: MeditationStore(dir), timing: fast);
+    expect(c.silentBlock, silentBlockLength);
+    await c.start(const Duration(minutes: 1));
+    await until(c, () => c.inSilentBlock);
+    final glides = sound.glides, bells = sound.bells;
+    expect(sound.bedOn, isFalse, reason: 'the bed fades out at the cue');
+    expect(c.stage, Stage.running);
+    expect(c.runSeconds, closeTo(60, 0.1));
+    await until(c, () => c.silentSeconds > 30);
+    expect(c.silentSecondsLeft, inInclusiveRange(1, 90));
+    await until(c, () => c.stage == Stage.report);
+    expect(sound.glides, glides, reason: 'nothing is played in the silent minutes');
+    expect(sound.bells, bells);
+    final r = c.report!;
+    expect(r.complete, isTrue);
+    expect(r.runS, closeTo(60, 0.1), reason: 'the length counts the time with sound only');
+    expect(r.silent!.plannedS, 120);
+    expect(r.silent!.seconds, closeTo(120, 0.1));
+    expect(r.silent!.alpha, isNotNull);
+    expect(r.silent!.muscleShare, greaterThan(0), reason: 'the demo clenches every 45 s');
+    final log = jsonDecode(File('${dir.path}/${r.logFile}').readAsStringSync()) as Map<String, Object?>;
+    final marker = (log['info']! as List).cast<Map<String, Object?>>().firstWhere((i) => i.containsKey('silentBlock'));
+    final fromN = (marker['silentBlock']! as Map<String, Object?>)['fromN']! as int;
+    expect(fromN, (90 + 60) * 250, reason: 'after 90 s of calibration and 60 s with sound');
+    expect(controlStream(log, SessionKind.meditation), hasLength(600), reason: 'a replay plays only the time with sound');
+    expect(jsonEncode(replaySession(log).log.lines), jsonEncode(log['lines']), reason: 'the core ran on: it replays');
+    c.dispose();
+  });
+
+  test('Stop in the silent minutes keeps the session whole and the block as far as it got', () async {
+    final band = DemoBand(DemoSignal(7));
+    final c = MeditationController(finder: Finder([band]), sound: SilentSound.new, timing: fast);
+    await c.start(const Duration(minutes: 1));
+    await until(c, () => c.silentSeconds > 20);
+    await c.stop();
+    await until(c, () => c.stage == Stage.report);
+    expect(c.report!.complete, isTrue, reason: 'the time with sound was reached');
+    expect(c.report!.silent!.seconds, inInclusiveRange(20, 60));
+    expect(c.report!.silent!.alpha, isNull, reason: 'under a minute of clean signal: no number');
+    c.dispose();
+  });
+
+  test('a session stopped before its silent minutes has none; the learning line says how many count', () async {
+    final band = DemoBand(DemoSignal(7));
+    final c = MeditationController(finder: Finder([band]), sound: SilentSound.new, timing: fast);
+    await c.start(const Duration(minutes: 1));
+    await until(c, () => c.runSeconds > 20);
+    await c.stop();
+    await until(c, () => c.stage == Stage.report);
+    expect(c.report!.complete, isFalse);
+    expect(c.report!.silent, isNull);
+    expect(c.learning!.verdict, Verdict.notYet);
+    expect(c.learning!.lines.first, startsWith('Not enough sessions yet: 0 of 8'));
     c.dispose();
   });
 

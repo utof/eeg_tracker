@@ -39,6 +39,12 @@ class OutcomeMeter {
   /// Null when under [minCountedS] were counted.
   double? get value => _counted * stepS >= minCountedS ? _sum / _counted : null;
 
+  /// Seconds of steps counted.
+  double get countedS => _counted * stepS;
+
+  /// The mean of the counted steps whatever their number (null with none): for a caller with its own minimum.
+  double? get mean => _counted == 0 ? null : _sum / _counted;
+
   /// Share of the run not counted, 0..1.
   double get excludedShare => _steps == 0 ? 1 : 1 - _counted / _steps;
 }

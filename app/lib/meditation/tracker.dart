@@ -12,7 +12,9 @@ import 'dart:math' as math;
 import '../detectors/drift_off.dart' show DriftState;
 import '../feedback/mapping.dart' show jawBlock;
 import '../feedback/session.dart';
+import '../sound/audio_route.dart';
 import '../training/control.dart' show SessionKind;
+import 'silent_block.dart';
 
 enum Moment { calibrating, settled, settling, restless, drifting, noSignal }
 
@@ -163,12 +165,18 @@ class MeditationTracker {
     double? outcome,
     double? excludedShare,
     Map<String, Object?>? at,
+    SilentBlock? silent,
+    AudioRoute? audioRoute,
+    bool bluetoothSound = false,
   }) => MeditationSummary(
     kind: kind,
     check: check,
     outcome: outcome,
     excludedShare: excludedShare,
     at: at,
+    silent: silent,
+    audioRoute: audioRoute,
+    bluetoothSound: bluetoothSound,
     start: start,
     lengthMin: length.inSeconds / 60,
     runS: _round1(runSeconds),
@@ -199,6 +207,9 @@ class MeditationSummary {
     this.outcome,
     this.excludedShare,
     this.at,
+    this.silent,
+    this.audioRoute,
+    this.bluetoothSound = false,
     required this.start,
     required this.lengthMin,
     required this.runS,
@@ -229,6 +240,14 @@ class MeditationSummary {
 
   /// Alpha-theta: seconds of alpha and theta above their lines, crossover, asleep, counted; chimes, gongs.
   final Map<String, Object?>? at;
+
+  /// Meditation: the silent minutes after the sound (silent_block.dart); null when the session ended before them.
+  final SilentBlock? silent;
+
+  /// Where the sound went at the start (null: not known), and whether any of the session went to Bluetooth
+  /// headphones (the sound came late; sound/audio_route.dart).
+  final AudioRoute? audioRoute;
+  final bool bluetoothSound;
   final DateTime start;
 
   /// The length chosen, in minutes.
@@ -270,6 +289,9 @@ class MeditationSummary {
     if (outcome != null) 'outcome': outcome,
     if (excludedShare != null) 'excludedShare': excludedShare,
     if (at != null) 'at': at,
+    if (silent != null) 'silent': silent!.toJson(),
+    if (audioRoute != null) 'audio': audioRoute!.toJson(),
+    if (bluetoothSound) 'bluetoothSound': true,
     'start': start.toIso8601String(),
     'lengthMin': lengthMin,
     'runS': runS,
@@ -332,6 +354,9 @@ class MeditationSummary {
       outcome: outcome is num && outcome.isFinite ? outcome.toDouble() : null,
       excludedShare: num_(j['excludedShare']),
       at: at is Map<String, Object?> ? at : null,
+      silent: SilentBlock.fromJson(j['silent']),
+      audioRoute: j['audio'] is Map ? AudioRoute.fromMap(j['audio']) : null,
+      bluetoothSound: j['bluetoothSound'] == true,
       start: start,
       lengthMin: lengthMin,
       runS: runS,

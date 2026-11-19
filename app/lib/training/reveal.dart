@@ -109,6 +109,7 @@ class Reveal {
     required this.hidden,
     required this.planOk,
     required this.primary,
+    this.silent,
     required this.excluded,
     required this.right,
     required this.judged,
@@ -127,6 +128,10 @@ class Reveal {
   /// The plan's hash, the schedule's hash and the schedule drawn again from the salt all agree.
   final bool planOk;
   final PermutationResult? primary;
+
+  /// Meditation, when the frozen plan named it: the silent minutes after the sound, live minus replay, with the
+  /// same within-block test (sessions without a number for them are left out).
+  final PermutationResult? silent;
   final int excluded;
 
   /// Guesses: right of those that said live or replay, and how many said "not sure".
@@ -159,6 +164,15 @@ class Reveal {
       lines.add(
         'No clear difference between live and replay (p = ${_p(p.p)}). For one person that is a likely and '
         'legitimate result: in the own-replay study live beat replay in only 6-11 of 24 people.',
+      );
+    }
+    final s = silent;
+    if (s != null) {
+      lines.add(
+        s.p < 0.05
+            ? 'In the silent minutes after the sound, alpha differed too (p = ${_p(s.p)}): the live link carried over '
+                  'into the time without sound.'
+            : 'In the silent minutes after the sound: no clear difference (p = ${_p(s.p)}).',
       );
     }
     if (judged > 0 && (guessP ?? 1) < 0.05) {
@@ -208,6 +222,15 @@ Reveal? reveal({
   final primary = permutationTest([for (final r in used) r.outcome!], [for (final r in used) armOf(r) == Arm.live], [
     for (final r in used) r.block,
   ]);
+  final quiet = [
+    for (final r in shown)
+      if (r.silent != null) r,
+  ];
+  final silent = plan.testsSilent
+      ? permutationTest([for (final r in quiet) r.silent!], [for (final r in quiet) armOf(r) == Arm.live], [
+          for (final r in quiet) r.block,
+        ])
+      : null;
   var right = 0, judged = 0, unsure = 0;
   for (final r in shown) {
     final g = r.ratings?.guess;
@@ -237,6 +260,7 @@ Reveal? reveal({
     hidden: sorted.length - shown.length,
     planOk: planOk,
     primary: primary,
+    silent: silent,
     excluded: shown.length - used.length,
     right: right,
     judged: judged,
