@@ -100,6 +100,9 @@ class StatesController extends ChangeNotifier {
   /// The sound is paused by a double clench.
   bool paused = false;
 
+  /// A call or another app has the sound now ([audioFocus]): the sound is paused until it is back.
+  bool _interrupted = false;
+
   /// Where sessions are kept (null: nothing saved).
   SoundStore? store;
 
@@ -256,6 +259,7 @@ class StatesController extends ChangeNotifier {
     final k = keeper;
     if (k == null) return;
     k.onStop = () => unawaited(stop());
+    k.onFocus = audioFocus;
     try {
       canLock = await k.hold(KeepSpec(title: plan.preset.name, text: 'Sound session · ${plan.line}', headband: useHeadband));
     } catch (_) {
@@ -307,6 +311,7 @@ class StatesController extends ChangeNotifier {
     _drift = null;
     _hands = null;
     paused = false;
+    _interrupted = false;
     _lightsOffAt = null;
     _lightsOffMono = null;
     _soundStartS = null;
@@ -372,6 +377,7 @@ class StatesController extends ChangeNotifier {
     }
     _soundStartS = _t().floor();
     _soundStartK = (_seen?.n ?? 0) ~/ fs;
+    if (_interrupted) sound.pause(on: true); // a call came while the sound was being made
     _event('sound on: ${plan!.line}');
     _set(SoundStage.playing, note);
     _saveRunning();
@@ -429,10 +435,31 @@ class StatesController extends ChangeNotifier {
     final sound = _sound;
     if (kind == GestureKind.clench && sound != null && stage == SoundStage.playing) {
       paused = !paused;
-      sound.pause(on: paused);
+      sound.pause(on: paused || _interrupted);
       _event('hands-free: ${paused ? 'sound paused' : 'sound back'} (${gestureWord(kind)})');
     } else {
       _event('hands-free: moment (${gestureWord(kind)})');
+    }
+    _notify();
+  }
+
+  /// A call or another app took the sound, or gave it back (the session keeper, DECISIONS row 468): the sound pauses
+  /// meanwhile (its timers go on); each change is an event in the session file.
+  void audioFocus(FocusChange f) {
+    if (_ended) return;
+    switch (f) {
+      case FocusChange.lost || FocusChange.paused:
+        if (_interrupted) return;
+        _interrupted = true;
+        _sound?.pause(on: true);
+        _event('audio focus lost: a call or another app (sound paused)');
+      case FocusChange.back:
+        if (!_interrupted) return;
+        _interrupted = false;
+        _sound?.pause(on: paused);
+        _event('audio focus back: sound on');
+      case FocusChange.duck:
+        _event('audio focus: a short sound over ours');
     }
     _notify();
   }

@@ -250,6 +250,28 @@ void main() {
     expect(none.log, ['hold', 'release']);
   });
 
+  test('a call during the check-in stops it and keeps nothing; a short notification sound does not', () async {
+    late MorningController c;
+    final band = EyesBand(DemoSignal(1), () => c.stage == MorningStage.closed ? 'closed' : 'open');
+    final keeper = FakeSessionKeeper();
+    c = MorningController(
+      finder: OneFinder(band),
+      store: MorningStore(tmp),
+      timing: const MorningTiming(contactFor: Duration(milliseconds: 5), settle: Duration.zero, phaseS: 600),
+      keeper: keeper,
+    );
+    await c.start();
+    c.begin();
+    keeper.onFocus!(FocusChange.duck);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(c.stage, MorningStage.closed, reason: 'a notification sound is not a call');
+    keeper.onFocus!(FocusChange.paused);
+    await until(c, () => c.stage == MorningStage.intro);
+    expect(c.message, contains('call or another app'));
+    expect(tmp.listSync(), isEmpty);
+    expect(keeper.held, isFalse);
+  });
+
   test('no headband: a plain failure', () async {
     final c = MorningController(finder: OneFinder(null), store: MorningStore(tmp), timing: fast);
     await c.start();

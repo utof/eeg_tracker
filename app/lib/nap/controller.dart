@@ -300,7 +300,10 @@ class NapController extends ChangeNotifier {
     final by = _now().add(Duration(minutes: lengthMin));
     String two(int v) => v.toString().padLeft(2, '0');
     try {
-      await k.hold(KeepSpec(title: 'Nap', text: 'Wakes you by ${two(by.hour)}:${two(by.minute)}', headband: true));
+      // no audio focus: nothing plays until the wake, and a podcast you fall asleep to should go on (row 468)
+      await k.hold(
+        KeepSpec(title: 'Nap', text: 'Wakes you by ${two(by.hour)}:${two(by.minute)}', headband: true, focus: false),
+      );
     } catch (_) {
       // the screen stays on as before
     }

@@ -240,6 +240,7 @@ class _DreamScreenState extends State<DreamScreen> {
     // (session_keeper.dart, DECISIONS row 195). It starts here, with the app on screen and the microphone allowed:
     // Android gives a locked app the microphone only then.
     _keeper.onStop = () => unawaited(_c.stop());
+    _keeper.onFocus = _c.audioFocus; // a call or another app's sound (DECISIONS row 468)
     unawaited(
       on
           ? _keeper.hold(const KeepSpec(title: 'Dream catcher', text: 'Session running', headband: true, microphone: true))

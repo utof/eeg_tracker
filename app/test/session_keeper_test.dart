@@ -30,7 +30,13 @@ void main() {
     final k = PhoneSessionKeeper();
     expect(await k.hold(const KeepSpec(title: 'Fall asleep', text: 'Sound session', headband: true)), isTrue);
     expect(calls.single.method, 'hold');
-    expect(calls.single.arguments, {'title': 'Fall asleep', 'text': 'Sound session', 'headband': true, 'microphone': false});
+    expect(calls.single.arguments, {
+      'title': 'Fall asleep',
+      'text': 'Sound session',
+      'headband': true,
+      'microphone': false,
+      'focus': true,
+    });
     await k.release();
     expect(calls.last.method, 'release');
   });

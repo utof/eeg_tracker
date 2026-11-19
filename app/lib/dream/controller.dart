@@ -35,6 +35,7 @@ import '../recorder/chunk_writer.dart';
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
 import '../session_clock.dart';
+import '../session_keeper.dart' show FocusChange;
 import '../sound/gesture_tone.dart';
 import 'audio.dart';
 import 'band_link.dart';
@@ -187,6 +188,7 @@ class DreamController extends ChangeNotifier {
   bool _gapPending = false;
   int _lostSamples = 0;
   bool _busy = false;
+  bool _interrupted = false;
   Future<void>? _roundFuture;
   Completer<AnswerEnd>? _answerDone;
   Completer<bool?>? _tap;
@@ -280,6 +282,7 @@ class DreamController extends ChangeNotifier {
     _gapPending = false;
     _lostSamples = 0;
     _busy = false;
+    _interrupted = false;
     _roundFuture = null;
     _answerDone = null;
     _tap = null;
@@ -450,6 +453,25 @@ class DreamController extends ChangeNotifier {
     _notify();
   }
 
+  /// A call or another app took the sound, or gave it back (the session keeper, DECISIONS row 468): no question is
+  /// asked meanwhile (an answer would record the call); each change is a marker in the recording.
+  void audioFocus(FocusChange f) {
+    if (_ended) return;
+    switch (f) {
+      case FocusChange.lost || FocusChange.paused:
+        if (_interrupted) return;
+        _interrupted = true;
+        _mark('dream catcher: audio focus lost: a call or another app (no question until it is back)');
+      case FocusChange.back:
+        if (!_interrupted) return;
+        _interrupted = false;
+        _mark('dream catcher: audio focus back');
+        _check();
+      case FocusChange.duck:
+        _mark('dream catcher: audio focus: a short sound over ours');
+    }
+  }
+
   // ---- rounds ----
 
   void _check() {
@@ -466,6 +488,7 @@ class DreamController extends ChangeNotifier {
       unawaited(_finish(plan.done >= plan.rounds ? DreamEnd.rounds : DreamEnd.cap));
       return;
     }
+    if (_interrupted) return; // no question during a call
     final cause = plan.due(t, driftState);
     if (cause == null) return;
     _busy = true;

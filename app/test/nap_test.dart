@@ -368,6 +368,7 @@ void main() {
       await c.start(lengthMin: 20);
       expect(keeper.held, isTrue, reason: 'a locked phone must not freeze the nap: the wake cue depends on it');
       expect((keeper.spec!.title, keeper.spec!.text, keeper.spec!.headband), ('Nap', 'Wakes you by 14:50', true));
+      expect(keeper.spec!.focus, isFalse, reason: 'nothing plays until the wake: a podcast you fall asleep to goes on');
       await until(c, () => c.stage == NapStage.waking);
       keeper.onStop!(); // Stop on the lock screen while the cue plays: "I'm awake"
       await until(c, () => c.stage == NapStage.done);

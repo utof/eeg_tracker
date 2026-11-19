@@ -140,6 +140,7 @@ class _AlphaThetaScreenState extends State<AlphaThetaScreen> {
     _screenOn = on;
     unawaited(Phone.keepScreenOn(on: on).catchError((Object _) {}));
     _keeper.onStop = () => unawaited(_c.stop());
+    _keeper.onFocus = _c.audioFocus; // a call or another app's sound (DECISIONS row 468)
     unawaited(
       on
           ? _keeper.hold(const KeepSpec(title: 'Alpha-theta', text: 'Session running', headband: true))

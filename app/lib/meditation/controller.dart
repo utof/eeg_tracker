@@ -59,6 +59,7 @@ import '../recorder/headband.dart' show HeadbandFinder;
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
 import '../handsfree/live.dart';
 import '../session_clock.dart';
+import '../session_keeper.dart' show FocusChange;
 import '../sound/audio_route.dart';
 import '../sound/feedback_sound.dart';
 import '../sound/gesture_tone.dart';
@@ -213,6 +214,10 @@ class MeditationController extends ChangeNotifier {
 
   /// A meditation's sound is paused by a double clench.
   bool paused = false;
+
+  /// A call or another app has the sound now ([audioFocus]): the bed is quiet and nothing rewards.
+  bool get interrupted => _interrupted;
+  bool _interrupted = false;
 
   /// Where sessions of this controller's kind are kept; set by the screen once the app's folder is known
   /// (null: not saved).
@@ -490,6 +495,7 @@ class MeditationController extends ChangeNotifier {
     _drift = null;
     _hands = null;
     paused = false;
+    _interrupted = false;
     _lostSamples = 0;
     _routeAtStart = null;
     _bluetoothUsed = false;
@@ -571,7 +577,7 @@ class MeditationController extends ChangeNotifier {
       if (seen != null) _drift = DriftOff(seen.n ~/ fs); // lights off: the eyes close now
     } else if (r.cue == 'calibration-done') {
       sound.cue();
-      sound.bed(on: !paused);
+      sound.bed(on: !paused && !_interrupted);
       calPhase = null;
       _set(Stage.running, '');
     }
@@ -586,7 +592,7 @@ class MeditationController extends ChangeNotifier {
     } else if (r.phase == 'run' && live != null) {
       final drift = driftState, asleep = drift == DriftState.asleep, at = kind == SessionKind.alphaTheta;
       // the same gates act whether the sound is live or replayed; in alpha-theta sleep is one of them
-      final gated = live.gated || (at && asleep) || paused;
+      final gated = live.gated || (at && asleep) || paused || _interrupted;
       final played = _replayer?.next(live, gated: gated) ??
           (gated && !live.gated ? (level: live.level, rough: live.rough, reward: null, gated: true) : live);
       sound.play(played);
@@ -634,7 +640,7 @@ class MeditationController extends ChangeNotifier {
     } else if (asleepGuard) {
       asleepGuard = false;
       _wokeAt = -1e9;
-      sound.bed(on: true);
+      sound.bed(on: !_interrupted);
       _session?.log.note({'event': 'awake again: bed back', 'n': _session?.n});
     }
   }
@@ -652,10 +658,33 @@ class MeditationController extends ChangeNotifier {
     if (_ended || s == null) return;
     if (g == GestureKind.clench && kind == SessionKind.meditation && stage == Stage.running && _silent == null) {
       paused = !paused;
-      _sound?.bed(on: !paused);
+      _sound?.bed(on: !paused && !_interrupted);
       s.log.note({'event': 'hands-free: ${paused ? 'sound paused' : 'sound back'} (${gestureWord(g)})', 'n': s.n});
     } else {
       s.log.note({'event': 'hands-free: moment (${gestureWord(g)})', 'n': s.n});
+    }
+    _notify();
+  }
+
+  /// A call or another app took the sound, or gave it back (the session keeper, DECISIONS row 468): the bed goes quiet
+  /// and nothing rewards meanwhile (the core goes on measuring); each change is a line in the session log.
+  void audioFocus(FocusChange f) {
+    if (_ended) return;
+    final s = _session; // null while connecting: the change still counts, nothing to log yet
+    void log(String event) => s?.log.note({'event': event, 'n': s.n});
+    switch (f) {
+      case FocusChange.lost || FocusChange.paused:
+        if (_interrupted) return;
+        _interrupted = true;
+        _sound?.bed(on: false);
+        log('audio focus lost: a call or another app (sound paused)');
+      case FocusChange.back:
+        if (!_interrupted) return;
+        _interrupted = false;
+        if (stage == Stage.running && _silent == null && !paused && !asleepGuard) _sound?.bed(on: true);
+        log('audio focus back: sound on');
+      case FocusChange.duck:
+        log('audio focus: a short sound over ours');
     }
     _notify();
   }

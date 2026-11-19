@@ -16,6 +16,7 @@ import 'package:eeg_tracker/dream/band_link.dart';
 import 'package:eeg_tracker/feedback/demo.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
+import 'package:eeg_tracker/session_keeper.dart' show FocusChange;
 import 'package:eeg_tracker/recorder/nights.dart';
 import 'package:eeg_tracker/sound/synth.dart' show wav16;
 import 'package:flutter_test/flutter_test.dart';
@@ -622,6 +623,27 @@ void main() {
       expect(c.micNote, contains('did not record'));
       expect(mic.stopsAsked, greaterThanOrEqualTo(1), reason: 'its stop was asked too, and given up on');
       await c.stop().timeout(const Duration(seconds: 5));
+      c.dispose();
+    });
+
+    test('a call or another app takes the sound: no question until it is back, and the markers say so', () async {
+      final band = DriftBand((_) => 1), sound = SilentDreamSound();
+      final c = controller(band, FakeMic(spoken), sound, u: 0);
+      await c.start(rounds: 3);
+      c.audioFocus(FocusChange.paused);
+      await until(c, () => c.seconds > 11 * 60); // past the first round's timer (10 min)
+      expect((c.roundsDone, c.roundNow), (0, null), reason: 'no question during a call');
+      c.audioFocus(FocusChange.back);
+      await until(c, () => c.roundsDone >= 1);
+      await c.stop();
+      final s = c.last!;
+      final markers = [
+        for (final l in File('${recordings.path}/${s.recording}.markers.jsonl').readAsLinesSync()) '${(jsonDecode(l) as Map)['text']}',
+      ];
+      expect(markers, containsAllInOrder([
+        'dream catcher: audio focus lost: a call or another app (no question until it is back)',
+        'dream catcher: audio focus back',
+      ]));
       c.dispose();
     });
 

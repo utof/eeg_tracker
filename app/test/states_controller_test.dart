@@ -119,6 +119,23 @@ void main() {
     c.dispose();
   });
 
+  test('a call or another app takes the sound: it pauses until the sound is back, and the session file says so', () async {
+    final sound = SilentStateSound();
+    final keeper = FakeSessionKeeper();
+    final c = StatesController(finder: OneFinder(null), sound: () => sound, store: store, timing: fast, keeper: keeper);
+    await c.start(SoundPlan.of(SoundState.relax), useHeadband: false);
+    keeper.onFocus!(FocusChange.paused);
+    keeper.onFocus!(FocusChange.duck);
+    keeper.onFocus!(FocusChange.back);
+    expect(sound.pauses, [true, false]);
+    await c.stop();
+    expect(
+      store.list().single.events.map((e) => e.text),
+      containsAllInOrder(['audio focus lost: a call or another app (sound paused)', 'audio focus back: sound on']),
+    );
+    c.dispose();
+  });
+
   test("a session of a fair test's day keeps the test's tag; the next session has none", () async {
     var now = DateTime(2026, 11, 20, 10);
     final sound = SilentStateSound();

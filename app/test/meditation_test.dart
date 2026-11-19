@@ -17,6 +17,7 @@ import 'package:eeg_tracker/meditation/store.dart';
 import 'package:eeg_tracker/meditation/tracker.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
+import 'package:eeg_tracker/session_keeper.dart' show FocusChange;
 import 'package:eeg_tracker/sound/feedback_sound.dart';
 import 'package:eeg_tracker/training/control.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -437,6 +438,26 @@ void main() {
       expect(band.calls.last, 'disconnect');
       c.dispose();
     });
+  });
+
+  test('a call or another app takes the sound: the bed goes quiet, no bells until it is back, the log says so', () async {
+    final band = DemoBand(DemoSignal(7), perTick: 25), sound = SilentSound();
+    final c = MeditationController(finder: Finder([band]), sound: () => sound, timing: fast, silentBlock: Duration.zero);
+    await c.start(const Duration(minutes: 20));
+    await until(c, () => c.stage == Stage.running && c.runSeconds > 20);
+    c.audioFocus(FocusChange.paused);
+    expect(sound.bedOn, isFalse);
+    final bells = sound.bells;
+    await until(c, () => c.runSeconds > 200);
+    expect(sound.bells, bells, reason: 'no bells during a call');
+    c.audioFocus(FocusChange.duck); // a short sound: Android lowers ours by itself
+    c.audioFocus(FocusChange.back);
+    expect(sound.bedOn, isTrue);
+    await until(c, () => sound.bells > bells);
+    await c.stop();
+    final events = [for (final i in c.session!.log.info) i['event']].whereType<String>();
+    expect(events, containsAllInOrder(['audio focus lost: a call or another app (sound paused)', 'audio focus back: sound on']));
+    c.dispose();
   });
 
   test('the silent minutes: the sound stops after the length, the headband goes on, the block has its number', () async {

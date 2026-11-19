@@ -216,6 +216,7 @@ class MorningController extends ChangeNotifier {
     final k = keeper;
     if (k == null) return;
     k.onStop = () => unawaited(stop());
+    k.onFocus = _onFocus;
     try {
       await k.hold(const KeepSpec(title: 'Morning check-in', text: 'Check-in running', headband: true));
     } catch (_) {
@@ -227,6 +228,14 @@ class MorningController extends ChangeNotifier {
     try {
       await keeper?.release();
     } catch (_) {}
+  }
+
+  /// A call or another app's sound during the check-in (the session keeper, DECISIONS row 468) spoils the routine, as
+  /// a drop does: it stops and keeps nothing. A short notification sound does not.
+  void _onFocus(FocusChange f) {
+    if (!active || _ended || f == FocusChange.duck || f == FocusChange.back) return;
+    unawaited(_abort('A call or another app\'s sound came during the check-in, so it stopped and nothing was kept. '
+        'Start again when it is quiet.'));
   }
 
   /// Checks contact again (the laptop's "Check again"): the signal pauses for a few seconds.
