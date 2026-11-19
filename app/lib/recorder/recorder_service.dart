@@ -173,6 +173,9 @@ class RecorderTaskHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     final dir = await _recordingsDir();
+    final plan = await _alarmPlan();
+    // Stop (or the system's destroy) came while this was starting: it has been answered; no night starts after it.
+    if (_stopping) return;
     _filesDir = Directory(dir).parent.path;
     final HeadbandFinder finder;
     if (this.finder != null) {
@@ -194,7 +197,7 @@ class RecorderTaskHandler extends TaskHandler {
       watch: () => LiveDrift(handsFree: nightGestures(Directory(dir).parent)),
       // one live sleep model for the smart alarm and the lucid cues, fed by the recorder (DECISIONS 330)
       scorer: scorer,
-      alarmPlan: await _alarmPlan(),
+      alarmPlan: plan,
       alarm: alarm(dir, scorer),
       // lucid dream cues when they are on: the shared model, the phone's media player (DECISIONS 303)
       cues: cues(dir, scorer),
@@ -204,11 +207,11 @@ class RecorderTaskHandler extends TaskHandler {
     unawaited(_sharing(() async => _applyShare(await loadShareConfig())));
   }
 
-  Future<void> _sharing(Future<void> Function() what) async {
-    try {
-      await what().timeout(const Duration(seconds: 10));
-    } catch (_) {}
-  }
+  /// Every step goes after the one before it (a switch moved on, off and on again within seconds must leave one
+  /// server, the last one asked for, and none that nobody can stop); none waits longer than 10 s for the one before.
+  Future<void> _sharing(Future<void> Function() what) =>
+      _shareSteps = _shareSteps.then((_) => what().timeout(const Duration(seconds: 10))).catchError((Object _) {});
+  Future<void> _shareSteps = Future<void>.value();
 
   /// Starts, restarts or stops the server to match [config].
   Future<void> _applyShare(ShareConfig config) async {
