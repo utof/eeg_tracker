@@ -1,8 +1,10 @@
 // Share on Wi-Fi from the screen's side (DECISIONS rows 220-229): the switch, who serves, and when it ends.
 //
 // During a night the recorder's service serves (it keeps running with the screen off) and tells the screen where;
-// between nights the app serves the files itself while it is open, and keeps the screen on for the first
-// 15 minutes. Only one of the two holds the port: the app lets go before a night starts and takes over after Stop.
+// between nights the app serves the files itself, keeps the screen on for the first 15 minutes, and keeps itself
+// running with a notification while sharing is on ([keepAlive], DECISIONS row 589), so Android does not freeze it in
+// the background: a frozen app's port still takes connections and never answers. Only one of the two holds the port:
+// the app lets go before a night starts and takes over after Stop.
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -10,6 +12,10 @@ import 'package:flutter/foundation.dart';
 import '../phone.dart';
 import 'isolate.dart';
 import 'protocol.dart';
+
+/// The notification's words while the app keeps itself running to share between nights.
+String shareKeepText(int offAtMs) =>
+    'Your laptop can copy the files until ${clockText(DateTime.fromMillisecondsSinceEpoch(offAtMs))}. Stop turns it off.';
 
 /// What the main screen's "Your data" section shows.
 typedef ShareLine = ({bool on, String text, bool warn, String? address});
@@ -20,6 +26,7 @@ class ShareControl extends ChangeNotifier {
     required this.save,
     required this.sendToRecorder,
     required this.keepScreenOn,
+    this.keepAlive,
     ShareHost Function(String filesDir, void Function(ShareStatus) onChange)? host,
     DateTime Function()? clock,
   }) : _makeHost = host ?? _appHost,
@@ -31,6 +38,10 @@ class ShareControl extends ChangeNotifier {
   /// Sends the setting to the recorder's service while a night runs.
   final void Function(Map<String, Object?> message) sendToRecorder;
   final Future<void> Function(bool on) keepScreenOn;
+
+  /// Keeps the app running in the background while it serves between nights (a notification until [offAtMs]); false
+  /// lets go. Null in tests that do not look at it.
+  final Future<void> Function(bool on, int offAtMs)? keepAlive;
   final ShareHost Function(String filesDir, void Function(ShareStatus) onChange) _makeHost;
   final DateTime Function() _now;
 
@@ -42,6 +53,7 @@ class ShareControl extends ChangeNotifier {
   ShareHost? _host;
   bool _night = false;
   bool _awake = false;
+  int? _aliveUntil;
   String? _filesDir;
   Future<void> _queue = Future.value();
 
@@ -79,6 +91,7 @@ class ShareControl extends ChangeNotifier {
       await _serveFromApp();
     }
     await _keepAwake(_config.activeAt(now) && !night && now < _config.awakeUntilMs, front: front);
+    await _keepAlive(_config.activeAt(now) && !night);
     notifyListeners();
   });
 
@@ -98,6 +111,7 @@ class ShareControl extends ChangeNotifier {
   Future<void> beforeNight() => _serial(() async {
     _night = true;
     await _stopHost();
+    await _keepAlive(false); // the recorder's service keeps the app running now
     _status = shareDown;
     notifyListeners();
   });
@@ -125,7 +139,18 @@ class ShareControl extends ChangeNotifier {
       final now = _now().millisecondsSinceEpoch;
       await _keepAwake(_config.activeAt(now) && now < _config.awakeUntilMs, front: true);
     }
+    await _keepAlive(_config.activeAt(_now().millisecondsSinceEpoch) && !_night);
     notifyListeners();
+  }
+
+  /// Keeps the app running while it serves between nights; once per change.
+  Future<void> _keepAlive(bool want) async {
+    final until = want ? _config.offAtMs : null;
+    if (until == _aliveUntil) return;
+    _aliveUntil = until;
+    try {
+      await keepAlive?.call(until != null, until ?? 0);
+    } catch (_) {}
   }
 
   Future<void> _serveFromApp() async {
@@ -197,6 +222,7 @@ class ShareControl extends ChangeNotifier {
   @override
   void dispose() {
     unawaited(_stopHost());
+    if (_aliveUntil != null) unawaited(keepAlive?.call(false, 0).catchError((Object _) {}));
     super.dispose();
   }
 }

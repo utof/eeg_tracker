@@ -22,7 +22,7 @@ import '../recorder/headband.dart';
 import '../recorder/nights.dart';
 import '../recorder/recorder_service.dart';
 import '../recorder/status.dart';
-import '../session_keeper.dart' show PhoneSessionKeeper;
+import '../session_keeper.dart' show KeepSpec, PhoneSessionKeeper;
 import '../share/control.dart';
 import '../share/isolate.dart' show shareAddress;
 import '../sleep/onnx_runs.dart';
@@ -268,6 +268,10 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     save: saveShareConfig,
     sendToRecorder: FlutterForegroundTask.sendDataToTask,
     keepScreenOn: (on) => Phone.keepScreenOn(on: on),
+    keepAlive: (on, offAtMs) => PhoneSessionKeeper.keepInBackground(
+      on ? KeepSpec(title: 'Sharing on Wi-Fi', text: shareKeepText(offAtMs), focus: false) : null,
+      onStop: () => unawaited(_share.setOn(false)),
+    ),
   )..addListener(_onScoring);
 
   bool get _front => ModalRoute.of(context)?.isCurrent ?? true;

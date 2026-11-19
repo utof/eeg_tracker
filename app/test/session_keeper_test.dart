@@ -98,4 +98,35 @@ void main() {
     await released;
     expect(calls.map((c) => c.method), ['hold', 'release']);
   });
+
+  test('a background keep (Share on Wi-Fi) holds while no session does; a session borrows it and gives it back', () async {
+    var stops = 0, sessionStops = 0;
+    const share = KeepSpec(title: 'Sharing on Wi-Fi', text: 'until 10:05', focus: false);
+    expect(await PhoneSessionKeeper.keepInBackground(share, onStop: () => stops++), isTrue);
+    expect(PhoneSessionKeeper.held, isFalse, reason: 'not a session: the night scoring does not stop for it');
+    expect(calls.single.method, 'hold');
+    expect((calls.single.arguments as Map)['title'], 'Sharing on Wi-Fi');
+    await PhoneSessionKeeper.keepInBackground(share, onStop: () => stops++); // the minute's sync: no second call
+    expect(calls, hasLength(1));
+    await tapStop();
+    expect(stops, 1);
+
+    final session = PhoneSessionKeeper()..onStop = () => sessionStops++;
+    await session.hold(const KeepSpec(title: 'Meditation', headband: true));
+    expect(PhoneSessionKeeper.held, isTrue);
+    await tapStop();
+    expect((stops, sessionStops), (1, 1));
+    await session.release(); // the meditation ends: the notification goes back to sharing, the app keeps running
+    expect(calls.map((c) => c.method), ['hold', 'hold', 'hold']);
+    expect((calls.last.arguments as Map)['title'], 'Sharing on Wi-Fi');
+    expect(PhoneSessionKeeper.held, isFalse);
+
+    expect(await PhoneSessionKeeper.keepInBackground(null), isFalse); // sharing off
+    expect(calls.last.method, 'release');
+    final n = calls.length;
+    await PhoneSessionKeeper.keepInBackground(null);
+    expect(calls, hasLength(n));
+    await tapStop(); // nothing holds: nothing happens
+    expect((stops, sessionStops), (1, 1));
+  });
 }
