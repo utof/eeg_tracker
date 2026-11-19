@@ -7,11 +7,14 @@ import 'dart:ui' as ui;
 import 'package:eeg_tracker/export/exporter.dart';
 import 'package:eeg_tracker/ui/export_view.dart';
 import 'package:eeg_tracker/ui/meditation_view.dart' show MarkShape;
+import 'package:eeg_tracker/share/protocol.dart';
 import 'package:eeg_tracker/ui/night_view.dart';
+import 'package:eeg_tracker/ui/share_sheet.dart';
 import 'package:eeg_tracker/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:qr/qr.dart';
 
 import 'screens_test.dart' show loadFonts;
 
@@ -145,6 +148,85 @@ void main() {
 
   testWidgets('export_copying_full: the whole page', (tester) async {
     await _shoot(tester, ExportView(model: _states['export_copying']!), 'export_copying_full', height: 1700);
+  });
+
+  // Share on Wi-Fi (DECISIONS rows 220-229): the row in Your data in its states, and the sheet.
+  const shareOff = (on: false, text: 'Lets your laptop watch the signal and copy the files over your home Wi-Fi.', warn: false, address: null);
+  const shareOn = (
+    on: true,
+    text: 'On at 192.168.1.23:8765 until 10:05. Keep this app open while the laptop copies.',
+    warn: false,
+    address: '192.168.1.23:8765',
+  );
+  const shareNoWifi = (on: true, text: 'On, but this phone has no Wi-Fi address. Join your home Wi-Fi.', warn: true, address: null);
+  for (final scale in [1.0, 1.3]) {
+    final tag = scale == 1.0 ? '' : '_text130';
+    for (final (name, line) in [('off', shareOff), ('on', shareOn), ('no_wifi', shareNoWifi)]) {
+      testWidgets('night_share_$name at ${(scale * 100).round()} % text', (tester) async {
+        final model = NightViewModel(
+          title: 'Ready',
+          sentence: 'Last night is saved. Put the headband on to start a new one.',
+          tone: Tone.calm,
+          running: false,
+          nightsOnPhone: 3,
+          exportLine: (text: 'Last export yesterday; 3 new files (2.4\u00a0MB) since.', warn: false),
+          share: line,
+        );
+        await _shoot(
+          tester,
+          NightView(model: model, onStart: () {}, onStop: () {}, onFix: (_) {}, onExport: () {}, onExportData: () {}, onShare: (_) {}, onShareDetails: () {}),
+          'night_share_$name${tag}_full',
+          scale: scale,
+          height: 2100,
+        );
+        expect(find.text('Share on Wi-Fi'), findsOneWidget);
+        expect(find.text('Address and code'), line.on ? findsOneWidget : findsNothing);
+        expect(tester.widget<Switch>(find.byType(Switch)).value, line.on);
+      });
+    }
+
+    testWidgets('night_share_recording at ${(scale * 100).round()} % text: during a night only the switch is in Your data', (tester) async {
+      const model = NightViewModel(
+        title: 'Recording',
+        sentence: 'All is well. You can put the phone down.',
+        tone: Tone.live,
+        running: true,
+        minutes: 12,
+        dataAgeSeconds: 0,
+        share: (on: true, text: 'On at 192.168.1.23:8765 until 10:05.', warn: false, address: '192.168.1.23:8765'),
+      );
+      await _shoot(
+        tester,
+        NightView(model: model, onStart: () {}, onStop: () {}, onFix: (_) {}, onShare: (_) {}, onShareDetails: () {}),
+        'night_share_recording${tag}_full',
+        scale: scale,
+        height: 1500,
+      );
+      expect(find.text('Your data'), findsOneWidget);
+      expect(find.text('Export data'), findsNothing);
+    });
+
+    for (final (name, address, night) in [('night', '192.168.1.23', true), ('app', '192.168.1.23', false), ('no_wifi', null, true)]) {
+      testWidgets('share_sheet_$name at ${(scale * 100).round()} % text', (tester) async {
+        final model = ShareSheetModel(address: address, port: 8765, token: 'kq7m2xwp9dfh', until: DateTime(2026, 11, 23, 10, 5), night: night);
+        await _shoot(
+          tester,
+          Scaffold(backgroundColor: Night.surfaceHigh, body: ShareSheet(model: model, onNewToken: () {})),
+          'share_sheet_$name$tag',
+          scale: scale,
+          height: 1300,
+        );
+        expect(find.text('kq7m2xwp9dfh'), findsOneWidget);
+        expect(find.text(address == null ? 'no Wi-Fi' : '192.168.1.23:8765'), findsOneWidget);
+        expect(find.byType(QrBox), address == null ? findsNothing : findsOneWidget);
+        expect(find.textContaining('scripts/pull_phone.py http://${address ?? '<phone address>'}:8765 --token kq7m2xwp9dfh'), findsOneWidget);
+      });
+    }
+  }
+
+  test('the QR code holds the address and the code, with a quiet margin', () {
+    final image = QrImage(QrCode(payload: QrPayload.fromString(shareUrl('192.168.1.23', 8765, 'kq7m2xwp9dfh'))));
+    expect(image.moduleCount, lessThanOrEqualTo(37)); // 208 dp / (37 + 8) = 4 dp a module at the least
   });
 
   for (final warn in [true, false]) {

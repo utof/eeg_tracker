@@ -93,6 +93,10 @@ class Phone {
   static Future<PhoneBattery?> battery() async =>
       PhoneBattery.fromMap(await _channel.invokeMapMethod<Object?, Object?>('battery'));
 
+  /// Share on Wi-Fi during a night: holds (or lets go of) a Wi-Fi lock, so Wi-Fi keeps answering with the screen
+  /// off (PhoneChannel.kt). Works from the recorder's engine too.
+  static Future<void> wifiLock({required bool on}) => _channel.invokeMethod<void>('wifiLock', {'on': on});
+
   /// Schedules the foreground service to start again in [delayMs], then ends this process.
   static Future<void> restartProcess(int delayMs) =>
       _channel.invokeMethod<void>('restartProcess', {'delayMs': delayMs});

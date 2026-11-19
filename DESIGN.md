@@ -157,6 +157,11 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
 - **Export line** (Your data): an icon and one sentence, muted ("Last export yesterday; 3 new files since"), or
   `caution` amber with a warning icon once something new has been only on the phone for 3 days, or nothing was ever
   exported. Never colour alone: the sentence says what is at risk.
+- **Share row and sheet** (Your data): a Material switch row "Share on Wi-Fi" under a hairline, one muted sentence
+  under it (amber with words when there is no Wi-Fi address or it stopped), and the text button Address and code. The
+  sheet uses label-left / value-right rows (Address, Code, Turns off at) in tabular titleLarge with copy icons, the two
+  laptop commands as selectable body text, and a QR code drawn in `ground` on an `ink` field: the one light field in
+  the app, parchment instead of white, because a camera needs the contrast.
 - **Copy strip** (Export data): sixteen of the watch strip's own cells (track, 6 dp, a wider gap every four), filling
   from the left with `saved` by the share of the phone's data that has reached the export folder; while copying,
   the cell in progress is outlined green like the half hour in progress. A muted sentence under it gives both sizes.

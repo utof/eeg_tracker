@@ -61,3 +61,11 @@ drift-off detector thinks, in words only; a hairline sets the bar apart from the
 because it is used lying down at the moment the eyes close, where the thumb already is. Refused: a section in the
 scrolling page, a notification action, a coloured state chip. Checked as test renders at 440 dp (100 and 130 %
 text) and at the owner's 393 dp with 130 % text, which also found the watch strip 6 dp too wide (fixed).
+
+## Addition 2026-11-19: Share on Wi-Fi (DECISIONS rows 220-229)
+
+A narrow addition inside this surface, no new direction (headless run, the brief stood in for the owner): in "Your
+data", under a hairline, a switch row "Share on Wi-Fi" with one sentence and, while on, "Address and code", which
+opens a sheet (`app/lib/ui/share_sheet.dart`): who can read and that it is not encrypted, Address / Code / Turns off
+at as log rows, a parchment QR code, the two laptop commands, New code. During a night the section holds only this
+row. Checked as test renders at 100 and 130 % text (`app/test/export_screens_test.dart`), not on the phone.

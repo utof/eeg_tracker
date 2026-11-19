@@ -96,3 +96,11 @@ The recorder restarts itself after every Bluetooth drop and for every contact re
 passes live data through from the recorder, answering "reconnecting" while the recorder is away. Use
 `http://<laptop>:8770/` instead of port 8765. It answers the Sleep page and the morning result itself, so they
 work while the headband is off or charging (the recorder has no page server then).
+
+### The phone as the recorder
+
+The phone app records nights too, and with **Share on Wi-Fi** switched on (off by default; app/README.md) it answers
+the same routes as the laptop recorder: `python3 scripts/page_server.py --recorder http://<phone>:8765 --token <code>`
+shows these pages on the phone's recording, and `python3 scripts/pull_phone.py http://<phone>:8765 --token <code>`
+mirrors its files into `_local/` every 2 minutes while it records, checked against the phone's SHA-256 list.
+Local network only, a code on every request, plain HTTP (not encrypted: home Wi-Fi only; DECISIONS rows 220-229).

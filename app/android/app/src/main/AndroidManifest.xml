@@ -33,6 +33,12 @@
          service (type microphone) keeps it, DECISIONS row 195. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Share on Wi-Fi (off unless the owner switches it on; DECISIONS rows 220-229): the app listens on the
+         local network for the laptop. Android has one permission for every socket, so this is INTERNET; the app
+         itself never calls out. The Wi-Fi lock (held only while sharing during a night) uses WAKE_LOCK above. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
     <!-- No backup of any kind: recordings and night state are EEG (DECISIONS row 57). -->

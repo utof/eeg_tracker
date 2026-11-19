@@ -1,6 +1,6 @@
 """An always-on front for the recorder's pages, so they stay up while the recorder reconnects.
 
-usage: python3 scripts/page_server.py [--port 8770] [--recorder http://127.0.0.1:8765]
+usage: python3 scripts/page_server.py [--port 8770] [--recorder http://127.0.0.1:8765] [--token <t>]
 
 The recorder (scripts/record_night.py) restarts its whole process after every Bluetooth drop and for every contact
 re-check, and its page server goes with it for 20-40 s. This small server never restarts: it serves the pages
@@ -10,8 +10,13 @@ itself (scripts/live_page.html at "/", anything in scripts/web/ by file name) an
 The results (GET/POST /sleep-report and /morning-report, GET /hypnogram.png) it answers itself through
 night_files.py, like the recorder does, so the Sleep page works while the headband is off or charging, which is
 when the recorder has no page server at all. Standard library only.
+
+The recorder may be the phone app: switch "Share on Wi-Fi" on there (app/README.md) and pass its address and token,
+`--recorder http://<phone-ip>:8765 --token <t>`. The token goes along with every request passed on (it never
+reaches the browser), and the pages work on the phone's recording unchanged. The token may also come from the
+EEG_PHONE_TOKEN environment variable, which keeps it out of the shell history.
 """
-import argparse, http.client, json, sys
+import argparse, http.client, json, os, sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -27,7 +32,8 @@ REPORTS = ("sleep-report", "morning-report", "hypnogram.png")
 KINDS = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".png": "image/png"}
 
 
-def make_handler(rec_host: str, rec_port: int, rec_dir: Path = HERE.parent / "_local" / "recordings"):
+def make_handler(rec_host: str, rec_port: int, rec_dir: Path = HERE.parent / "_local" / "recordings",
+                 token: str | None = None):
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -96,8 +102,10 @@ def make_handler(rec_host: str, rec_port: int, rec_dir: Path = HERE.parent / "_l
             stream = urlsplit(self.path).path.rstrip("/").endswith("/stream")
             try:
                 c = http.client.HTTPConnection(rec_host, rec_port, timeout=None if stream else 10)
-                c.request(method, self.path, body=body,
-                          headers={"Content-Type": self.headers.get("Content-Type", "text/plain")})
+                headers = {"Content-Type": self.headers.get("Content-Type", "text/plain")}
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"  # the phone's Share on Wi-Fi asks for it
+                c.request(method, self.path, body=body, headers=headers)
                 r = c.getresponse()
             except OSError:
                 self._away(); return
@@ -136,9 +144,12 @@ def main() -> None:
     ap.add_argument("--recorder", default="http://127.0.0.1:8765")
     ap.add_argument("--recordings", type=Path, default=HERE.parent / "_local" / "recordings",
                     help="the recorder's --out; the results live in the nights folder next to it")
+    ap.add_argument("--token", default=os.environ.get("EEG_PHONE_TOKEN"),
+                    help="the phone app's Share on Wi-Fi token, when --recorder is the phone (or set EEG_PHONE_TOKEN)")
     a = ap.parse_args()
     u = urlsplit(a.recorder)
-    srv = ThreadingHTTPServer(("0.0.0.0", a.port), make_handler(u.hostname or "127.0.0.1", u.port or 80, a.recordings))
+    srv = ThreadingHTTPServer(("0.0.0.0", a.port),
+                              make_handler(u.hostname or "127.0.0.1", u.port or 80, a.recordings, a.token))
     srv.daemon_threads = True
     print(f"pages on port {a.port}, recorder at {a.recorder}", flush=True)
     srv.serve_forever()

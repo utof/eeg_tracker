@@ -18,6 +18,8 @@ import '../recorder/headband.dart';
 import '../recorder/nights.dart';
 import '../recorder/recorder_service.dart';
 import '../recorder/status.dart';
+import '../share/control.dart';
+import '../share/isolate.dart' show shareAddress;
 import '../sleep/onnx_runs.dart';
 import '../sleep/report.dart';
 import '../sleep/scorer.dart';
@@ -35,6 +37,7 @@ import 'nearby.dart';
 import 'night_strip.dart';
 import 'night_view.dart';
 import 'phone_checks.dart';
+import 'share_sheet.dart';
 import 'sleep_report_screen.dart';
 import 'sleep_scoring.dart';
 import 'states_screen.dart';
@@ -163,6 +166,18 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   String? _checkedInAt, _experiment;
   Pending? _pending;
 
+  /// Share on Wi-Fi (DECISIONS rows 220-229): the setting, and the app's own server between nights.
+  late final ShareControl _share = ShareControl(
+    load: loadShareConfig,
+    save: saveShareConfig,
+    sendToRecorder: FlutterForegroundTask.sendDataToTask,
+    keepScreenOn: (on) => Phone.keepScreenOn(on: on),
+  )..addListener(_onScoring);
+
+  bool get _front => ModalRoute.of(context)?.isCurrent ?? true;
+
+  String? get _filesDir => _dir == null ? null : Directory(_dir!).parent.path;
+
   @override
   void initState() {
     super.initState();
@@ -172,6 +187,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() {}); // data age and the current half hour move on
       if (++_ticks % 5 == 0) unawaited(_refreshRunning());
+      // Its time may be up, or Android may have ended the recorder: once a minute is enough.
+      if (_ticks % 60 == 0) unawaited(_share.sync(night: _running, filesDir: _filesDir, front: _front));
     });
     unawaited(_refresh());
   }
@@ -179,6 +196,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     _scoring?.removeListener(_onScoring);
+    _share.dispose();
     _clock?.cancel();
     FlutterForegroundTask.removeTaskDataCallback(_onData);
     WidgetsBinding.instance.removeObserver(this);
@@ -196,6 +214,11 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   void _onData(Object data) {
     if (data is Map && data['kind'] == 'stopped') {
       _stopped?.complete();
+      return;
+    }
+    final shared = shareStatusFrom(data);
+    if (shared != null) {
+      _share.onRecorderStatus(shared);
       return;
     }
     final s = RecorderStatus.fromMap(data);
@@ -277,6 +300,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     } catch (_) {
       // a line of text is never worth breaking the night screen
     }
+    await _share.sync(night: running, filesDir: dir == null ? null : Directory(dir).parent.path, front: _front);
     if (!mounted) return;
     setState(() {
       _nights = nights;
@@ -367,6 +391,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
         // The system dialog; recording starts anyway, and the warning stays until it is allowed.
         await _safe(() => Phone.openSettings('batteryOptimization'), false);
       }
+      await _share.beforeNight(); // the recorder serves during the night: the app lets go of the port
       final result = await startRecorderService(_dir ?? await _safe<String?>(Phone.recordingsDir, null));
       if (result is ServiceRequestFailure) _say('The recorder did not start: ${result.error}');
       _status = null;
@@ -407,6 +432,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       // The recorder closes its files and the headband first; then the service goes.
       await _stopped!.future.timeout(const Duration(seconds: 25), onTimeout: () {});
       await FlutterForegroundTask.stopService();
+      await _share.afterStop(); // 15 more minutes, so the laptop gets the end of the night
     } finally {
       _stopped = null;
       _lightsOffSentMs = null;
@@ -450,6 +476,35 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     unawaited(_refresh());
   }
 
+  Future<void> _setShare(bool on) async {
+    await _share.setOn(on);
+    if (on && mounted) await _shareDetails();
+  }
+
+  /// The address, the code and the QR code for the laptop.
+  Future<void> _shareDetails() => showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    backgroundColor: Night.surfaceHigh,
+    builder: (c) => ListenableBuilder(
+      listenable: _share,
+      builder: (c, _) {
+        final at = shareAddress(_share.status);
+        return ShareSheet(
+          model: ShareSheetModel(
+            address: at?.substring(0, at.lastIndexOf(':')),
+            port: _share.config.port,
+            token: _share.config.token,
+            until: DateTime.fromMillisecondsSinceEpoch(_share.config.offAtMs),
+            night: _running,
+          ),
+          onNewToken: _share.newToken,
+        );
+      },
+    ),
+  );
+
   /// Meditation owns the headband while it runs, so it starts only between nights (DECISIONS row 75).
   Future<void> _meditate() async {
     if (_running) return;
@@ -479,7 +534,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   }
 
   /// Settings: the hands-free switch and its calibration (DECISIONS 248); the calibration itself waits for Stop.
-  Future<void> _settings() => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
+  Future<void> _settings() =>
+      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
 
   Future<void> _trends() =>
       Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TrendsScreen(recordingsDir: _dir)));
@@ -572,6 +628,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
             ),
       lightsOffTapped: (s?.lightsOffMs ?? _lightsOffSentMs) != null,
       napLine: _napLine,
+      share: _dir == null ? null : _share.line(),
     );
   }
 
@@ -586,6 +643,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onFix: _fix,
       onExport: _export,
       onExportData: _exportData,
+      onShare: _busy ? null : _setShare,
+      onShareDetails: _shareDetails,
       onMeditate: _meditate,
       onDream: _dream,
       onNap: _nap,

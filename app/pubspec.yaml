@@ -25,6 +25,7 @@ dependencies:
   # The dream catcher's microphone (DECISIONS row 112): your spoken answers and your own prompts as WAV files.
   # BSD-3-Clause, by llfbandit; on Android it uses the system's AudioRecord, nothing bundled.
   record: ^7.2.0
+  qr: ^4.0.1
 
 dev_dependencies:
   flutter_test:

@@ -1,0 +1,502 @@
+// Share on Wi-Fi: the HTTP server (DECISIONS rows 220-229). It answers the laptop recorder's routes with the
+// same JSON (scripts/recorder_hub.py), so scripts/page_server.py --recorder http://<phone>:8765 --token <t> shows
+// the laptop's pages on the phone's recording, and it lists and serves the app's files read-only:
+//
+//   GET  /state          status, battery, minutes, age, contact, the last 4 s of data
+//   GET  /stream         server-sent events: a hello, every batch {"i","t","uv"}, every marker
+//   POST /marker         a text marker into the run's .markers.jsonl (503 while nothing records)
+//   POST /contact        503: the phone checks contact once, at the start of the night (row 52)
+//   GET  /files          every file Export data would copy: path, bytes, sha256, modified_ms
+//   GET  /files/<path>   one file, with HTTP Range (a growing night file is fetched piece by piece)
+//   the laptop's own jobs (/sleep-report, /morning-report, /hypnogram.png): 503, as the page server answers
+//   while the recorder is away
+//
+// Every request needs the token and a client on the local network. Nothing here writes, renames or deletes a
+// file. Plain dart:io with no Flutter import: it runs in an isolate of its own (isolate.dart), and in tests.
+import 'dart:async';
+import 'dart:collection';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
+
+import '../export/store.dart';
+import 'protocol.dart';
+
+const List<String> _names = ['O1', 'O2', 'T3', 'T4'];
+const int _fs = 250;
+const int _ringRows = _fs * 5;
+const int _stateRows = _fs * 4;
+
+/// Lines a slow /stream reader may have waiting; past it batches are dropped for that reader only.
+const int streamQueueMax = 200;
+
+/// /stream readers at once.
+const int streamReadersMax = 8;
+
+/// A file changed in the last seconds is still being written: listed without a SHA-256, marked `growing`.
+const Duration _settled = Duration(seconds: 20);
+
+const Set<String> _laptopOnly = {'sleep-report', 'morning-report', 'hypnogram.png'};
+
+/// What the recorder answers for a marker: its unix time and the index of the next sample; null = not recording.
+typedef MarkerResult = ({double t, int i});
+
+class _Reader {
+  final ListQueue<String> queue = ListQueue();
+  Completer<void>? _wake;
+  bool closed = false;
+
+  void push(String line) {
+    if (queue.length >= streamQueueMax) return; // this reader loses the batch; nobody else does
+    queue.add(line);
+    wake();
+  }
+
+  void wake() {
+    final w = _wake;
+    _wake = null;
+    if (w != null && !w.isCompleted) w.complete();
+  }
+
+  Future<void> wait(Duration d) {
+    final w = _wake = Completer<void>();
+    return w.future.timeout(d, onTimeout: () {});
+  }
+}
+
+class ShareServer {
+  ShareServer({
+    required this.filesDir,
+    required this.token,
+    this.port = sharePort,
+    this.onMarker,
+    this.clientOf,
+    this.keepalive = const Duration(seconds: 10),
+    DateTime Function()? clock,
+  }) : _now = clock ?? DateTime.now;
+
+  /// The app's private `files/` folder.
+  final Directory filesDir;
+  final String token;
+  final int port;
+
+  /// Asks the recorder to write a marker; null (or no answer) = nothing is recording.
+  final Future<MarkerResult?> Function(String text)? onMarker;
+
+  /// Tests: the client's address instead of the socket's.
+  final InternetAddress? Function(HttpRequest request)? clientOf;
+  final Duration keepalive;
+  final DateTime Function() _now;
+
+  final Map<String, HttpServer> _servers = {};
+  final List<_Reader> _readers = [];
+  final Map<String, ({int bytes, int modifiedMs, String sha256})> _hashes = {};
+
+  // The last 5 s of samples in volts, 4 per row, as a ring.
+  final Float32List _ring = Float32List(_ringRows * 4);
+  int _ringNext = 0;
+  int _ringCount = 0;
+
+  String? _stem;
+  int _nextI = 0;
+  double? _lastT;
+  Map<Object?, Object?> _live = const {};
+  String _contactKey = '';
+  double? _contactT;
+
+  int get boundPort => _servers.isEmpty ? port : _servers.values.first.port;
+  List<String> get addresses => _servers.keys.toList();
+  int get readers => _readers.length;
+
+  /// Listens on [addresses] and on the phone itself (for `adb forward`). Throws when nothing could be bound.
+  Future<void> listenOn(List<InternetAddress> addresses) async {
+    final want = <String, InternetAddress>{
+      for (final a in [...addresses, InternetAddress.loopbackIPv4]) a.address: a,
+    };
+    for (final gone in _servers.keys.where((k) => !want.containsKey(k)).toList()) {
+      await _servers.remove(gone)?.close(force: true);
+    }
+    Object? failure;
+    for (final e in want.entries) {
+      if (_servers.containsKey(e.key)) continue;
+      try {
+        final s = await HttpServer.bind(e.value, port, shared: false);
+        s.idleTimeout = const Duration(seconds: 60);
+        s.defaultResponseHeaders.clear();
+        s.listen(_handle, onError: (Object _) {});
+        _servers[e.key] = s;
+      } catch (err) {
+        failure = err;
+      }
+    }
+    if (_servers.isEmpty) throw failure ?? StateError('no address to listen on');
+  }
+
+  Future<void> close() async {
+    for (final r in _readers.toList()) {
+      r.closed = true;
+      r.wake();
+    }
+    for (final s in _servers.values.toList()) {
+      await s.close(force: true);
+    }
+    _servers.clear();
+  }
+
+  // ---- live data in ------------------------------------------------------------------------------------------
+
+  /// One batch as it arrived: [first] is the index of its first sample in the run [stem], [t] its unix time in
+  /// seconds, [volts] 4 values per sample (O1 O2 T3 T4).
+  void addBatch(String stem, int first, double t, Float32List volts) {
+    final n = volts.length ~/ 4;
+    if (n == 0) return;
+    for (var k = 0; k < n * 4; k += 4) {
+      final o = _ringNext * 4;
+      _ring[o] = volts[k];
+      _ring[o + 1] = volts[k + 1];
+      _ring[o + 2] = volts[k + 2];
+      _ring[o + 3] = volts[k + 3];
+      _ringNext = (_ringNext + 1) % _ringRows;
+    }
+    _ringCount = _ringCount + n > _ringRows ? _ringRows : _ringCount + n;
+    _stem = stem;
+    _nextI = first + n;
+    _lastT = t;
+    if (_readers.isEmpty) return; // nobody listens: nothing is built or sent
+    final b = StringBuffer('{"i":$first,"t":${_num(t, 3)},"uv":[');
+    for (var k = 0; k < n * 4; k += 4) {
+      if (k > 0) b.write(',');
+      b.write('[${_num(volts[k] * 1e6, 2)},${_num(volts[k + 1] * 1e6, 2)},'
+          '${_num(volts[k + 2] * 1e6, 2)},${_num(volts[k + 3] * 1e6, 2)}]');
+    }
+    b.write(']}');
+    _publish(b.toString());
+  }
+
+  /// The recorder's status about once a second (`RecorderStatus.toMap`), or `{}` when the app itself serves.
+  void setLive(Map<Object?, Object?> live) {
+    _live = live;
+    final c = live['contact'];
+    if (live['contactKnown'] == true && c is List) {
+      final key = c.join(',');
+      if (key != _contactKey) {
+        _contactKey = key;
+        _contactT = _round(_seconds(), 3);
+      }
+    }
+  }
+
+  void _publish(String line) {
+    for (final r in _readers) {
+      r.push(line);
+    }
+  }
+
+  double _seconds() => _now().microsecondsSinceEpoch / 1e6;
+
+  String get _status {
+    final phase = _live['phase'];
+    if (phase is String) return statusWord(phase);
+    final t = _lastT; // the app serves: a session (meditation, check-in, ...) may be writing a recording
+    return t != null && _seconds() - t < 5 ? 'session' : 'not recording';
+  }
+
+  /// GET /state, with the keys and rounding of `Hub.state()` in scripts/recorder_hub.py.
+  Map<String, Object?> state() {
+    final rows = _ringCount < _stateRows ? _ringCount : _stateRows;
+    final data = <List<double>>[];
+    for (var c = 0; c < 4; c++) {
+      var sum = 0.0;
+      final col = Float64List(rows);
+      for (var k = 0; k < rows; k++) {
+        final row = (_ringNext - rows + k + _ringRows * 2) % _ringRows;
+        col[k] = _ring[row * 4 + c];
+        sum += col[k];
+      }
+      final mean = rows == 0 ? 0.0 : sum / rows;
+      data.add([for (final v in col) _round((v - mean) * 1e6, 1)]);
+    }
+    final ohms = _live['contact'];
+    final known = _live['contactKnown'] == true && ohms is List && ohms.length == 4;
+    final samples = _live['nightSamples'];
+    final t = _lastT;
+    final battery = _live['battery'];
+    return {
+      'status': _status,
+      'battery': battery is num ? battery.toInt() : '?',
+      'battery_note': null,
+      'minutes': _round((samples is num ? samples : (_stem == null ? 0 : _nextI)) / _fs / 60, 1),
+      'age': t == null ? 999 : _round(_seconds() - t, 1),
+      'names': _names,
+      'fs': _fs,
+      'contact': {
+        for (var c = 0; c < 4; c++) _names[c]: known && ohms[c] is num ? (ohms[c] as num).round() : null,
+      },
+      'contact_t': _contactT,
+      'data': data,
+    };
+  }
+
+  // ---- requests ----------------------------------------------------------------------------------------------
+
+  Future<void> _handle(HttpRequest req) async {
+    final res = req.response;
+    try {
+      res.headers.set('Cache-Control', 'no-store');
+      final client = clientOf != null ? clientOf!(req) : req.connectionInfo?.remoteAddress;
+      if (client == null || !isAllowedClient(client)) {
+        return await _json(res, 403, {'error': 'only the local network may connect'});
+      }
+      if (!_authorized(req)) return await _json(res, 401, {'error': 'token missing or wrong'});
+      final method = req.method;
+      if (method != 'GET' && method != 'POST' && method != 'HEAD') {
+        return await _json(res, 405, {'error': 'read-only'});
+      }
+      final path = req.uri.path;
+      if (path == '/files' || path == '/files/') {
+        if (method == 'POST') return await _json(res, 405, {'error': 'read-only'});
+        return await _json(res, 200, await _fileList(hash: req.uri.queryParameters['sha'] != '0'));
+      }
+      if (path.startsWith('/files/')) {
+        if (method == 'POST') return await _json(res, 405, {'error': 'read-only'});
+        return await _file(req, Uri.decodeComponent(path.substring('/files/'.length)));
+      }
+      final trimmed = path.endsWith('/') && path.length > 1 ? path.substring(0, path.length - 1) : path;
+      final name = trimmed.substring(trimmed.lastIndexOf('/') + 1);
+      if (method == 'POST') {
+        if (name == 'marker') return await _marker(req);
+        if (name == 'contact') {
+          await req.drain<void>();
+          return await _json(res, 503, {'error': 'the phone checks contact once, at the start of the night'});
+        }
+        await req.drain<void>();
+        if (_laptopOnly.contains(name)) return await _json(res, 503, {'error': 'recorder reconnecting'});
+        return await _json(res, 404, {'error': 'no such route'});
+      }
+      if (name == 'stream') return await _stream(res);
+      if (name == 'state') return await _json(res, 200, state());
+      if (_laptopOnly.contains(name)) return await _json(res, 503, {'error': 'recorder reconnecting'});
+      if (path == '/') {
+        return await _json(res, 200, {
+          'app': 'eeg-tracker',
+          'share': 1,
+          'status': _status,
+          'routes': ['GET /state', 'GET /stream', 'POST /marker', 'GET /files', 'GET /files/<path>'],
+        });
+      }
+      return await _json(res, 404, {'error': 'no such route'});
+    } catch (_) {
+      try {
+        res.statusCode = HttpStatus.internalServerError;
+      } catch (_) {}
+      try {
+        await res.close();
+      } catch (_) {}
+    }
+  }
+
+  bool _authorized(HttpRequest req) {
+    final auth = req.headers.value('authorization');
+    final given = auth != null && auth.startsWith('Bearer ')
+        ? auth.substring(7).trim()
+        : req.headers.value('x-eeg-token') ?? req.uri.queryParameters['token'] ?? '';
+    return sameToken(given, token);
+  }
+
+  Future<void> _json(HttpResponse res, int code, Object body) => _send(res, code, utf8.encode(jsonEncode(body)), 'application/json');
+
+  Future<void> _send(HttpResponse res, int code, List<int> body, String kind) async {
+    res.statusCode = code;
+    res.headers.set('Content-Type', kind);
+    res.contentLength = body.length;
+    res.add(body);
+    await res.close();
+  }
+
+  Future<void> _marker(HttpRequest req) async {
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in req) {
+      if (bytes.length < 2000) bytes.add(chunk);
+    }
+    final all = bytes.takeBytes();
+    var text = utf8.decode(all.length > 2000 ? all.sublist(0, 2000) : all, allowMalformed: true).trim();
+    if (text.length > 200) text = text.substring(0, 200);
+    if (text.isEmpty) text = 'marker';
+    MarkerResult? m;
+    try {
+      m = await onMarker?.call(text).timeout(const Duration(seconds: 3));
+    } catch (_) {
+      m = null;
+    }
+    if (m == null) return _json(req.response, 503, {'error': 'not recording yet'});
+    _publish(jsonEncode({'marker': text, 'i': m.i, 't': _round(m.t, 3)}));
+    return _send(req.response, 200, utf8.encode('ok'), 'text/plain');
+  }
+
+  /// Server-sent events, as `Page.stream` on the laptop. No chunked framing: the laptop's page server passes the
+  /// raw lines through.
+  Future<void> _stream(HttpResponse res) async {
+    if (_readers.length >= streamReadersMax) return _json(res, 503, {'error': 'too many stream readers'});
+    res.statusCode = 200;
+    res.headers.set('Content-Type', 'text/event-stream');
+    res.headers.chunkedTransferEncoding = false;
+    res.persistentConnection = false;
+    final r = _Reader();
+    _readers.add(r);
+    Socket? socket;
+    try {
+      // The socket itself, with the headers written: it says when the reader goes away, and its flush waits for
+      // the network, so a slow reader fills its own short queue and never the phone's memory.
+      final out = socket = await res.detachSocket();
+      void gone([Object? _]) {
+        r.closed = true;
+        r.wake();
+      }
+
+      out.listen((_) {}, onDone: gone, onError: gone, cancelOnError: true);
+      unawaited(out.done.then(gone, onError: gone));
+      final hello = {'hello': true, 'names': _names, 'fs': _fs, 'unit': 'uV', 'status': _status, 'next_i': _nextI};
+      out.write('data: ${jsonEncode(hello)}\n\n');
+      await out.flush();
+      while (!r.closed) {
+        if (r.queue.isEmpty) {
+          await r.wait(keepalive);
+          if (r.closed) break;
+          if (r.queue.isEmpty) out.write(': keepalive\n\n');
+        }
+        while (r.queue.isNotEmpty) {
+          out.write('data: ${r.queue.removeFirst()}\n\n');
+        }
+        await out.flush();
+      }
+    } catch (_) {
+      // the reader went away
+    } finally {
+      r.closed = true;
+      _readers.remove(r);
+      socket?.destroy();
+    }
+  }
+
+  // ---- files -------------------------------------------------------------------------------------------------
+
+  /// The list Export data's manifest holds (`path`, `bytes`, `sha256`, `modified_ms`), made now from the folder.
+  /// A file still being written has `sha256: null` and `growing: true`; so has every file with [hash] false
+  /// unless its SHA-256 is already known.
+  Future<Map<String, Object?>> _fileList({required bool hash}) async {
+    final stored = storedFiles(filesDir);
+    final exported = _exportIndex();
+    final nowMs = _now().millisecondsSinceEpoch;
+    final files = <Map<String, Object?>>[];
+    for (final f in stored) {
+      final growing = nowMs - f.modifiedMs < _settled.inMilliseconds;
+      String? sha;
+      if (!growing) {
+        final known = _hashes[f.path];
+        final ex = exported[f.path];
+        if (known != null && known.bytes == f.bytes && known.modifiedMs == f.modifiedMs) {
+          sha = known.sha256;
+        } else if (ex != null && ex.sameAs(f)) {
+          sha = ex.sha256;
+        } else if (hash) {
+          sha = await _sha256(f);
+        }
+      }
+      files.add({
+        'path': f.path,
+        'bytes': f.bytes,
+        'sha256': sha,
+        'modified_ms': f.modifiedMs,
+        if (growing) 'growing': true,
+      });
+    }
+    return {
+      'format': 'eeg-tracker-phone-files',
+      'version': 1,
+      'listed': _now().toIso8601String(),
+      'recording': _stem,
+      'files': files,
+      'totals': {'files': files.length, 'bytes': stored.fold<int>(0, (n, f) => n + f.bytes)},
+    };
+  }
+
+  Map<String, ExportedFile> _exportIndex() {
+    try {
+      return ExportStore(filesDir).load().files;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// SHA-256 of a file that did not change while it was read; null otherwise (the next list tries again).
+  Future<String?> _sha256(StoredFile f) async {
+    try {
+      final out = _DigestSink();
+      final input = sha256.startChunkedConversion(out);
+      await for (final chunk in f.file.openRead()) {
+        input.add(chunk);
+      }
+      input.close();
+      final st = f.file.statSync();
+      if (st.size != f.bytes || st.modified.millisecondsSinceEpoch != f.modifiedMs) return null;
+      final digest = out.value.toString();
+      _hashes[f.path] = (bytes: f.bytes, modifiedMs: f.modifiedMs, sha256: digest);
+      return digest;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _file(HttpRequest req, String path) async {
+    final res = req.response;
+    // Only what Export data would copy, by the same rule; never a link, never a path that climbs out.
+    if (!isExported(path)) return _json(res, 404, {'error': 'no such file'});
+    final file = File('${filesDir.path}/$path');
+    if (FileSystemEntity.typeSync(file.path, followLinks: false) != FileSystemEntityType.file) {
+      return _json(res, 404, {'error': 'no such file'});
+    }
+    final st = file.statSync();
+    final size = st.size; // the file may grow while it is sent: this answer ends where it was now
+    res.headers.set('Accept-Ranges', 'bytes');
+    res.headers.set('X-Modified-Ms', '${st.modified.millisecondsSinceEpoch}');
+    res.headers.set('Content-Type', 'application/octet-stream');
+    ByteRange? range;
+    try {
+      range = parseRange(req.headers.value('range'), size);
+    } on RangeError {
+      res.headers.set('Content-Range', 'bytes */$size');
+      res.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+      res.contentLength = 0;
+      return res.close();
+    }
+    final start = range?.start ?? 0, end = range?.end ?? size - 1;
+    if (range != null) {
+      res.statusCode = HttpStatus.partialContent;
+      res.headers.set('Content-Range', 'bytes $start-$end/$size');
+    }
+    res.contentLength = end - start + 1;
+    if (req.method != 'HEAD' && end >= start) await res.addStream(file.openRead(start, end + 1));
+    return res.close();
+  }
+}
+
+class _DigestSink implements Sink<Digest> {
+  late Digest value;
+
+  @override
+  void add(Digest data) => value = data;
+
+  @override
+  void close() {}
+}
+
+double _round(num v, int digits) {
+  final p = digits == 1 ? 10.0 : (digits == 2 ? 100.0 : 1000.0);
+  final r = (v * p).roundToDouble() / p;
+  return r.isFinite ? r : 0.0;
+}
+
+/// A number as JSON with at most [digits] decimals; never `NaN` or `Infinity`, which JSON does not have.
+String _num(num v, int digits) => _round(v, digits).toString();
