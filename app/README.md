@@ -289,6 +289,15 @@ APKs under the ARM translation, x86_64 API 36 image):
 
 The plugin's JVM tests: `cd android && ./gradlew :neurosdk2:testDebugUnitTest` after one `flutter build apk`.
 
+**The rest of the night pipeline review and BrainBit's calls off the main thread together** (seventh integration,
+2026-11-19, the arm64 release APK of `aa96f98` on the x86_64 API 36 image, `hw.cpu.ncore=2`): a BrainBit Start night
+without a headband, with Lights off tapped over and over from the moment of Start, kept the first tap: the saved night
+(`FlutterSharedPreferences.xml`, `prefs.night`) had `lightsOffMs` at the tap, 1.2 s after the recorder began the
+night, and the screen read "Lights off 16:26." with "Lights off again". The recorder was already up 0.35 s after
+Start, before the screen showed Lights off, so the screen could not reach the queued path itself (the tests do). The
+process had the plugin's `neurosdk2-calls` thread, searched for 3.5 minutes (6 scans) in one process with no "isn't
+responding", and Stop ended the service and the night (`active: false`, `lightsOffMs` kept).
+
 ## Meditate
 
 1. Make sure no night is being recorded (the headband talks to one thing at a time). Put the headband on and
