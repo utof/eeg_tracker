@@ -27,13 +27,16 @@ nav a:hover,nav a:focus-visible{border-color:#8ab4f8;outline:none}nav b{display:
 <div id="chs"></div>
 <div id="alpha"><span id="alphatxt"></span><div id="alphabar"></div></div>
 <button onclick="fetch('contact',{method:'POST'});this.textContent='Restarting, back in about 30 s…';setTimeout(()=>this.textContent='Re-check contact (pauses ~30 s)',35000)">Re-check contact (pauses ~30 s)</button>
-<div id="hint">Green on all four = good. Red: part the hair under that electrode, press it to the skin, sit still.
+<div id="hint">Green on every channel = good. Red: part the hair under that electrode, press it to the skin, sit still.
 Alpha test: close your eyes for 20 s; the bar for the back pair should grow.</div></main>
 <script>
-const W={O1:'back left',O2:'back right',T3:'left side',T4:'right side'};
-const chs=document.getElementById('chs');const cv={};
-for(const n of ['O1','O2','T3','T4']){const d=document.createElement('div');d.className='ch';
- d.innerHTML=`<div><div class=name>${n}</div><div class=where>${W[n]}</div></div><div><span id=b${n} class="badge bad">…</span><span id=n${n} class=nums></span><canvas id=c${n} width=600 height=56></canvas></div>`;chs.append(d);cv[n]=d.querySelector('canvas').getContext('2d')}
+const W={O1:'back left',O2:'back right',T3:'left side',T4:'right side',Fz:'front middle',Fp1:'forehead left',Fp2:'forehead right',Cz:'top',Pz:'back middle',Oz:'back middle',C3:'left top',C4:'right top'};
+const chs=document.getElementById('chs');let cv={},shown='';
+// one row per channel the recorder names (BrainBit's four, or the DIY board's montage)
+function rows(names){chs.innerHTML='';cv={};shown=names.join(' ');
+ for(const n of names){const d=document.createElement('div');d.className='ch';
+ d.innerHTML=`<div><div class=name>${n}</div><div class=where>${W[n]||''}</div></div><div><span id=b${n} class="badge bad">…</span><span id=n${n} class=nums></span><canvas id=c${n} width=600 height=56></canvas></div>`;chs.append(d);cv[n]=d.querySelector('canvas').getContext('2d')}}
+rows(['O1','O2','T3','T4'])
 function draw(g,y){g.clearRect(0,0,600,56);g.strokeStyle='#8ab4f8';g.lineWidth=1.2;g.beginPath();
  y.forEach((v,i)=>{const px=i*600/(y.length-1),py=28-Math.max(-27,Math.min(27,v*27/100));i?g.lineTo(px,py):g.moveTo(px,py)});g.stroke()}
 // power per 0.25 Hz bin up to 51 Hz, Hann window
@@ -47,15 +50,16 @@ function smooth(x,fs){const h=Math.round(fs/2),o=[];let acc=0;const q=[];
  const r=[];for(let i=4;i<o.length;i+=5)r.push((o[i]+o[i-1]+o[i-2]+o[i-3]+o[i-4])/5);return r}
 async function tick(){try{const s=await (await fetch('state')).json();
  document.getElementById('top').textContent=s.status==='reconnecting'?'Reconnecting to the headband (back in about 30 s)…':`${s.status} · battery ${s.battery_note || s.battery + "%"} · recorded ${s.minutes} min · last data ${s.age}s ago`;
- let best={r:0,pk:0};
+ let best={r:0,pk:0};if(s.names.join(' ')!==shown)rows(s.names);
+ const measured=s.contact_t!==null&&s.contact_t!==undefined; // the DIY board never measures contact
  s.names.forEach((n,c)=>{const x=s.data[c];if(x.length<s.fs*2)return;const sp=spectrum(x,s.fs);
   let tot=0;for(let k=Math.ceil(1/sp.df);k*sp.df<=40;k++)tot+=sp.p[k];
   const rms=Math.sqrt(2*tot/(0.375*sp.N*sp.N)),hum=band(sp,49,51)/Math.max(band(sp,30,45),1e-9);
-  const flat=Math.max(...x.map(Math.abs))<0.5,ct=s.contact[n];
+  const flat=Math.max(...x.map(Math.abs))<0.5,ct=measured?s.contact[n]:undefined;
   const grade=(flat||rms>60||ct===null)?'bad':(rms>30||hum>200)?'fair':'good';
   const word=(flat||ct===null)?'not touching':grade=='bad'?'noisy':grade;
   const b=document.getElementById('b'+n);b.className='badge '+grade;b.textContent=word;
-  document.getElementById('n'+n).textContent=`${rms.toFixed(0)} µV · hum ${hum>200?'high':hum>20?'some':'low'} · contact ${ct===null?'none':Math.round(ct/1000)+' kΩ'}`;
+  document.getElementById('n'+n).textContent=`${rms.toFixed(0)} µV · hum ${hum>200?'high':hum>20?'some':'low'} · contact ${ct===undefined?'not measured':ct===null?'none':Math.round(ct/1000)+' kΩ'}`;
   draw(cv[n],smooth(x,s.fs));
   if(n=='O1'||n=='O2'){const r=band(sp,8,12)/Math.max((band(sp,4,7)+band(sp,14,20))/2,1e-9);
    if(r>best.r){let pk=7,pv=0;for(let k=Math.ceil(7/sp.df);k*sp.df<=13;k++)if(sp.p[k]>pv){pv=sp.p[k];pk=k*sp.df}best={r,pk}}}});
