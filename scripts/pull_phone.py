@@ -455,7 +455,8 @@ def main(argv: list[str] | None = None, out: Callable[[str], object] = print,
     ap.add_argument("--every", type=float, default=2, help="minutes between passes (default 2)")
     ap.add_argument("--once", action="store_true", help="one pass, then exit")
     ap.add_argument("--dest", type=Path, default=ip.DEFAULT_DEST, help="where to copy (default: <repo>/_local)")
-    ap.add_argument("--raw-only", action="store_true", help="only the raw recordings (.f32 .idx .log .markers.jsonl)")
+    ap.add_argument("--raw-only", action="store_true",
+                    help="only the raw recordings (.f32 .idx .log .markers.jsonl, and the phone's packed .f32.gz)")
     a = ap.parse_args(argv)
     if not a.token:
         out("Give the token the app shows: --token <t> (or set EEG_PHONE_TOKEN).")
