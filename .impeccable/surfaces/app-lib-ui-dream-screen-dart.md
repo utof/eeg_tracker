@@ -51,3 +51,28 @@ record turns the row green with its seconds counting), and the halved "were you 
 
 FINISH: rendered at 100 % and 130 % text in test/dream_screens_test.dart (build/screens/dream_*.png), looked at,
 fixed; the face also checked for light: nothing larger than a word lit.
+
+## Addition 2026-11-19: answers as text (DECISIONS rows 254-255)
+
+Shaped without the owner (a subagent run, no question tool): the task's brief stood in for the interview; the
+assumptions are marked. Mode stays Operate; the world and the clip row stay as they are.
+
+- **Job:** the morning after, read what you said instead of (or before) listening, and fix what the phone misheard
+  while you still remember. The words belong to the answer, so they live inside its clip row, between its detail
+  lines and the note: a muted label line, then the words in a ruled field like the note's (the field is the edit;
+  no separate edit mode, the note already taught the gesture). *(assumed: inline editing beats an Edit button for a
+  tired reader; the two fields are told apart by their labels and hints.)*
+- **States in the row, all in words, no colour alone:** model not on the phone: no words block (the section below
+  offers it); waiting: "Words: waiting to be written out."; now: "Words: writing out…"; done: "Words heard by the
+  phone" over the field; nothing heard: "No words heard." over an empty field whose hint invites typing; your edit:
+  "Your words" with "Undo edit" (the phone's text comes back; it was kept); failed: an amber warning line with its
+  reason and "The recording is kept.", plus Try again once the phone has given up (2 tries).
+- **Answers as text section** (after Your prompts: both are one-time setup): one sentence on what it does and that
+  it stays on the phone; then by state: an outlined Download (670 MB) with "Use Wi-Fi"; while downloading the export
+  page's copy strip (on-world progress, no ring) with "312 of 670 MB" and an outlined Stop; ready: a muted line and
+  a Delete text button that asks once; an error in amber with Try again (it resumes). Lights off stays the only filled
+  button.
+- **Anti-goals:** no language picker (the model tells Russian from English itself), no spinner, no confidence
+  scores, nothing that suggests the words are exact.
+- **Finish:** new states rendered at 100 % and 130 % text and at 393 dp width (the owner's 11T) in
+  test/dream_screens_test.dart.

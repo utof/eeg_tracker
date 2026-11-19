@@ -3,7 +3,9 @@
 // between nights; during a session the screen stays on, black, at the lowest brightness, without the system bars
 // (you may lock the phone yourself: a foreground service keeps the session going, DECISIONS row 195).
 // With the sleep ending the night recording starts by itself and the app returns to the night screen.
-// Layout in dream_view.dart.
+// Afterwards the answers are written out as text on the phone (DECISIONS rows 250-255): whenever this screen is
+// open with no session and no night recording, once the speech model is downloaded here.
+// Layout in dream_view.dart and dream_text_view.dart.
 import 'dart:async';
 import 'dart:io';
 
@@ -13,12 +15,17 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import '../dream/controller.dart';
 import '../dream/record_mic.dart';
+import '../dream/speech_model.dart';
+import '../dream/speech_sherpa.dart';
 import '../dream/store.dart';
+import '../dream/text_runner.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
 import '../recorder/recorder_service.dart';
 import '../session_keeper.dart';
+import '../sleep/onnx_runs.dart' show modelsDirFor;
 import '../sound/dream_sound.dart';
+import 'dream_text_view.dart';
 import 'dream_view.dart';
 import 'evidence_sheet.dart';
 import 'nearby.dart';
@@ -63,6 +70,13 @@ class _DreamScreenState extends State<DreamScreen> {
   bool _justEnded = false;
   Timer? _saveTimer;
   DreamSession? _dirty;
+  SpeechModelStore? _model;
+  DreamTexts? _texts;
+  bool _modelReady = false;
+  bool _downloading = false;
+  int _downloaded = 0;
+  String? _downloadError;
+  DateTime _lastProgress = DateTime(0);
 
   @override
   void initState() {
@@ -76,8 +90,12 @@ class _DreamScreenState extends State<DreamScreen> {
       final rec = await Phone.recordingsDir();
       if (rec != null) {
         _recordings = rec;
-        _c.store = DreamStore(dreamDirFor(rec));
+        final st = _c.store = DreamStore(dreamDirFor(rec));
         _c.recordingsDir = Directory(rec);
+        final model = _model = SpeechModelStore(modelsDirFor(rec), parakeetV3);
+        _modelReady = model.ready;
+        _texts = DreamTexts(store: st, open: () => _openSpeech(model), blocked: () => _c.active || _nightRunning)
+          ..addListener(_changed);
       }
     } catch (_) {
       // without the folder the session still runs; nothing is saved and the tones play
@@ -88,6 +106,87 @@ class _DreamScreenState extends State<DreamScreen> {
       _nightRunning = running;
       _load();
     });
+    _writeOut();
+  }
+
+  // ---- answers as text ----
+
+  Future<Transcriber> _openSpeech(SpeechModelStore model) async =>
+      SherpaTranscriber.open(model, await vadFile(Directory(model.dir.parent.path)));
+
+  /// Writes out the answers waiting for it, unless a session or a night recording runs (never during one).
+  void _writeOut() {
+    final t = _texts;
+    if (t == null || !_modelReady || _c.active || _nightRunning) return;
+    unawaited(t.run(_sessions));
+  }
+
+  Future<void> _download() async {
+    final m = _model;
+    if (m == null || _downloading) return;
+    setState(() {
+      _downloading = true;
+      _downloadError = null;
+      _downloaded = m.bytesHere;
+    });
+    try {
+      await m.download(
+        onProgress: (share) {
+          final now = DateTime.now();
+          if (!mounted || now.difference(_lastProgress).inMilliseconds < 250) return;
+          _lastProgress = now;
+          setState(() => _downloaded = (share * m.spec.bytes).round());
+        },
+      );
+      _modelReady = m.ready;
+    } on ModelDownloadCancelled {
+      // kept as a part: Download goes on from there
+    } catch (e) {
+      _downloadError = downloadProblem(e);
+    }
+    if (!mounted) return;
+    setState(() {
+      _downloading = false;
+      _downloaded = m.bytesHere;
+    });
+    _writeOut();
+  }
+
+  Future<void> _deleteModel() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Delete the speech model?'),
+        content: const Text('Words already written stay. New answers wait as recordings until you download it again.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Keep it')),
+          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await _texts?.stop();
+    _model?.delete();
+    setState(() => _modelReady = false);
+  }
+
+  SpeechInfo? _speechInfo() {
+    final m = _model;
+    if (m == null) return null;
+    final total = m.spec.bytes;
+    if (_modelReady) return SpeechInfo(SpeechState.ready, total: total);
+    if (_downloading) return SpeechInfo(SpeechState.downloading, bytes: _downloaded, total: total);
+    if (_downloadError != null) return SpeechInfo(SpeechState.failed, bytes: _downloaded, total: total, message: _downloadError);
+    return SpeechInfo(SpeechState.absent, total: total);
+  }
+
+  Map<String, AnswerWords> _wordsOf(DreamSession? s) {
+    final t = _texts;
+    if (s == null || t == null) return const {};
+    return {
+      for (final f in s.rounds.map((r) => r.answerFile).nonNulls)
+        f: wordsFor(t.of(f), modelReady: _modelReady, working: t.working == f),
+    };
   }
 
   void _load() {
@@ -111,6 +210,8 @@ class _DreamScreenState extends State<DreamScreen> {
       if (stage == DreamStage.done) {
         _justEnded = true;
         _load();
+        _texts?.reload();
+        if (_c.last?.night != 'started') _writeOut(); // the answers as text, now that the session is over
         if (_c.last?.night == 'started') {
           // the night recorder has the headband now: back to the night screen, which shows it recording
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -154,6 +255,9 @@ class _DreamScreenState extends State<DreamScreen> {
   void dispose() {
     _c.removeListener(_changed);
     _c.dispose(); // ends a running session and saves what there was
+    _model?.cancel(); // a download goes on from its part next time
+    _texts?.removeListener(_changed);
+    _texts?.dispose(); // frees the speech model
     dreamSessionRunning = false;
     _recordTimer?.cancel();
     _flushNotes();
@@ -182,6 +286,7 @@ class _DreamScreenState extends State<DreamScreen> {
       return;
     }
     if (!await _micAllowed()) return;
+    await _texts?.stop(); // nothing written out during a session: the speech model is freed first
     if (phone.sdkInt >= 33) {
       // the session's notification (Stop for a locked phone) and the night recorder's; ask now, not half-asleep
       await FlutterForegroundTask.requestNotificationPermission();
@@ -319,7 +424,15 @@ class _DreamScreenState extends State<DreamScreen> {
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => _SessionPage(session: s, play: _audio, dir: _c.store!.dir, onNote: _note, onLeave: _flushNotes),
+        builder: (_) => _SessionPage(
+          session: s,
+          play: _audio,
+          dir: _c.store!.dir,
+          onNote: _note,
+          onLeave: _flushNotes,
+          texts: _texts,
+          words: () => _wordsOf(s),
+        ),
       ),
     );
     if (mounted) setState(_load);
@@ -354,6 +467,8 @@ class _DreamScreenState extends State<DreamScreen> {
       latest: latest,
       justEnded: _justEnded && c.stage == DreamStage.done,
       earlier: _sessions.length > 1 ? _sessions.sublist(1, _sessions.length.clamp(1, 11)) : const [],
+      words: _wordsOf(latest),
+      speech: _speechInfo(),
     );
     return PopScope(
       canPop: !active && _recordingPrompt == null,
@@ -375,6 +490,15 @@ class _DreamScreenState extends State<DreamScreen> {
         onNote: _note,
         onOpen: _open,
         onInfo: () => showEvidence(context, 'dream-catcher'),
+        onWords: (_, r, v) => _texts?.edit(r.answerFile!, v),
+        onUndoWords: (_, r) => _texts?.undoEdit(r.answerFile!),
+        onRetryWords: (_, r) {
+          _texts?.retry(r.answerFile!);
+          _writeOut();
+        },
+        onSpeechDownload: _download,
+        onSpeechStop: () => _model?.cancel(),
+        onSpeechDelete: _deleteModel,
       ),
     );
   }
@@ -382,12 +506,24 @@ class _DreamScreenState extends State<DreamScreen> {
 
 /// An earlier session's answers on their own page.
 class _SessionPage extends StatefulWidget {
-  const _SessionPage({required this.session, required this.play, required this.dir, required this.onNote, required this.onLeave});
+  const _SessionPage({
+    required this.session,
+    required this.play,
+    required this.dir,
+    required this.onNote,
+    required this.onLeave,
+    required this.texts,
+    required this.words,
+  });
   final DreamSession session;
   final SoloudDreamSound play;
   final Directory dir;
   final void Function(DreamSession s, DreamRound r, String note) onNote;
   final VoidCallback onLeave;
+
+  /// The answers as text (they may be written out while this page is open).
+  final DreamTexts? texts;
+  final Map<String, AnswerWords> Function() words;
 
   @override
   State<_SessionPage> createState() => _SessionPageState();
@@ -395,6 +531,16 @@ class _SessionPage extends StatefulWidget {
 
 class _SessionPageState extends State<_SessionPage> {
   String? _playing;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.texts?.addListener(_changed);
+  }
+
+  void _changed() {
+    if (mounted) setState(() {});
+  }
 
   Future<void> _play(DreamSession s, DreamRound r) async {
     final f = r.answerFile;
@@ -412,6 +558,7 @@ class _SessionPageState extends State<_SessionPage> {
 
   @override
   void dispose() {
+    widget.texts?.removeListener(_changed);
     unawaited(widget.play.stopClip());
     widget.onLeave();
     super.dispose();
@@ -424,7 +571,18 @@ class _SessionPageState extends State<_SessionPage> {
       appBar: AppBar(title: Text('Dream catcher', style: text.titleMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant))),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
-        children: [DreamAnswers(session: widget.session, playing: _playing, onPlay: _play, onNote: widget.onNote)],
+        children: [
+          DreamAnswers(
+            session: widget.session,
+            playing: _playing,
+            onPlay: _play,
+            onNote: widget.onNote,
+            words: widget.words(),
+            onWords: (_, r, v) => widget.texts?.edit(r.answerFile!, v),
+            onUndoWords: (_, r) => widget.texts?.undoEdit(r.answerFile!),
+            onRetryWords: (_, r) => widget.texts?.retry(r.answerFile!),
+          ),
+        ],
       ),
     );
   }

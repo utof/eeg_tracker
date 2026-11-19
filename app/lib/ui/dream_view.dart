@@ -11,6 +11,7 @@ import '../dream/voice.dart' show AnswerEnd;
 import '../dream/rounds.dart' show DreamCause, DreamRule;
 import '../recorder/contact.dart';
 import '../recorder/nights.dart' show nightLabel;
+import 'dream_text_view.dart';
 import 'meditation_view.dart' show MarkShape, StateMark;
 import 'parts.dart';
 import 'theme.dart';
@@ -47,6 +48,8 @@ class DreamViewModel {
     this.latest,
     this.justEnded = false,
     this.earlier = const [],
+    this.words = const {},
+    this.speech,
   });
 
   final DreamStage stage;
@@ -82,6 +85,10 @@ class DreamViewModel {
   final DreamSession? latest;
   final bool justEnded;
   final List<DreamSession> earlier;
+
+  /// Each answer's words by its file name (DECISIONS row 254), and the speech model (null: no section).
+  final Map<String, AnswerWords> words;
+  final SpeechInfo? speech;
 
   /// The session face is up (connecting to the end).
   bool get face => stage.index >= DreamStage.connecting.index && stage.index <= DreamStage.ending.index;
@@ -120,6 +127,12 @@ class DreamView extends StatelessWidget {
     required this.onNote,
     required this.onOpen,
     required this.onInfo,
+    this.onWords,
+    this.onUndoWords,
+    this.onRetryWords,
+    this.onSpeechDownload,
+    this.onSpeechStop,
+    this.onSpeechDelete,
   });
 
   final DreamViewModel model;
@@ -134,6 +147,14 @@ class DreamView extends StatelessWidget {
   final void Function(DreamSession s, DreamRound r, String note) onNote;
   final ValueChanged<DreamSession> onOpen;
   final VoidCallback onInfo;
+
+  /// Your words for an answer, Undo edit, Try again; the speech model's Download, Stop and Delete.
+  final void Function(DreamSession s, DreamRound r, String text)? onWords;
+  final void Function(DreamSession s, DreamRound r)? onUndoWords;
+  final void Function(DreamSession s, DreamRound r)? onRetryWords;
+  final VoidCallback? onSpeechDownload;
+  final VoidCallback? onSpeechStop;
+  final VoidCallback? onSpeechDelete;
 
   @override
   Widget build(BuildContext context) => model.face ? _face(context) : _page(context);
@@ -167,10 +188,28 @@ class DreamView extends StatelessWidget {
             ),
           if (latest != null) ...[
             SectionHeading(m.justEnded ? 'This session' : 'Last session'),
-            DreamAnswers(session: latest, playing: m.playing, onPlay: onPlayAnswer, onNote: onNote),
+            DreamAnswers(
+              session: latest,
+              playing: m.playing,
+              onPlay: onPlayAnswer,
+              onNote: onNote,
+              words: m.words,
+              onWords: onWords,
+              onUndoWords: onUndoWords,
+              onRetryWords: onRetryWords,
+            ),
           ],
           const SectionHeading('Your prompts'),
           for (final k in PromptKind.values) _promptRow(k, last: k == PromptKind.values.last),
+          if (m.speech case final speech?) ...[
+            const SectionHeading('Answers as text'),
+            SpeechSection(
+              info: speech,
+              onDownload: onSpeechDownload ?? () {},
+              onStop: onSpeechStop ?? () {},
+              onDelete: onSpeechDelete ?? () {},
+            ),
+          ],
           const SectionHeading('Tonight'),
           _choice<int>(
             context,
@@ -548,11 +587,27 @@ class _RoundMarks extends StatelessWidget {
 
 /// A session's answers: one clip row per round, with the note under it.
 class DreamAnswers extends StatelessWidget {
-  const DreamAnswers({super.key, required this.session, required this.playing, required this.onPlay, required this.onNote});
+  const DreamAnswers({
+    super.key,
+    required this.session,
+    required this.playing,
+    required this.onPlay,
+    required this.onNote,
+    this.words = const {},
+    this.onWords,
+    this.onUndoWords,
+    this.onRetryWords,
+  });
   final DreamSession session;
   final String? playing;
   final void Function(DreamSession s, DreamRound r) onPlay;
   final void Function(DreamSession s, DreamRound r, String note) onNote;
+
+  /// Each answer's words by its file name (none: no words block).
+  final Map<String, AnswerWords> words;
+  final void Function(DreamSession s, DreamRound r, String text)? onWords;
+  final void Function(DreamSession s, DreamRound r)? onUndoWords;
+  final void Function(DreamSession s, DreamRound r)? onRetryWords;
 
   @override
   Widget build(BuildContext context) {
@@ -590,6 +645,15 @@ class DreamAnswers extends StatelessWidget {
             ].join('\n'),
             playing: playing == r.answerFile && r.answerFile != null,
             onPlay: r.answerFile == null ? null : () => onPlay(s, r),
+            words: switch (words[r.answerFile]) {
+              final w? when w.state != WordsState.none => WordsBlock(
+                words: w,
+                onChanged: (v) => onWords?.call(s, r, v),
+                onUndo: () => onUndoWords?.call(s, r),
+                onRetry: () => onRetryWords?.call(s, r),
+              ),
+              _ => null,
+            },
             note: _NoteField(note: r.note, onChanged: (v) => onNote(s, r, v)),
             rule: i < s.rounds.length - 1,
           ),
@@ -611,6 +675,7 @@ class ClipRow extends StatelessWidget {
     this.playing = false,
     this.recordingNow = false,
     this.action,
+    this.words,
     this.note,
     this.rule = true,
   });
@@ -628,6 +693,9 @@ class ClipRow extends StatelessWidget {
   /// Null: nothing to play (the control is shown disabled).
   final VoidCallback? onPlay;
   final Widget? action;
+
+  /// An answer's words (dream_text_view.dart), above its note.
+  final Widget? words;
   final Widget? note;
 
   /// A hairline under the row; off for the last row of a section.
@@ -684,6 +752,7 @@ class ClipRow extends StatelessWidget {
                   const SizedBox(height: 6),
                   Text(detail!, style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.4)),
                 ],
+                ?words,
                 ?note,
                 if (action != null) Padding(padding: const EdgeInsets.only(top: 4), child: action),
               ],
