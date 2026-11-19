@@ -58,3 +58,18 @@ still 28 dp dot mid-screen; the length selector keeps Material's check mark; no 
 the settled share moved into the readout label; screen fixtures keep counts and marks one-to-one.
 For the owner (DESIGN.md not changed without approval): DESIGN.md says "Start night is the only filled
 button" and "no sounds"; this screen adds one filled primary of its own and is a sound practice by design.
+
+## Addition (2026-11-19): silent minutes, learning, Bluetooth
+
+Refinement inside the same world and structure (decided without the owner: a subagent run with no question
+channel; DECISIONS 420-425). The line gains a fourth cell, the 2 silent minutes after the sound: a plain track
+cell after the session's, filled as they run and outlined green while live; the session and the silent cell share
+the width in their real ratio (eyes open keeps its 22 dp floor). While they run, the status reads "Without sound"
+(idle ring, muted sentence: go on the same way, a last tone ends the session) and the readout counts them down;
+the bells readout keeps its place and value. The report adds one row under This session, "Alpha without sound"
+(a signed percentage against the silent minute before the sound, or "not enough" with why), and a "Learning"
+section before Earlier sessions: the verdict sentence in bodyLarge ink, the rest (with the sound on, Bluetooth and
+replay-check counts, "Seen together, not tested") in muted bodyMedium; no chart, no score. Bluetooth is said in
+amber words with the Bluetooth-audio icon in Before you start (it replaces the headphones note while the sound goes
+there), and as one amber line under the readouts during the session and in the report. Checked as test renders at
+100 and 130 % text (build/screens/meditation_*.png), not yet on the phone.

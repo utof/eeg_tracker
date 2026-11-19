@@ -37,7 +37,7 @@ void main() {
       expect(readme['Sleep report'], ['how long does the phone take?', 'the night extras']);
       expect(readme['Dream catcher'], ['the first try', 'answers as words']);
       expect(readme['Self-experiments'], ['start a first experiment']);
-      expect(readme['Meditate'], isEmpty);
+      expect(readme['Meditate'], ['the silent minutes and the Bluetooth note', 'eight meditations, then the first learning verdict']);
       expect(readme.values.expand((s) => s).length, greaterThanOrEqualTo(17));
     });
 
@@ -120,7 +120,7 @@ void main() {
           for (final c in tryCards)
             if (c.weakEvidence) c.id,
         },
-        {'smart-alarm', 'meditation', 'sound', 'alpha-theta', 'lucid', 'was-this-you'},
+        {'smart-alarm', 'meditation', 'meditation-learning', 'sound', 'alpha-theta', 'lucid', 'was-this-you'},
       );
       expect(tryCards.firstWhere((c) => c.id == 'sharp').weakEvidence, isFalse);
     });

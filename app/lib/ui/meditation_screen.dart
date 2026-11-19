@@ -15,6 +15,7 @@ import '../meditation/store.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
 import '../session_keeper.dart';
+import '../sound/audio_route.dart';
 import '../sound/soloud_sound.dart';
 import '../training/check_store.dart';
 import '../training/control.dart';
@@ -37,6 +38,7 @@ class _MeditationScreenState extends State<MeditationScreen> {
     finder: _finder,
     sound: () => SoloudSound(),
     gestureTone: SoloudGestureTone.new,
+    audioRoute: PhoneAudioRoute(),
   );
   int _minutes = 10;
   bool _nightRunning = false;
@@ -50,6 +52,7 @@ class _MeditationScreenState extends State<MeditationScreen> {
   void initState() {
     super.initState();
     _c.addListener(_changed);
+    _c.watchRoute(); // the setup warns as soon as the sound goes to Bluetooth headphones
     unawaited(_prepare());
   }
 
@@ -76,6 +79,7 @@ class _MeditationScreenState extends State<MeditationScreen> {
     final on = SettingsStore(files).load().replayCheck;
     final cs = on ? CheckStore(files, SessionKind.meditation) : null;
     _c.checkStore = cs;
+    _c.checkResults = CheckStore(files, SessionKind.meditation); // its test of the silent minutes, once revealed
     _checkPreview = cs == null ? null : previewStatus(cs, donorCandidates(store, store.list()));
   }
 
@@ -199,6 +203,11 @@ class _MeditationScreenState extends State<MeditationScreen> {
       nightRunning: _nightRunning,
       checkOn: c.stage == Stage.setup || c.stage == Stage.failed ? c.checkStore != null : c.checkOn,
       checkStatus: c.stage == Stage.setup || c.stage == Stage.failed ? _checkPreview : c.checkStatus,
+      silentSeconds: c.active || c.stage == Stage.report ? c.silentLength.inSeconds : c.silentBlock.inSeconds,
+      silentRun: c.silentSeconds,
+      inSilent: c.inSilentBlock,
+      route: c.route,
+      learning: c.learning,
     );
     return PopScope(
       canPop: !c.active,

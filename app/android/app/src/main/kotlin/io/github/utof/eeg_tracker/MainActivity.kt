@@ -25,6 +25,7 @@ class MainActivity : FlutterActivity() {
         val messenger = flutterEngine.dartExecutor.binaryMessenger
         PhoneChannel.register(messenger, applicationContext)
         AlarmChannel.register(messenger, applicationContext)
+        AudioRoute.register(messenger, applicationContext) // where the sound goes (feedback sessions warn on Bluetooth)
         // Export needs this Activity for the system folder picker, so it lives here, not in PhoneChannel.
         val data = DataExport(applicationContext).also { dataExport = it }
         MethodChannel(messenger, NightExport.CHANNEL).setMethodCallHandler { call, result ->

@@ -12,6 +12,7 @@ import 'dart:math' as math;
 import '../detectors/drift_off.dart' show DriftState;
 import '../feedback/mapping.dart' show jawBlock;
 import '../feedback/session.dart';
+import '../sound/audio_route.dart';
 import '../training/control.dart' show SessionKind;
 import 'silent_block.dart';
 
@@ -165,6 +166,7 @@ class MeditationTracker {
     double? excludedShare,
     Map<String, Object?>? at,
     SilentBlock? silent,
+    AudioRoute? audioRoute,
     bool bluetoothSound = false,
   }) => MeditationSummary(
     kind: kind,
@@ -173,6 +175,7 @@ class MeditationTracker {
     excludedShare: excludedShare,
     at: at,
     silent: silent,
+    audioRoute: audioRoute,
     bluetoothSound: bluetoothSound,
     start: start,
     lengthMin: length.inSeconds / 60,
@@ -205,6 +208,7 @@ class MeditationSummary {
     this.excludedShare,
     this.at,
     this.silent,
+    this.audioRoute,
     this.bluetoothSound = false,
     required this.start,
     required this.lengthMin,
@@ -240,7 +244,9 @@ class MeditationSummary {
   /// Meditation: the silent minutes after the sound (silent_block.dart); null when the session ended before them.
   final SilentBlock? silent;
 
-  /// The sound went to Bluetooth headphones during some of the session (it came late; sound/audio_route.dart).
+  /// Where the sound went at the start (null: not known), and whether any of the session went to Bluetooth
+  /// headphones (the sound came late; sound/audio_route.dart).
+  final AudioRoute? audioRoute;
   final bool bluetoothSound;
   final DateTime start;
 
@@ -284,6 +290,7 @@ class MeditationSummary {
     if (excludedShare != null) 'excludedShare': excludedShare,
     if (at != null) 'at': at,
     if (silent != null) 'silent': silent!.toJson(),
+    if (audioRoute != null) 'audio': audioRoute!.toJson(),
     if (bluetoothSound) 'bluetoothSound': true,
     'start': start.toIso8601String(),
     'lengthMin': lengthMin,
@@ -348,6 +355,7 @@ class MeditationSummary {
       excludedShare: num_(j['excludedShare']),
       at: at is Map<String, Object?> ? at : null,
       silent: SilentBlock.fromJson(j['silent']),
+      audioRoute: j['audio'] is Map ? AudioRoute.fromMap(j['audio']) : null,
       bluetoothSound: j['bluetoothSound'] == true,
       start: start,
       lengthMin: lengthMin,

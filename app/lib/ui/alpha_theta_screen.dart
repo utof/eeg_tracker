@@ -8,6 +8,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'hands_free_screen.dart' show activeGestures;
+import '../sound/audio_route.dart';
 import '../sound/soloud_gesture_tone.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
@@ -45,6 +46,7 @@ class _AlphaThetaScreenState extends State<AlphaThetaScreen> {
     sound: () => SoloudSound(),
     alphaThetaSound: SoloudAlphaThetaSound.new,
     gestureTone: SoloudGestureTone.new,
+    audioRoute: PhoneAudioRoute(), // recorded with the session; Bluetooth is said in amber during it
   );
   _Page _page = _Page.loading;
   AtJournal? _journal;
@@ -378,6 +380,7 @@ class _AlphaThetaScreenState extends State<AlphaThetaScreen> {
       checkOn: c.checkOn,
       checkStatus: c.checkStatus,
       asleepGuard: c.asleepGuard,
+      route: c.route,
     );
     return PopScope(
       canPop: !c.active,

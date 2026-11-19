@@ -87,15 +87,17 @@ class Learning {
               'That is common (16-57 % of people do not learn a given rhythm); the practice still counts.',
       });
       final w = withSound;
-      if (w != null)
+      if (w != null) {
         out.add('With the sound on: about ${pct(w.slope)} % a session (90 % range ${pct(w.low)} to ${pct(w.high)} %).');
+      }
       if (bluetooth > 0) {
         out.add(
           '$bluetooth of these $count sessions played over Bluetooth, where the sound comes about 0.25-0.5 s late.',
         );
       }
-      if (inCheck > 0)
+      if (inCheck > 0) {
         out.add('$inCheck of these $count sessions were in the replay check, so some had replayed sound.');
+      }
     }
     final t = tested;
     if (t != null) {

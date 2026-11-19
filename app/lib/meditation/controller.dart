@@ -30,6 +30,9 @@
 // running (its log replays as before); the log marks where the sound stopped, so a replay of this session in the
 // replay check plays only the time with sound. Stop in the silent minutes keeps the session whole. Alpha-theta has
 // none yet (its own after-session steps come first).
+// Where the sound goes (sound/audio_route.dart, DECISIONS 424): read at the start and followed while the screen is
+// open, so the setup can warn about Bluetooth (0.25-0.5 s late); the session log keeps the route and every change,
+// and the summary whether any of it went over Bluetooth. The session goes on either way.
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -47,6 +50,7 @@ import '../recorder/chunk_writer.dart' show Sample, fileStem;
 import '../recorder/headband.dart' show HeadbandFinder;
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
 import '../handsfree/live.dart';
+import '../sound/audio_route.dart';
 import '../sound/feedback_sound.dart';
 import '../sound/gesture_tone.dart';
 import '../sound/session_sound.dart';
@@ -149,6 +153,8 @@ class MeditationController extends ChangeNotifier {
     this.timing = const MeditationTiming(),
     this.gestureTone,
     this.silentBlock = silentBlockLength,
+    this.audioRoute,
+    this.routeTimeout = const Duration(seconds: 2),
     DateTime Function()? clock,
   }) : _makeSound = sound,
        _makeAtSound = alphaThetaSound ?? SilentSessionSound.new,
@@ -163,6 +169,14 @@ class MeditationController extends ChangeNotifier {
 
   /// How long a meditation's silent minutes last after its time with sound (zero: none).
   final Duration silentBlock;
+
+  /// Where the sound goes (null: not known, nothing recorded); [route] is the latest answer.
+  final AudioRouteSource? audioRoute;
+  final Duration routeTimeout;
+  AudioRoute route = AudioRoute.unknown;
+  AudioRoute? _routeAtStart;
+  bool _bluetoothUsed = false;
+  StreamSubscription<AudioRoute>? _routeSub;
 
   /// The owner's calibrated gestures while the hands-free switch is on (set by the screen); null: off.
   GestureSettings? handsFree;
@@ -294,6 +308,7 @@ class MeditationController extends ChangeNotifier {
     silentLength = kind == SessionKind.meditation ? silentBlock : Duration.zero;
     _set(Stage.connecting, 'Looking for the headband.');
     try {
+      await _readRoute();
       await _prepareCheck(sessionLength);
       final link = BandLink(
         finder: finder,
@@ -328,11 +343,14 @@ class MeditationController extends ChangeNotifier {
       final engine = kind == SessionKind.alphaTheta ? AlphaThetaEngine() : null;
       final s = engine?.core ?? Session();
       engine != null ? engine.contact(contact) : s.contact(contact);
+      _routeAtStart = route;
+      _bluetoothUsed = route.bluetooth;
       s.log.note({
         'app': 'eeg_tracker ${kind.name}',
         'lengthS': sessionLength.inSeconds,
         if (silentLength > Duration.zero) 'silentS': silentLength.inSeconds,
         'headband': link.name,
+        if (audioRoute != null) 'audioRoute': route.toJson(),
         if (_slot != null) 'check': _checkInfo(),
       });
       _session = s;
@@ -354,6 +372,37 @@ class MeditationController extends ChangeNotifier {
     } catch (e) {
       await _fail('Could not start: $e');
     }
+  }
+
+  /// Follows where the sound goes (the setup's warning, the session's record) until [dispose].
+  void watchRoute() {
+    final src = audioRoute;
+    if (src == null || _routeSub != null) return;
+    _routeSub = src.changes.listen(_onRoute, onError: (Object _) {});
+    unawaited(src.current().then(_onRoute, onError: (Object _) {}));
+  }
+
+  /// The route right before a session (unknown when the phone does not answer in [routeTimeout]).
+  Future<void> _readRoute() async {
+    final src = audioRoute;
+    if (src == null) return;
+    watchRoute();
+    try {
+      route = await src.current().timeout(routeTimeout);
+    } catch (_) {
+      route = AudioRoute.unknown;
+    }
+  }
+
+  void _onRoute(AudioRoute r) {
+    if (r == route) return;
+    route = r;
+    final s = _session;
+    if (s != null && !_ended) {
+      if (r.bluetooth) _bluetoothUsed = true;
+      s.log.note({'event': 'audio route', 'route': r.toJson(), 'n': s.n});
+    }
+    _notify();
   }
 
   /// Ends early. With at least [minReportS] of session after calibration, the report shows what there was.
@@ -406,6 +455,8 @@ class MeditationController extends ChangeNotifier {
     _hands = null;
     paused = false;
     _lostSamples = 0;
+    _routeAtStart = null;
+    _bluetoothUsed = false;
     _sound = null;
     _lastData = null;
     _signalAt = null;
@@ -654,6 +705,8 @@ class MeditationController extends ChangeNotifier {
       excludedShare: outcome == null ? null : (outcome.excludedShare * 1000).round() / 1000,
       at: _tally?.toJson(),
       silent: _silent?.block(silentLength.inSeconds.toDouble()),
+      audioRoute: _routeAtStart != null && audioRoute != null ? _routeAtStart : null,
+      bluetoothSound: _bluetoothUsed,
     );
     _seen?.finish();
     s.log.note({'sound': sound?.info(), 'end': complete ? 'length reached' : 'stopped', 'runS': t.runSeconds});
@@ -764,6 +817,8 @@ class MeditationController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_routeSub?.cancel());
+    _routeSub = null;
     if (!_ended) unawaited(_finish(complete: false));
     super.dispose();
   }

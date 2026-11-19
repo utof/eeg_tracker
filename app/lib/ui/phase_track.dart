@@ -1,7 +1,8 @@
 // The meditation's one line (.impeccable/surfaces/app-lib-ui-meditation-screen-dart.md, signature): eyes open,
-// eyes closed, the session, each segment as long as its real duration, filled as time passes, the live one
-// outlined green. After the session its segment draws the calm line, with a mark at each restless (amber) and
-// drifting (red) moment at its real time. Cells and colours are the watch strip's (DESIGN.md).
+// eyes closed, the session, and (meditation) the silent minutes after the sound, each segment as long as its real
+// duration, filled as time passes, the live one outlined green. After the session its segment draws the calm line,
+// with a mark at each restless (amber) and drifting (red) moment at its real time; the silent minutes stay a plain
+// cell filled as far as they ran (no sound, so no calm line). Cells and colours are the watch strip's (DESIGN.md).
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -9,7 +10,7 @@ import 'package:flutter/material.dart';
 import 'theme.dart';
 
 /// Which part of the line is in progress.
-enum TrackPart { open, closed, session }
+enum TrackPart { open, closed, session, silent }
 
 class PhaseTrack extends StatelessWidget {
   const PhaseTrack({
@@ -18,6 +19,8 @@ class PhaseTrack extends StatelessWidget {
     this.openDone = 0,
     this.closedDone = 0,
     this.sessionDone = 0,
+    this.silentSeconds = 0,
+    this.silentDone = 0,
     this.live,
     this.calm,
     this.marks = const [],
@@ -29,6 +32,9 @@ class PhaseTrack extends StatelessWidget {
 
   /// 0..1 of each part done.
   final double openDone, closedDone, sessionDone;
+
+  /// The silent minutes after the sound (0: none, three segments), and 0..1 of them done.
+  final double silentSeconds, silentDone;
   final TrackPart? live;
 
   /// Report: mean calm per bin (0..1), drawn as a line over the session segment.
@@ -50,7 +56,8 @@ class PhaseTrack extends StatelessWidget {
       child: CustomPaint(
         painter: _TrackPainter(
           sessionSeconds: sessionSeconds,
-          done: [openDone, closedDone, sessionDone],
+          silentSeconds: silentSeconds,
+          done: [openDone, closedDone, sessionDone, if (silentSeconds > 0) silentDone],
           live: live,
           calm: calm,
           calmBinSeconds: calmBinSeconds,
@@ -62,27 +69,33 @@ class PhaseTrack extends StatelessWidget {
 
   String _describe() {
     final minutes = (sessionSeconds / 60).round();
+    final silent = silentSeconds > 0 ? ', ${(silentSeconds / 60).round()} minutes without sound' : '';
     if (_report) {
       final restless = marks.where((m) => m.$2 != 'drifting').length, drifting = marks.length - restless;
-      return 'Session line: calm through $minutes minutes, $restless restless and $drifting drifting moments marked';
+      return 'Session line: calm through $minutes minutes, $restless restless and $drifting drifting moments marked$silent';
     }
     final part = switch (live) {
       TrackPart.open => 'eyes open, ${(openDone * 100).round()} percent done',
       TrackPart.closed => 'eyes closed, ${(closedDone * 100).round()} percent done',
       TrackPart.session => 'session, ${(sessionDone * 100).round()} percent done',
+      TrackPart.silent => 'without sound, ${(silentDone * 100).round()} percent done',
       null => 'not started',
     };
-    return 'Session line: 30 seconds eyes open, 60 seconds eyes closed, $minutes minutes session; now $part';
+    return 'Session line: 30 seconds eyes open, 60 seconds eyes closed, $minutes minutes session$silent; now $part';
   }
 }
 
 const double _gap = 6, _minPart = 22;
 
-/// Widths of the eyes-open, eyes-closed and session cells in [total] dp (6 dp gaps between them).
-List<double> trackWidths(double total, double sessionSeconds) {
-  final span = total - 2 * _gap, sum = 90 + sessionSeconds;
-  final open = math.max(_minPart, span * 30 / sum);
-  return [open, 2 * open, span - 3 * open];
+/// Widths of the eyes-open, eyes-closed and session cells in [total] dp (6 dp gaps between them), and of the silent
+/// minutes' cell when there are [silentSeconds]: the session and the silent minutes share the rest in their real
+/// ratio (eyes open's floor would otherwise make 2 silent minutes look half as long as 10 with sound).
+List<double> trackWidths(double total, double sessionSeconds, {double silentSeconds = 0}) {
+  final cells = silentSeconds > 0 ? 4 : 3;
+  final span = total - (cells - 1) * _gap, sum = 90 + sessionSeconds + silentSeconds;
+  final open = math.max(_minPart, span * 30 / sum), rest = span - 3 * open;
+  final silent = cells == 4 ? math.max(_minPart, rest * silentSeconds / (sessionSeconds + silentSeconds)) : 0.0;
+  return [open, 2 * open, rest - silent, if (cells == 4) silent];
 }
 
 /// Colour of a mark kind on the report's line.
@@ -91,6 +104,7 @@ Color markColor(String kind) => kind == 'drifting' ? Night.problem : Night.cauti
 class _TrackPainter extends CustomPainter {
   _TrackPainter({
     required this.sessionSeconds,
+    required this.silentSeconds,
     required this.done,
     required this.live,
     required this.calm,
@@ -98,7 +112,7 @@ class _TrackPainter extends CustomPainter {
     required this.marks,
   });
 
-  final double sessionSeconds;
+  final double sessionSeconds, silentSeconds;
   final List<double> done;
   final TrackPart? live;
   final List<double>? calm;
@@ -109,15 +123,15 @@ class _TrackPainter extends CustomPainter {
 
   /// Segment widths proportional to 30 s, 60 s and the session; the eyes-open cell is at least [_minPart] wide
   /// (a few dp at 20 min), and eyes closed stays exactly twice it, so the two keep their real ratio.
-  List<double> _widths(double total) => trackWidths(total, sessionSeconds);
+  List<double> _widths(double total) => trackWidths(total, sessionSeconds, silentSeconds: silentSeconds);
 
   @override
   void paint(Canvas canvas, Size size) {
     final w = _widths(size.width);
     var x = 0.0;
-    for (var i = 0; i < 3; i++) {
-      // in the report the calibration cells keep their working height, so the session's line leads
-      final h = calm != null && i < 2 ? math.min(32.0, size.height) : size.height;
+    for (var i = 0; i < w.length; i++) {
+      // in the report the calibration and silent cells keep their working height, so the session's line leads
+      final h = calm != null && i != 2 ? math.min(32.0, size.height) : size.height;
       final r = Rect.fromLTWH(x, size.height - h, w[i], h);
       final rr = RRect.fromRectAndRadius(r, const Radius.circular(_radius));
       canvas.drawRRect(rr, Paint()..color = Night.track);
@@ -198,6 +212,7 @@ class _TrackPainter extends CustomPainter {
   @override
   bool shouldRepaint(_TrackPainter old) =>
       old.sessionSeconds != sessionSeconds ||
+      old.silentSeconds != silentSeconds ||
       old.live != live ||
       old.calm != calm ||
       old.marks != marks ||
