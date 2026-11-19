@@ -4,12 +4,15 @@ import 'dart:io';
 
 import 'package:eeg_tracker/sharp/schedule.dart';
 import 'package:eeg_tracker/sharp/store.dart';
+import 'package:eeg_tracker/sleep/report.dart';
 import 'package:eeg_tracker/study/arm.dart';
 import 'package:eeg_tracker/study/schedule.dart';
 import 'package:eeg_tracker/study/store.dart';
+import 'package:eeg_tracker/wearer/check.dart' show answerSomeoneElse;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'sharp_prompts_test.dart' show FakeSharpPhone;
+import 'study_page_test.dart' show night;
 
 void main() {
   late Directory tmp;
@@ -88,6 +91,28 @@ void main() {
       reason: 'today\'s evening is answered, tomorrow\'s morning has nothing to recall',
     );
     expect(p.first.kind, PromptKind.studyEvening);
+  });
+
+  test('nights someone else wore do not set the times (DECISIONS 377): two own nights are too few', () async {
+    // three late nights tagged "someone else" and two of the owner's: only the owner's count, and two are under the
+    // three a usual bedtime needs, so the reminders keep 21:00 and 08:30
+    final nights = NightReportStore(nightsDirFor(recordings));
+    for (var d = 15; d <= 19; d++) {
+      final own = d >= 18;
+      final start = own ? DateTime(2026, 11, d, 23, 10) : DateTime(2026, 11, d + 1, 2, 40);
+      nights.write({
+        ...night(start, start.add(const Duration(hours: 8))).json,
+        'night_of': '2026-11-$d',
+        if (!own) 'wearer': {'answer': answerSomeoneElse},
+      });
+    }
+    expect(nights.all(), hasLength(5));
+    final phone = FakeSharpPhone();
+    StudyStore(studyDirFor(recordings)).saveSettings(const StudySettings(on: true));
+    await rearmPrompts(recordings, phone, now);
+    final p = phone.armed.single;
+    expect(p.first.at, DateTime(2026, 11, 20, 21));
+    expect(p[1].at, DateTime(2026, 11, 21, 8, 30));
   });
 
   test('readOwnDayNumbers: sharp hours and recall together', () {

@@ -11,11 +11,11 @@ import '../phone.dart';
 import '../sharp/prompts.dart';
 import '../sharp/schedule.dart' show PromptKind, clockText;
 import '../sharp/store.dart';
-import '../sleep/report.dart';
 import '../study/arm.dart';
 import '../study/page.dart';
 import '../study/schedule.dart';
 import '../study/store.dart';
+import '../wearer/wearer.dart' show ownNightReports;
 import 'evidence_sheet.dart';
 import 'study_view.dart';
 
@@ -72,7 +72,8 @@ class _StudyScreenState extends State<StudyScreen> {
         sharp: SharpStore(sharpDirFor(_dir!)).settings(),
         answers: store.answers(),
         events: store.promptEvents(),
-        reports: NightReportStore(nightsDirFor(_dir!)).all(),
+        // the nights the owner wore (DECISIONS 377), as Sharp hours reads them
+        reports: ownNightReports(_dir!),
         now: _now,
         notificationsOn: notifications,
         xiaomi: xiaomi,

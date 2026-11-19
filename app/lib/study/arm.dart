@@ -5,6 +5,7 @@ import '../sharp/prompts.dart';
 import '../sharp/schedule.dart';
 import '../sharp/store.dart';
 import '../sleep/report.dart';
+import '../wearer/wearer.dart' show ownNightReports;
 import 'page.dart';
 import 'schedule.dart';
 import 'store.dart';
@@ -33,7 +34,8 @@ Future<void> rearmPrompts(String recordingsDir, SharpPhone phone, DateTime now) 
       now: now,
       sharp: sharp,
       study: study,
-      reports: on ? NightReportStore(nightsDirFor(recordingsDir)).all() : const [],
+      // the nights the owner wore ("Was this you?", DECISIONS 377), as Sharp hours reads them
+      reports: on ? ownNightReports(recordingsDir) : const [],
       answers: on ? store.answers() : const [],
     ),
   );
