@@ -60,16 +60,39 @@ class OnnxStageRun implements StageRun {
   }
 
   @override
-  Future<Float32List> logits(Float32List x, int epochs) async {
-    final input = await OrtValue.fromList(x, [1, epochs * epochSamples, 4]);
+  Future<Float32List> logits(Float32List x, int epochs, {Float32List? means}) async =>
+      (await _run(x, epochs, 0, epochs, means, const ['logits'])).single;
+
+  @override
+  Future<SkipSums> sums(Float32List x, int epochs, {required int from, required int to}) async {
+    final out = await _run(x, epochs, from, to, null, const ['sums', 'counts']);
+    return (sums: out[0], counts: out[1]);
+  }
+
+  /// One model call (inputs as scripts/export_anysleep_onnx.py `two_pass_module`): [x] weighed by [means] or by its own
+  /// averages, its features summed over epochs [from, to); returns the outputs [names].
+  Future<List<Float32List>> _run(
+    Float32List x,
+    int epochs,
+    int from,
+    int to,
+    Float32List? means,
+    List<String> names,
+  ) async {
+    final inputs = <String, OrtValue>{};
     Map<String, OrtValue>? out;
     try {
-      out = await _session.run({'eeg': input});
-      final flat = await out['logits']!.asFlattenedList();
-      return Float32List.fromList([for (final v in flat) (v as num).toDouble()]);
+      inputs['eeg'] = await OrtValue.fromList(x, [1, epochs * epochSamples, 4]);
+      inputs['keep'] = await OrtValue.fromList(Float32List.fromList([from.toDouble(), to.toDouble()]), [2]);
+      inputs['means'] = await OrtValue.fromList(means ?? Float32List(4 * meansWidth), [4, meansWidth]);
+      inputs['use_means'] = await OrtValue.fromList(Float32List.fromList([means == null ? 0 : 1]), [1]);
+      out = await _session.run(inputs);
+      return [
+        for (final n in names)
+          Float32List.fromList([for (final v in await out[n]!.asFlattenedList()) (v as num).toDouble()]),
+      ];
     } finally {
-      await input.dispose();
-      for (final v in out?.values ?? const <OrtValue>[]) {
+      for (final v in [...inputs.values, ...?out?.values]) {
         await v.dispose();
       }
     }

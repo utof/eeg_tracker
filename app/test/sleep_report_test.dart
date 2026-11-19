@@ -131,6 +131,11 @@ void main() {
       expect(isStale(files, report({'a.f32': 60 * min})), isTrue); // b.f32 is new
       expect(isStale(files, report({...files, 'gone.f32': 20})), isTrue);
       expect(isStale(files, SleepReport({...report(files).json}..remove('drift_off'))), isTrue); // before drift_off
+      // a night the phone scored with another model (before the two passes) is scored once more; unscored ones not
+      final phone = SleepReport({...report(files).json, 'scored': true, 'model': phoneModelId});
+      expect(isStale(files, phone, model: phoneModelId), isFalse);
+      expect(isStale(files, SleepReport({...phone.json, 'model': 'old pieces'}), model: phoneModelId), isTrue);
+      expect(isStale(files, SleepReport({...phone.json, 'scored': false, 'model': null}), model: phoneModelId), isFalse);
     });
   });
 
@@ -255,15 +260,15 @@ void main() {
       expect(updated.readAsBytesSync(), bundle.bytes);
     });
 
-    test('pieces cover every epoch once and each sees its context', () {
-      expect(pieces(pieceEpochs + 2 * contextEpochs), [(w0: 0, w1: 180, c0: 0, c1: 180)]);
-      expect(pieces(181), hasLength(2));
+    test('pieces cover every epoch once and each sees its context (more in sleep_two_pass_test.dart)', () {
+      expect(pieces(175), [(w0: 0, w1: 175, c0: 0, c1: 175)]);
+      expect(pieces(176), [(w0: 0, w1: 144, c0: 0, c1: 128), (w0: 112, w1: 176, c0: 128, c1: 176)]);
       final ps = pieces(1000);
-      expect(ps.first, (w0: 0, w1: 120 + contextEpochs, c0: 0, c1: 120));
-      expect(ps.last, (w0: 960 - contextEpochs, w1: 1000, c0: 960, c1: 1000));
+      expect(ps.first, (w0: 0, w1: 152, c0: 0, c1: 128)); // 1000 - 152 is a multiple of 16
+      expect(ps.last, (w0: 880, w1: 1000, c0: 896, c1: 1000));
       final kept = [for (final p in ps) for (var e = p.c0; e < p.c1; e++) e];
       expect(kept, List.generate(1000, (e) => e));
-      expect(ps.every((p) => p.w1 - p.w0 <= pieceEpochs + 2 * contextEpochs), isTrue);
+      expect(ps.every((p) => p.w1 - p.w0 <= maxWindowEpochs), isTrue);
     });
 
     test('a model that returns the wrong number of values is an error, not a report', () async {
@@ -291,8 +296,12 @@ class _FakeRun implements StageRun {
   final bool short;
 
   @override
-  Future<Float32List> logits(Float32List x, int epochs) async {
-    expect(x.length, epochs * epochSamples * 4);
+  Future<SkipSums> sums(Float32List x, int epochs, {required int from, required int to}) =>
+      throw UnimplementedError('these nights fit one piece');
+
+  @override
+  Future<Float32List> logits(Float32List x, int epochs, {Float32List? means}) async {
+    expect((x.length, means), (epochs * epochSamples * 4, null));
     calls.add(epochs);
     final out = Float32List((short ? epochs - 1 : epochs) * 5);
     for (var e = 0; e < out.length ~/ 5; e++) {
