@@ -97,9 +97,16 @@ class Usual {
 Usual usualOf(Map<String, double> series, String day, Scale scale) {
   final before = series.keys.where((k) => k.compareTo(day) < 0).toList()..sort();
   final window = before.length > usualWindowDays ? before.sublist(before.length - usualWindowDays) : before;
+  return usualOfValues([for (final k in window) series[k]!], scale);
+}
+
+/// Your usual from the values of a window already chosen (the "unusual for you" card picks its own, lagged one:
+/// lib/unusual/detector.dart); values that cannot be judged (not finite, or not positive on a log scale) are left
+/// out.
+Usual usualOfValues(List<double> window, Scale scale) {
   final values = [
-    for (final k in window)
-      if (series[k]!.isFinite && (!scale.logScale || series[k]! > 0)) series[k]!,
+    for (final v in window)
+      if (v.isFinite && (!scale.logScale || v > 0)) v,
   ];
   if (values.length < usualMinDays) return Usual._(days: values.length, scale: scale);
   final judged = scale.logScale ? values.map(math.log).toList() : values;
