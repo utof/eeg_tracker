@@ -285,19 +285,6 @@ def test_job_state_for_the_sleep_page(tmp_path, fake_scorer):
     assert not nf.job_state(rec, nights)["running"]
 
 
-def test_long_nights_go_through_the_model_in_pieces():
-    assert score_sleep.windows(100) == [(0, 100, 0, 100)]
-    assert score_sleep.windows(score_sleep.ONE_PASS_EP) == [(0, score_sleep.ONE_PASS_EP, 0, score_sleep.ONE_PASS_EP)]
-    n = 20 * 120 + 7  # 20 h and a bit
-    w = score_sleep.windows(n)
-    kept = [i for _, _, c0, c1 in w for i in range(c0, c1)]
-    assert kept == list(range(n))  # every epoch kept exactly once, in order
-    for w0, w1, c0, c1 in w:
-        assert 0 <= w0 <= c0 < c1 <= w1 <= n
-        assert w1 - w0 <= score_sleep.PIECE_EP + 2 * score_sleep.CONTEXT_EP
-        assert c0 - w0 == min(c0, score_sleep.CONTEXT_EP) and w1 - c1 == min(n - c1, score_sleep.CONTEXT_EP)
-
-
 def test_page_server_answers_results_while_the_recorder_is_away(tmp_path, fake_scorer):
     """Headband off after waking: the recorder has no page server, the always-on one still serves the results."""
     import socket

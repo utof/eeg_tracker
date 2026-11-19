@@ -13,6 +13,9 @@ dependencies = [
   "pyedflib>=0.1.42",
   "matplotlib>=3.9",
   "torch>=2.6",
+  # the phone's ONNX Runtime (flutter_onnxruntime 1.9.0): score_sleep.py scores nights over 14 h with the app's
+  # models in two passes, as the phone does (DECISIONS 310)
+  "onnxruntime==1.28.0",
 ]
 
 [tool.uv]
@@ -29,4 +32,4 @@ explicit = true
 # Only for scripts/export_anysleep_onnx.py and its check (the phone app's sleep model):
 #   uv run --project analysis --group onnx python scripts/export_anysleep_onnx.py
 [dependency-groups]
-onnx = ["onnx>=1.19", "onnxruntime==1.28.0", "onnxscript>=0.5"]  # the ONNX Runtime the phone has (flutter_onnxruntime 1.9.0)
+onnx = ["onnx>=1.19", "onnxscript>=0.5"]  # ONNX Runtime itself is a main dependency (above)

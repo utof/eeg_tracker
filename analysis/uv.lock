@@ -176,6 +176,7 @@ dependencies = [
     { name = "matplotlib" },
     { name = "mne" },
     { name = "numpy" },
+    { name = "onnxruntime" },
     { name = "pyedflib" },
     { name = "scipy" },
     { name = "torch", version = "2.15.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
@@ -186,7 +187,6 @@ dependencies = [
 [package.dev-dependencies]
 onnx = [
     { name = "onnx" },
-    { name = "onnxruntime" },
     { name = "onnxscript" },
 ]
 
@@ -195,6 +195,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.9" },
     { name = "mne", specifier = ">=1.13" },
     { name = "numpy", specifier = ">=2.2" },
+    { name = "onnxruntime", specifier = "==1.28.0" },
     { name = "pyedflib", specifier = ">=0.1.42" },
     { name = "scipy", specifier = ">=1.14" },
     { name = "torch", specifier = ">=2.6", index = "https://download.pytorch.org/whl/cpu" },
@@ -204,7 +205,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 onnx = [
     { name = "onnx", specifier = ">=1.19" },
-    { name = "onnxruntime", specifier = "==1.28.0" },
     { name = "onnxscript", specifier = ">=0.5" },
 ]
 
