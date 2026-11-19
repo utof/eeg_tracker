@@ -12,6 +12,7 @@ import 'phone_checks.dart';
 import 'share_sheet.dart';
 import 'sleep_report_view.dart' show durationParts, nightTitle;
 import 'theme.dart';
+import 'try_these_screen.dart' show TryTheseEntry;
 
 enum Tone { calm, live, caution, problem }
 
@@ -210,6 +211,9 @@ class NightView extends StatelessWidget {
             _Sleep(sleep, onOpen: onSleepReport, onRetry: onRetrySleep),
           ],
           if (!m.running && morning != null) ...[const SectionHeading('Morning'), morning!],
+          // Each feature's first try and what to tell the assistant afterwards (DECISIONS 340), between nights.
+          if (!m.running)
+            ...[const SectionHeading('Try these'), TryTheseEntry(onSleepReport: onSleepReport, onAlarm: onAlarm)],
           // Before the night the phone settings matter most; during it, the headband.
           if (m.running) ...headband,
           const SectionHeading('Phone'),

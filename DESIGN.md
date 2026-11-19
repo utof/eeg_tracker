@@ -87,7 +87,8 @@ headings titleMedium 500; everything else bodyLarge. No monospace, no display fa
 One scrolling column, 24 dp page margins, sections separated by a hairline and 32 dp above the heading.
 Order: status, readouts, watch strip, then Headband and Phone (Phone first before a night, Headband first
 during one). Between nights the Sleep section (last night's asleep total and a Sleep report button) comes
-right after the strip, then the Morning section (today's check-in, Morning check-in and Trends buttons). The
+right after the strip, then the Morning section (today's check-in, Morning check-in and Trends buttons), then Try these
+(one muted line with the tally and the next stop, and a Try these button). The
 primary action is pinned at the bottom, full width, 64 dp; while a night records the pinned bar is a hairline, one
 muted line about the drift-off detector, then Lights off and Stop side by side (3 : 2). The sleep report is its own page: totals, the honest
 note, the chart, the periods, jaw and movement with
@@ -107,6 +108,15 @@ row, Awake and A day as label-left / value-right rows, the delivery line, Collec
 hour (chips, then the ratings' and the reaction times' charts), Today, Your data; Rate now pinned. Its question page
 shows one decision at a time: the question at headlineSmall and five full-width 64 dp rows (5 Very sharp at the top);
 then the reaction test, with Skip outlined until a test is done and Done filled after.
+Try these (from its section on the night screen) is one page in the order of a first week: the tally ("4 of 20 tried",
+"1 skipped" muted at the right) over the try ledger, one muted sentence, then the stops under hairline headings by when
+(Tonight, then the morning; Another night; Sessions, when you have time; Over the next weeks; When the headband is
+charged). A stop is a log row: its number cell, the title, how long in muted body, "The assistant's idea." for a
+proposal. One stop is open at a time (the next one at first): its sentence, whose idea (a muted line with a bulb), What
+to do as numbered lines, the outlined button to its screen, Then tell the assistant as bullets, the dream catcher's
+underline note field, then Done (filled, the page's one filled button) and Skip (a text button) at 3 : 2. Done or Skip
+folds the stop into "Done and skipped" (behind Show N stops) and the next one opens and scrolls into view. The note has
+its muted label, "What happened". With every stop done or skipped, an outlined Open Export data sits under the sentence.
 
 ## Elevation & Depth
 
@@ -214,6 +224,11 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   as ticks under it; answers as ink dots side by side per level, so a count reads as a row; once the pattern opens the
   dots turn ink-muted, each block with enough answers gets its range as a `rule` band and its mean as an ink tick, and
   the named best block (or two) is outlined in ink-muted. The sentence under it says the same in words.
+- **Try ledger** (Try these): one of the watch strip's own cells per stop, ten to a row with a wider gap after five:
+  `saved` when done, a dash on `track` when skipped, the next stop outlined green like the half hour in progress,
+  `track` still to come; the fill changes in 260 ms. Each stop's number cell (36 dp, growing with the text up to 130 %) repeats its mark with the number in
+  tabular titleMedium (ground ink on `saved`). A stop the app ticked itself says so in words ("Seen by the app"), never
+  by colour.
 - **Buttons:** one filled button per screen: Start night on the night screen (Lights off while a night records), Start on the meditation screen, and on
   each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before
   stopping, except in alpha-theta, where stopping must be instant. Session faces (dream catcher, sound for states)
