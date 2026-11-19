@@ -22,10 +22,13 @@ import java.util.Locale
  * (lib/sharp/schedule.dart) as a notification "How sharp do you feel?", and logs what happened to each moment in
  * files/sharp-hours/prompts.jsonl.
  *
- * - Inexact alarms that may ring in Doze (setAndAllowWhileIdle): no exact-alarm permission, and a few minutes'
- *   delay does not matter, since an answer is about the moment it is given. One alarm at a time: the moments
- *   ahead are kept in the app's preferences, and each ring arms the next. The app re-arms at every start and
- *   after a phone restart (SharpBootReceiver).
+ * - No exact-alarm permission. Each moment is armed twice: a window alarm (setWindow, 10 minutes: on time while
+ *   the phone is in use) and a backup 10 minutes later that may ring in Doze (setAndAllowWhileIdle); whichever
+ *   rings first asks, the other finds the moment handled and does nothing. (setAndAllowWhileIdle alone gets a
+ *   window of up to an hour on Android 14: seen on the emulator, 2026-11-19.) A few minutes do not matter, since
+ *   an answer is about the moment it is given. Only the next moment is armed: the moments ahead are kept in the
+ *   app's preferences, and each ring arms the next. The app re-arms at every start and after a phone restart
+ *   (SharpBootReceiver).
  * - A moment is skipped (and logged) while the night recorder runs, a sound session holds the phone, a session
  *   screen keeps the screen on, or notifications are off; dropped as "late" when it rings over an hour late
  *   (HyperOS can hold alarms back). The notification goes away by itself after an hour; "In 15 min" postpones it.
@@ -44,14 +47,17 @@ object SharpPrompts {
     const val EXTRA_SNOOZED = "sharpSnoozed"
     private const val PREFS = "sharp_hours"
     private const val KEY_PLAN = "plan"
+    private const val KEY_HANDLED = "handled"
     private const val LATE_MS = 60L * 60 * 1000
     private const val SNOOZE_MS = 15L * 60 * 1000
+    private const val WINDOW_MS = 10L * 60 * 1000
     private const val RECORDER = "com.pravera.flutter_foreground_task.service.ForegroundService"
     private const val REQ_NEXT = 40
     private const val REQ_SNOOZED = 41
     private const val REQ_OPEN = 42
     private const val REQ_LATER = 43
     private const val REQ_GONE = 44
+    private const val REQ_BACKUP = 45
     private val ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssxxx", Locale.ROOT)
 
     /** A session screen keeps the screen on (MainActivity's "keepScreenOn"): no question then. */
@@ -86,22 +92,31 @@ object SharpPrompts {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
-    /** Arms the first kept moment after now, or cancels the alarm when none is left. */
+    /** Arms the first kept moment after now (its window alarm and its Doze backup), or cancels both. */
     fun armNext(context: Context) {
         val am = context.getSystemService(AlarmManager::class.java) ?: return
         val now = System.currentTimeMillis()
         val next = plan(context).firstOrNull { it.first > now }
-        val pi = fireIntent(context, next?.first ?: 0L, next?.second ?: false, false, REQ_NEXT)
+        val main = fireIntent(context, next?.first ?: 0L, next?.second ?: false, false, REQ_NEXT)
+        val backup = fireIntent(context, next?.first ?: 0L, next?.second ?: false, false, REQ_BACKUP)
         if (next == null) {
-            am.cancel(pi)
+            am.cancel(main)
+            am.cancel(backup)
             return
         }
-        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next.first, pi)
+        am.setWindow(AlarmManager.RTC_WAKEUP, next.first, WINDOW_MS, main)
+        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next.first + WINDOW_MS, backup)
     }
 
     /** A moment rang (or its postponed copy): show it, skip it or drop it, log it, and arm the next. */
     fun fire(context: Context, planned: Long, test: Boolean, snoozed: Boolean) {
         val now = System.currentTimeMillis()
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (!snoozed) {
+            // the window alarm or its backup already asked this moment: nothing more
+            if (planned <= prefs.getLong(KEY_HANDLED, 0L)) return
+            prefs.edit().putLong(KEY_HANDLED, planned).apply()
+        }
         try {
             if (now - planned > LATE_MS) {
                 log(context, planned, now, "late", null, test)
