@@ -20,7 +20,7 @@ import android.os.SystemClock
 
 /**
  * Keeps a sound session alive while the phone is locked (DECISIONS rows 190-196): sound for states, meditation,
- * alpha-theta and the dream catcher. The session itself (sound engine, headband, timers) stays in the screen's
+ * alpha-theta, the dream catcher and the work session (DECISIONS 447). The session itself (sound engine, headband, timers) stays in the screen's
  * Flutter engine; this service only tells Android the app is playing sound (type mediaPlayback, plus
  * connectedDevice with the headband and microphone for the dream catcher), holds a partial wake lock and shows a
  * media notification with Stop. It is not the night recorder's service (flutter_foreground_task) and never
@@ -34,7 +34,7 @@ class SessionService : Service() {
         private const val ACTION_STOP_TAP = "io.github.utof.eeg_tracker.session.STOP_TAP"
         private const val CUSTOM_STOP = "stop"
 
-        /** The longest any session may hold the wake lock; the service is released long before. */
+        /** The longest a session may hold the wake lock without holding again (the work session re-holds). */
         private const val WAKE_LOCK_MS = 3L * 60 * 60 * 1000
 
         /** Stop was tapped on the notification or the lock screen; set by the screen's Activity. */
@@ -125,11 +125,11 @@ class SessionService : Service() {
             if (wakeLock == null) {
                 wakeLock = getSystemService(PowerManager::class.java)
                     ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "eeg_tracker:session")
-                    ?.apply {
-                        setReferenceCounted(false)
-                        acquire(WAKE_LOCK_MS)
-                    }
+                    ?.apply { setReferenceCounted(false) }
             }
+            // Every hold (re)arms the lock's timeout: a work session holds again every 20 minutes and can
+            // run a whole day (DECISIONS 447); the others hold once and are released long before.
+            wakeLock?.acquire(WAKE_LOCK_MS)
             running = true
             answer?.invoke(kept, null)
         } catch (e: Exception) {

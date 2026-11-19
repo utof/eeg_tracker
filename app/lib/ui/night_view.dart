@@ -156,6 +156,7 @@ class NightView extends StatelessWidget {
     this.onNap,
     this.onLucid,
     this.onSound,
+    this.onWork,
     this.onSleepReport,
     this.onRetrySleep,
     this.morning,
@@ -179,6 +180,9 @@ class NightView extends StatelessWidget {
   final VoidCallback? onNap;
   final VoidCallback? onLucid;
   final VoidCallback? onSound;
+
+  /// The work session (ROADMAP row 35): holds the headband, so only between nights.
+  final VoidCallback? onWork;
   final VoidCallback? onSleepReport;
   final VoidCallback? onRetrySleep;
 
@@ -272,6 +276,8 @@ class NightView extends StatelessWidget {
           if (!m.running) ...[const SectionHeading('Nap coach'), _Nap(line: m.napLine, onNap: onNap)],
           // Lucid dream cues: the evening practice and the morning questions, between nights (DECISIONS 308).
           if (!m.running && onLucid != null) ...[const SectionHeading('Lucid dreams'), _Lucid(line: m.lucidLine, onLucid: onLucid)],
+          // The work session holds the headband too, so it waits for the night to end (DECISIONS 447).
+          if (!m.running && onWork != null) ...[const SectionHeading('Work'), _Work(onWork: onWork)],
           // Sound for states also plays during a night, by its timer alone (DECISIONS row 130).
           const SectionHeading('Sound'),
           _Sound(running: m.running, onSound: onSound),
@@ -736,6 +742,27 @@ class _Lucid extends StatelessWidget {
         if (line != null) ...[const SizedBox(height: 8), Text(line!, style: text.bodyLarge?.copyWith(height: 1.4))],
         const SizedBox(height: 16),
         OutlinedButton.icon(onPressed: onLucid, icon: const Icon(Icons.visibility_outlined), label: const Text('Lucid dreams')),
+      ],
+    );
+  }
+}
+
+class _Work extends StatelessWidget {
+  const _Work({required this.onWork});
+  final VoidCallback? onWork;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Wear the headband while you work: the phone watches for heavy eyelids and suggests a break now and then.',
+          style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(onPressed: onWork, icon: const Icon(Icons.laptop_outlined), label: const Text('Work session')),
       ],
     );
   }

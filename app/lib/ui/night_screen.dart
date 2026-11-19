@@ -51,6 +51,7 @@ import 'share_sheet.dart';
 import 'sleep_report_screen.dart';
 import 'sleep_scoring.dart';
 import 'states_screen.dart';
+import 'work_screen.dart';
 import 'theme.dart';
 import 'trends_screen.dart';
 
@@ -746,6 +747,13 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     unawaited(_refresh());
   }
 
+  /// The work session holds the headband too, so it also starts only between nights (DECISIONS 447).
+  Future<void> _work() async {
+    if (_running) return;
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const WorkScreen()));
+    unawaited(_refresh());
+  }
+
   /// Lucid dream cues: the practice and the morning questions need no headband (DECISIONS 308).
   Future<void> _lucid() async {
     await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const LucidScreen()));
@@ -916,6 +924,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onNap: _nap,
       onLucid: _lucid,
       onSound: _sound,
+      onWork: _work,
       onSleepReport: sleep == null ? null : () => _openSleep(sleep.nightOf),
       onRetrySleep: sleep == null ? null : () => _scoring?.retry(sleep.nightOf),
       morning: MorningSection(

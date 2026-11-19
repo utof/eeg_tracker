@@ -411,6 +411,29 @@ The reminders' times are not stored when they follow the sleep: they are worked 
 (`app/lib/study/schedule.dart`). The Trends page reads one day number from the log (a day runs 04:00 to 04:00):
 `recall`, the mean of the day's morning answers (`little` 1, `some` 2, `well` 3).
 
+### Work sessions (`work-sessions/`)
+
+One file per work session (ROADMAP row 35, DECISIONS 440-449): `<stamp>.work.json`, the session's start as
+`yyyy-MM-dd-HHmmss` local time. Written whole (a temporary name, then a rename) every 5 minutes while the session runs
+and at Stop, so a crash loses at most the last minutes; `ended` says which. Times are local ISO times. No raw EEG: the
+per-30-s numbers are enough to score a session again with other weights or lines.
+
+| Field | Content |
+|---|---|
+| `version`, `kind`, `app` | 1, `work_session`, `eeg_tracker work` |
+| `start`, `end`, `ended` | the session's span; `ended`: `running` (written during the session) or `stopped` |
+| `headband`, `contact_ohms` | the headband's name; the contact check at the start, ohms per channel (`null`: no contact) |
+| `closed_alpha` | the optional eyes-closed minute: median back alpha (µV²) of its clean seconds; `null` when skipped or too noisy |
+| `baseline` | `alpha` (µV², 8-12 Hz at O1/O2), `events` (blinks plus sideways eye movements per 30 s), `theta` (µV², 4-7 Hz at O1/O2) and `sem` (µV², T3-T4 at 0.2-0.7 Hz): medians of the 6 scored half minutes after the first minute; `null` before |
+| `calibrated_at_s` | seconds of signal when the baseline was complete |
+| `worn_min`, `active_min` | minutes the headband sent a usable signal outside breaks |
+| `minutes` | minutes after the baseline per level: `alert`, `getting_drowsy`, `drowsy`, `unknown` (not enough clean signal); `eyes_closed` (half minutes read as closed eyes, whole session) |
+| `epochs` | one entry per 30 s of signal: `t` (its start, from the phone's clock), `s` (its first second of signal), `clean_s` (seconds read for alpha), `muscle_s`, `movement_s`, `gap_s`, `blinks`, `eye_moves`, `events` (per 30 usable s), `alpha`, `theta`, `sem` (medians, µV²; `null` under 10 clean seconds), `eyes_closed`, `a` and `still` (log2 against the baseline: alpha, and eye stillness = log2((baseline events + 1) / (events + 1))), `t` and `s_eye` (theta and slow eye power the same way, logged only), `index` (the mean of `a` and `still`, at most 0.25 when `a` is negative), `window` (the median index of the last 10), `level` |
+| `hints` | `at`, `reason` (`stretch`, `drowsy`, `eyesClosed`, `snooze`), `active_min` (worn minutes of the stretch), `threshold_min`, `level`, `answer` (`onBreak`, `snoozed`, `notNow` or `null`), `answered_at`, `taken` (a break of 5 minutes or more started within 30 minutes) |
+| `breaks` | `start`, `end`, `source` (`tapped` or `headbandOff`: no usable signal for 5 minutes, counted from when it stopped), `before` / `before_level` (the level's median just before), `after` / `after_level` (over the first 5 minutes after; `null` if never readable) |
+| `ratings` | `at`, `value` ("How sharp do you feel?", 1 Foggy to 5 Very sharp: the sharp-hours scale), `hint` (the index of the hint it answered, or `null`) |
+| `events` | `at`, `event`: the headband's drops, reconnects and stream restarts, each hint, the eyes-closed minute's outcome |
+
 ### Lucid dream cues (`lucid/`)
 
 The evening practice, the nights with the cues on and the honest self-test (DECISIONS rows 300-309). Each JSON file is

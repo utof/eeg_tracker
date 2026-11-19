@@ -20,6 +20,7 @@ const Map<String, SeenCheck> seenChecks = {
   'smart-alarm': _alarm,
   'meditation': _meditation,
   'sound': _sound,
+  'work': _work,
   'nap': _nap,
   'dream': _dream,
   'dream-words': _dreamWords,
@@ -148,6 +149,7 @@ String? _session(Directory files, String dir, String suffix, String what) {
 }
 
 String? _meditation(Directory files) => _session(files, 'meditations', '.meditation.json', 'A meditation saved');
+String? _work(Directory files) => _session(files, 'work-sessions', '.work.json', 'A work session saved');
 String? _nap(Directory files) => _session(files, 'naps', '.nap.json', 'A nap saved');
 String? _dream(Directory files) => _session(files, 'dream-catcher', '.dream.json', 'A dream catcher session saved');
 String? _alphaTheta(Directory files) =>

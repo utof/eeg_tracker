@@ -41,7 +41,7 @@ class WorkSummary {
     if (j is! Map || j['kind'] != 'work_session') return null;
     final start = DateTime.tryParse('${j['start']}'), end = DateTime.tryParse('${j['end']}');
     if (start == null || end == null) return null;
-    final m = j['minutes'] is Map ? j['minutes'] as Map : const {};
+    final m = j['minutes'] is Map ? j['minutes'] as Map : const <String, Object?>{};
     double n(Object? v) => v is num ? v.toDouble() : 0;
     final hints = <WorkHint>[];
     for (final h in (j['hints'] is List ? j['hints'] as List : const [])) {

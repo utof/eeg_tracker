@@ -26,6 +26,15 @@ import 'store.dart';
 
 enum WorkStage { setup, connecting, contact, eyesClosed, calibrating, running, ending, done, failed }
 
+/// One 5-minute cell of the last hour's strip: what the level read at its end, or a break, or nothing yet.
+enum WorkCell { none, unknown, alert, gettingDrowsy, drowsy, onBreak }
+
+/// How the signal is now, in four words' worth.
+enum WorkSignal { good, noisy, lost, off }
+
+/// The strip: 12 cells of 5 minutes, oldest first, the newest ending now.
+const int stripCells = 12, cellMinutes = 5;
+
 /// A skip of this many packet numbers or more (0.1 s) is a hole (as in meditation).
 const int workGapSamples = 25;
 
@@ -113,6 +122,44 @@ class WorkController extends ChangeNotifier {
     if (d == null) return (WorkRule.settleEpochs + WorkRule.baselineEpochs) / 2;
     final settle = math.max(0, WorkRule.settleEpochs - d.epochs.length);
     return (settle + d.baselineLeft) / 2;
+  }
+
+  /// The last hour as 12 cells of 5 minutes (oldest first).
+  List<WorkCell> lastHour() {
+    final now = _now();
+    final out = List<WorkCell>.filled(stripCells, WorkCell.none);
+    final from = now.subtract(const Duration(minutes: stripCells * cellMinutes));
+    int? cellOf(DateTime t) {
+      if (t.isBefore(from) || t.isAfter(now)) return null;
+      return math.min(stripCells - 1, t.difference(from).inSeconds ~/ (cellMinutes * 60));
+    }
+
+    for (final e in _epochs) {
+      final t = DateTime.tryParse('${e['t']}');
+      final i = t == null ? null : cellOf(t.add(const Duration(seconds: 30)));
+      if (i == null) continue;
+      out[i] = switch (levelOf(e['level'] as String?)) {
+        DrowsyLevel.alert => WorkCell.alert,
+        DrowsyLevel.gettingDrowsy => WorkCell.gettingDrowsy,
+        DrowsyLevel.drowsy => WorkCell.drowsy,
+        DrowsyLevel.unknown => (_drowsy?.calibrated ?? false) ? WorkCell.unknown : WorkCell.none,
+      };
+    }
+    for (final b in _planner?.breaks ?? const <WorkBreak>[]) {
+      final end = b.end ?? now;
+      for (var i = 0; i < stripCells; i++) {
+        final a = from.add(Duration(minutes: i * cellMinutes)), z = a.add(const Duration(minutes: cellMinutes));
+        if (b.start.isBefore(z) && end.isAfter(a)) out[i] = WorkCell.onBreak;
+      }
+    }
+    return out;
+  }
+
+  WorkSignal get signal {
+    if (signalLost) return WorkSignal.lost;
+    if (!worn) return WorkSignal.off;
+    final last = _drowsy?.epochs.lastOrNull;
+    return last != null && last.cleanS < WorkRule.minCleanS ? WorkSignal.noisy : WorkSignal.good;
   }
 
   BandLink? _link;

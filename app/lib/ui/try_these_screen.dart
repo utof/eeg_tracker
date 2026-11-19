@@ -29,6 +29,7 @@ import 'states_screen.dart';
 import 'training_settings_screen.dart';
 import 'trends_screen.dart';
 import 'try_these_view.dart';
+import 'work_screen.dart';
 
 /// Looks for what the app can see done, for the cards in [ids]; [filesDir] is the app's `files/`.
 typedef SeenLookup = Future<Map<String, String>> Function(String filesDir, Set<String> ids);
@@ -228,6 +229,7 @@ class _TryTheseScreenState extends State<TryTheseScreen> {
       TryOpen.lucid => const LucidScreen(),
       TryOpen.nap => const NapScreen(),
       TryOpen.sound => const StatesScreen(),
+      TryOpen.work => const WorkScreen(),
       TryOpen.settings => const SettingsScreen(),
       TryOpen.experiments => ExperimentsScreen(recordingsDir: rec),
       TryOpen.sharpHours => SharpHoursScreen(recordingsDir: rec),
