@@ -352,6 +352,47 @@ void main() {
     expect(RegExp('could not save the night state').allMatches(logs), hasLength(1));
   });
 
+  test('an early Lights off, saves in order and each run counted once on the board\'s night too', () async {
+    // The rest of the night pipeline review (DECISIONS 395-396) on the board's night: a Lights off from the first
+    // moments of a start is kept; saves of the night state land in the order made; each run's samples are counted
+    // once, across a board restart (two file sets).
+    final dir = Directory('${root.path}/files/recordings-diy');
+    final finder = DiyFinder(link: () => link, timing: fastBoard);
+    final store = _SlowEveryOtherStore();
+    final r = NightRecorder(
+      finder: finder,
+      dir: dir,
+      store: store,
+      onStatus: statuses.add,
+      onStuck: (_) async => fail('nothing may get stuck'),
+      timing: fastNight,
+      watch: null,
+    );
+    final tapped = DateTime.now();
+    r.lightsOff(at: tapped); // before run(): the service hands it over as soon as the recorder exists
+    final run = r.run(restartedBySystem: false);
+    pump.start();
+    await waitFor(() => r.status.phase == Phase.recording);
+    expect(r.status.lightsOffMs, tapped.millisecondsSinceEpoch);
+    await Future<void>.delayed(_ms * 300);
+    board.restart();
+    await waitFor(() => r.status.runs == 2 && r.status.phase == Phase.recording);
+    await Future<void>.delayed(_ms * 300);
+    await r.stop();
+    await run;
+    finder.dispose();
+    final sets = stems(dir);
+    expect(sets, hasLength(2));
+    final total = sets.map((s) => records(File('$s.f32')).length).reduce((a, b) => a + b);
+    expect(total, greaterThan(0));
+    expect(store.state.lightsOffMs, tapped.millisecondsSinceEpoch);
+    expect(store.state.samples, total);
+    final counts = [for (final s in store.landed) s.samples];
+    expect(counts, [...counts]..sort(), reason: 'an older state landed after a newer one');
+    final logs = [for (final s in sets) File('$s.log').readAsStringSync()].join();
+    expect(RegExp(r' lights off\n').allMatches(logs), hasLength(1), reason: logs);
+  });
+
   test('a board restart and a new mode: three file sets, never joined', () async {
     final dir = Directory('${root.path}/files/recordings-diy');
     final finder = DiyFinder(link: () => link, timing: fastBoard);
@@ -412,6 +453,19 @@ void main() {
     expect(missing, greaterThan(0)); // the holes stay holes
     expect(q.toSet().length, q.length);
   });
+}
+
+/// Keeps every state as it lands; every other save takes 30 ms first (commits on a pool of threads finish out of order).
+class _SlowEveryOtherStore extends MemoryNightStore {
+  final List<NightState> landed = [];
+  int _n = 0;
+
+  @override
+  Future<void> save(NightState s) async {
+    if ((_n++).isEven) await Future<void>.delayed(const Duration(milliseconds: 30));
+    landed.add(s);
+    state = s;
+  }
 }
 
 class _BrokenStore implements NightStore {
