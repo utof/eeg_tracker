@@ -137,6 +137,7 @@ class SignalFeed extends ChangeNotifier {
   Timer? _frame;
   int _ticks = 0;
   bool _measuring = false;
+  bool _switching = false;
   bool _disposed = false;
 
   bool get active => _active;
@@ -331,8 +332,14 @@ class SignalFeed extends ChangeNotifier {
     }
     // the own connection gives way at once to a night or a session; once a night or a session ends, the view
     // connects by itself
-    await _stop(SignalStage.starting);
-    await _start();
+    if (_switching) return;
+    _switching = true;
+    try {
+      await _stop(SignalStage.starting);
+      await _start();
+    } finally {
+      _switching = false;
+    }
   }
 
   /// The view's own connection reads the contact again: the stream pauses for about 7 s.
