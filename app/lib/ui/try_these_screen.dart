@@ -18,6 +18,7 @@ import 'dream_screen.dart';
 import 'experiments_screen.dart';
 import 'export_screen.dart';
 import 'hands_free_screen.dart' show SettingsScreen;
+import 'lucid_screen.dart';
 import 'meditation_screen.dart';
 import 'morning_screen.dart';
 import 'nap_screen.dart';
@@ -223,6 +224,7 @@ class _TryTheseScreenState extends State<TryTheseScreen> {
       TryOpen.alphaTheta => const AlphaThetaScreen(),
       TryOpen.training => rec == null ? null : TrainingSettingsScreen(recordingsDir: rec),
       TryOpen.dream => const DreamScreen(),
+      TryOpen.lucid => const LucidScreen(),
       TryOpen.nap => const NapScreen(),
       TryOpen.sound => const StatesScreen(),
       TryOpen.settings => const SettingsScreen(),

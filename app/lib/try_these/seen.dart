@@ -21,6 +21,7 @@ const Map<String, SeenCheck> seenChecks = {
   'nap': _nap,
   'dream': _dream,
   'dream-words': _dreamWords,
+  'lucid': _lucid,
   'alpha-theta': _alphaTheta,
   'experiment': _experiment,
   'replay': _replay,
@@ -150,6 +151,14 @@ String? _alphaTheta(Directory files) =>
 
 String? _dreamWords(Directory files) =>
     _session(files, 'dream-catcher', '.text.json', 'An answer written out as words');
+
+/// A morning's three questions answered (files/lucid/mornings/`<stamp>`.json, `answers`): the card's last step.
+String? _lucid(Directory files) {
+  for (final f in _files(files, 'lucid/mornings', '.json')) {
+    if (_json(f)?['answers'] is Map) return 'Lucid dream questions answered on ${_stampDay(f) ?? 'this phone'}.';
+  }
+  return null;
+}
 
 /// Fall asleep with the headband: the card's last step (only that session keeps its EEG as a recording).
 String? _sound(Directory files) {

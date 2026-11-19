@@ -296,6 +296,14 @@ void main() {
       put('sound-states/2026-11-20-230000.sound.json', jsonEncode({'recording': null}));
       put('sound-states/2026-11-21-000000.sound.json', jsonEncode({'recording': '2026-11-21-000000'}));
       put('naps/2026-11-20-150000.nap.json', '{}');
+      put(
+        'lucid/mornings/2026-11-21-070000.json',
+        jsonEncode({
+          'night': '2026-11-21-070000',
+          'answered': '2026-11-21T07:00:00+03:00',
+          'answers': {'lucid': 'no'},
+        }),
+      );
       put('dream-catcher/2026-11-20-160000.dream.json', '{}');
       put('dream-catcher/2026-11-20-160000-r1.text.json', '{}');
       put('alpha-theta/2026-11-20-170000.alphatheta.json', '{}');
@@ -316,6 +324,7 @@ void main() {
       expect(seen['sound'], 'A Fall asleep session with the headband on Sat 21 Nov.');
       expect(seen['sharp'], 'Answers on 2 days.');
       expect(seen['replay'], 'Switched on.');
+      expect(seen['lucid'], 'Lucid dream questions answered on Sat 21 Nov.');
     });
 
     test(
@@ -330,6 +339,7 @@ void main() {
         );
         put('sound-states/2026-11-20-230000.sound.json', jsonEncode({'recording': null}));
         put('settings.json', jsonEncode({'replayCheck': false}));
+        put('lucid/mornings/2026-11-20-070000.json', jsonEncode({'night': '2026-11-20-070000'}));
         expect(seenByApp(files, seenChecks.keys.toSet()), isEmpty);
       },
     );
