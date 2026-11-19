@@ -107,9 +107,10 @@ written.
 
 ## The phone
 
-**Pair phone…** runs `scripts/phone_link.py` in a terminal window (the QR code to scan with the phone) once that
-script is in this checkout; until then the item is greyed out. After pairing, a status line says whether the phone is
-connected. Showing the phone's own work-session drowsiness in this menu is prepared but not connected yet.
+**Pair phone…** runs `scripts/phone_link.py` in a terminal window (the QR code to scan with the phone; see
+[phone-link.md](phone-link.md)), copying the phone's files into the tray's own `_local`. While that window already
+runs, the item opens its page `http://127.0.0.1:8771/` with the code, bigger, instead of starting a second copy. It is
+greyed out only without a terminal program. After pairing, a status line says whether the phone is connected. Showing the phone's own work-session drowsiness in this menu is prepared but not connected yet.
 
 ## Not done yet
 

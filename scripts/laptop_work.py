@@ -612,16 +612,6 @@ def session_from(stamp: str, d: dict) -> WorkSession | None:
 
 # ---------- the phone link (a hook: feat/qr-pairing's scripts/phone_link.py) ----------
 
-def pair_command(repo: Path = REPO, python: str = sys.executable) -> list[str] | None:
-    """The command "Pair phone…" runs: phone_link.py in a terminal window (it shows the QR code and wants Enter for a
-    new one). None while the script is not in this checkout, or there is no terminal program."""
-    script = repo / "scripts" / "phone_link.py"
-    term = shutil.which("x-terminal-emulator") or shutil.which("gnome-terminal")
-    if not script.exists() or term is None:
-        return None
-    return [term, "-e", python, str(script)]
-
-
 def link_status_probe(url: str = "http://127.0.0.1:8771/status") -> dict | None:
     """phone_link.py's own status, on this laptop only; None when it is not running."""
     try:
@@ -630,6 +620,29 @@ def link_status_probe(url: str = "http://127.0.0.1:8771/status") -> dict | None:
         return d if isinstance(d, dict) else None
     except (urllib.error.URLError, OSError, ValueError):
         return None
+
+
+PAIR_PAGE = "http://127.0.0.1:8771/"  # phone_link.py's own page on this laptop: the code, bigger
+
+
+def pair_command(repo: Path = REPO, python: str = sys.executable, *, local: Path | None = None,
+                 probe: Callable[[], dict | None] | None = None,
+                 which: Callable[[str], str | None] = shutil.which) -> list[str] | None:
+    """The command "Pair phone…" runs. While phone_link.py already runs (its status answers on this laptop): its page
+    with the code, in the browser. Else phone_link.py in a terminal window (it shows the QR code and wants Enter for a
+    new one), copying the phone's files into [local] (the tray's `_local`). None while the script is not in this
+    checkout, or there is no terminal program."""
+    script = repo / "scripts" / "phone_link.py"
+    if not script.exists():
+        return None
+    if (probe or link_status_probe)() is not None:
+        return ["xdg-open", PAIR_PAGE]
+    args = [python, str(script)] + (["--dest", str(local)] if local is not None else [])
+    term = which("x-terminal-emulator")
+    if term is not None:
+        return [term, "-e", *args]  # Debian's rule: -e takes the command and its arguments
+    term = which("gnome-terminal")
+    return None if term is None else [term, "--", *args]
 
 
 def phone_line(local: Path, probe: Callable[[], dict | None] = link_status_probe) -> str | None:

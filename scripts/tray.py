@@ -297,7 +297,8 @@ def run_tray(a: argparse.Namespace) -> int:
 
     def launch(argv: list[str]) -> None:
         GLib.spawn_async(argv, flags=GLib.SpawnFlags.SEARCH_PATH)
-    menu = TrayMenu(ctl, Gtk, GLib, AI, launch=launch, data_dir=a.local / "laptop" / "work")
+    menu = TrayMenu(ctl, Gtk, GLib, AI, launch=launch, data_dir=a.local / "laptop" / "work",
+                    pair=lambda: lw.pair_command(local=a.local))
     for sig in (15, 2, 1):   # SIGTERM (logout), SIGINT (Ctrl+C), SIGHUP: close the session file first
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, lambda *_: (menu.quit(), False)[1])
     menu.render(); GLib.idle_add(lambda: (menu.tick(), False)[1])
