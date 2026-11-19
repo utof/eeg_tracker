@@ -170,7 +170,7 @@ void main() {
         final shot = GlobalKey();
         await _pump(tester, RepaintBoundary(key: shot, child: _tabs(_model(running: running), key: key)), height: 873, scale: scale);
         key.currentState!.go(tab);
-        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(seconds: 1)); // the bar's pill has moved
         expect(tester.takeException(), isNull);
         final boundary = shot.currentContext!.findRenderObject()! as RenderRepaintBoundary;
         await tester.runAsync(() async {
