@@ -573,6 +573,8 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.settings,
     readme: [TryRef('Was this you?', 'nothing to do for about two weeks, then one look')],
+    evidence: 'was-this-you',
+    weakEvidence: true,
     proposal: true,
   ),
   TryCard(

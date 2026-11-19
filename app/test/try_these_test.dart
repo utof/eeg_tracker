@@ -120,7 +120,7 @@ void main() {
           for (final c in tryCards)
             if (c.weakEvidence) c.id,
         },
-        {'smart-alarm', 'meditation', 'sound', 'alpha-theta', 'lucid'},
+        {'smart-alarm', 'meditation', 'sound', 'alpha-theta', 'lucid', 'was-this-you'},
       );
       expect(tryCards.firstWhere((c) => c.id == 'sharp').weakEvidence, isFalse);
     });
