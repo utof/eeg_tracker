@@ -258,17 +258,18 @@ const List<TryCard> tryCards = [
     what: 'The laptop copies the night while the phone records, and can show your live signal.',
     takes: '2 minutes before a night, with the laptop on',
     steps: [
-      'Phone and laptop on your home Wi-Fi. On the main screen, Your data: switch Share on Wi-Fi on.',
-      'The sheet shows the address, the code and two laptop commands: start them on the laptop, or ask the assistant.',
+      'Phone and laptop on your home Wi-Fi. On the laptop run python3 scripts/phone_link.py, or ask the assistant.',
+      'Point the phone\'s camera at the square code, tap the link, then Open EEG Tracker, then Connect.',
       'Start the night as usual and sleep.',
       'In the morning tap Stop and leave the app open for a few minutes.',
     ],
     tell: [
-      'Did the laptop keep getting data all night with the screen off, or say "no answer" for long stretches?',
+      'Did the camera open the link, and did the app open by itself?',
+      'Did the laptop keep getting data all night with the screen off, or say "No answer" for long stretches?',
       'Was the phone on the charger?',
     ],
     opens: TryOpen.nightScreen,
-    readme: [TryRef('Share on Wi-Fi', 'switch it on before a night')],
+    readme: [TryRef('Share on Wi-Fi', 'connect the laptop by one scan, then a night')],
   ),
   TryCard(
     id: 'work',

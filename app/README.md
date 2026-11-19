@@ -27,7 +27,7 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
 **Another night**
 
 - [Smart alarm](#smart-alarm): one morning
-- [Share on Wi-Fi](#share-on-wi-fi-the-laptop-watches-and-copies-while-the-phone-records): the first night mirrored to the laptop (the first night doubles as the phone test)
+- [Share on Wi-Fi](#share-on-wi-fi-the-laptop-watches-and-copies-while-the-phone-records): connect the laptop by one scan, then the first night mirrored to it (the first night doubles as the phone test)
 
 **Daytime sessions**
 
@@ -1458,41 +1458,55 @@ minutes after Stop. It is **not encrypted** (plain HTTP; encryption is deferred,
 on the same Wi-Fi could listen in, so use it on your home Wi-Fi only, never on a shared or public one. **New code**
 on the sheet shuts out every laptop that has the old one.
 
+**Connecting the laptop by one scan** (DECISIONS rows 530-539, `../docs/phone-link.md`). The square code on the
+laptop works once, for 5 minutes. The app asks before anything is sent, and it sends its own code only to the laptop
+that proves it showed that square code; nothing leaves your home network. The two remember each other, so next time
+there is nothing to scan.
+
 **It cannot hurt the recording.** The server runs apart from the recorder, which only hands it copies of the samples
 and never waits for it. If the server fails, sharing goes off with one line in the night's log and the night goes on
 (DECISIONS row 221; tested with servers that crash and hang).
 
-### Owner step: switch it on before a night (2 minutes; the first night doubles as the phone test)
+### Owner step: connect the laptop by one scan, then a night (2 minutes; the first night doubles as the phone test)
 
-1. Phone on your home Wi-Fi, the laptop on the same one. On the main screen scroll to **Your data** and switch
-   **Share on Wi-Fi** on. A sheet shows the **Address** (like `192.168.1.23:8765`), the **Code**, and both as a QR
-   code. **Address and code** opens it again.
-2. On the laptop, in the repo folder, with the address and code from the sheet (the sheet shows both commands
-   whole):
-   - the live pages: `python3 scripts/page_server.py --recorder http://<address> --token <code>`, then open
-     `http://localhost:8770/` (the live check page; `sound.html`, `beats.html`, `eyes.html` work too);
-   - the copy: `python3 scripts/pull_phone.py http://<address> --token <code>`; leave it running. Every 2 minutes
-     it prints what it fetched. Raw nights land in `_local/recordings/`, everything else in `_local/phone/`.
-3. Start the night as usual. The notification says "shared on Wi-Fi at <address>". Sleep.
-4. In the morning, Stop. Leave the app open for a few minutes: sharing stays on for 15 minutes so the laptop gets
-   the end of the night, then turns itself off. `pull_phone.py` prints "finished and checked" for the night's files.
-5. **What to tell the assistant after the first night** (only the real phone can show these): did `pull_phone.py`
-   keep printing lines all night with the phone's screen off, or did it say "no answer" for long stretches? Was the
-   phone on the charger? The night's `.log` has the phone battery once a minute, so a night with sharing on against
-   one without gives its real cost.
+1. Phone and laptop on your home Wi-Fi. On the laptop, in the repo folder, run `python3 scripts/phone_link.py` (or
+   ask the assistant to run it). It shows a square code. Leave that window open.
+2. Open the phone's camera and point it at the code. Tap the link the camera shows; the browser opens a page with
+   **Open EEG Tracker**: tap it (it often opens the app by itself).
+3. The app asks **Connect to this laptop?** with the laptop's name: tap **Connect**. It switches Share on Wi-Fi on
+   and says **Connected**. The laptop window says "Paired", then copies the phone's files every 2 minutes; the live
+   pages are at `http://localhost:8770/` on the laptop. Raw nights land in `_local/recordings/`, everything else in
+   `_local/phone/`.
+4. Start the night as usual. The notification says "shared on Wi-Fi at <address>". Sleep. In the morning, Stop and
+   leave the app open for a few minutes: sharing stays on for 15 minutes so the laptop gets the end of the night.
+5. **What to tell the assistant after the first night**: did the camera open the link, and did **Open EEG Tracker**
+   open the app by itself or only after a tap? Did the laptop window keep printing lines all night with the phone's
+   screen off, or "No answer" for long stretches? Was the phone on the charger? (The night's `.log` has the phone
+   battery once a minute and a line when the laptop was told where the phone is.)
+
+Next time: run `python3 scripts/phone_link.py` again and switch **Share on Wi-Fi** on: the phone finds the laptop by
+itself within a minute, no scan. If the app is new or forgot the laptop, scan the code the window shows.
 
 Good to know:
 
-- The code stays the same until you tap **New code**, so the laptop commands stay the same every night. To keep the
-  code out of the shell history, set it once: `export EEG_PHONE_TOKEN=<code>`; all three scripts read it.
+- The code stays the same until you tap **New code**; after a new one the phone tells the paired laptop by itself.
+  For the commands by hand, set it once to keep it out of the shell history: `export EEG_PHONE_TOKEN=<code>`.
 - Between nights the phone answers only while the app is open on the screen (Android freezes a closed app); the app
   keeps the screen on for the first 15 minutes. During a night it answers with the screen off.
 - During a night the laptop's **Re-check contact** button does nothing: the phone checks contact once, at the start
   (DECISIONS row 52). The Sleep page and the morning result are the laptop's own jobs and use the laptop's files,
   which `pull_phone.py` keeps filled.
-- If the phone's address changes (the router gave it a new one), the main screen and the sheet show the new one
-  within a minute; restart the two laptop commands with it. A fixed address for the phone in the router avoids this.
-- Without Wi-Fi but with a cable: `adb forward tcp:8765 tcp:8765`, then use `http://127.0.0.1:8765` as the address.
+- If the phone's address changes (the router gave it a new one), it tells the paired laptop within 5 minutes; nothing
+  to restart. If the laptop's address changes, scan again. **Forget this laptop** on the sheet stops the phone telling
+  it anything.
+- Did the code expire before you scanned it? Press Enter in the laptop window for a new one. Each code works once.
+- A VPN on the phone can stop the scan from reaching the laptop: turn it off for the scan, or let it bypass the local
+  network.
+- By hand, without the scan (the sheet shows both commands whole): the live pages with
+  `python3 scripts/page_server.py --recorder http://<address> --token <code>`, the copy with
+  `python3 scripts/pull_phone.py http://<address> --token <code>`.
+- Without Wi-Fi but with a cable: `adb forward tcp:8765 tcp:8765`, then use `http://127.0.0.1:8765` as the address
+  (or `python3 scripts/phone_link.py --phone-at http://127.0.0.1:8765` after a scan).
 - Export data stays the full, checked hand-over (and the only one that works without Wi-Fi). Files the laptop
   already mirrored are found "already here" by `import_phone.py`.
 

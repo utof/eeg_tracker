@@ -563,6 +563,14 @@ the phone is still writing, with their size) and `raw` (checked raw files, which
 the phone's file ended when it was listed; readers should ignore an incomplete last record, as they do for a
 recording that is still running.
 
+**Pairing** (`scripts/phone_link.py`, DECISIONS rows 530-539, `docs/phone-link.md`): the laptop answers on port 8771
+`POST /link/hello` (`{"v": 1, "via": "code" | "key", "nonce"}` -> `{"v": 1, "nonce", "proof", "name"}`) and
+`POST /link/finish` (`{"v": 1, "via", "nonce", "proof", "port", "token"}` -> `{"v": 1, "name"}`, plus `"key"` after
+a pairing by code); 410 for a code that expired or was used, 404 `not paired` for a key it does not have, 403 for a
+wrong proof or a client outside the local network. `_local/phone/link.json` (mode 600): `version` 1, `laptop_key`,
+`paired` and `told` (ISO times), `phone` (`address`, `port`, `token`). On the phone the paired laptop is the field
+`laptop` (`host`, `port`, `key`, `name`, `paired_at_ms`) of the Share on Wi-Fi setting in the app's private settings.
+
 ## The catalog of nights (`_local/catalog/`)
 
 `scripts/catalog.py` (standard library only; DECISIONS 313-318) reads `_local/` and writes:
