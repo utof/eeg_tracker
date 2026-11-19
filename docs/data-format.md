@@ -518,6 +518,26 @@ one live sleep model the cues and the smart alarm share opens and closes (DECISI
 ... (load N tonight)`, `live sleep model: shared with the ... (no second copy)`, `live sleep model off, no one needs it
 (N calls, median S s)`.
 
+### When I put the headband on (`auto-start/`)
+
+Automatic recording, phase 1 (ROADMAP row 39, DECISIONS 600-609): the owner's choices, what the headband watcher
+remembers between checks, and every check, guess, question, answer and outcome, so a personal model can learn from the
+answers later. Times are local with their UTC offset. `settings.json`, `state.json` and `laptop.json` are written under
+a temporary name, then renamed; a missing, damaged or foreign one reads as the defaults. `log.jsonl` only grows; a line
+cut off by a crash is skipped. Nothing here holds EEG (the minutes kept while the app asks become a normal run in
+`recordings/` only after a yes).
+
+| File | Content |
+|---|---|
+| `settings.json` | `version` 1, `choices` (`night`, `work`, `other`: `start`, `ask` or `nothing`; `other` never `start` in phase 1), `work_chime` (automatic work sessions chime), `bed_min` and `wake_min` (the bedtime window set by hand, minutes after midnight; `null` while it follows the recorded nights) |
+| `state.json` | `version` 1, `quiet_until` (per kind: no question before then, after Not now or no answer), `yes_streak` (per kind), `offered` (kinds offered "start automatically" in this streak), `worn_since` (the wearing in progress), `asked_this_wearing`, `charge_notice_day` |
+| `laptop.json` | `version` 1, `working` (the laptop's latest word on a work session) and `at` |
+| `log.jsonl` | one line per event, each with `version` 1, `at` and `event`: `check` (`trigger`: `presence`, `bedtime`, `laptop`, `opened` or `now`; `near`, `worn` (`null` when it could not be told), `how` (`resistance`, `signal`, `simulated` in a debug build, `none`), `ohms` per channel (`null` = no contact), `battery` (%), `guess` (`night`, `work`, `other`), `reasons`, `choice`, `window` (`HH:MM-HH:MM`), `phone` (`charging`, `screen_on`, `screen_off_min`, `dnd`, `laptop`, `next_alarm`), `error`); `skipped` (`trigger`, `why`); `question` (`kind`, `text`); `answer` (`kind`, `answer`: `yes`, `no`, `none` (no answer in 15 minutes or swiped away), `released` (a start by hand), for `other` also `night` or `work`; `after_s`); `start` (`kind`, `how`: `automatic` or `yes`, `preroll_s` and `stem` (the run the kept minutes became), `quiet` and `limit_min` for work, `error`); `declined` (`kind`, `why`, `battery`); `offer` (`kind`, `yes_in_a_row`); `offer_answer` (`kind`, `accept`); `released` |
+
+A night the watcher started has a first line in its first run's `.log`: `started automatically: ...` or `started after
+"Yes" ...`, and the minutes kept while asking are the night's first run, whose `.log` begins `auto-start: the headband
+was found on ...`.
+
 ### Try these (`try-these/`)
 
 The in-app list of what to try next (DECISIONS row 340): which stops the owner ticked Done or Skip, which the app

@@ -50,6 +50,10 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
 - [Replay check](#replay-check-off-unless-you-switch-it-on): switch on in Training settings, then just meditate (no steps of its own)
 - [Alpha-theta](#alpha-theta): read the screening and consent once; no steps of its own
 
+**When the headband is on anyway**
+
+- [When I put the headband on](#when-i-put-the-headband-on-automatic-recording-asks-first-unless-you-change-it): pair it once, then a bedtime with "Ask me" (5 minutes, then a few evenings)
+
 **When the headband and the board are ready**
 
 - [Our own headband connection](#our-own-headband-connection-test-off-by-default): the probe (5 minutes), then one night with the switch on
@@ -97,12 +101,15 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
   DECISIONS rows 130-139.
 - Try these: `lib/try_these/` (the cards, the progress file, what the app sees by itself), `lib/ui/try_these_*.dart`;
   DECISIONS row 340 (below).
+- When I put the headband on (automatic recording): `lib/auto/` (rules, worn check, battery guard, the watcher, its
+  log, its own engine `task.dart`), `lib/ui/auto_*.dart`, `android/.../AutoWatch.kt`, `AutoWatchService.kt` and
+  `HeadbandPresenceService.kt`; DECISIONS rows 600-609 (below).
 
 ## Try these
 
 Between nights the main screen's **Try these** section (after Morning) opens one page with each feature's first try,
 in order: tonight and the morning (a night with Lights off, how long scoring takes, the report's noise and jaw numbers,
-the morning check-in, Export data), another night (smart alarm, Share on Wi-Fi), sessions, the tries that take weeks
+the morning check-in, Export data), another night (smart alarm, Share on Wi-Fi, the headband noticed when you put it on), sessions, the tries that take weeks
 (a self-experiment, the replay check, the lucid dream cues, and the assistant's proposals Sharp hours, Unusual for
 you and Was this you?, marked as such), our own headband connection when the headband is charged, and the DIY board
 (a test, not EEG yet) when the board is built. Each stop says what it is, what to do, opens its screen, lists what to
@@ -1230,6 +1237,69 @@ minutes, the microphone recorded real sound, and the night recording started fro
 5. In the morning tell the assistant: did the sound stop by itself, did the night record from then, and the battery
    percent at lights off and in the morning. Send the session file's `stalls` and `end` (Export data has it).
 6. If a locked session stopped early: choose **Screen: Stays on** for now and say so; that is the old behaviour.
+
+## When I put the headband on (automatic recording; asks first unless you change it)
+
+You wished the app would start reading by itself when you wear the headband and know what you are doing. This is the
+first phase (DECISIONS rows 600-609; research `_local/research/2026-11-20-00-auto-activity.md`; the **i** button
+shows `docs/evidence/auto-start.md`).
+
+- Settings (the gear on the main screen), **When I put the headband on**. For **At night**, **Working** and **Anything
+  else**: **Automatic**, **Ask me** (the default) or **Do nothing**. "Anything else" can only ask for now.
+- **Pair the headband** once: Android's own dialog offers the headband ("BB Black"). Then Android tells the app when
+  the headband comes near and lets it start a recording with the app closed. Without it the battery exemption the app
+  already asks for does the same job, less reliably; with neither, the app checks only when you open it. The page says
+  which of these your phone allows.
+- When it checks: when you open the app, every 10 minutes in your **bedtime window** (from 2 hours before your usual
+  bedtime to your usual wake-up, from your last 14 days of nights; 23:00 to 07:00 until 3 nights; **Change** sets it
+  by hand), when the paired headband comes near, and when the laptop says a work session started (prepared; the
+  laptop does not send it yet). **Check now** runs one. Never during a recording or a session, and not in the 30
+  minutes after a recording's last data.
+- A check connects for about 10 seconds: contact on each electrode (off the head: no contact at all) and the battery,
+  then it lets go. On the head, the app guesses what you are doing from the clock and the phone: in the bedtime window,
+  or charging with the screen off (or Do Not Disturb) after 20:00, it is the night; the laptop's work session is work;
+  anything else is other.
+- **Ask me**: one quiet notification, "Headband on. Start the night?" (**Start the night**, **Not now**), "Headband on.
+  Start a work session?" (**Start**, **Not now**) or "Headband on. What are you doing?" (**Night**, **Work session**,
+  **Not now**). The minutes since the check are kept in memory meanwhile (up to 15): **Start the night** saves them as
+  the night's first part, so the night counts from when you put the headband on. **Not now**, or no answer in 15
+  minutes, writes nothing, and the app asks about that kind no more for 30 minutes and for the rest of that wearing.
+  A work start opens the work page, which starts the session.
+- **Automatic** only ever means recording and silent analysis: the night recorder (the drift-off detector, the sleep
+  report after Stop; no smart alarm, no lucid or memory cues, no sound), or the work page with a session whose hints
+  show on the screen and the lock-screen card; its chime only with **Chime in automatic work sessions** on. After 10
+  yes in a row for the night or for work, the page (and a notification) offers to switch it to Automatic.
+- **The night comes first**: a work session starts by itself or is offered only while the headband keeps enough for
+  tonight (planning: 10 % an hour, plus 15 %; down to 15 % while bedtime is 4 hours or more away, ending 4 hours
+  before bed), and it stops itself in time. Otherwise: "Charge the headband for tonight" (once a day). A night is never
+  refused, only warned about in the question.
+- A night started this way says so in its log ("started automatically" or "started after Yes"). Stop it in the
+  morning as usual. Starting anything by hand (Start night, a session) makes the watcher let go of the headband at
+  once; its question goes away and nothing is kept.
+- **How often it was right** on the page counts your answers per kind.
+
+Files, app-private, exported by Export data and listed by Share on Wi-Fi: `files/auto-start/settings.json`,
+`state.json`, `log.jsonl` (every check, guess, question, answer and outcome) and `laptop.json`; format in
+`docs/data-format.md`. A debug build has a fake "headband came near" for the emulator (Emulator smoke test).
+
+### Owner step: pair it, then a bedtime with "Ask me" (5 minutes, then a few evenings)
+
+Nothing of this has run on a phone yet. Only the phone can tell: whether HyperOS shows the pairing dialog and keeps
+"headband near" working with the screen off, the contact numbers on and off the head, and how much the checks take
+from the headband's battery.
+
+1. Settings, **When I put the headband on**, **Pair the headband** with the headband nearby and not in use. Choose
+   it in the dialog. Note what the "Watching for the headband" lines say.
+2. On a Xiaomi: Settings, Apps, EEG Tracker: **Autostart** on and **Battery saver: No restrictions**.
+3. Headband on, **Check now**: within about 20 seconds a quiet notification should ask. Tap **Not now**. Then take
+   the headband off and tap **Check now** again: no question should come.
+4. At bedtime, leave everything on **Ask me**, put the headband on, put the phone on the charger and lock it. Within 10
+   minutes "Headband on. Start the night?" should come. Tap **Start the night**. Stop in the morning as usual.
+5. Tell the assistant (and Export data: `auto-start/log.jsonl` has the contact numbers and battery of every check):
+   - Did the pairing dialog show the headband; did the question come, how late, with the screen off?
+   - Did the night's report start when you put the headband on, not when you tapped?
+   - Did a question ever come at a wrong moment (off the head, in a session, right after Stop)?
+   - The headband's battery in the evening and in the morning, on a day with checks.
 
 ## Hands-free controls (off unless you switch it on)
 
