@@ -21,6 +21,21 @@ abstract final class Night {
 
 const List<FontFeature> tabular = [FontFeature.tabularFigures()];
 
+// The bottom bar's icons and labels, made once: a theme that is rebuilt equal never animates (MaterialApp's
+// AnimatedTheme lerps between unequal themes, and a closure made anew is never equal).
+final WidgetStateProperty<IconThemeData?> _barIcons = WidgetStateProperty.resolveWith(
+  (s) => IconThemeData(size: 24, color: s.contains(WidgetState.selected) ? Night.ink : Night.inkMuted),
+);
+final WidgetStateProperty<TextStyle?> _barLabels = WidgetStateProperty.resolveWith(
+  (s) => TextStyle(
+    fontSize: 12,
+    height: 16 / 12,
+    letterSpacing: 0.5,
+    color: s.contains(WidgetState.selected) ? Night.ink : Night.inkMuted,
+    fontWeight: s.contains(WidgetState.selected) ? FontWeight.w600 : FontWeight.w500,
+  ),
+);
+
 ThemeData nightTheme() {
   const scheme = ColorScheme(
     brightness: Brightness.dark,
@@ -86,6 +101,18 @@ ThemeData nightTheme() {
       style: TextButton.styleFrom(foregroundColor: Night.ink, minimumSize: const Size(64, 48), textStyle: small),
     ),
     dialogTheme: const DialogThemeData(backgroundColor: Night.surfaceHigh),
+    // the main screen's bottom bar (home_tabs.dart): one ply on the ground, the chosen tab one step lighter
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: Night.ground,
+      surfaceTintColor: Colors.transparent,
+      shadowColor: Colors.transparent,
+      elevation: 0,
+      height: 72,
+      indicatorColor: Night.rule,
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      iconTheme: _barIcons,
+      labelTextStyle: _barLabels,
+    ),
     snackBarTheme: SnackBarThemeData(
       backgroundColor: Night.surfaceHigh,
       contentTextStyle: text.bodyLarge?.copyWith(color: Night.ink),
