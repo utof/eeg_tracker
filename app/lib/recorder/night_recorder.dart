@@ -603,8 +603,14 @@ class NightRecorder {
       // Anything unexpected ends this run only; the night goes on with a reconnect.
       w.log('unexpected error: ${_short(e)}');
     }
-    await _cancel([sigSub, rangeSub, notesSub]);
-    return _finish(band, w, end, isLost);
+    await _cancel([sigSub, rangeSub]);
+    // The headband's notes are heard until the run's files close: stopping its signal and letting it go write its
+    // last lines (the lost packets since its last note).
+    try {
+      return await _finish(band, w, end, isLost);
+    } finally {
+      await _cancel([notesSub]);
+    }
   }
 
   /// Ends a run's subscriptions; a failing cancel costs nothing.

@@ -25,13 +25,17 @@ import 'own_ble/fake_headband.dart';
 
 const _ms = Duration(milliseconds: 1);
 
-OwnTiming ownFast({Duration healFor = const Duration(seconds: 3), List<Duration>? backoffs}) => OwnTiming(
+OwnTiming ownFast({
+  Duration healFor = const Duration(seconds: 3),
+  List<Duration>? backoffs,
+  Duration notesEvery = const Duration(milliseconds: 50),
+}) => OwnTiming(
   callTimeout: _ms * 300,
   healFor: healFor,
   stall: _ms * 150,
   backoffs: backoffs ?? [_ms * 20, _ms * 40, _ms * 80],
   contactFor: _ms * 30,
-  notesEvery: _ms * 50,
+  notesEvery: notesEvery,
   contactNoteEvery: _ms * 100,
   poll: _ms * 10,
   stopWait: _ms * 500,
@@ -273,6 +277,22 @@ void main() {
           .firstMatch(log)!;
       expect(int.parse(end.group(1)!), 8 * int.parse(end.group(2)!));
       expect(int.parse(end.group(2)!), greaterThanOrEqualTo(20));
+    });
+
+    test('the lost packets the object noted as the run ended are in the log too', () async {
+      final hb = FakeHeadband(loseEvery: 7);
+      // Its notes come every 10 s, so all of them come as the run ends (the stop and the disconnect).
+      final keep = _Keep(own(hb, timing: ownFast(notesEvery: const Duration(seconds: 10))));
+      final r = recorder(keep);
+      final running = r.run(restartedBySystem: false);
+      await waitFor(() => statuses.isNotEmpty && statuses.last.nightSamples > 1000);
+      await r.stop();
+      await running;
+      final band = keep.bands.single as OwnHeadband;
+      expect(band.lostSamples, greaterThan(0));
+      final log = files('log').single.readAsStringSync();
+      final noted = RegExp(r'lost (\d+) samples in \d+ gaps').allMatches(log).fold<int>(0, (n, m) => n + int.parse(m.group(1)!));
+      expect(noted, band.lostSamples, reason: log);
     });
 
     test('with command 5 contact is measured all night alongside the signal', () async {
@@ -583,4 +603,25 @@ void main() {
       expect(File('pubspec.yaml').readAsStringSync(), contains('universal_ble: ${m.group(1)}'));
     });
   });
+}
+
+/// A finder that keeps every headband object it hands out.
+class _Keep implements HeadbandFinder {
+  _Keep(this.inner);
+  final HeadbandFinder inner;
+  final List<Headband> bands = [];
+
+  @override
+  Future<Headband?> find(Duration scanFor, {void Function(String name, int rssi)? onFound}) async {
+    final b = await inner.find(scanFor, onFound: onFound);
+    if (b != null) bands.add(b);
+    return b;
+  }
+
+  @override
+  Future<Headband> connectDirect(BandId id) async {
+    final b = await inner.connectDirect(id);
+    bands.add(b);
+    return b;
+  }
 }

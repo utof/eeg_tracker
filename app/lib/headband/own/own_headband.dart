@@ -422,6 +422,7 @@ class OwnHeadband implements Headband, BandNotes, MendsDrops {
       await _runner?.timeout(timing.stopWait, onTimeout: () {});
     } catch (_) {}
     await _drv.close(idle: true);
+    _tick(); // the lost packets since the last note, while the night's log still listens
     await _signal.close();
     await _resist.close();
     await _range.close();
