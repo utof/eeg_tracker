@@ -243,7 +243,7 @@ folder). It never changes or deletes anything in the app's folder, and never run
 
 - The layout is the app's own: `recordings/` (raw nights, the recorder's format above), `nights/<date>.report.json`,
   `mornings/`, `meditations/`, `alpha-theta/` (sessions and `journal.json`), `replay-check/<kind>/` and
-  `settings.json`, `experiments/<made at>/` (self-experiments, below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers and their `<stamp>-r<n>.text.json` words, below, `prompts/`), `sound-states/`, `hands-free/` (below), `unusual/` (below), `own-ble/`
+  `settings.json`, `experiments/<made at>/` (self-experiments, below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers and their `<stamp>-r<n>.text.json` words, below, `prompts/`), `sound-states/`, `hands-free/` (below), `unusual/` (below), `try-these/` (below), `own-ble/`
   (`settings.json`: which headband connection is in use; `probe/<stamp>/`: the probe's result, docs/own-ble-driver.md), and any folder
   a later feature adds. Left on the phone: `models/` (copies of the app's model assets), `export/` (the export's own
   index), half-written `*.tmp` files, the scorer's `*.scoring` markers, and the two files Android and a plugin keep
@@ -337,6 +337,18 @@ The moments themselves are not stored: they are drawn again from `seed`, the day
 (`app/lib/sharp/schedule.dart`): the waking window cut into `per_day` equal parts, one random minute in each, at least
 60 minutes apart; two of them suggest the test. The Trends page reads two day numbers from these files (a day runs
 04:00 to 04:00): `sharp`, the mean of the day's ratings, and `dayrt`, the median of the day's tests' medians.
+
+### Try these (`try-these/`)
+
+The in-app list of what to try next (DECISIONS row 340): which stops the owner ticked Done or Skip, which the app
+ticked itself, and the owner's notes ("What happened?"), for the assistant to read after an import
+(`_local/phone/try-these/`). Card ids and titles are those of `app/lib/try_these/cards.dart`. Times are local with
+their UTC offset. A missing or damaged `progress.json` reads as nothing done.
+
+| File | Content |
+|---|---|
+| `progress.json` | `version` 1, `changed` (the last write), `cards`: one entry per card id the owner or the app touched: `title`, `state` (`open`, `done`, `skipped`), `at` (when the state last changed), `by` (`owner` or `app`), `seen` (what the app saw, in a sentence, when `by` is `app`), `note` (the owner's note, as typed; saved a moment after the last key), `note_changed`; written under a temporary name, then renamed |
+| `events.jsonl` | one line per change of state: `at`, `card`, `title`, `event` (`done`, `skipped`, `reopened`, `seen by the app`), with `seen` and the `note` at that moment; a note typed without a change of state is not logged |
 
 On the laptop, `scripts/import_phone.py <folder>` (standard library only) checks the manifest, copies
 `recordings/<stamp>.*` into `_local/recordings/` beside the laptop's own recordings and everything else into

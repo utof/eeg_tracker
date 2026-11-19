@@ -49,6 +49,28 @@ for a state, with an optional beat, and with the headband shows what your brain 
 - Sound for states: `lib/states/` (presets, stop rule, readout, files, session), `lib/sound/state_synth.dart` (the
   sound, made in the app) and `lib/sound/soloud_state_sound.dart`, `lib/ui/states_*.dart` and `lib/ui/sound_score.dart`;
   DECISIONS rows 130-139.
+- Try these: `lib/try_these/` (the cards, the progress file, what the app sees by itself), `lib/ui/try_these_*.dart`;
+  DECISIONS row 340 (below).
+
+## Try these
+
+Between nights the main screen's **Try these** section (after Morning) opens one page with each feature's first try,
+in order: tonight and the morning (a night with Lights off, how long scoring takes, the report's noise and jaw numbers,
+the morning check-in, Export data), another night (smart alarm, Share on Wi-Fi), sessions, the tries that take weeks
+(a self-experiment, the replay check, and the assistant's proposals Sharp hours and Unusual for you, marked as such),
+and our own headband connection when the headband is charged. Each stop says what it is, what to do, opens its
+screen, lists what to tell the assistant, and takes a note ("What happened?"); **Done** or **Skip** folds it away and
+opens the next. "4 of 20 tried" and a row of cells sit at the top.
+
+The app ticks a stop itself when it sees it done (a scored night with Lights off tapped, a scored night, a check-in,
+a complete export, the smart alarm rang, a meditation, a nap, a dream catcher session, an answer written out, an
+alpha-theta session, a Fall asleep sound session with the headband, an experiment started, the replay check on,
+sharp-hours answers on 2 days); a stop you skipped or reopened stays as you left it.
+
+Ticks and notes are kept in `files/try-these/` (`progress.json`, `events.jsonl`; `docs/data-format.md`) and leave the
+phone with **Export data**; after `scripts/import_phone.py` the assistant reads them in `_local/phone/try-these/`. The
+cards are written by hand from this README's "Owner step" sections (`lib/try_these/cards.dart`):
+`test/try_these_test.dart` fails when an owner step has no card, so a new feature's owner step needs one there.
 
 ## Build and test
 
@@ -62,7 +84,7 @@ flutter build apk --release --target-platform android-arm64
 
 `flutter test` also renders the night screen in six states (two also at the owner's 393 dp width), the meditation
 screen in eleven, the sleep report in nine, the replay check's and alpha-theta's pages in nineteen, the dream catcher in thirteen, the nap coach in sixteen, the check-in, trends
-and Morning section in eighteen, sound for states in fourteen, Export data in nine and Headband connection in eleven to `build/screens/*.png`
+and Morning section in eighteen, sound for states in fourteen, Export data in nine, Headband connection in eleven and Try these in seven to `build/screens/*.png`
 (normal and 130 % text). `test/own_ble_*_test.dart` run our own connection on a fake
 headband: the driver, a night, sessions, the probe and its page. `test/export_test.dart` exports a fake app folder (every place the app writes) and remakes,
 with `EXPORT_FIXTURE=write`, the export the laptop importer's test reads (`test/fixtures/phone_export/`).
