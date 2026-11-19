@@ -65,6 +65,10 @@ class ChunkWriter {
   /// dropped, so it can never cost a sample.
   static void Function(String stem, int first, DateTime arrival, List<Sample> samples)? onBatch;
 
+  /// The Signal view's tap during a night (lib/signal/live_tap.dart, DECISIONS 595), beside [onBatch] and on the same
+  /// terms: it only gathers the batch for the screen, and one that throws is dropped.
+  static void Function(String stem, int first, DateTime arrival, List<Sample> samples)? onLive;
+
   int get samplesReceived => _received;
   int get samplesWritten => _written;
   bool get isClosed => _closed;
@@ -95,6 +99,14 @@ class ChunkWriter {
         tap(stem, _received - samples.length, arrival, samples);
       } catch (_) {
         onBatch = null;
+      }
+    }
+    final live = onLive;
+    if (live != null) {
+      try {
+        live(stem, _received - samples.length, arrival, samples);
+      } catch (_) {
+        onLive = null;
       }
     }
   }
