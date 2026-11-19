@@ -8,7 +8,7 @@
 // [workDayMinMinutes] of it has no number at all: the share of such a short stretch would be a few readings, and the
 // first hint of a work day comes after 60 worn minutes. Sessions the owner marked as worn by someone else (`wearer`,
 // as nights and check-ins are marked, DECISIONS 377) are left out. Nothing here changes a file.
-// As in the session (DECISIONS 521-522): a hint in the 30 minutes before a session's Stop was followed by a break when
+// As in the session (DECISIONS 522, 524): a hint in the 30 minutes before a session's Stop was followed by a break when
 // 5 minutes or more passed until the next session (or none came); the first drowsy stretch starts its 12 half minutes
 // again after each break.
 import 'dart:convert';

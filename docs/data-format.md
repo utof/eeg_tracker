@@ -459,7 +459,8 @@ The reminders' times are not stored when they follow the sleep: they are worked 
 One file per work session (ROADMAP row 35, DECISIONS 440-449): `<stamp>.work.json`, the session's start as
 `yyyy-MM-dd-HHmmss` local time. Written whole (a temporary name, then a rename) every 5 minutes while the session runs
 and at Stop, so a crash loses at most the last minutes; `ended` says which. Times are local ISO times. No raw EEG: the
-per-30-s numbers are enough to score a session again with other weights or lines.
+per-30-s numbers are enough to score a session again with other weights or lines. Compact JSON (one line); older files
+are indented, and read the same.
 
 | Field | Content |
 |---|---|
@@ -470,12 +471,13 @@ per-30-s numbers are enough to score a session again with other weights or lines
 | `baseline` | `alpha` (µV², 8-12 Hz at O1/O2), `events` (blinks plus sideways eye movements per 30 s), `theta` (µV², 4-7 Hz at O1/O2) and `sem` (µV², T3-T4 at 0.2-0.7 Hz): medians of the 6 scored half minutes after the first minute; `null` before |
 | `calibrated_at_s` | seconds of signal when the baseline was complete |
 | `worn_min`, `active_min` | minutes the headband sent a usable signal outside breaks |
+| `stretch_min` | worn minutes since the last break of 5 minutes or more (the hour's count) when the file was written; a session started under 5 minutes after this one's `end` carries it on (absent in older files) |
 | `minutes` | minutes after the baseline per level: `alert`, `getting_drowsy`, `drowsy`, `unknown` (not enough clean signal); `eyes_closed` (half minutes read as closed eyes, whole session) |
-| `epochs` | one entry per 30 s of signal: `at` (its start, local ISO time from the phone's clock; the first version of the file had no `at`), `s` (its first second of signal), `clean_s` (seconds read for alpha), `muscle_s`, `movement_s`, `gap_s`, `blinks`, `eye_moves`, `events` (per 30 usable s), `alpha`, `theta`, `sem` (medians, µV²; `null` under 10 clean seconds), `eyes_closed`, `a` and `still` (log2 against the baseline: alpha, and eye stillness = log2((baseline events + 1) / (events + 1))), `t` and `s_eye` (theta and slow eye power the same way, logged only), `index` (the mean of `a` and `still`, at most 0.25 when `a` is negative), `window` (the median index of the last 10), `level` |
+| `epochs` | one entry per 30 s of signal: `at` (its start, local ISO time from the phone's clock; the first version of the file had no `at`), `s` (its first second of signal), `clean_s` (seconds read for alpha), `muscle_s`, `movement_s`, `gap_s`, `blinks`, `eye_moves`, `eye_s` (seconds counted for eye events: no hole or movement, all four channels usable for the detectors; absent in older files), `events` (per 30 of those seconds; `null` under 20), `alpha`, `theta`, `sem` (medians, µV²; `null` under 10 clean seconds), `eyes_closed`, `a` and `still` (log2 against the baseline: alpha, and eye stillness = log2((baseline events + 1) / (events + 1))), `t` and `s_eye` (theta and slow eye power the same way, logged only), `index` (the mean of `a` and `still`, where a positive `still` counts only as far as alpha is up: times `a` / 0.5, between 0 and 1; `a` alone when `still` is `null`; older files used the plain mean, at most 0.25 when `a` was negative), `window` (the median index of the last 10), `level` |
 | `hints` | `at`, `reason` (`stretch`, `drowsy`, `eyesClosed`, `snooze`), `active_min` (worn minutes of the stretch), `threshold_min`, `level`, `answer` (`onBreak`, `snoozed`, `notNow` or `null`), `answered_at`, `taken` (a break of 5 minutes or more started within 30 minutes) |
-| `breaks` | `start`, `end`, `source` (`tapped` or `headbandOff`: no usable signal for 5 minutes, counted from when it stopped), `before` / `before_level` (the level's median just before), `after` / `after_level` (over the first 5 minutes after; `null` if never readable) |
+| `breaks` | `start`, `end`, `source` (`tapped` or `headbandOff`: no usable signal for 5 minutes, counted from when it stopped), `end_source` (`back`: Back tapped; `auto`: a tapped break whose Back was forgotten ended by itself, at the moment the headband came back after a minute or more off, or after 20 minutes' worth of readable half minutes; `signal`: a headband-off break's signal came back; `stop`: Stop; absent in older files), `before` / `before_level` (the level's median just before; for `headbandOff`, just before the headband went off), `after` / `after_level` (over the first 5 minutes after; `null` if never readable) |
 | `ratings` | `at`, `value` ("How sharp do you feel?", 1 Foggy to 5 Very sharp: the sharp-hours scale), `hint` (the index of the hint it answered, or `null`) |
-| `events` | `at`, `event`: the headband's drops, reconnects and stream restarts, each hint, the eyes-closed minute's outcome, and `chime waited: a call` (with `hint`, the hint's `at`) when a hint came during a call and its chime waited (DECISIONS 495) |
+| `events` | `at`, `event`: the headband's drops, reconnects and stream restarts (also `no data for N s: stream restarted` and `no data for N s with the headband in range; reconnecting`), each hint, the eyes-closed minute's outcome, `chime waited: a call` (with `hint`, the hint's `at`) when a hint came during a call and its chime waited (DECISIONS 495), `break ended by itself (Back not tapped)` (with `end`), and `stretch carried over from a session that ended under 5 minutes ago` (with `stretch_min`) |
 | `wearer` | optional, as in a night's report: `answer` (`me` or `someone else`) and `at`; a session marked `someone else` is left out of the Trends numbers below. The owner sets it by hand with "Someone else wore it" on the end page or under the session in the list of earlier sessions (DECISIONS rows 490-494); "Undo" removes the object. Nothing else in the file changes |
 
 The Trends page and the self-experiments read one set of day numbers from these files (DECISIONS rows 480-489; a day
@@ -484,7 +486,9 @@ from the hints their `at` and `taken`, from the breaks their `start` and `end`, 
 `value`. Work time is the epochs read as alert, getting drowsy or drowsy, outside closed eyes and breaks; a day with
 under 30 minutes of it has no number. Measure ids: `worktime` (minutes), `workdrowsy` (share of that time at getting
 drowsy or drowsy, 0-100), `workfirst` (worked minutes until the level first read getting drowsy or drowsy in 8 of 12
-epochs; only days with one), `workhints`, `workfollowed` (hints a break of 5 minutes or more followed), `workbreaks`
+epochs since the last break; only days with one), `workhints`, `workfollowed` (hints a break of 5 minutes or more
+followed: `taken`, or the hint came in the 30 minutes before the session's Stop and 5 minutes or more passed until the
+next session, or no session followed and the file says `stopped`), `workbreaks`
 (5 minutes or more) and `worksharp` (the mean tap, 1-5; only days with a tap).
 
 ### Lucid dream cues (`lucid/`)
