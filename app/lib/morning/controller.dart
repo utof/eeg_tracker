@@ -177,7 +177,7 @@ class MorningController extends ChangeNotifier {
     final run = ++_run;
     _set(MorningStage.connecting, 'Looking for the headband.');
     await _keep();
-    if (_ended) return; // stopped meanwhile
+    if (!_live(run)) return; // stopped meanwhile, or a newer start took over (it searches itself)
     try {
       // a headband the search brings after its deadline is let go; a search stuck behind an earlier one says so
       final band = await BandLink.within(

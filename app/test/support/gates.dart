@@ -5,6 +5,7 @@ import 'dart:async';
 
 import 'package:eeg_tracker/recorder/chunk_writer.dart' show Sample;
 import 'package:eeg_tracker/recorder/headband.dart';
+import 'package:eeg_tracker/session_keeper.dart';
 
 /// Every search waits until the test answers it: `finds[i].complete(band)` (or null: none found).
 class GateFinder implements HeadbandFinder {
@@ -73,4 +74,18 @@ class SlowStart implements Headband {
   Future<bool> isInRange() => inner.isInRange();
   @override
   Future<int> battery() => inner.battery();
+}
+
+/// A session keeper whose every hold waits until the test answers it (`holds[i].complete(true)`), as the phone's
+/// keeper waits for its service.
+class GateKeeper extends FakeSessionKeeper {
+  final List<Completer<bool>> holds = [];
+
+  @override
+  Future<bool> hold(KeepSpec spec) async {
+    await super.hold(spec);
+    final c = Completer<bool>();
+    holds.add(c);
+    return c.future;
+  }
 }

@@ -271,6 +271,30 @@ void main() {
     expect(band.calls, containsAllInOrder(['stopSignal', 'disconnect']));
   });
 
+  test('Stop, then Start again while the first start waits for the service: the first start does not search', () async {
+    late MorningController c;
+    final finder = GateFinder(), keeper = GateKeeper();
+    final band = EyesBand(DemoSignal(2), () => c.stage == MorningStage.closed ? 'closed' : 'open');
+    c = MorningController(finder: finder, store: MorningStore(tmp), timing: fast, keeper: keeper);
+    final first = c.start();
+    await until(c, () => keeper.holds.length == 1);
+    await c.stop();
+    final second = c.start();
+    await until(c, () => keeper.holds.length == 2);
+    keeper.holds[0].complete(true); // the phone answers the first hold only now
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(finder.finds, isEmpty, reason: 'a second search beside the new start could take its headband');
+    keeper.holds[1].complete(true);
+    await until(c, () => finder.finds.length == 1);
+    finder.finds[0].complete(band);
+    await second;
+    await first;
+    expect((c.stage, c.message), (MorningStage.contact, ''));
+    expect(finder.finds, hasLength(1));
+    await c.stop();
+    expect(band.calls, containsAllInOrder(['stopSignal', 'disconnect']));
+  });
+
   test('Stop, then Start again: the first search finding nothing fails nothing (finding 1)', () async {
     late MorningController c;
     final finder = GateFinder(), band = EyesBand(DemoSignal(2), () => 'open');

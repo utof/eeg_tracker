@@ -378,6 +378,37 @@ void main() {
       c.dispose();
     });
 
+    test('Stop, then Start again while the first start waits for the service: it does not search', () async {
+      final finder = GateFinder(), keeper = GateKeeper(), band = DriftBand((t) => 1, perTick: 5);
+      final c = NapController(
+        finder: finder,
+        sound: SilentNapSound.new,
+        store: store,
+        recordingsDir: recordings,
+        scale: scaleNow,
+        timing: fast,
+        keeper: keeper,
+      );
+      final first = c.start(lengthMin: 30);
+      await until(c, () => keeper.holds.length == 1);
+      await c.stop();
+      final second = c.start(lengthMin: 30);
+      await until(c, () => keeper.holds.length == 2);
+      keeper.holds[0].complete(true); // the phone answers the first hold only now
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(finder.finds, isEmpty, reason: 'a second search beside the new start could take its headband');
+      keeper.holds[1].complete(true);
+      await until(c, () => finder.finds.length == 1);
+      finder.finds[0].complete(band);
+      await until(c, () => c.stage == NapStage.resting);
+      await first;
+      await second;
+      expect(finder.finds, hasLength(1));
+      await c.stop();
+      expect(store.list().single.end, NapEnd.stopped);
+      c.dispose();
+    });
+
     test('Stop while the stream is being started: the nap ends, stays ended, and its final record stands', () async {
       final inner = DriftBand((t) => 1, perTick: 5), band = SlowStart(inner);
       final c = NapController(

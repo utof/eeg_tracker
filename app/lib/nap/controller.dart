@@ -238,7 +238,7 @@ class NapController extends ChangeNotifier {
     this.lengthMin = lengthMin;
     _set(NapStage.connecting, 'Looking for the headband.');
     await _keep(lengthMin);
-    if (_ended) return; // stopped meanwhile
+    if (!_live(run)) return; // stopped meanwhile, or a newer start took over (it searches itself)
     final link = BandLink(finder: finder, timing: timing.link, onBatch: _onBatch, onEvent: _onLinkEvent, clock: _now);
     _link = link;
     try {
