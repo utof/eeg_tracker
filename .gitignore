@@ -9,3 +9,4 @@ logs/
 .venv/
 !app/test/fixtures/phone_export/eeg-export/recordings/*.f32
 !app/test/fixtures/phone_export/eeg-export/mornings/*.f32
+!app/test/fixtures/packed/*.f32.gz

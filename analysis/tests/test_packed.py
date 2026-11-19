@@ -172,6 +172,23 @@ def test_a_run_stopped_between_the_copy_and_the_removal_is_finished(tmp_path: Pa
     assert packed.finish(g32) is None and g32.exists() and not packed.packed_path(g32).exists()
 
 
+PHONE_FIXTURE = ROOT / "app" / "test" / "fixtures" / "packed" / "2026-11-18-231200.f32.gz"
+
+
+def test_the_phones_packed_form_reads_the_same_on_the_laptop(tmp_path: Path) -> None:
+    """The fixture was packed by the app (app/lib/recorder/packed.dart, app/test/packed_test.dart checks it too): its
+    gzip header names the .f32 with its length and SHA-256, which the laptop reads without unpacking."""
+    told = packed.info(PHONE_FIXTURE)
+    assert told == packed.unpacked(PHONE_FIXTURE) and told.bytes == 500 * REC
+    body = gzip.decompress(PHONE_FIXTURE.read_bytes())
+    assert struct.unpack_from("<I", body, 499 * REC)[0] == 499
+    shutil.copy(PHONE_FIXTURE, tmp_path)
+    f32 = tmp_path / "2026-11-18-231200.f32"
+    assert packed.raw_files(tmp_path) == [f32] and packed.size(f32) == len(body) and packed.read_bytes(f32) == body
+    uv, _ = to_bdf.load(f32)
+    assert uv.shape == (500, 4)
+
+
 # ---- the daily run ----------------------------------------------------------------------------------------------
 
 def pack_cli(local: Path, *args: str) -> tuple[int, str]:

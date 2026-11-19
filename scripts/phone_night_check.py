@@ -22,7 +22,7 @@ The thresholds of the verdict are planning values (DECISIONS row 320), not measu
 """
 from __future__ import annotations
 
-import argparse, bisect, lzma, re, statistics, struct, sys
+import argparse, bisect, lzma, re, statistics, struct, sys, zlib
 from array import array
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -417,7 +417,7 @@ def pack_at(run: Run, j: int) -> int | None:
             with open(run.path, "rb") as f:
                 f.seek(j * REC)
                 b = f.read(4)
-    except (OSError, lzma.LZMAError, EOFError):
+    except (OSError, lzma.LZMAError, zlib.error, EOFError):
         return None
     return struct.unpack("<I", b)[0] if len(b) == 4 else None
 

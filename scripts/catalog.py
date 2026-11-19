@@ -36,7 +36,7 @@ Read-only on the data: it never deletes, moves or packs a recording or a report.
 """
 from __future__ import annotations
 
-import argparse, hashlib, json, lzma, os, re, sys
+import argparse, hashlib, json, lzma, os, re, sys, zlib
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -46,7 +46,7 @@ import night_files as nf  # noqa: E402
 import packed  # noqa: E402
 
 FORMAT, VERSION = "eeg-tracker-catalog", 1
-RAW = (".f32", packed.PACKED, ".idx", ".log", ".markers.jsonl")
+RAW = (".f32", *packed.PACKED_FORMS, ".idx", ".log", ".markers.jsonl")
 LAPTOP_REPORT = (".report.json", ".sleep.json", ".hypnogram.png", ".bdf")  # scripts/sleep_report.py's files
 MORNING_WITHIN_S = 12 * 3600
 DIY = "recordings-diy"
@@ -180,8 +180,8 @@ def nights_on(local: Path) -> list[dict]:
 def _attach_mornings(local: Path, rows: list[dict]) -> None:
     """A check-in belongs to the night recorded in its `source` file, else to the last night that started before it
     and ended at most 12 hours before it. The phone's keep their raw signal beside them in phone/mornings/."""
-    by_file = {Path(rel).name.removesuffix(packed.SUFFIX): row for row in rows for rel, kind in row["paths"]
-               if rel.endswith((packed.RAW, packed.PACKED))}
+    by_file = {packed.logical(Path(rel)).name: row for row in rows for rel, kind in row["paths"]
+               if rel.endswith((packed.RAW, *packed.PACKED_FORMS))}
     found = [(p, f"recordings/{p.name}") for p in sorted((local / "recordings").glob("*.morning.json"))]
     found += [(p, f"phone/mornings/{p.name}") for p in sorted((local / "phone" / "mornings").glob("*.morning.json"))]
     for p, rel in found:
@@ -251,8 +251,8 @@ def _content(f: dict | None) -> tuple[int, str] | None:
 
 def _twin(rel: str) -> str | None:
     """The other form of a raw .f32's path: packed for plain, plain for packed."""
-    if rel.endswith(packed.PACKED):
-        return rel[:-len(packed.SUFFIX)]
+    if rel.endswith(packed.PACKED_FORMS):
+        return rel[:-3]
     return rel + packed.SUFFIX if rel.endswith(packed.RAW) else None
 
 
@@ -268,9 +268,9 @@ def _compare_packed(path: Path, rel: str, st: os.stat_result, prev: dict | None,
         o = packed.unpacked(path) if check else packed.info(path)
         if o.sha256 is None:  # not packed by pack_old.py: its check is not a SHA-256
             o = packed.unpacked(path)
-    except (OSError, lzma.LZMAError, EOFError):
+    except (OSError, lzma.LZMAError, zlib.error, EOFError):
         return sha, (prev or {}).get("original"), "damaged"
-    original = dict(path=rel[:-len(packed.SUFFIX)], bytes=o.bytes, sha256=o.sha256)
+    original = dict(path=rel[:-3], bytes=o.bytes, sha256=o.sha256)
     old = prev or gone
     if old is None:
         return sha, original, "new"
@@ -285,10 +285,10 @@ def _form_changed(path: Path, rel: str, twin: dict, content: tuple[int, str]) ->
     """A raw .f32 that was plain at the last catalog and is packed now (or the other way round): "packed" or
     "unpacked" when it holds the same bytes, "grew" when the earlier bytes are its start, else "changed"."""
     if _content(twin) == content:
-        return "packed" if rel.endswith(packed.SUFFIX) else "unpacked"
+        return "packed" if rel.endswith(packed.PACKED_FORMS) else "unpacked"
     before = _content(twin)
     if before and before[0] <= content[0]:
-        _, pre = digest(path, content[0], before[0], unpack=rel.endswith(packed.SUFFIX))
+        _, pre = digest(path, content[0], before[0], unpack=rel.endswith(packed.PACKED_FORMS))
         if pre == before[1]:
             return "grew"
     return "changed"
@@ -310,7 +310,7 @@ def build(local: Path, previous: dict | None, check: bool, now: datetime) -> tup
             p = local / rel
             st = p.stat()
             original = None
-            if kind == "raw" and rel.endswith(packed.PACKED):
+            if kind == "raw" and rel.endswith(packed.PACKED_FORMS):
                 sha, original, what = _compare_packed(p, rel, st, old.get(rel), gone.get(rel), check)
             else:
                 sha, what = _compare(p, kind, st, old.get(rel), gone.get(rel), check)

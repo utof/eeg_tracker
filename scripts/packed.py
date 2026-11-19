@@ -8,6 +8,10 @@ the same bytes come back. Every laptop reader of a raw `.f32` goes through this 
 - `open_raw(path)`, `read_bytes(path)`: the original's bytes.
 - `raw_files(folder)`: every `<stamp>.f32` in a folder, packed or not, by its plain name.
 
+The phone packs its own after a day as `<stamp>.f32.gz` (app/lib/recorder/packed.dart: gzip, whose header names
+the .f32 and holds its length and SHA-256). import_phone.py and pull_phone.py unpack those as they arrive, but an
+export folder or a copy of the phone's files may still hold them, so the readers here open that form too.
+
 Readers keep using the plain name (`<stamp>.f32`): the sleep report's `inputs`, `with_suffix(".idx")` and the
 catalog's night rows stay as they were. Only `.f32` is packed; `.idx`, `.log` and `.markers.jsonl` stay plain (the
 nights' chaining reads the last `.idx` row of every recording, often).
@@ -20,14 +24,16 @@ removes the original. Standard library only (the recorder hub imports night_file
 """
 from __future__ import annotations
 
-import hashlib, lzma, os, struct, zlib
+import gzip, hashlib, json, lzma, os, struct, zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
-SUFFIX = ".xz"
+SUFFIX = ".xz"  # what the laptop writes
+FORMS = (SUFFIX, ".gz")  # what it reads: its own form, and the phone's
 RAW = ".f32"
 PACKED = RAW + SUFFIX
+PACKED_FORMS = tuple(RAW + s for s in FORMS)
 PRESET = 6  # xz -6, the default: 61 % smaller on a real night (DECISIONS 541)
 MIN_BYTES = 64 * 1024  # smaller files are left plain: under 13 s of signal, little to gain
 CHUNK = 1 << 20
@@ -62,23 +68,28 @@ def packed_path(path: Path) -> Path:
 
 
 def is_packed(path: Path) -> bool:
-    return path.name.endswith(SUFFIX)
+    """A packed raw file: `<stamp>.f32.xz` (the laptop's) or `<stamp>.f32.gz` (the phone's)."""
+    return path.name.endswith(PACKED_FORMS)
 
 
 def logical(path: Path) -> Path:
-    """The plain name of a raw file: `<stamp>.f32` for `<stamp>.f32.xz`."""
-    return path.with_name(path.name[: -len(SUFFIX)]) if is_packed(path) else path
+    """The plain name of a raw file: `<stamp>.f32` for `<stamp>.f32.xz` or `.f32.gz`."""
+    return path.with_name(path.name[:-3]) if is_packed(path) else path  # both suffixes are 3 characters
 
 
 def on_disk(path: Path | str) -> Path | None:
-    """The file holding a raw file's bytes: the plain one, else the packed one; None when neither is there."""
+    """The file holding a raw file's bytes: the plain one, else a packed one (the laptop's form first); None when
+    neither is there."""
     p = Path(path)
     if is_packed(p):
         return p if p.is_file() else None
     if p.is_file():
         return p
-    x = packed_path(p)
-    return x if x.is_file() else None
+    for s in FORMS:
+        x = p.with_name(p.name + s)
+        if x.is_file():
+            return x
+    return None
 
 
 def exists(path: Path | str) -> bool:
@@ -89,7 +100,8 @@ def raw_files(folder: Path | str, ext: str = RAW) -> list[Path]:
     """Every `*<ext>` in [folder] by its plain name, whether it is packed or not, sorted."""
     d = Path(folder)
     found = {p for p in d.glob(f"*{ext}") if p.is_file()}
-    found |= {logical(p) for p in d.glob(f"*{ext}{SUFFIX}") if p.is_file()}
+    for s in FORMS:
+        found |= {logical(p) for p in d.glob(f"*{ext}{s}") if p.is_file()}
     return sorted(found)
 
 
@@ -147,11 +159,39 @@ def _parse(path: Path, size: int) -> Original | None:
         return Original(uncompressed, sha)
 
 
+def _parse_gz(path: Path) -> Original | None:
+    """The original's length and SHA-256 from the phone's gzip header (its comment field); None without them."""
+    with open(path, "rb") as f:
+        h = f.read(4096)
+    if len(h) < 10 or h[:3] != b"\x1f\x8b\x08" or not h[3] & 16:
+        return None
+    o = 10
+    if h[3] & 4:
+        o += 2 + int.from_bytes(h[o:o + 2], "little")
+    if h[3] & 8:
+        o = h.find(b"\0", o) + 1
+        if o == 0:
+            return None
+    z = h.find(b"\0", o)
+    try:
+        j = json.loads(h[o:z].decode("latin-1")) if z > o else None
+    except ValueError:
+        return None
+    size, sha = (j.get("bytes"), j.get("sha256")) if isinstance(j, dict) else (None, None)
+    if isinstance(size, int) and size >= 0 and isinstance(sha, str) and len(sha) == 64:
+        return Original(size, sha)
+    return None
+
+
+def _open_packed(path: Path) -> BinaryIO:
+    return gzip.open(path, "rb") if path.name.endswith(".gz") else lzma.open(path, "rb")  # type: ignore[return-value]
+
+
 def unpacked(path: Path) -> Original:
-    """Unpacks the whole file (xz checks its own check on the way) and returns the length and SHA-256 of what came
-    out. Raises lzma.LZMAError or EOFError for a damaged file."""
+    """Unpacks the whole file (xz checks its own check, gzip its CRC, on the way) and returns the length and SHA-256
+    of what came out. Raises lzma.LZMAError, zlib.error, gzip.BadGzipFile or EOFError for a damaged file."""
     h, n = hashlib.sha256(), 0
-    with lzma.open(path, "rb") as r:
+    with _open_packed(path) as r:
         while b := r.read(CHUNK):
             h.update(b)
             n += len(b)
@@ -169,8 +209,9 @@ def info(path: Path) -> Original:
     key = (str(path), st.st_size, st.st_mtime_ns)
     if key not in _infos:
         try:
-            _infos[key] = _parse(path, st.st_size) or unpacked(path)
-        except (lzma.LZMAError, EOFError) as e:
+            told = _parse_gz(path) if path.name.endswith(".gz") else _parse(path, st.st_size)
+            _infos[key] = told or unpacked(path)
+        except (lzma.LZMAError, zlib.error, EOFError, gzip.BadGzipFile) as e:
             raise Damaged(f"{path.name} does not unpack ({e})") from e
     return _infos[key]
 
@@ -188,7 +229,7 @@ def open_raw(path: Path | str) -> BinaryIO:
     d = on_disk(path)
     if d is None:
         raise FileNotFoundError(str(path))
-    return lzma.open(d, "rb") if is_packed(d) else open(d, "rb")  # type: ignore[return-value]
+    return _open_packed(d) if is_packed(d) else open(d, "rb")
 
 
 def read_bytes(path: Path | str) -> bytes:

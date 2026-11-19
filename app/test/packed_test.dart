@@ -108,6 +108,15 @@ void main() {
       expect(parsePackedHeader(Uint8List.fromList([1, 2, 3])), isNull);
     });
 
+    test('the packed fixture the laptop reads too says what it holds', () {
+      // made by packRaw; analysis/tests/test_packed.py reads the same file with the laptop's code
+      final gz = File('test/fixtures/packed/2026-11-18-231200.f32.gz');
+      final body = gzip.decode(gz.readAsBytesSync());
+      expect(packedInfo(gz), PackedInfo(name: '2026-11-18-231200.f32', bytes: 10000, sha256: sha(body), modifiedMs: 1763496720123));
+      expect(rawLength(File('test/fixtures/packed/2026-11-18-231200.f32')), 10000);
+      expect(ByteData.sublistView(Uint8List.fromList(body)).getUint32(499 * recordBytes, Endian.little), 499);
+    });
+
     test('a crash before the check leaves the original and nothing else', () {
       final f32 = run(rec, DateTime(2026, 11, 18, 23), 60);
       final body = f32.readAsBytesSync();
