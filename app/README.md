@@ -266,8 +266,9 @@ no `.log` lines): if it happens there, BrainBit's calls need their own thread or
 ## Meditate
 
 1. Make sure no night is being recorded (the headband talks to one thing at a time). Put the headband on and
-   switch it on. Use wired headphones or the phone's speaker: Bluetooth headphones add about 0.3 s, so the
-   sound comes late.
+   switch it on. Use wired headphones or the phone's speaker: Bluetooth headphones add about 0.25-0.5 s, so the
+   sound comes late. When the sound goes to Bluetooth headphones, the screen says so in amber, before and during
+   the session, and the session file keeps where the sound went; you can still go on.
 2. On the main screen scroll to **Meditation** and tap **Meditate**. Pick 5, 10 or 20 minutes and tap
    **Start meditation**.
 3. The app finds the headband and checks contact (keep still a few seconds).
@@ -278,9 +279,14 @@ no `.log` lines): if it happens there, BrainBit's calls need their own thread or
    (at most 6 a minute). A tight jaw, blinks or drifting toward sleep pause the bells. Nothing to do: just notice.
    The screen stays on. You can lock the phone with the power button: the session goes on, and **Stop** is on
    the lock screen (see "Sessions with the phone locked").
-6. A third tone ends the session. The report shows minutes settled, bells, restless moments (jaw, blinks,
-   movement), drifting moments, a line of how calm the sound was, and how this session compares with earlier
-   ones (a range from the 4th session). **Stop** ends early and keeps what there was (not during calibration).
+6. A third tone, and the sound fades out for **2 silent minutes** while the headband keeps measuring: go on the
+   same way, eyes closed ("Without sound" on the screen). Can you reach the state without the sound? A last tone
+   ends the session. The report shows minutes settled, bells, restless moments (jaw, blinks, movement), drifting
+   moments, a line of how calm the sound was, how this session compares with earlier ones (a range from the 4th
+   session), **Alpha without sound** (alpha in the silent minutes against the silent minute before the sound),
+   and **Learning**: from the 8th session with the silent minutes, whether that number is going up across
+   sessions, with its 90 % range (checked again at 12, then every 12). **Stop** ends early and keeps what there
+   was (not during calibration); stopped before the silent minutes, the session does not count for Learning.
 
 The **i** button shows what the research says (`docs/evidence/meditation-feedback.md`): a guided practice, not
 a treatment, and no "meditation depth" is measured. Each session is kept in the app's private folder,
@@ -288,6 +294,32 @@ a treatment, and no "meditation depth" is measured. Each session is kept in the 
 in the laptop page's session format, so it can be replayed). **Export data** copies them out (below).
 
 If the headband drops out, the countdown pauses ("No signal") and the app reconnects by itself.
+
+### Owner step: the silent minutes and the Bluetooth note (one session, about 15 minutes)
+
+Nothing of this has run on a phone yet: not the route reading, not the tone before the silent minutes.
+
+1. If you have Bluetooth headphones, connect them, then open **Meditation**: under Before you start an amber
+   line should name them and say the sound comes 0.25-0.5 s late. Disconnect them: within a few seconds the
+   usual headphones line should be back.
+2. Wired headphones or the speaker, 10 minutes, **Start meditation**. After the 10 minutes a tone, the sound
+   fades: go on the same way, eyes closed. After 2 minutes a last tone.
+3. Read the report: **Alpha without sound** under This session, and **Learning** ("Not enough sessions yet: 1 of
+   8").
+4. Tell the assistant:
+   - Did the amber line come and go with the headphones, with their name?
+   - Was the tone before the silent minutes clear? Were 2 minutes fine, or too long?
+   - The number beside Alpha without sound.
+
+### Owner step: eight meditations, then the first learning verdict (a few weeks)
+
+1. Meditate as usual, at least 8 times to the end (the silent minutes count; a session stopped before them does
+   not). Wired headphones or the speaker when you can.
+2. After the 8th, **Learning** in the report says going up, no clear trend, or going down, with its 90 % range. It
+   is checked again at 12. It is "seen together, not tested": with the replay check on, its results say whether
+   the live sound itself made the difference.
+3. Tell the assistant the Learning sentences after the 8th and the 12th session, and anything that changed in
+   those weeks (sleep, time of day, how the headband sat).
 
 ## Sleep report
 
