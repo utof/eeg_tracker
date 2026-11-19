@@ -150,6 +150,13 @@ class WakeService : Service() {
             return START_NOT_STICKY
         }
         instance = this
+        if (finished) {
+            // a ring that came while this ringer was finishing: start over (the service object is reused)
+            finished = false
+            sinceMs = 0L
+            step = 0
+            loudOn = false
+        }
         if (sinceMs == 0L) {
             val earlier = p.getLong("ringingSinceMs", 0)
             if (earlier > 0) {
