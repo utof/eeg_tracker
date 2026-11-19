@@ -62,6 +62,15 @@ class FakeBell implements AlarmBell {
   }
 }
 
+/// A bell whose channel fails, answering only after a while.
+class SlowFailingBell implements AlarmBell {
+  @override
+  Future<bool> ringNow(String reason) async {
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    throw StateError('no channel');
+  }
+}
+
 /// The scaling is AnySleep's own and checked elsewhere (live_prep_test.dart); here only its size matters.
 Future<Float32List> zeros(LiveWindow w) async => Float32List(w.epochs * 3840 * 4);
 
@@ -294,6 +303,25 @@ void main() {
       expect(model.closed, isTrue);
       // the status survives the isolate port
       expect(AlarmStatus.fromMap(s.toMap())!.why, 'light');
+    });
+
+    test('an early ring that fails is in the night\'s log, though the alarm is done by then', () async {
+      final band = FastBand(start: t0);
+      final plan = AlarmPlan(endMs: ((t0 + 40 * 60) * 1000).round(), windowMin: 30);
+      final bell = SlowFailingBell(); // a platform channel answers after the next batches have come
+      final r = recorder(
+        band,
+        plan: plan,
+        alarm: (p) => LiveAlarm(plan: p, model: () => ScriptedModel((_) => 'N2'), bell: bell, scale: zeros, clock: band.now),
+      );
+      final running = r.run(restartedBySystem: false);
+      await until(() => statuses.any((s) => s.alarm?.phase == 'woke'));
+      await until(() => band.clockS >= 12 * 60);
+      await r.stop();
+      await running;
+
+      expect(logOf(dir), contains('smart alarm: could not ring early (Bad state: no channel); the phone\'s alarm rings at 07:30'));
+      expect(savedSamples(dir), band.sent);
     });
 
     test('the model waits for its hour: nothing is made before it', () async {

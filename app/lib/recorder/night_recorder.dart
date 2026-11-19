@@ -898,13 +898,22 @@ class NightRecorder {
     }
   }
 
-  /// The model is done (it woke you, the window ended, or it gave up by itself).
+  /// The model is done (it woke you, the window ended, or it gave up by itself). What it says after that (the early
+  /// ring's answer comes from the phone later: a failure) goes into the night like its other lines.
   void _alarmFinished(AlarmWatch a) {
     _alarmLast = a.live;
     _alarm = null;
     _night = _night.copyWith(alarmScoring: false, alarmOff: true);
     unawaited(_save().catchError((Object _) {}));
-    unawaited(_closeAlarm(a));
+    unawaited(
+      _closeAlarm(a).then((_) {
+        try {
+          for (final text in a.takeEvents()) {
+            _marker(text, _now());
+          }
+        } catch (_) {}
+      }),
+    );
   }
 
   /// The alarm alone failed: one log line; the cues and the model they use go on.

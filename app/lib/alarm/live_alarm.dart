@@ -67,7 +67,8 @@ abstract interface class AlarmWatch {
   /// Woke, ended or off: the recorder lets it go.
   bool get finished;
 
-  /// Stops the model and frees it (after any running call).
+  /// Stops the model and frees it (after any running call), and waits for an early ring's answer: what it said
+  /// (a failure) can be taken with [takeEvents] afterwards.
   Future<void> close();
 }
 
@@ -212,9 +213,12 @@ class LiveAlarm implements AlarmWatch, StageListener {
       'behind; $early min before ${_hm(plan.endMs)})',
     );
     _save();
-    unawaited(_ring('${words[0].toUpperCase()}${words.substring(1)}, $early min before ${_hm(plan.endMs)}.'));
+    _ringing = _ring('${words[0].toUpperCase()}${words.substring(1)}, $early min before ${_hm(plan.endMs)}.');
     unawaited(_freeModel());
   }
+
+  /// The early ring while the phone answers (it never throws).
+  Future<void>? _ringing;
 
   Future<void> _ring(String reason) async {
     try {
@@ -281,6 +285,7 @@ class LiveAlarm implements AlarmWatch, StageListener {
     if (!finished) _phase = AlarmPhase.off;
     _save();
     await _freeModel();
+    await _ringing?.timeout(const Duration(seconds: 10), onTimeout: () {});
   }();
 
   int? _modelFrom;
