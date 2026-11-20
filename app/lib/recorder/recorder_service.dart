@@ -22,6 +22,7 @@ import '../cues/night_cues.dart' show CueFactory, oneKindANight;
 import '../lucid/live_cues.dart' show lucidCuesFor;
 import '../memory_cues/live_cues.dart' show memoryCuesFor;
 import '../phone.dart';
+import '../start_log.dart';
 import '../share/isolate.dart';
 import '../share/protocol.dart';
 import '../signal/live_tap.dart';
@@ -239,6 +240,7 @@ class RecorderTaskHandler extends TaskHandler {
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    unawaited(logAppStart('recorder')); // files/app-starts.log (DECISIONS 734)
     final rec = await _recordingsDir();
     final plan = await _alarmPlan();
     final auto = await _autoNotes();
@@ -251,7 +253,7 @@ class RecorderTaskHandler extends TaskHandler {
     if (this.finder != null) {
       finder = this.finder!();
     } else {
-      final b = diy == null ? BrainBitFinder() : BrainBitFinder(pick: () async => diy.finder());
+      final b = diy == null ? BrainBitFinder(recorder: true) : BrainBitFinder(pick: () async => diy.finder());
       _finder = b;
       finder = b;
     }

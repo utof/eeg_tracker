@@ -5,6 +5,8 @@
 // With "Headband: DIY board (test)" on (files/diy-board/settings.json, DECISIONS rows 360-369) every session gets a
 // refusal in plain words (they read BrainBit's O1 O2 T3 T4); only the recorder's service records the board, with a
 // finder of its own (diy/night.dart).
+// Only in a replay build (`--dart-define=EEG_REPLAY=true`, never the owner's) a plan in `files/replay/` replaces the
+// headband with a replayed recording (replay.dart, DECISIONS 730-739); a normal build has no such path at all.
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show debugPrint;
@@ -15,6 +17,7 @@ import '../recorder/headband.dart';
 import 'diy/board.dart' show DiyFinder;
 import 'diy/settings.dart';
 import 'own/own_headband.dart';
+import 'replay.dart' show ReplayFinder, replayBuild, replayFinderFor;
 import 'own/settings.dart';
 import 'own/universal_transport.dart';
 
@@ -79,7 +82,9 @@ OwnFinder ownFinderFor(OwnBleSettings settings, OwnBleStore? store, Directory? r
 }
 
 class BrainBitFinder implements HeadbandFinder {
-  BrainBitFinder({Future<HeadbandFinder> Function()? pick}) : _pickWith = pick ?? _default;
+  /// [recorder]: the recorder's service asks (only it may record a replay whose layout is not the BrainBit's).
+  BrainBitFinder({Future<HeadbandFinder> Function()? pick, bool recorder = false})
+    : _pickWith = pick ?? (() => _default(recorder: recorder));
 
   final Future<HeadbandFinder> Function() _pickWith;
   Future<HeadbandFinder>? _picked;
@@ -95,7 +100,12 @@ class BrainBitFinder implements HeadbandFinder {
   /// True once the DIY board's finder was chosen (only the recorder's service picks it; null before the first use).
   bool? get usesDiy => _finder == null ? null : _finder is DiyFinder;
 
-  static Future<HeadbandFinder> _default() async {
+  static Future<HeadbandFinder> _default({bool recorder = false}) async {
+    if (replayBuild) {
+      final rec = await Phone.recordingsDir();
+      final replay = rec == null ? null : replayFinderFor(rec, forSessions: !recorder);
+      if (replay != null) return replay;
+    }
     final diy = await loadDiyBoard();
     final own = await loadOwnBle();
     return chooseFor(own.settings, own.store, own.recordings, diy.settings);
@@ -130,6 +140,7 @@ class BrainBitFinder implements HeadbandFinder {
     if (f is SdkFinder) f.dispose(anyLost: anyLost);
     if (f is OwnFinder) f.dispose();
     if (f is DiyFinder) f.dispose();
+    if (replayBuild && f is ReplayFinder) f.dispose();
     _picked = null;
     _finder = null;
   }

@@ -13,6 +13,7 @@ import 'logs/usage_watch.dart' show UsageGestures, UsageNavigatorObserver;
 import 'phone.dart' show Phone;
 import 'recorder/recorder_service.dart';
 import 'sharp/prompts.dart';
+import 'start_log.dart';
 import 'ui/auto_hooks.dart';
 import 'ui/night_screen.dart';
 import 'ui/sharp_rating_screen.dart';
@@ -26,6 +27,7 @@ void main() {
   ScreenRecords.start(recordingsDir: Phone.recordingsDir, power: Phone.powerMap, mainStarted: started, processAgeMs: Phone.processAge);
   FlutterForegroundTask.initCommunicationPort(); // status messages from the recorder isolate
   initRecorderService();
+  unawaited(logAppStart('screen')); // why the process before this one ended (files/app-starts.log, DECISIONS 734)
   // AnySleep's weights ship in the APK (assets/models); its MIT licence travels with them.
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks(['AnySleep (sleep model)'], await rootBundle.loadString('assets/models/LICENSE-AnySleep.txt'));

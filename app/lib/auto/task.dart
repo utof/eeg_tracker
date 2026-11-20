@@ -14,6 +14,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart' show Servi
 import '../logs/activity.dart' show Activity;
 import '../logs/engine.dart' show EngineRecords;
 import '../phone.dart';
+import '../start_log.dart';
 import '../recorder/brainbit.dart';
 import '../recorder/chunk_writer.dart' show Sample;
 import '../recorder/recorder_service.dart';
@@ -32,6 +33,7 @@ Future<void> runAutoWatch() async {
   // this engine's log and battery samples while it checks (lib/logs, DECISIONS 715)
   EngineRecords.start(engine: 'auto', recordingsDir: Phone.recordingsDir, power: Phone.powerMap);
   initRecorderService(); // the night recorder's options, in case this engine starts it
+  unawaited(logAppStart('watcher')); // files/app-starts.log (DECISIONS 734)
   await AutoTask().run();
 }
 
