@@ -30,7 +30,10 @@ class EegApp : Application() {
 
             override fun onTaskDestroy() {}
 
-            override fun onEngineWillDestroy() {}
+            // the recorder's engine ends: its hold on Wi-Fi (Share on Wi-Fi, the DIY board) goes with it (DECISIONS 612)
+            override fun onEngineWillDestroy() {
+                PhoneChannel.holdWifi(this@EegApp, "recorder", false)
+            }
         })
     }
 }

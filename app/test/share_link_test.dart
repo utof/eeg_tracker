@@ -287,7 +287,8 @@ void main() {
         sendToRecorder: sent.add,
         keepScreenOn: (_) async {},
         clock: () => now,
-        host: (dir, onChange) => ShareHost(filesDir: dir, onLog: (_) {}, onChange: onChange, entry: fakeServer),
+        host: (dir, onChange, wifiLock) =>
+            ShareHost(filesDir: dir, onLog: (_) {}, onChange: onChange, entry: fakeServer, wifiLock: wifiLock),
       );
     });
     tearDown(() async {

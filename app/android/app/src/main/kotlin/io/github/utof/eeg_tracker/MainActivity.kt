@@ -186,6 +186,8 @@ class MainActivity : FlutterActivity() {
         SessionService.onButtonTapped = null
         SessionService.onFocusChanged = null
         SessionService.release(applicationContext)
+        // the app's own server between nights lived in this engine: its hold on Wi-Fi goes with it (DECISIONS 612)
+        PhoneChannel.holdWifi(applicationContext, "screen", false)
         super.onDestroy()
     }
 

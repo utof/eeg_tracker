@@ -265,6 +265,12 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    `scripts/pull_phone.py http://127.0.0.1:18765 --token <code> --once --dest <scratch>`; Start night (the
    recorder's service serves, status `reconnecting` without a headband), Stop (the app serves again), switch off
    (the port closes). All of it passed; the emulator cannot show Wi-Fi with the screen off or the battery cost.
+10. **The night's Wi-Fi lines and lock** (2026-11-20, DECISIONS 616): Share on Wi-Fi on, Start night, then
+   `adb logcat -s eeg_tracker flutter | grep -i wifi` shows who holds the lock (`wifi lock: recorder on, held for
+   [screen, recorder]`) and a `wifi ...` line at every change: `adb shell svc wifi disable` / `enable`, the power
+   key, `adb shell dumpsys deviceidle force-idle` (after `dumpsys battery unplug`). `adb shell dumpsys wifi` lists the
+   lock under "Locks held". `adb shell settings put global wifi_sleep_policy 0` and battery saver on show the Phone
+   section's Wi-Fi rows. All of it passed.
 
 10. **The smart alarm inside the night recorder** (DECISIONS rows 230-231): `flutter build apk --release
    --target-platform android-x64 -t tool/alarm_smoke.dart`, install with `-g`, put one recording into
@@ -1737,6 +1743,29 @@ on between nights, a notification "Sharing on Wi-Fi" keeps the app running; its 
 (meditation, check-in, ...) shows its own notification meanwhile and gives it back; during a night the recorder's
 notification does it.
 
+**If the laptop loses the phone at night, nothing is lost (rows 610-616).** The night stays on the phone and the
+laptop copies what it missed once it reaches the phone again (Export data works without Wi-Fi at all). On 2026-11-20
+the owner's Xiaomi dropped off the network soon after the screen went off. The app holds a Wi-Fi lock whenever it
+shares, but from Android 14 no app can keep Wi-Fi out of power saving with the screen off, so **the phone's own
+settings decide**. Now the night's `.log` has a `wifi ...` line whenever the phone's Wi-Fi changes (and every 30
+minutes; never the network's name), and `scripts/phone_night_check.py` says "Wi-Fi off from 03:25 to 07:40" or
+"connected all night".
+
+**Phone settings to check before a night the laptop mirrors** (Xiaomi names; they move between HyperOS versions and
+were not checked on the owner's phone):
+
+- **Keep Wi-Fi on during sleep** → Always, if the phone has it (Settings → Wi-Fi → Additional settings or Advanced
+  settings). The night screen's Phone section says so when the phone reports Wi-Fi set to sleep with the screen off.
+- **Battery saver** and **Ultra battery saver** off for the night (the Phone section shows battery saver). In the
+  battery settings, nothing that turns off Wi-Fi or mobile data when the phone is locked.
+- **Wi-Fi assistant** (Settings → Wi-Fi): "switch to mobile data" when Wi-Fi looks weak can take the phone off Wi-Fi
+  with mobile data on; turn it off for these nights.
+- **The VPN app**: with **Always-on** and **Block connections without VPN**, the laptop may not reach the phone. Let
+  the VPN bypass the local network (LAN), or turn lockdown off. The Phone section reminds you when a VPN is on (an app
+  cannot see the lockdown setting itself).
+- **EEG Tracker** itself, as for every night: battery saver No restrictions, Autostart on.
+- **The router**: a fixed address for the phone (a DHCP reservation) keeps the laptop's commands working.
+
 ### Owner step: connect the laptop by one scan, then a night (2 minutes; the first night doubles as the phone test)
 
 1. Phone and laptop on your home Wi-Fi. On the laptop, in the repo folder, run `python3 scripts/phone_link.py` (or
@@ -1752,7 +1781,8 @@ notification does it.
 5. **What to tell the assistant after the first night**: did the camera open the link, and did **Open EEG Tracker**
    open the app by itself or only after a tap? Did the laptop window keep printing lines all night with the phone's
    screen off, or "No answer" for long stretches? Was the phone on the charger? (The night's `.log` has the phone
-   battery once a minute and a line when the laptop was told where the phone is.)
+   battery once a minute, a line when the laptop was told where the phone is, and the phone's Wi-Fi at every change:
+   `scripts/phone_night_check.py` turns them into "Wi-Fi off from ... to ...".)
 
 Next time: run `python3 scripts/phone_link.py` again and switch **Share on Wi-Fi** on: the phone finds the laptop by
 itself within a minute, no scan. If the app is new or forgot the laptop, scan the code the window shows.
@@ -1763,7 +1793,7 @@ Good to know:
   For the commands by hand, set it once to keep it out of the shell history: `export EEG_PHONE_TOKEN=<code>`.
 - Between nights the phone keeps answering in the background, with a "Sharing on Wi-Fi" notification that stops
   Android freezing the app (row 589); its Stop turns sharing off. The app keeps the screen on for the first 15 minutes.
-  During a night it answers with the screen off.
+  During a night it answers with the screen off, as long as the phone keeps its Wi-Fi (the settings above).
 - During a night the laptop's **Re-check contact** button does nothing: the phone checks contact once, at the start
   (DECISIONS row 52). The Sleep page and the morning result are the laptop's own jobs and use the laptop's files,
   which `pull_phone.py` keeps filled.

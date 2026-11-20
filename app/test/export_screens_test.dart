@@ -219,7 +219,7 @@ void main() {
           Scaffold(backgroundColor: Night.surfaceHigh, body: ShareSheet(model: model, onNewToken: () {})),
           'share_sheet_$name$tag',
           scale: scale,
-          height: 1300,
+          height: 1500, // the whole sheet, with "nothing is lost" (DECISIONS 614), at 130 % text too
         );
         expect(find.text('kq7m2xwp9dfh'), findsOneWidget);
         expect(find.text(address == null ? 'not found' : '192.168.1.23:8765'), findsOneWidget);
@@ -230,6 +230,8 @@ void main() {
         expect(find.textContaining('scripts/pull_phone.py http://${address ?? '127.0.0.1'}:8765 --token kq7m2xwp9dfh'), findsOneWidget);
         // between nights a notification keeps the app answering in the background (DECISIONS row 589)
         expect(find.textContaining('"Sharing on Wi-Fi" notification'), name == 'app' ? findsOneWidget : findsNothing);
+        // the laptop losing the phone loses nothing (the owner's night of 2026-11-20, DECISIONS 614)
+        expect(find.textContaining('If the laptop cannot reach the phone, nothing is lost'), findsOneWidget);
       });
     }
   }

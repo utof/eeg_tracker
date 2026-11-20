@@ -140,6 +140,13 @@ class ShareSheet extends StatelessWidget {
                       '(its Stop turns sharing off).',
             style: address == null ? muted?.copyWith(color: Night.caution) : muted,
           ),
+          const SizedBox(height: 10),
+          Text(
+            'If the laptop cannot reach the phone, nothing is lost: the night stays on the phone and the laptop copies '
+            'what it missed once it reaches the phone again. Some phones turn Wi-Fi off with the screen off: the Phone '
+            'section of the Night tab names the settings to check.',
+            style: muted,
+          ),
           if (address != null) ...[
             const SizedBox(height: 24),
             Center(

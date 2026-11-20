@@ -60,6 +60,8 @@ void main() {
   late Map<String, Object> prefs;
   late Completer<void> dirAnswer;
   late List<Object?> toMain;
+  late List<Map<Object?, Object?>> locks;
+  late int wifiReads;
 
   setUp(() {
     files = Directory.systemTemp.createTempSync('recorder_service_test');
@@ -67,6 +69,8 @@ void main() {
     prefs = {};
     dirAnswer = Completer<void>()..complete();
     toMain = [];
+    locks = [];
+    wifiReads = 0;
     messenger.setMockMethodCallHandler(const MethodChannel('plugins.flutter.io/shared_preferences'), (call) async {
       final args = call.arguments is Map ? call.arguments as Map : const <Object?, Object?>{};
       switch (call.method) {
@@ -94,6 +98,11 @@ void main() {
         await dirAnswer.future;
         return '${files.path}/recordings';
       }
+      if (call.method == 'wifiLock') locks.add(call.arguments as Map<Object?, Object?>);
+      if (call.method == 'wifiState') {
+        wifiReads++;
+        return {'enabled': true, 'connected': true, 'route': 'wifi', 'lock': locks.lastOrNull?['on'] == true};
+      }
       return null;
     });
     messenger.setMockMethodCallHandler(const MethodChannel('flutter_foreground_task/methods'), (_) async => null);
@@ -106,7 +115,8 @@ void main() {
     files.deleteSync(recursive: true);
   });
 
-  RecorderTaskHandler handler(NoBand band) => RecorderTaskHandler(finder: () => band, cues: (_, _) => (_) => null);
+  RecorderTaskHandler handler(NoBand band) =>
+      RecorderTaskHandler(finder: () => band, cues: (_, _) => (_) => null, wifiEvery: const Duration(milliseconds: 50));
 
   Map<String, Object?> share(ShareConfig c) => {'kind': 'share', 'config': c.toJson()};
 
@@ -193,6 +203,32 @@ void main() {
     ).timeout(const Duration(milliseconds: 500));
     expect(failed, [3]);
   });
+
+  test('Share on Wi-Fi during a night holds the Wi-Fi lock as the recorder; off and Stop let go; the Wi-Fi watch runs until Stop', () async {
+    final port = await freePort();
+    final on = ShareConfig(token: token, port: port).switchedOn(DateTime.now().millisecondsSinceEpoch);
+    final h = handler(NoBand());
+    await h.onStart(DateTime.now(), TaskStarter.developer);
+    expect(wifiReads, greaterThan(0), reason: 'the Wi-Fi watch looks at the start of the night');
+    h.onReceiveData(share(on));
+    await until(() => locks.lastOrNull?['on'] == true);
+    expect(locks.last, {'on': true, 'who': 'recorder'});
+    h.onReceiveData(share(on.switchedOff()));
+    await until(() => locks.last['on'] == false);
+    expect(locks.last, {'on': false, 'who': 'recorder'});
+    h.onReceiveData(share(on));
+    await until(() => locks.last['on'] == true);
+
+    h.onReceiveData(stopCommand);
+    await until(() => toMain.any((m) => m is Map && m['kind'] == 'stopped') && locks.last['on'] == false);
+    expect(locks.last, {'on': false, 'who': 'recorder'});
+    expect(locks.map((c) => c['who']).toSet(), {'recorder'});
+    expect(wifiReads, greaterThan(3), reason: 'the Wi-Fi watch looks on its period through the night');
+    final seen = wifiReads;
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect(wifiReads, seen, reason: 'the Wi-Fi watch stops with the night');
+    await h.onDestroy(DateTime.now(), false);
+  }, timeout: const Timeout(Duration(seconds: 60)));
 
   test('the share switch moved on, off and on again within a second leaves one server, the last one asked', () async {
     final port = await freePort();

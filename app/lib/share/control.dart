@@ -4,7 +4,8 @@
 // between nights the app serves the files itself, keeps the screen on for the first 15 minutes, and keeps itself
 // running with a notification while sharing is on ([keepAlive], DECISIONS row 589), so Android does not freeze it in
 // the background: a frozen app's port still takes connections and never answers. Only one of the two holds the port:
-// the app lets go before a night starts and takes over after Stop.
+// the app lets go before a night starts and takes over after Stop. Whoever serves holds the phone's Wi-Fi lock
+// ([wifiLock], DECISIONS row 612) under its own name, so the hand-over never drops it.
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -25,6 +26,10 @@ typedef ShareLine = ({bool on, String text, bool warn, String? address});
 /// How a pairing ended: the laptop, or why not.
 typedef PairOutcome = ({PairedLaptop? laptop, LinkFailure? failure});
 
+/// Makes the app's own server: the files folder, where its status goes, and the Wi-Fi lock it holds while it serves.
+typedef ShareHostMaker =
+    ShareHost Function(String filesDir, void Function(ShareStatus) onChange, Future<void> Function(bool on)? wifiLock);
+
 class ShareControl extends ChangeNotifier {
   ShareControl({
     required this.load,
@@ -32,7 +37,8 @@ class ShareControl extends ChangeNotifier {
     required this.sendToRecorder,
     required this.keepScreenOn,
     this.keepAlive,
-    ShareHost Function(String filesDir, void Function(ShareStatus) onChange)? host,
+    this.wifiLock,
+    ShareHostMaker? host,
     DateTime Function()? clock,
   }) : _makeHost = host ?? _appHost,
        _now = clock ?? DateTime.now;
@@ -47,18 +53,24 @@ class ShareControl extends ChangeNotifier {
   /// Keeps the app running in the background while it serves between nights (a notification until [offAtMs]); false
   /// lets go. Null in tests that do not look at it.
   final Future<void> Function(bool on, int offAtMs)? keepAlive;
-  final ShareHost Function(String filesDir, void Function(ShareStatus) onChange) _makeHost;
+
+  /// Keeps the phone's Wi-Fi awake while the app's own server runs between nights, also with the screen off and
+  /// during a session (`Phone.wifiLock` as `screen`); null in tests that do not look at it.
+  final Future<void> Function(bool on)? wifiLock;
+  final ShareHostMaker _makeHost;
   final DateTime Function() _now;
 
   /// Between nights the app's server also takes the paired laptop's work signal for automatic recording (DECISIONS
   /// 603): kept in `auto-start/laptop.json`, and a start asks the headband watcher for a check.
-  static ShareHost _appHost(String filesDir, void Function(ShareStatus) onChange) => ShareHost(
-    filesDir: filesDir,
-    onLog: debugPrint,
-    onChange: onChange,
-    wifi: Phone.wifiNets,
-    onWork: (working) => unawaited(laptopWorkSignal(working: working)),
-  );
+  static ShareHost _appHost(String filesDir, void Function(ShareStatus) onChange, Future<void> Function(bool on)? lock) =>
+      ShareHost(
+        filesDir: filesDir,
+        onLog: debugPrint,
+        onChange: onChange,
+        wifi: Phone.wifiNets,
+        wifiLock: lock,
+        onWork: (working) => unawaited(laptopWorkSignal(working: working)),
+      );
 
   ShareConfig _config = const ShareConfig();
   ShareStatus _status = shareDown;
@@ -224,7 +236,7 @@ class ShareControl extends ChangeNotifier {
       if (_night) return;
       _status = s;
       notifyListeners();
-    });
+    }, wifiLock);
     host.setLive(const {});
     await host.start(_config);
   }

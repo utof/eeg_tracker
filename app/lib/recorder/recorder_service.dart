@@ -4,7 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import '../alarm/bell.dart';
@@ -31,6 +31,7 @@ import 'headband.dart';
 import 'live_drift.dart';
 import 'night_recorder.dart';
 import 'status.dart';
+import 'wifi_watch.dart';
 
 const int _serviceId = 4711;
 const String _nightKey = 'night';
@@ -177,7 +178,12 @@ Future<NightState> loadNight() async => _PrefsNightStore().load();
 void recorderEntryPoint() => FlutterForegroundTask.setTaskHandler(RecorderTaskHandler());
 
 class RecorderTaskHandler extends TaskHandler {
-  RecorderTaskHandler({this.finder, this.alarm = smartAlarmFor, this.cues = nightCuesWith});
+  RecorderTaskHandler({
+    this.finder,
+    this.alarm = smartAlarmFor,
+    this.cues = nightCuesWith,
+    this.wifiEvery = wifiWatchEvery,
+  });
 
   /// Only for smoke tests (a replayed headband); null: the BrainBit.
   final HeadbandFinder Function()? finder;
@@ -187,6 +193,9 @@ class RecorderTaskHandler extends TaskHandler {
 
   /// The sound cues for the recordings folder and the night's live model (a smoke test brings their hours forward).
   final CueFactory Function(String recordingsDir, NightScorer scorer) cues;
+
+  /// How often the phone's Wi-Fi is looked at for the night's log (tests look more often).
+  final Duration wifiEvery;
   NightRecorder? _recorder;
   BrainBitFinder? _finder;
   Phase? _shownPhase;
@@ -201,8 +210,12 @@ class RecorderTaskHandler extends TaskHandler {
   /// The DIY board's night (DECISIONS rows 360-369), or null for the BrainBit.
   DiyNight? _diy;
 
-  /// Who holds the Wi-Fi lock: the DIY board's datagrams, Share on Wi-Fi (one lock for the process, PhoneChannel.kt).
+  /// Why this engine holds the Wi-Fi lock (as `recorder`; one lock for the process, PhoneChannel.kt): the DIY board's
+  /// datagrams, Share on Wi-Fi.
   bool _wifiDiy = false, _wifiShare = false;
+
+  /// The phone's Wi-Fi in the night's log, from the start to Stop (wifi_watch.dart, DECISIONS 611).
+  WifiWatch? _wifiWatch;
 
   /// Lights off and Alarm off that came before the recorder existed (the first moments of a start): handed to it as
   /// soon as it is made, so a tap the screen already shows as done is never lost.
@@ -256,6 +269,15 @@ class RecorderTaskHandler extends TaskHandler {
       startNotes: [...?diy?.notes, if (starter != TaskStarter.system) ...?auto],
     );
     _recorder = recorder;
+    // into the night's log, and logcat (tag flutter) for a look at the phone the next morning
+    _wifiWatch = WifiWatch(
+      read: Phone.wifiState,
+      log: (line) {
+        recorder.note(line);
+        debugPrint('eeg_tracker $line');
+      },
+      every: wifiEvery,
+    )..start();
     final early = _lightsOffEarly;
     if (early != null) recorder.lightsOff(at: early);
     if (_alarmOffEarly) recorder.alarmOff();
@@ -270,7 +292,7 @@ class RecorderTaskHandler extends TaskHandler {
 
   Future<void> _wifi() async {
     try {
-      await Phone.wifiLock(on: _wifiDiy || _wifiShare).timeout(const Duration(seconds: 5));
+      await Phone.wifiLock(on: _wifiDiy || _wifiShare, who: 'recorder').timeout(const Duration(seconds: 5));
     } catch (_) {}
   }
 
@@ -366,6 +388,7 @@ class RecorderTaskHandler extends TaskHandler {
     if (_stopping) return;
     _stopping = true;
     _endTap();
+    _wifiWatch?.stop();
     final r = _recorder;
     // Sharing in the background: its port is free again within about 4 s, while the recorder saves and stops.
     unawaited(_sharing(() async => _share?.stop()));

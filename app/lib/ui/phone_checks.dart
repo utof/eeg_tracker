@@ -16,6 +16,8 @@ enum FixAction {
   xiaomiAutostart,
   xiaomiBatterySaver,
   xiaomiDone,
+  wifiSettings,
+  vpnSettings,
 }
 
 class PhoneCheck {
@@ -28,11 +30,14 @@ class PhoneCheck {
 }
 
 /// [bluetooth] false: the DIY board is chosen (it comes over Wi-Fi), so Nearby devices and Bluetooth are not needed.
+/// [wifi]: Wi-Fi has to stay up all night (Share on Wi-Fi is on, or the DIY board), so what may turn it off with the
+/// screen off is named too (DECISIONS 613; the owner's Xiaomi left Wi-Fi soon after the screen went off, 2026-11-20).
 List<PhoneCheck> phoneChecks({
   required PhoneSnapshot phone,
   required bool nearbyAllowed,
   required bool xiaomiDone,
   bool bluetooth = true,
+  bool wifi = false,
 }) => [
   if (bluetooth && !nearbyAllowed)
     const PhoneCheck('Nearby devices is not allowed, so the app cannot find the headband.', [
@@ -50,7 +55,28 @@ List<PhoneCheck> phoneChecks({
       ('Allow', FixAction.requestNotifications),
     ]),
   if (phone.powerSaveMode)
-    const PhoneCheck('Battery saver is on. It can stop the recording.', [('Open settings', FixAction.batterySaver)]),
+    PhoneCheck(
+      wifi
+          ? 'Battery saver is on. It can stop the recording and turn Wi-Fi off while the screen is off.'
+          : 'Battery saver is on. It can stop the recording.',
+      const [('Open settings', FixAction.batterySaver)],
+    ),
+  if (wifi && (phone.wifiSleepPolicy == 0 || phone.wifiSleepPolicy == 1))
+    PhoneCheck(
+      phone.wifiSleepPolicy == 1
+          ? 'Wi-Fi is set to sleep when the screen is off unless the phone charges, so the laptop can lose the phone '
+                'at night. In the Wi-Fi settings, set "Keep Wi-Fi on during sleep" to Always if the phone has it.'
+          : 'Wi-Fi is set to sleep when the screen is off, so the laptop can lose the phone at night. In the Wi-Fi '
+                'settings, set "Keep Wi-Fi on during sleep" to Always if the phone has it.',
+      const [('Wi-Fi settings', FixAction.wifiSettings)],
+    ),
+  if (wifi && phone.vpnActive)
+    const PhoneCheck(
+      'A VPN is on. If the laptop cannot reach the phone at night, let the VPN app bypass the local network, or turn '
+      'off its "Block connections without VPN".',
+      [('VPN settings', FixAction.vpnSettings)],
+      serious: false,
+    ),
   if ((phone.standbyBucket ?? 0) >= 45)
     const PhoneCheck('Android has put this app in its restricted group.', [('Open settings', FixAction.appDetails)]),
   if (phone.xiaomiOs != null && !xiaomiDone)
