@@ -126,7 +126,7 @@ void main() {
       expect(whole.difference(seen), isEmpty, reason: 'on no tab');
       // the night's controls are on the first tab
       if (running) {
-        expect(where[HomeTab.night], containsAll(['Lights off', 'Stop', 'Recording', 'Contact']));
+        expect(where[HomeTab.night], containsAll(['Lights off', 'Stop', 'Recording', 'Headband']));
         expect(where[HomeTab.sessions], contains('Sound'));
         expect(where[HomeTab.sessions]!.any((s) => s.startsWith('The headband is busy with the night')), isTrue);
         expect(where[HomeTab.more]!.any((s) => s.contains('Shared on Wi-Fi')), isTrue);

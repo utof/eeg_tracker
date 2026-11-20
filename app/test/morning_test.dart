@@ -12,6 +12,7 @@ import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/session_keeper.dart';
 import 'package:eeg_tracker/sound/check_in_sound.dart';
+import 'package:eeg_tracker/signal/quality.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/gates.dart';
@@ -140,8 +141,9 @@ void main() {
     expect(c.stage, MorningStage.contact);
     expect(c.contact['O1'], 4e5);
     expect(c.contact['T4'], isNull);
-    await until(c, () => c.grades['O1']!.word != 'not touching');
-    expect(c.grades['T4']!.word, 'not touching'); // no contact reading: as the laptop page says it
+    await until(c, () => c.quality.electrodes.every((e) => e.fromSignal)); // the one judge has seen 4 s of signal
+    expect(c.quality.gradeOf('O1'), isNot(Contact.none));
+    expect(c.quality.electrodes.last.ohms, isNull); // T4: no contact reading
     c.begin();
     expect(c.stage, MorningStage.closed);
     await until(c, () => c.stage == MorningStage.questions);
@@ -411,7 +413,7 @@ void main() {
     c = MorningController(finder: OneFinder(band), store: MorningStore(tmp), timing: fast);
     await c.start();
     expect(c.contact, isEmpty);
-    await until(c, () => c.grades['O1']!.word != 'not touching');
+    await until(c, () => c.quality.gradeOf('O1') != Contact.none);
     c.begin();
     expect(c.stage, MorningStage.closed);
     await c.stop();

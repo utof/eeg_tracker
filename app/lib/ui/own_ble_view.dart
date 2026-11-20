@@ -240,8 +240,6 @@ class _Idle extends StatelessWidget {
           const SectionHeading('Headband'),
           DeviceChoice(diy: false, onChanged: free ? v.onDevice : null),
         ],
-        const SectionHeading('If the headband is lost'),
-        const LostNoticeSetting(),
         const SectionHeading('Which connection'),
         _SwitchRow(
           title: 'Use our own connection (test)',
@@ -305,6 +303,8 @@ class _Idle extends StatelessWidget {
             style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.4),
           ),
         ],
+        const SectionHeading('If the headband is lost'),
+        const LostNoticeSetting(),
       ],
     );
   }

@@ -199,6 +199,7 @@ void main() {
       final s = await json('/state');
       expect(s.keys.toSet(), {...(shapes['state_keys']! as List), ...(shapes['phone_state_keys']! as List)});
       expect(s['session'], isNull);
+      expect(s['alert'], isNull);
       expect(s['status'], 'not recording');
       expect(s['battery'], '?');
       expect(s['names'], shapes['names']);
@@ -208,6 +209,21 @@ void main() {
       expect(s['contact_t'], isNull);
       expect(s['age'], 999);
       expect(s['minutes'], 0);
+    });
+
+    test("/state's alert: the newest headband notice, from a night's status or beside a session; only the known fields", () async {
+      const lost = {'kind': 'lost', 'at': 1795300000, 'title': 'Headband lost', 'text': 'No data for 5 min.', 'extra': 'x'};
+      server.setLive({'phase': 'reconnecting', 'alert': lost});
+      expect((await json('/state'))['alert'], {'kind': 'lost', 'at': 1795300000, 'title': 'Headband lost', 'text': 'No data for 5 min.'});
+      server.setLive(const {});
+      expect((await json('/state'))['alert'], isNull);
+      server.setSession({'alert': {'kind': 'back', 'at': 1795300600, 'title': 'Headband is back', 'text': 'Data again.'}});
+      final s = await json('/state');
+      expect((s['alert'] as Map)['kind'], 'back');
+      expect(s['session'], isNull, reason: 'a notice alone is not a session');
+      server.setSession({'alert': {'kind': 7}});
+      expect((await json('/state'))['alert'], isNull);
+      server.setSession(null);
     });
 
     test("/state's session: a Work session's level and signal for the laptop tray, its data's age by the phone's clock (DECISIONS 671)", () async {
