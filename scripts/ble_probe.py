@@ -27,6 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import brainbit_ble as bb  # noqa: E402
 import packed  # noqa: E402
+import recording  # noqa: E402
 
 LIFT_S, REST_S = 4.0, 3.0
 WHERE = {"O1": "LEFT BACK", "O2": "RIGHT BACK", "T3": "LEFT TEMPLE", "T4": "RIGHT TEMPLE"}
@@ -217,14 +218,19 @@ def order_from(lifts: dict) -> str | None:
 
 
 def sdk_reference(path: Path, seconds: float = 60.0) -> dict:
-    """Noise level (RMS of sample-to-sample steps, µV) per channel in the middle of an SDK recording."""
-    data = packed.read_bytes(path); n = len(data) // 20  # plain, or packed after a day (.f32.xz)
-    k = int(seconds * bb.FS); start = max(0, n // 2 - k // 2)
+    """Noise level (RMS of sample-to-sample steps, µV) per channel in the middle of an SDK recording: its O1 O2 T3
+    T4, found by name in the recording's header (scripts/recording.py; a file from before the header is the
+    BrainBit's `<I4f`)."""
+    head = recording.read(path)
+    where = recording.pick(head, bb.NAMES, "the scale check")
+    rec = head.struct
+    data = packed.read_bytes(path); n = len(data) // rec.size  # plain, or packed after a day (.f32.xz)
+    k = int(seconds * head.sample_rate); start = max(0, n // 2 - k // 2)
     cols: list[list[float]] = [[], [], [], []]
     for i in range(start, min(n, start + k)):
-        r = struct.unpack_from("<I4f", data, 20 * i)
-        for j in range(4):
-            cols[j].append(r[1 + j] * 1e6)
+        r = rec.unpack_from(data, rec.size * i)
+        for j, c in enumerate(where):
+            cols[j].append(r[1 + c] * 1e6)
     return {name: {k2: round(v, 2) for k2, v in stats(cols[j]).items()} for j, name in enumerate(bb.NAMES)}
 
 
@@ -359,7 +365,7 @@ def write_results(pr: Probe, summary: dict, a: argparse.Namespace) -> None:
             summary["sdk_reference"] = dict(file=str(a.sdk_ref), sdk=ref, ratio_diff_rms={
                 n: round(ours[n]["diff_rms"] / ref[n]["diff_rms"], 2) for n in bb.NAMES
                 if n in ours and ours[n].get("diff_rms") and ref[n].get("diff_rms")})
-        except (OSError, KeyError, ZeroDivisionError, struct.error) as e:
+        except (OSError, KeyError, ZeroDivisionError, struct.error, recording.RecordingError) as e:
             summary["sdk_reference"] = f"failed: {e}"
     (pr.folder / "summary.json").write_text(json.dumps(summary, indent=1, default=str) + "\n")
     with open(pr.folder / "decoded.csv", "w") as f:

@@ -251,6 +251,39 @@ void main() {
       expect((await json('/state'))['names'], shapes['names']); // the BrainBit's again
     });
 
+    test('an 8-channel board: /state has its eight names, eight data rows and its rate (DECISIONS 630-639)', () async {
+      final names = ['Fz', 'Cz', 'Pz', 'O1', 'O2', 'T7', 'T8', 'Oz'];
+      server.setLive({
+        'kind': 'status',
+        'phase': 'recording',
+        'nightSamples': 5000,
+        'board': {'names': names, 'mode': 'test', 'modeText': 'test signal, not EEG', 'fs': 500},
+      });
+      final v = Float32List(500 * 8);
+      for (var i = 0; i < 500; i++) {
+        for (var c = 0; c < 8; c++) {
+          v[i * 8 + c] = (c + 1) * 1e-5 * (i.isEven ? 1 : -1); // each channel its own swing
+        }
+      }
+      server.addBatch('2026-11-20-030000', 0, now.microsecondsSinceEpoch / 1e6, v, channels: 8);
+      final s = await json('/state');
+      expect(s['names'], names);
+      expect(s['fs'], 500);
+      expect((s['contact'] as Map).keys, names);
+      final data = (s['data'] as List).cast<List<Object?>>();
+      expect(data, hasLength(8));
+      for (var c = 0; c < 8; c++) {
+        expect((data[c].first! as num).abs(), closeTo((c + 1) * 10, 0.1), reason: names[c]); // µV around the mean
+      }
+      // the BrainBit again: four channels, its names, the ring starts over at its width
+      server.setLive({'kind': 'status', 'phase': 'recording', 'nightSamples': 5000});
+      server.addBatch('2026-11-20-031000', 0, now.microsecondsSinceEpoch / 1e6, batch(0, 250));
+      final b = await json('/state');
+      expect(b['names'], shapes['names']);
+      expect(b['data'] as List, hasLength(4));
+      expect(b['fs'], 250);
+    });
+
     test('/state from the app between nights: "session" while a session records, then "not recording"', () async {
       server.setLive(const {});
       server.addBatch('2026-11-19-030000', 0, now.microsecondsSinceEpoch / 1e6, batch(0, 250));

@@ -117,10 +117,11 @@ class NightTapSender {
     _run = run;
     // plain lists: the recorder runs in another engine, whose messages may carry only plain values
     final packs = <int>[for (final x in samples) x.pack];
+    final n = samples.first.volts.length; // one recording: every sample as wide as its header says
     final volts = <double>[
-      for (final x in samples) ...[x.o1, x.o2, x.t3, x.t4],
+      for (final x in samples) ...x.volts,
     ];
-    _held.add([first, arrival.millisecondsSinceEpoch, packs, volts]);
+    _held.add([first, arrival.millisecondsSinceEpoch, packs, volts, n]);
     _heldSamples += samples.length;
     // a stalled timer never lets the list grow without end: about 4 s at most
     if (_heldSamples > 1000) flush();
@@ -148,10 +149,10 @@ List<LiveBatch>? nightTapBatches(Object? data) {
   final run = data['run'] is String ? data['run'] as String : null;
   final out = <LiveBatch>[];
   for (final b in data['batches'] as List) {
-    if (b is! List || b.length != 4) continue;
-    final first = b[0], at = b[1], packs = b[2], volts = b[3];
-    if (first is! int || at is! int || packs is! List || volts is! List) continue;
-    if (volts.length != packs.length * 4 || packs.isEmpty) continue;
+    if (b is! List || b.length != 5) continue;
+    final first = b[0], at = b[1], packs = b[2], volts = b[3], n = b[4];
+    if (first is! int || at is! int || packs is! List || volts is! List || n is! int || n < 1) continue;
+    if (volts.length != packs.length * n || packs.isEmpty) continue;
     if (!packs.every((p) => p is int) || !volts.every((v) => v is num)) continue;
     final uv = Float32List(volts.length);
     for (var i = 0; i < volts.length; i++) {
@@ -161,7 +162,7 @@ List<LiveBatch>? nightTapBatches(Object? data) {
       LiveBatch(
         arrival: DateTime.fromMillisecondsSinceEpoch(at),
         values: uv,
-        channels: 4,
+        channels: n,
         packs: Int32List.fromList(packs.cast<int>()),
         first: first,
         run: run,

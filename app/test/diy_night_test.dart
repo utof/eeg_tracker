@@ -15,12 +15,14 @@ import 'package:eeg_tracker/headband/diy/night.dart';
 import 'package:eeg_tracker/headband/diy/settings.dart';
 import 'package:eeg_tracker/lucid/live_cues.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
+import 'package:eeg_tracker/recorder/header.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/live_drift.dart';
 import 'package:eeg_tracker/recorder/night_recorder.dart';
 import 'package:eeg_tracker/recorder/nights.dart' show nightsIn;
 import 'package:eeg_tracker/recorder/status.dart';
 import 'package:eeg_tracker/sleep/night_scorer.dart';
+import 'package:eeg_tracker/sleep/night_signal.dart' show joinLayout;
 import 'package:eeg_tracker/wearer/wearer.dart' show refreshWearer;
 import 'package:flutter_test/flutter_test.dart';
 
@@ -285,6 +287,53 @@ void main() {
     final wearer = refreshWearer(rec, DateTime.now());
     expect(wearer.on, isTrue);
     expect(wearer.verdicts, isEmpty);
+  });
+
+  test('a night on the 8-channel chip: eight floats a record, a header naming them, the laptop\'s <I8f', () async {
+    board = FakeBoard(channels: 8);
+    pump = Pump(link, board);
+    final dir = Directory('${root.path}/files/recordings-diy');
+    final drift = SpyDrift();
+    final names = ['Fz', 'Cz', 'Pz', 'O1', 'O2', 'T7', 'T8', 'Oz'];
+    final finder = DiyFinder(link: () => link, timing: fastBoard, names: names);
+    final r = recorder(finder, dir, watch: () => drift);
+    final run = r.run(restartedBySystem: false);
+    pump.start();
+    await waitFor(() => r.status.phase == Phase.recording && statuses.any((s) => s.board != null));
+    await Future<void>.delayed(_ms * 500);
+    await r.stop();
+    await run;
+    finder.dispose();
+    final sets = stems(dir);
+    expect(sets, hasLength(1));
+    final f = File('${sets.single}.f32');
+    final h = readHeader(f);
+    expect(h.source, HeaderSource.file);
+    expect(h.names, names);
+    expect(h.record, '<I8f');
+    expect(h.counter, 'board sequence number');
+    expect(h.device, 'DIY board');
+    expect(f.lengthSync() % 36, 0);
+    final b = ByteData.sublistView(f.readAsBytesSync());
+    final n = b.lengthInBytes ~/ 36;
+    expect(n, greaterThan(50));
+    final lsb = 4.5 / (24 * 8388608);
+    final first = b.getUint32(0, Endian.little);
+    for (var i = 0; i < n; i++) {
+      final seq = b.getUint32(36 * i, Endian.little);
+      expect(seq, first + i); // nothing lost, nothing filled
+      final want = board.codes(seq)[0] * lsb;
+      for (var c = 0; c < 8; c++) {
+        expect(b.getFloat32(36 * i + 4 + 4 * c, Endian.little), closeTo(want, 1e-9));
+      }
+    }
+    final log = File('${sets.single}.log').readAsStringSync();
+    expect(log, contains('format .f32 records <I8f: board sequence number, then Fz Cz Pz O1 O2 T7 T8 Oz in volts; 250 Hz'));
+    expect(log, contains('board 8 channels, 250 Hz'));
+    expect(drift.adds, 0); // the board's samples never reach the detectors (row 367), whatever its names
+    expect(statuses.lastWhere((s) => s.board != null).board!.names, names);
+    // the night readers pick the sleep sites by name from its header: O1 O2 T7 T8 are columns 3 4 5 6
+    expect(joinLayout([f]).parts.firstWhere((p) => p.run != null).run!.columns, [3, 4, 5, 6]);
   });
 
   test('the lucid cues and the live sleep model they share are off before the board\'s first sample', () async {

@@ -10,6 +10,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'chunk_writer.dart';
+import 'header.dart' show legacyHeader, tryHeader;
 import 'packed.dart' show isPackedPath, rawLength;
 
 final RegExp _stem = RegExp(r'^(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})\.');
@@ -98,10 +99,14 @@ List<NightFiles> nightsIn(Directory dir) {
   final data = <_Rec>[];
   final other = <String>[];
   for (final stem in byStem.keys) {
-    final size = rawLength(File('${dir.path}/$stem.f32'));
+    final f32 = File('${dir.path}/$stem.f32');
+    final size = rawLength(f32);
     final start = stemTime('$stem.')!;
-    if (size >= recordBytes) {
-      data.add(_Rec(stem, start, _lastData(dir, stem, start, size)));
+    // its header's record and rate (any number of channels); a set whose header cannot be used counts as the BrainBit's
+    // here, for its length only: its readers refuse it in words
+    final h = size > 0 ? (tryHeader(f32) ?? legacyHeader) : legacyHeader;
+    if (size >= h.recordBytes) {
+      data.add(_Rec(stem, start, _lastData(dir, stem, start, size ~/ h.recordBytes, h.sampleRate)));
     } else {
       other.add(stem);
     }
@@ -145,9 +150,9 @@ List<NightFiles> nightsIn(Directory dir) {
   });
 }
 
-/// Arrival time of the last batch (the last `.idx` row); start + samples / 250 without an index.
-DateTime _lastData(Directory dir, String stem, DateTime start, int size) {
-  final byLength = start.add(Duration(microseconds: (size ~/ recordBytes) * 4000));
+/// Arrival time of the last batch (the last `.idx` row); start + samples / rate without an index.
+DateTime _lastData(Directory dir, String stem, DateTime start, int samples, num rate) {
+  final byLength = start.add(Duration(microseconds: (samples * 1e6 / rate).round()));
   final idx = File('${dir.path}/$stem.idx');
   try {
     final len = idx.existsSync() ? idx.lengthSync() : 0;

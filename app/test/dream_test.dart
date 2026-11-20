@@ -67,7 +67,7 @@ class DriftBand implements Headband {
       demo.alphaGain = gain(demo.t);
       final batch = <Sample>[];
       for (final r in demo.next(perTick)) {
-        batch.add((pack: pack % 2048, o1: r[0] * 1e-6, o2: r[1] * 1e-6, t3: r[2] * 1e-6, t4: r[3] * 1e-6));
+        batch.add(Sample.four(pack: pack % 2048, o1: r[0] * 1e-6, o2: r[1] * 1e-6, t3: r[2] * 1e-6, t4: r[3] * 1e-6));
         pack++;
       }
       _signal.add(batch);

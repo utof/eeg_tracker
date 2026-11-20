@@ -615,3 +615,84 @@ def test_the_owners_laptop_nights_parse() -> None:
         assert s["rate"] == pytest.approx(250, rel=0.01)
         text = pnc.render(s)
         assert "Verdict: " in text and not pnc.MAC.search(text)
+
+
+# ---- any number of channels (docs/data-format.md "The recording header") ---------------------------------------
+
+EIGHT = tuple(f"Ch{i}" for i in range(1, 9))
+
+
+def eight_channel_night(root: Path) -> None:
+    """Two runs of 8 channels with their headers: lost packets in the first, a drop between them."""
+    ohms = " ".join(f"{n}={v}" for n, v in zip(EIGHT, (120000, 95000, 48000, 31000, 3000000, 60000, 70000, 80000)))
+    a = PhoneRun(T, seconds=600, lost=[(100, 5), (200, 2)], end="drop", names=EIGHT, header=True, contact=ohms,
+                 after=[(12, "reconnect try 1 (scan): connected after 4.2 s")])
+    b = PhoneRun(a.last + timedelta(seconds=30), seconds=480, names=EIGHT, header=True, contact=None, night_end=True,
+                 head=[f"reconnected (scan, try 1) after a drop (out of range); previous run {stem(T)}, last data "
+                       f"{a.last:%Y-%m-%dT%H:%M:%S}.000, 30.0 s ago"])
+    for k, run in enumerate((a, b)):
+        write_run(root / "recordings", run, seed=k + 1)
+
+
+def test_an_eight_channel_night_is_read_by_its_header(tmp_path: Path) -> None:
+    pytest.importorskip("numpy")
+    eight_channel_night(tmp_path)
+    s = pnc.check(tmp_path, NIGHT)
+    assert s["channels"] == EIGHT and s["fs"] == 250
+    assert s["samples"] == (600 + 480) * 250 and s["signal_s"] == 1080.0  # 36-byte records, not 20
+    assert abs(s["rate"] - 250) < 0.5
+    assert (s["packets"].lost, s["packets"].jumps) == (7, 2)  # the counter is read every 36 bytes
+    assert len(s["drops"]) == 1 and 20 < s["drops"][0].length < 60
+    sig = s["signal"]
+    assert sig["seconds"] == 1080 and len(sig["flat"]) == len(sig["railed"]) == len(sig["hum"]) == 8
+    assert sig["flat"] == [0, 0, 0, 1080, 0, 0, 0, 0]  # the fourth channel is all zeros
+    assert sig["hum"][2] > pnc.HUM_HIGH and all(h < pnc.HUM_SOME for i, h in enumerate(sig["hum"]) if i not in (2, 3))
+    assert s["contact"]["start"][1] == dict(zip(EIGHT, (120000.0, 95000.0, 48000.0, 31000.0, 3000000.0, 60000.0,
+                                                        70000.0, 80000.0)))
+    assert any("Ch4 was flat" in f for f in s["fixes"]) and any("Strong 50 Hz hum on Ch3" in f for f in s["fixes"])
+    assert any("Contact at the start was poor or missing on Ch5" in f for f in s["fixes"])
+    text = pnc.render(s)
+    head = next(ln for ln in text.splitlines() if ln.startswith("Signal  "))
+    assert head.split() == ["Signal", *EIGHT]
+    row = next(ln for ln in text.splitlines() if ln.startswith("  flat min"))
+    assert row.split()[2:] == ["0.0", "0.0", "0.0", "18.0", "0.0", "0.0", "0.0", "0.0"]
+    assert "Ch8 80 k" in text and "O1" not in text and "T4" not in text
+    assert "all understood" in text
+
+
+def test_a_brainbit_night_with_headers_reads_like_one_without(tmp_path: Path) -> None:
+    pytest.importorskip("numpy")
+    runs = {}
+    for name, header in (("old", False), ("new", True)):
+        write_run(tmp_path / name / "recordings", PhoneRun(T, seconds=600, lost=[(100, 5)], night_end=True, header=header))
+        runs[name] = pnc.check(tmp_path / name, NIGHT)
+    assert (tmp_path / "new" / "recordings" / f"{stem(T)}.header.json").is_file()
+    assert pnc.render(runs["old"]) == pnc.render(runs["new"])
+    assert runs["new"]["channels"] == ("O1", "O2", "T3", "T4")
+
+
+def test_a_night_of_mixed_channel_sets_keeps_its_signal_table_to_the_first_kind(tmp_path: Path) -> None:
+    pytest.importorskip("numpy")
+    a = PhoneRun(T, seconds=300, names=EIGHT, header=True, contact=None, end="drop")
+    b = PhoneRun(a.last + timedelta(seconds=30), seconds=300, night_end=True)  # 4 channels, no header
+    for k, run in enumerate((a, b)):
+        write_run(tmp_path / "recordings", run, seed=k + 1)
+    s = pnc.check(tmp_path, NIGHT)
+    assert s["samples"] == 600 * 250 and s["channels"] == EIGHT
+    assert s["signal"]["seconds"] == 300 and len(s["signal"]["flat"]) == 8
+    assert s["signal"]["other"] == ["O1 O2 T3 T4 (1 recording)"]
+    assert "not in this table: O1 O2 T3 T4 (1 recording)" in pnc.render(s)
+
+
+def test_a_damaged_header_is_said_and_nothing_is_guessed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    eight_channel_night(tmp_path)
+    (tmp_path / "recordings" / f"{stem(T)}.header.json").write_text("{")
+    assert pnc.main([NIGHT, "--data", str(tmp_path)]) == 2
+    assert f"{stem(T)}.header.json" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("prev,cur,want", [(5, 6, ("ok", 0)), (5, 9, ("lost", 3)), (5, 5, ("repeat", 0)),
+                                           (3000, 5000, ("lost", 1999)), (5000, 3, ("restart", 0)),
+                                           (2**32 - 1, 0, ("ok", 0)), (2**32 - 2, 1, ("lost", 2))])
+def test_a_board_sequence_number_has_no_2048_wrap(prev: int, cur: int, want: tuple[str, int]) -> None:
+    assert pnc.jump(prev, cur, "board sequence number") == want

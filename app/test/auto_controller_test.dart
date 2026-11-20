@@ -16,7 +16,7 @@ import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 List<Sample> batch(int first) => [
-  for (var i = 0; i < 8; i++) (pack: first + i, o1: 1e-5, o2: 2e-5, t3: -1e-5, t4: 3e-6),
+  for (var i = 0; i < 8; i++) Sample.four(pack: first + i, o1: 1e-5, o2: 2e-5, t3: -1e-5, t4: 3e-6),
 ];
 
 /// The headband check: what it finds, and the batches it streams while held.
@@ -298,7 +298,12 @@ void main() {
         now = now.add(const Duration(minutes: 3));
       });
       final files = Directory(rec).listSync().map((f) => f.uri.pathSegments.last).toList()..sort();
-      expect(files, ['2026-11-20-223000.f32', '2026-11-20-223000.idx', '2026-11-20-223000.log']);
+      expect(files, [
+        '2026-11-20-223000.f32',
+        '2026-11-20-223000.header.json', // what its records hold (DECISIONS 630-639)
+        '2026-11-20-223000.idx',
+        '2026-11-20-223000.log',
+      ]);
       expect(File('$rec/2026-11-20-223000.f32').lengthSync(), 80 * 20);
       expect(check.releases, 1, reason: 'let go before the recorder looks for it');
       final notes = starter.nights.single;

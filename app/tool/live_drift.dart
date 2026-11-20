@@ -65,7 +65,7 @@ Future<void> main(List<String> args) async {
       if (from >= records || to <= from) continue;
       final batch = [
         for (var i = from; i < to; i++)
-          (
+          Sample.four(
             pack: data.getUint32(i * recordBytes, Endian.little),
             o1: data.getFloat32(i * recordBytes + 4, Endian.little),
             o2: data.getFloat32(i * recordBytes + 8, Endian.little),

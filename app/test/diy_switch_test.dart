@@ -50,9 +50,12 @@ void main() {
     test('names: four, different, letters and digits; parsed from what a person types', () {
       expect(parseDiyNames(' O1, O2 Fz,,Fp1 '), ['O1', 'O2', 'Fz', 'Fp1']);
       expect(diyNamesProblem(['O1', 'O2', 'Fz', 'Fp1']), isNull);
-      expect(diyNamesProblem(['O1', 'O2', 'Fz']), contains('Give 4 names'));
-      expect(diyNamesProblem(['O1', 'O2', 'Fz', 'Fp1', 'Cz']), contains('Give 4 names'));
-      expect(diyNamesProblem(parseDiyNames('O1 O2 F z Fp1')), contains('Give 4 names')); // "F z" is two names
+      expect(diyNamesProblem(['O1', 'O2', 'Fz']), contains('Give 4, 6 or 8 names'));
+      expect(diyNamesProblem(['O1', 'O2', 'Fz', 'Fp1', 'Cz']), contains('Give 4, 6 or 8 names'));
+      expect(diyNamesProblem(parseDiyNames('O1 O2 F z Fp1')), contains('Give 4, 6 or 8 names')); // "F z" is two names
+      expect(diyNamesProblem(['Fz', 'Cz', 'Pz', 'O1', 'O2', 'T7']), isNull); // the 6-channel chip
+      expect(diyNamesProblem(['Fz', 'Cz', 'Pz', 'O1', 'O2', 'T7', 'T8', 'Oz']), isNull); // the 8-channel chip
+      expect(diyNamesProblem([for (var i = 1; i <= 9; i++) 'C$i']), contains('Give 4, 6 or 8 names'));
       expect(diyNamesProblem(['O1', 'O2', 'F z', 'Fp1']), contains('not: F z'));
       expect(diyNamesProblem(['O1', 'O2', 'Fz/1', 'Fp1']), contains('not: Fz/1'));
       expect(diyNamesProblem(['O1', 'O2', 'O1', 'Fp1']), contains('its own name'));

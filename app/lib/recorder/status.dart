@@ -219,6 +219,7 @@ class BoardLive {
     required this.modeText,
     required this.notEeg,
     this.levelsUv = const [],
+    this.fs = sampleRateHz,
     this.link = '',
     this.sender,
     this.lost = 0,
@@ -239,6 +240,9 @@ class BoardLive {
   /// Peak to peak over the last second per channel in microvolts; null before the first second.
   final List<double?> levelsUv;
 
+  /// The board's samples a second.
+  final int fs;
+
   /// How the frames arrive (`UDP port 9000 ...`) and from whom.
   final String link;
   final String? sender;
@@ -254,6 +258,7 @@ class BoardLive {
     'modeText': modeText,
     'notEeg': notEeg,
     'levelsUv': [for (final v in levelsUv) v == null || v.isNaN || v.isInfinite ? null : v],
+    'fs': fs,
     'link': link,
     'sender': sender,
     'lost': lost,
@@ -271,6 +276,7 @@ class BoardLive {
       modeText: m['modeText'] is String ? m['modeText'] as String : '',
       notEeg: m['notEeg'] != false,
       levelsUv: levels is List ? [for (final v in levels) _double(v)] : const [],
+      fs: m['fs'] is int && (m['fs'] as int) > 0 ? m['fs'] as int : sampleRateHz,
       link: m['link'] is String ? m['link'] as String : '',
       sender: m['sender'] is String ? m['sender'] as String : null,
       lost: _int(m['lost']) ?? 0,

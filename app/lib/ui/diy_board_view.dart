@@ -195,7 +195,7 @@ class _NoWifi extends StatelessWidget {
   }
 }
 
-/// CH1-CH4's names: the four as they are now, a field to change them, Save.
+/// CH1..'s names: as they are now (four to a row), a field to change them, Save.
 class _ChannelNames extends StatefulWidget {
   const _ChannelNames({required this.names, this.onSave});
   final List<String> names;
@@ -239,25 +239,31 @@ class _ChannelNamesState extends State<_ChannelNames> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            for (var i = 0; i < widget.names.length; i++)
-              Expanded(
-                child: Semantics(
-                  label: 'channel ${i + 1}: ${widget.names[i]}',
-                  excludeSemantics: true,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('CH${i + 1}', style: text.bodyMedium?.copyWith(color: Night.inkMuted)),
-                      const SizedBox(height: 4),
-                      Text(widget.names[i], style: text.titleLarge, overflow: TextOverflow.ellipsis),
-                    ],
+        for (var r = 0; r < widget.names.length; r += 4)
+          Padding(
+            padding: EdgeInsets.only(top: r == 0 ? 0 : 12),
+            child: Row(
+              children: [
+                for (var i = r; i < r + 4; i++)
+                  Expanded(
+                    child: i >= widget.names.length
+                        ? const SizedBox.shrink()
+                        : Semantics(
+                            label: 'channel ${i + 1}: ${widget.names[i]}',
+                            excludeSemantics: true,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('CH${i + 1}', style: text.bodyMedium?.copyWith(color: Night.inkMuted)),
+                                const SizedBox(height: 4),
+                                Text(widget.names[i], style: text.titleLarge, overflow: TextOverflow.ellipsis),
+                              ],
+                            ),
+                          ),
                   ),
-                ),
-              ),
-          ],
-        ),
+              ],
+            ),
+          ),
         const SizedBox(height: 16),
         TextField(
           controller: _c,
@@ -268,7 +274,7 @@ class _ChannelNamesState extends State<_ChannelNames> {
           autocorrect: false,
           style: text.bodyLarge,
           decoration: InputDecoration(
-            labelText: 'Names, CH1 to CH4',
+            labelText: 'Names from CH1: 4, 6 or 8, as the board',
             helperText: 'Separated by commas, e.g. O1, O2, Fz, Fp1',
             errorText: _problem,
             errorMaxLines: 3,

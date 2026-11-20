@@ -2,7 +2,7 @@ import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/packets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-List<Sample> rows(Iterable<int> packs) => [for (final p in packs) (pack: p, o1: 0, o2: 0, t3: 0, t4: 0)];
+List<Sample> rows(Iterable<int> packs) => [for (final p in packs) Sample.four(pack: p, o1: 0, o2: 0, t3: 0, t4: 0)];
 
 void main() {
   test('a normal stretch has nothing missing or repeated', () {

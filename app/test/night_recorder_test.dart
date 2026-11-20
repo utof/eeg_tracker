@@ -76,7 +76,7 @@ class FakeBand implements Headband {
         return packOf == null ? i % 2048 : packOf!(i);
       }
 
-      _signal.add([for (var i = 0; i < 5; i++) (pack: next(), o1: 1e-6, o2: 2e-6, t3: 3e-6, t4: 4e-6)]);
+      _signal.add([for (var i = 0; i < 5; i++) Sample.four(pack: next(), o1: 1e-6, o2: 2e-6, t3: 3e-6, t4: 4e-6)]);
       emitted += 5;
     });
   }

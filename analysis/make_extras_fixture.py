@@ -89,7 +89,7 @@ def night_part(recordings: Path, night: str, sleep_json: Path) -> dict[str, Any]
     found = [n for n in nf.nights(nf.recordings(recordings)) if n.name == night]
     if not found:
         raise SystemExit(f"no night {night} in {recordings}")
-    start, uv, notes = to_bdf.join([r.path for r in found[0].recs])
+    start, uv, notes = to_bdf.join_sites([r.path for r in found[0].recs], ("O1", "O2", "T3", "T4"), "the detector pass")
     quality, bursts, moves = nx.events(nx.see(uv, notes))
     del uv
     scored = json.loads(sleep_json.read_text())

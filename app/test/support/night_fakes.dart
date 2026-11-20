@@ -69,7 +69,7 @@ Sample sampleAt(int i, {double? jawFromS, bool eyes = true}) {
     t3 += 40 * math.sin(i * 2.1);
     t4 += 40 * math.sin(i * 2.3);
   }
-  return (
+  return Sample.four(
     pack: i % 2048,
     o1: (12000 + 10 * math.sin(i * 0.25)) * 1e-6,
     o2: (-8000 + 8 * math.cos(i * 0.1)) * 1e-6,

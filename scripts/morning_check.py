@@ -18,6 +18,10 @@ skipped (eyes settling after the tone).
 Writes <session start>.morning.json next to the recording (or in --out-dir) and prints a short summary that
 compares today with the last 14 earlier *.morning.json files in that folder (median and range).
 
+A recording may hold any number of channels (its <stamp>.header.json, scripts/recording.py): the check-in reads
+O1 and O2 by name or 10-10 site and the setup test O1 O2 T3 T4; a recording without them is refused in words, never
+read from other channels. The sample rate is the recording's own.
+
 If the recording also holds a setup test (setup:* markers from the same page), it reports whether blinks,
 left-right glances (T3 minus T4) and jaw clenches stand out from the background (signal-to-noise per event type).
 """
@@ -31,6 +35,7 @@ from scipy import signal
 sys.path.insert(0, str(Path(__file__).parent))
 import night_files as nf  # noqa: E402
 import packed  # noqa: E402  (a recording packed after a day, <stamp>.f32.xz, reads as the plain one)
+import recording  # noqa: E402
 from to_bdf import load  # noqa: E402
 
 FS = 250
@@ -371,8 +376,25 @@ def find_latest(paths: list[Path], prefix: str):
     return best
 
 
-def analyse(path: Path, sess: list[dict], fs: float = FS) -> dict:
+def load_sites(path: Path, wanted: list[str], who: str) -> tuple[np.ndarray, float]:
+    """The recording's `wanted` channels in that order (µV, n x len(wanted)), found by name or 10-10 site, and its
+    sample rate. recording.MissingChannels in words when it lacks one."""
+    h = recording.read(path)
+    where = recording.pick(h, wanted, who)
     uv, _ = load(path)
+    return (uv if where == list(range(uv.shape[1])) else uv[:, where]), float(h.sample_rate)
+
+
+def device_of(path: Path) -> dict:
+    """The result's `device`: the recorder's model and the channels the file holds."""
+    h = recording.read(path)
+    return dict(model="BrainBit Black" if h.device == recording.BRAINBIT else h.device or "unknown",
+                channels=list(h.names))
+
+
+def analyse(path: Path, sess: list[dict], fs: float | None = None) -> dict:
+    uv, rate = load_sites(path, BACK, "the morning check-in")
+    fs = rate if fs is None else fs
     w = morning_windows(sess)
     cut = {}
     for ph, (i0, i1, _t0, _t1) in w["win"].items():
@@ -380,7 +402,7 @@ def analyse(path: Path, sess: list[dict], fs: float = FS) -> dict:
         cut[ph] = uv[a:b] if b > a else uv[0:0]
     channels = {}
     for name in BACK:
-        c = NAMES.index(name)
+        c = BACK.index(name)
         channels[name] = channel_measures(cut["eyes_closed"][:, c], cut["eyes_open"][:, c] if "eyes_open" in cut else None, fs)
     start = datetime.fromtimestamp(w["t"]).astimezone()
     end = datetime.fromtimestamp(max(t1 for _i0, _i1, _t0, t1 in w["win"].values())).astimezone()
@@ -392,7 +414,7 @@ def analyse(path: Path, sess: list[dict], fs: float = FS) -> dict:
         method=dict(segment_s=SEG_S, reject_p2p_uv=P2P_UV, reject_rel_spread=REL_SPREAD, alpha_band_hz=list(ALPHA),
                     iaf="centre of gravity of power above the 1/f line, 7-14 Hz", fit_hz=list(FIT),
                     fit_excludes_hz=list(IAF_RANGE), skip_s=[SKIP_START_S, SKIP_END_S]),
-        device=dict(model="BrainBit Black", channels=NAMES), validated=False)
+        device=device_of(path), validated=False)
 
 
 def run(a: argparse.Namespace) -> None:
@@ -410,15 +432,18 @@ def run(a: argparse.Namespace) -> None:
         path, sess = found
         res = analyse(path, sess)
         if setup and setup[0] == path:
-            uv, _ = load(path)
-            res["setup_test"] = setup_test(uv, setup[1])
+            try:
+                uv, fs = load_sites(path, NAMES, "the setup test")
+                res["setup_test"] = setup_test(uv, setup[1], fs)
+            except recording.MissingChannels as e:  # the check-in stands; the setup test needs all four
+                print(f"{e}; the setup test is left out", file=sys.stderr)
         kind = "morning"
     else:
         path, sess = setup
-        uv, _ = load(path)
+        uv, fs = load_sites(path, NAMES, "the setup test")
         start = datetime.fromtimestamp(sess[0]["t"]).astimezone()
         res = dict(version=VERSION, source=path.name, start=start.isoformat(timespec="seconds"),
-                   setup_test=setup_test(uv, sess))
+                   setup_test=setup_test(uv, sess, fs))
         kind = "setup"
     out = a.out_dir or path.parent
     out.mkdir(parents=True, exist_ok=True)
@@ -448,13 +473,20 @@ def main() -> None:
                     "(the recorder hub passes its nights folder), so only one runs at a time")
     a = ap.parse_args()
     if not a.job_dir:
-        run(a); return
+        try:
+            run(a)
+        except recording.RecordingError as e:
+            raise SystemExit(str(e)) from e
+        return
     job = nf.Job(a.job_dir, "morning-report")
     if not job.acquire():
         print("another morning analysis is running; nothing to do"); return
     try:
         job.step("Working out this morning's numbers")
-        run(a)
+        try:
+            run(a)
+        except recording.RecordingError as e:
+            raise SystemExit(str(e)) from e
         job.write(state="done", step="Done", error=None)
     except BaseException as e:
         msg = str(e) if isinstance(e, SystemExit) else f"{type(e).__name__}: {e}"

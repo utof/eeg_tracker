@@ -26,7 +26,7 @@ List<(double, int)> readIdx(File f) {
 double f32(double v) => (Float32List(1)..[0] = v)[0];
 
 List<Sample> batch(int firstPack, int n) => [
-  for (var i = 0; i < n; i++) (pack: (firstPack + i) % 2048, o1: 1e-5 * i, o2: -2e-5 * i, t3: 0.4, t4: -0.123456789),
+  for (var i = 0; i < n; i++) Sample.four(pack: (firstPack + i) % 2048, o1: 1e-5 * i, o2: -2e-5 * i, t3: 0.4, t4: -0.123456789),
 ];
 
 void main() {

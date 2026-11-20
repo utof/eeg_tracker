@@ -124,7 +124,7 @@ class GestureBand implements Headband {
       final batch = <Sample>[];
       for (var i = 0; i < 250; i++) {
         final r = _row();
-        batch.add((pack: pack % 2048, o1: r[0] * 1e-6, o2: r[1] * 1e-6, t3: r[2] * 1e-6, t4: r[3] * 1e-6));
+        batch.add(Sample.four(pack: pack % 2048, o1: r[0] * 1e-6, o2: r[1] * 1e-6, t3: r[2] * 1e-6, t4: r[3] * 1e-6));
         pack++;
       }
       _signal.add(batch);
@@ -442,7 +442,7 @@ void main() {
           for (var i = 0; i < 125; i++)
             () {
               final r = band._row();
-              return (pack: (sent + i) % 2048, o1: r[0] * 1e-6, o2: r[1] * 1e-6, t3: r[2] * 1e-6, t4: r[3] * 1e-6);
+              return Sample.four(pack: (sent + i) % 2048, o1: r[0] * 1e-6, o2: r[1] * 1e-6, t3: r[2] * 1e-6, t4: r[3] * 1e-6);
             }(),
         ];
         live.add(DateTime.fromMillisecondsSinceEpoch(start + (sent + 125) * 4), rows);

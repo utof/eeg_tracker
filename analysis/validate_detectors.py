@@ -177,13 +177,19 @@ def per_stage(bdf: Path, sleep: Path) -> dict[str, Any]:
 
 
 def load_run(f32: Path) -> tuple[Floats, det.Bools]:
-    """A recorder run: <I4f records (packet, O1 O2 T3 T4 in volts). Lost packets (a skip in the packet
-    number) are filled with the last value and marked missing, as `to_bdf.py` does for gaps. Plain or packed."""
+    """A recorder run: O1 O2 T3 T4 in µV, found by name or 10-10 site in its records (the packet number, then
+    the channels the run's header names; scripts/recording.py), refused in words without them. Lost packets (a skip
+    in the packet number) are filled with the last value and marked missing, as `to_bdf.py` does for gaps. Plain or
+    packed."""
+    import recording  # noqa: PLC0415  (scripts/)
+
+    head = recording.read(f32)
+    where = recording.pick(head, det.CHANNELS, "the detectors' check")
     raw = packed.read_bytes(f32)
-    n = len(raw) // 20
-    rec = np.frombuffer(raw[: n * 20], dtype=np.dtype([("p", "<u4"), ("x", "<f4", (4,))]))
+    n = len(raw) // head.record_bytes
+    rec = np.frombuffer(raw[: n * head.record_bytes], dtype=np.dtype([("p", "<u4"), ("x", "<f4", (head.n,))]))
     pack = rec["p"].astype(np.int64)
-    x = rec["x"].astype(np.float64).T * 1e6
+    x = rec["x"][:, where].astype(np.float64).T * 1e6
     skip = np.zeros(n, np.int64)
     skip[1:] = np.clip((pack[1:] - pack[:-1] - 1) % 2048, 0, 250)  # the counter wraps; long holes are runs
     fill = int(skip.sum())

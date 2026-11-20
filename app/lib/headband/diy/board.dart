@@ -12,21 +12,25 @@
 //   datagrams, repeats and late ones are counted and dropped (DECISIONS row 354);
 // - no contact and no battery reading (lead-off detection is off in the bench firmware); the recorder skips both;
 // - it never sends a byte to the board (there is no send call in this folder; DECISIONS row 352);
-// - CH1-CH4 travel in the BrainBit's sample record, so the files are byte for byte the laptop's DIY `<I4f`; the
-//   8-channel chip is refused in words (DECISIONS row 363).
+// - its 4, 6 or 8 channels travel in the app's N-channel sample record, so the files are byte for byte the laptop's
+//   DIY `<I4f` / `<I6f` / `<I8f`, with a header that names them (recorder/header.dart; DECISIONS 630-639; until
+//   2026-11-20 the phone took the 4-channel chip only, row 363). Names: the setting's when it gives one per channel,
+//   else Ch1..ChN (the laptop's rule), said in the log.
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
 import '../../recorder/chunk_writer.dart' show Sample;
+import '../../recorder/header.dart';
 import '../../recorder/headband.dart';
 import '../../recorder/status.dart' show BoardLive, sampleRateHz;
 import '../../share/protocol.dart' show isAllowedClient;
 import 'e9.dart';
+import '../../signal/layout.dart' show CustomPositions, diyBoardMontage, withPositions;
 import 'link.dart';
-import 'settings.dart' show defaultDiyNames, diyChannels;
+import 'settings.dart' show defaultDiyNames;
 
-/// The board's trouble in plain words (no frames, the 8-channel chip, a port in use, no battery reading).
+/// The board's trouble in plain words (no frames, a port in use, no battery reading).
 class DiyBoardError implements Exception {
   const DiyBoardError(this.message);
   final String message;
@@ -62,12 +66,17 @@ class DiyFinder implements HeadbandFinder {
   DiyFinder({
     DiyLink Function()? link,
     this.names = defaultDiyNames,
+    this.positions = const CustomPositions(),
     this.vref = defaultVref,
     this.port = diyUdpPort,
     this.timing = const DiyTiming(),
   }) : _makeLink = link ?? (() => UdpLink(port: port));
 
+  /// The setting's channel names (CH1 on); used when they are as many as the board's channels.
   final List<String> names;
+
+  /// The Signal tab's positions file (files/signal/positions.txt), for the header's places.
+  final CustomPositions positions;
   final double vref;
   final int port;
   final DiyTiming timing;
@@ -88,15 +97,17 @@ class DiyFinder implements HeadbandFinder {
   }
 
   /// Listens (once; the receiver stays up until [dispose]) and waits up to [scanFor] for the board's frames; null when
-  /// none came. Throws [DiyBoardError] when only an unsupported board (8 channels) sent any.
+  /// none came.
   @override
   Future<Headband?> find(Duration scanFor, {void Function(String name, int rssi)? onFound}) async {
     final rx = await _open();
     if (await rx.waitForCapture(scanFor)) return rx.claim();
-    final no = rx.unsupported;
-    if (no != null) throw DiyBoardError(no);
     return null;
   }
+
+  /// The names for a board of [channels] channels: the setting's when it gives that many, else Ch1..ChN.
+  List<String> namesFor(int channels) =>
+      names.length == channels ? names : [for (var i = 1; i <= channels; i++) 'Ch$i'];
 
   /// The same board again (after a restart or a drop): waits up to [DiyTiming.directWait] for its frames.
   @override
@@ -104,9 +115,8 @@ class DiyFinder implements HeadbandFinder {
     final rx = await _open();
     if (await rx.waitForCapture(timing.directWait)) return rx.claim();
     throw DiyBoardError(
-      rx.unsupported ??
-          'No frames from the board for ${timing.directWait.inSeconds} s on UDP port $port. Is it on this Wi-Fi, '
-              'sending to this phone, and past its prompts?',
+      'No frames from the board for ${timing.directWait.inSeconds} s on UDP port $port. Is it on this Wi-Fi, '
+      'sending to this phone, and past its prompts?',
     );
   }
 
@@ -140,9 +150,6 @@ class _Receiver {
   String? _why;
   List<E9Frame> _kept = [];
   int _dropped = 0;
-
-  /// Set while the capture under way comes from a board the phone cannot record (8 channels): why, in words.
-  String? unsupported;
   Completer<void>? _arrived;
 
   /// Log lines while no board object holds the capture.
@@ -235,16 +242,10 @@ class _Receiver {
     _kept = [];
     lost = boardMissed = bad = 0;
     _leadOff = null;
-    unsupported = f.channels == diyChannels
-        ? null
-        : 'The board sends ${f.channels} channels; the phone records the 4-channel chip (ADS1299-4) only. Record '
-              'this board with the laptop (DRIVER=diy scripts/record_night.sh).';
-    if (unsupported != null) _line(unsupported!);
     _deliver(f);
   }
 
   void _deliver(E9Frame f) {
-    if (unsupported != null) return;
     final lo = (f.leadOffP, f.leadOffN);
     if (lo != _leadOff) {
       _leadOff = lo;
@@ -270,9 +271,9 @@ class _Receiver {
 
   static String _hex2(int v) => v.toRadixString(16).padLeft(2, '0');
 
-  bool get _ready => _kept.isNotEmpty && unsupported == null;
+  bool get _ready => _kept.isNotEmpty;
 
-  /// True once a capture the phone can record has frames no board object holds.
+  /// True once a capture has frames no board object holds.
   Future<bool> waitForCapture(Duration wait) async {
     if (_ready) return true;
     final until = DateTime.now().add(wait);
@@ -331,12 +332,17 @@ class _Receiver {
 }
 
 class DiyHeadband implements Headband, BandNotes, OtherBoard {
-  DiyHeadband._(this._rx, this._firstFrame, List<String> lines) {
+  DiyHeadband._(this._rx, this._firstFrame, List<String> lines)
+    : names = List.unmodifiable(_rx.finder.namesFor(_firstFrame.channels)) {
     final f = _firstFrame;
-    final names = _rx.finder.names;
     final k = voltsPerCount(f.gain, _rx.finder.vref);
     for (final l in lines) {
       _note(l);
+    }
+    final set = _rx.finder.names;
+    if (set.length != f.channels) {
+      _note('the setting names ${set.length} channels (${set.join(' ')}) but the board sends ${f.channels}: using '
+          '${names.join(' ')}; give ${f.channels} names on the Headband connection page');
     }
     _note('channels ${names.join(' ')} (montage: the phone\'s setting on the Headband connection page; a plan until '
         'the firmware has an electrode mode)');
@@ -350,6 +356,19 @@ class DiyHeadband implements Headband, BandNotes, OtherBoard {
 
   final _Receiver _rx;
   final E9Frame _firstFrame;
+
+  /// CH1.. in order: the setting's names, or Ch1..ChN when it does not give one per channel.
+  final List<String> names;
+
+  /// What this capture's records hold: its channels by name with their places (the positions file's where it names
+  /// them), the board's rate, volts, the board's sequence number first (recorder/header.dart).
+  @override
+  late final RecordingHeader header = headerForMontage(
+    withPositions(diyBoardMontage(names), _rx.finder.positions),
+    device: 'DIY board',
+    sampleRate: _firstFrame.fs,
+    counter: counterSequence,
+  );
   final _signal = StreamController<List<Sample>>.broadcast(sync: true);
   final _resist = StreamController<Map<String, double>>.broadcast();
   final _range = StreamController<bool>.broadcast();
@@ -363,7 +382,7 @@ class DiyHeadband implements Headband, BandNotes, OtherBoard {
   /// Each channel's lowest and highest count in the second under way, and the swing of the last whole second.
   late final List<int> _lo = List.filled(_firstFrame.channels, 0), _hi = List.filled(_firstFrame.channels, 0);
   int _inBlock = 0;
-  List<double?> _levels = List.filled(diyChannels, null);
+  late List<double?> _levels = List.filled(_firstFrame.channels, null);
 
   static String _g(double v) => v == v.roundToDouble() ? v.toStringAsFixed(1) : '$v';
 
@@ -390,11 +409,12 @@ class DiyHeadband implements Headband, BandNotes, OtherBoard {
 
   @override
   BoardLive get board => BoardLive(
-    names: _rx.finder.names,
+    names: names,
     mode: _firstFrame.mode,
     modeText: _firstFrame.modeText,
     notEeg: _firstFrame.notEeg,
     levelsUv: _levels,
+    fs: _firstFrame.fs,
     link: _rx.link.describe,
     sender: _rx.sender,
     lost: _rx.lost,
@@ -425,8 +445,7 @@ class DiyHeadband implements Headband, BandNotes, OtherBoard {
 
   void _frame(E9Frame f) {
     _level(f);
-    final v = f.volts(_rx.finder.vref);
-    final s = (pack: f.seq, o1: v[0], o2: v[1], t3: v[2], t4: v[3]);
+    final s = Sample(f.seq, f.volts(_rx.finder.vref));
     if (_streaming) {
       _batch.add(s);
     } else {
@@ -443,7 +462,7 @@ class DiyHeadband implements Headband, BandNotes, OtherBoard {
     }
     if (++_inBlock < f.fs.clamp(1, sampleRateHz)) return;
     final k = voltsPerCount(f.gain, _rx.finder.vref) * 1e6;
-    _levels = [for (var c = 0; c < diyChannels; c++) c < _lo.length ? (_hi[c] - _lo[c]) * k : null];
+    _levels = [for (var c = 0; c < _lo.length; c++) (_hi[c] - _lo[c]) * k];
     _inBlock = 0;
   }
 

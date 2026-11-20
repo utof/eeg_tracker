@@ -4,6 +4,7 @@
 import 'dart:io';
 
 import '../../recorder/night_recorder.dart' show RecorderTiming;
+import '../../signal/layout.dart' show PositionsStore, signalDirFor;
 import 'board.dart';
 import 'settings.dart';
 
@@ -30,7 +31,8 @@ class DiyNight {
 
   Directory get dir => diyRecordingsDirFor(recordingsDir);
 
-  DiyFinder finder() => DiyFinder(names: settings.names);
+  /// The board's finder: the setting's names, and the Signal tab's positions file for the header's places.
+  DiyFinder finder() => DiyFinder(names: settings.names, positions: PositionsStore(signalDirFor(recordingsDir)).load());
 
   /// The night's first log lines.
   List<String> get notes => [

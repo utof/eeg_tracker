@@ -2,7 +2,8 @@
 // (test/diy/fake_board.dart) and on a real UDP socket on this machine: frames become samples in volts, damaged
 // datagrams are counted and dropped, gaps are counted (board missed / link lost), repeats and late datagrams are
 // dropped, a restart or a new mode ends the board object (the recorder then starts a new file set), the 8-channel
-// chip is refused in plain words, and nothing is ever sent to the board.
+// chip records all its channels with a header that names them (DECISIONS 630-639), and nothing is ever sent to the
+// board.
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -12,6 +13,7 @@ import 'package:eeg_tracker/headband/diy/e9.dart';
 import 'package:eeg_tracker/headband/diy/link.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart' show Sample;
 import 'package:eeg_tracker/recorder/headband.dart';
+import 'package:eeg_tracker/signal/layout.dart' show parsePositions;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'diy/fake_board.dart';
@@ -220,15 +222,47 @@ void main() {
     expect((again.band as OtherBoard).board.mode, 'short');
   });
 
-  test('the 8-channel chip is refused in plain words, after the wait', () async {
-    board = FakeBoard(channels: 8);
-    final found = finder.find(const Duration(milliseconds: 80));
-    await settle(5);
-    sendAll(link, board.next(20));
-    await expectLater(
-      found,
-      throwsA(isA<DiyBoardError>().having((e) => '$e', 'text', contains('sends 8 channels; the phone records the 4-channel chip'))),
+  test('the 8-channel chip records all eight channels in place, named Ch1..Ch8 when the setting gives four', () async {
+    board = FakeBoard(channels: 8, mode: 'S'); // shorted inputs: a different value on every channel
+    final w = await connected();
+    final frames = board.next(20);
+    sendAll(link, frames);
+    await waitFor(() => w.samples.length == 23);
+    for (var k = 0; k < 20; k++) {
+      final s = w.samples[3 + k], f = decodeFrame(frames[k]);
+      expect(s.pack, f.seq);
+      expect(s.volts, f.volts()); // all eight, each in its place
+    }
+    final h = (w.band as OtherBoard).header;
+    expect(h.names, ['Ch1', 'Ch2', 'Ch3', 'Ch4', 'Ch5', 'Ch6', 'Ch7', 'Ch8']);
+    expect(h.record, '<I8f');
+    expect(h.counter, 'board sequence number');
+    expect(h.device, 'DIY board');
+    expect(h.sampleRate, 250);
+    expect((w.band as OtherBoard).board.names, h.names);
+    await settle();
+    expect(
+      w.notes,
+      contains('the setting names 4 channels (O1 O2 Fz Fp1) but the board sends 8: using Ch1 Ch2 Ch3 Ch4 Ch5 Ch6 Ch7 '
+          'Ch8; give 8 names on the Headband connection page'),
     );
+    expect(w.notes, contains(startsWith('format .f32 records <I8f: board sequence number, then Ch1 Ch2')));
+  });
+
+  test('eight names in the setting name the 8-channel chip; the positions file places them in its header', () async {
+    finder = DiyFinder(
+      link: () => link,
+      timing: fast,
+      names: const ['Fz', 'Cz', 'Pz', 'O1', 'O2', 'T7', 'T8', 'X1'],
+      positions: parsePositions('X1 60 30\n'),
+    );
+    board = FakeBoard(channels: 8);
+    final w = await connected();
+    final h = (w.band as OtherBoard).header;
+    expect(h.names, ['Fz', 'Cz', 'Pz', 'O1', 'O2', 'T7', 'T8', 'X1']);
+    expect(h.channels[3].site, 'O1');
+    expect(h.channels[7].xyz, isNotNull); // placed by the positions file
+    expect(h.pick(const ['O1', 'O2', 'T3', 'T4'], who: 'x'), [3, 4, 5, 6]);
   });
 
   test('datagrams from outside the local network are ignored; a second sender is named', () async {

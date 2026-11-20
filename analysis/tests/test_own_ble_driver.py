@@ -356,7 +356,7 @@ LOG_LINES = [r"^\S+ connected .+ ([0-9A-F]{2}:){5}[0-9A-F]{2} serial \S+ battery
 def test_ble_recorder_writes_the_sdk_recorders_format(recorders):
     assert recorders["rc"]["sdk"] == 0 and recorders["rc"]["ble"] == 0, recorders["out"]
     sets = {n: one_set(recorders["dirs"][n]) for n in ("sdk", "ble")}
-    assert set(sets["sdk"]) == set(sets["ble"]) == {".f32", ".idx", ".log", ".markers.jsonl"}
+    assert set(sets["sdk"]) == set(sets["ble"]) == {".f32", ".idx", ".log", ".markers.jsonl", ".header.json"}
     recs = {n: records(sets[n][".f32"]) for n in sets}
     for n in sets:
         assert 2300 < len(recs[n]) < 3100, (n, len(recs[n]))  # 11 s at 250 Hz
