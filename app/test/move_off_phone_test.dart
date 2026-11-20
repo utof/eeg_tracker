@@ -225,7 +225,8 @@ void main() {
       expect(classify('work-sessions/2026-11-18-100000.work.json'), 'work.summaries');
       expect(classify('cache/share-hashes.json'), 'cache.all');
       expect(classify('settings.json'), 'other.all');
-      for (final id in ['nights.reports', 'work.summaries', 'checkins.results', 'dream.text', 'other.all']) {
+      expect(classify('logs/app-2026-11-18-main.jsonl'), 'logs.app'); // the app's own records (lib/logs)
+      for (final id in ['nights.reports', 'work.summaries', 'checkins.results', 'dream.text', 'other.all', 'logs.app']) {
         expect(storageItems[id]!.kept, isTrue, reason: id);
       }
       expect({for (final i in storageItems.values) if (i.auto) i.id}, {'nights.raw', 'work.raw', 'dream.audio', 'checkins.raw', 'diy.raw'});

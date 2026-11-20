@@ -77,6 +77,9 @@ const List<StorageCategory> storageCategories = [
   StorageCategory('diy', 'DIY board', [StorageItem('diy.raw', 'Raw recordings', raw: true, auto: true)]),
   StorageCategory('logs', 'Logs', [
     StorageItem('logs.recorder', 'Recorder logs', note: 'What happened during each recording'),
+    // the app's own records (lib/logs, DECISIONS 710-719): they keep 7 to 90 days by themselves, and each page under
+    // More, How the app runs, deletes its own; counted here, never offered
+    StorageItem('logs.app', 'App log, usage and battery', note: 'Kept 7 to 90 days; How the app runs deletes them', kept: true),
   ]),
   StorageCategory('cache', 'Cache', [
     StorageItem('cache.all', 'Working files', note: 'Made again by the app when it needs them', regenerable: true),
@@ -145,6 +148,8 @@ String classify(String path, {String? Function(String stemPath)? session}) {
       return 'dream.sessions';
     case 'cache':
       return 'cache.all';
+    case 'logs':
+      return 'logs.app';
   }
   return 'other.all';
 }
