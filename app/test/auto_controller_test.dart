@@ -298,7 +298,12 @@ void main() {
         now = now.add(const Duration(minutes: 3));
       });
       final files = Directory(rec).listSync().map((f) => f.uri.pathSegments.last).toList()..sort();
-      expect(files, ['2026-11-20-223000.f32', '2026-11-20-223000.idx', '2026-11-20-223000.log']);
+      expect(files, [
+        '2026-11-20-223000.f32',
+        '2026-11-20-223000.header.json', // what its records hold (DECISIONS 630-639)
+        '2026-11-20-223000.idx',
+        '2026-11-20-223000.log',
+      ]);
       expect(File('$rec/2026-11-20-223000.f32').lengthSync(), 80 * 20);
       expect(check.releases, 1, reason: 'let go before the recorder looks for it');
       final notes = starter.nights.single;

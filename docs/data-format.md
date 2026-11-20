@@ -50,10 +50,10 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 
 ## Raw recording (DIY board)
 
-`scripts/record_diy.py` ([diy-board.md](diy-board.md)) writes the same four files for the owner's ADS1299 board, into
-`_local/recordings-diy/` (not `_local/recordings/`: the sleep and morning tools read O1 O2 T3 T4 only). The phone app
-writes the same layout for the 4-channel chip into its `files/recordings-diy/` (Wi-Fi route; diy-board.md "On the
-phone"): its `.log` names the link `UDP port 9000 on every IPv4 interface (Wi-Fi route)`, each sender (`datagrams
+`scripts/record_diy.py` ([diy-board.md](diy-board.md)) writes the same files for the owner's ADS1299 board, into
+`_local/recordings-diy/` (not `_local/recordings/`: the board's nights are never scored; the sleep and morning tools
+read O1 O2 T3 T4, by name since 2026-11-20). The phone app writes the same layout for the 4-, 6- and 8-channel chips
+into its `files/recordings-diy/` (Wi-Fi route; diy-board.md "On the phone"): its `.log` names the link `UDP port 9000 on every IPv4 interface (Wi-Fi route)`, each sender (`datagrams
 from <address>`), `a new capture: board restarted (<why>)` at the start of a set after a restart, and has the phone
 recorder's own lines (`connected DIY board udp:9000 (no battery or signal-strength reading from this board)`,
 `samples N (+n)`, `reconnected (scan, try n) after a drop`).
@@ -105,7 +105,7 @@ an error that names the file: readers never guess past a damaged header.
 
 ```json
 {"format": "eeg-tracker-recording", "version": 1, "device": "BrainBit", "layout": "BrainBit",
- "channels": [{"name": "O1", "site": "O1", "xyz": [-0.309, -0.951, 0.0]}, {"name": "O2", "site": "O2", "xyz": [0.309, -0.951, 0.0]},
+ "channels": [{"name": "O1", "site": "O1", "xyz": [-0.309, -0.9511, 0.0]}, {"name": "O2", "site": "O2", "xyz": [0.309, -0.9511, 0.0]},
               {"name": "T3", "site": "T7", "xyz": [-1.0, 0.0, 0.0]}, {"name": "T4", "site": "T8", "xyz": [1.0, 0.0, 0.0]}],
  "reference": {"name": "Ref", "where": "forehead", "site": "Fpz"}, "ground": null,
  "sample_rate": 250, "unit": "V", "record": "<I4f", "counter": "packet number", "made_by": "eeg_tracker app"}
@@ -375,7 +375,7 @@ folder). It never changes or deletes anything in the app's folder, and never run
   `settings.json`, `experiments/<made at>/` (self-experiments, below), `wearer/` ("Was this you?", below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers and their `<stamp>-r<n>.text.json` words, below, `prompts/`), `sound-states/`, `hands-free/` (below), `unusual/` (below), `lucid/` (below), `try-these/` (below), `own-ble/`
   (`settings.json`: which headband connection is in use; `probe/<stamp>/`: the probe's result, docs/own-ble-driver.md),
   `recordings-diy/` (the DIY board's nights, the format of "Raw recording (DIY board)") and `diy-board/settings.json`
-  (`useDiy`: which headband; `names`: CH1-CH4), and any folder
+  (`useDiy`: which headband; `names`: 4, 6 or 8 names from CH1), and any folder
   a later feature adds. Left on the phone: `models/` (copies of the app's model assets), `export/` (the export's own
   index), half-written `*.tmp` files, the scorer's `*.scoring` markers, and the two files Android and a plugin keep
   there for themselves (`profileInstalled`, `flutter_callback_cache.json`; DECISIONS row 160).
