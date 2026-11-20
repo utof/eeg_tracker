@@ -13,6 +13,7 @@ import '../work/drowsiness.dart';
 import '../work/store.dart';
 import 'form_parts.dart' show PinnedAction, Para;
 import 'parts.dart';
+import 'device_status.dart';
 import 'theme.dart';
 import 'wearer_view.dart' show WearerRemark;
 
@@ -157,6 +158,7 @@ class WorkView extends StatelessWidget {
             : 'Wear the headband while you work. The phone watches for heavy eyelids and suggests a break now and then.',
       ),
       if (!failed && m.message.isNotEmpty) Para(m.message, color: Night.inkMuted),
+      const SharedDeviceCard(top: 24),
       const SectionHeading('How it works'),
       _Rule('First', 'about 4 minutes of your usual work: your awake baseline. Start when you feel fresh.'),
       _Rule('Then', 'alert, getting drowsy or drowsy, from the last 5 minutes against your baseline.'),
@@ -185,6 +187,7 @@ class WorkView extends StatelessWidget {
     final (mark, word, line) = _state(m);
     return [
       _Status(mark: mark, word: word, line: line),
+      const SharedDeviceCard(top: 20),
       if (m.hint != null) _HintBlock(hint: m.hint!, rated: m.rated, onSnooze: onSnooze, onNotNow: onNotNow, onRate: onRate),
       if (m.afterBreak != null && m.hint == null && !m.onBreak) Para(m.afterBreak!, color: Night.ink, top: 16),
       if (m.stage.index >= WorkStage.calibrating.index) ...[

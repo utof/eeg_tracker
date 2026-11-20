@@ -5,11 +5,12 @@
 // 5 minutes, the counters (samples, times, missing packets) and the latest values. Any number of channels.
 import 'package:flutter/material.dart';
 
-import '../recorder/contact.dart';
 import '../signal/head3d.dart';
 import '../signal/layout.dart';
 import '../signal/live_signal.dart';
+import '../signal/quality.dart';
 import '../signal/signal_feed.dart';
+import 'device_status.dart';
 import 'head_view.dart';
 import 'night_view.dart' show Tone;
 import 'parts.dart';
@@ -33,6 +34,7 @@ class SignalViewModel {
     this.dataAge,
     this.problem,
     this.canMeasure = false,
+    this.quality,
   });
 
   factory SignalViewModel.of(SignalFeed f) => SignalViewModel(
@@ -60,19 +62,27 @@ class SignalViewModel {
   final int? dataAge;
   final String? problem;
   final bool canMeasure;
-}
 
-/// '820 kΩ', '1.4 MΩ', '–' (no reading).
-String formatOhms(double? ohms) {
-  if (ohms == null || ohms.isNaN || ohms < 0) return '–';
-  if (ohms.isInfinite) return 'off';
-  if (ohms < 1e3) return '${ohms.round()} Ω';
-  if (ohms < 1e6) return '${(ohms / 1e3).round()} kΩ';
-  return '${(ohms / 1e6).toStringAsFixed(1)} MΩ';
+  /// Each electrode's word from the one judge (the headband card's status); null: the contact reading alone decides.
+  final QualityVerdict? quality;
+
+  SignalViewModel withQuality(QualityVerdict? q) => SignalViewModel(
+    stage: stage,
+    kind: kind,
+    montage: montage,
+    measuresContact: measuresContact,
+    diy: diy,
+    ohms: ohms,
+    ohmsAt: ohmsAt,
+    ohmsFrom: ohmsFrom,
+    dataAge: dataAge,
+    problem: problem,
+    canMeasure: canMeasure,
+    quality: q,
+  );
 }
 
 String _two(int v) => v.toString().padLeft(2, '0');
-String _hm(DateTime t) => '${_two(t.hour)}:${_two(t.minute)}';
 
 /// 23:41:12.116
 String clockMs(double ms) {
@@ -169,44 +179,17 @@ String _sentence(String s) {
   return up.endsWith('.') ? up : '$up.';
 }
 
-/// Where the shown contact comes from, in a sentence.
-String contactSource(SignalViewModel m) {
-  if (!m.measuresContact) return 'This board does not measure contact.';
-  final at = m.ohmsAt;
-  switch (m.ohmsFrom) {
-    case ContactFrom.nightStart:
-      return 'Measured ${at == null ? 'when the night started' : 'when the night started, ${_hm(at)}'}. The headband stays '
-          'in recording mode until Stop: this is the last reading.';
-    case ContactFrom.session:
-      return 'Measured ${at == null ? 'when the session started' : 'at ${_hm(at)}, when the session started'}. The '
-          'headband stays with the session: this is the last reading.';
-    case ContactFrom.now:
-      return 'Measured${at == null ? '' : ' at ${_hm(at)}'}. Measure again any time; the traces pause for about 7 s.';
-    case ContactFrom.none:
-      return switch (m.kind) {
-        FeedKind.night => 'No contact reading from the start of this night.',
-        FeedKind.session => 'The session has no contact reading.',
-        _ => 'Contact is measured when the headband connects.',
-      };
-  }
-}
-
 /// A channel's mark from the contact reading.
 SiteMark siteMark(SignalViewModel m, String name) {
   if (!m.measuresContact) return (contact: Contact.none, value: null, measured: false);
+  final e = m.quality?.electrodes.where((e) => e.name == name).firstOrNull;
+  if (e != null) return (contact: e.grade, value: m.ohms.isEmpty ? null : formatOhms(m.ohms[name]), measured: true);
   if (m.ohms.isEmpty) return (contact: Contact.none, value: null, measured: true);
   final o = m.ohms[name];
   return (contact: classifyOhms(o), value: formatOhms(o), measured: true);
 }
 
-const List<(IconData, Color, String)> _markIcons = [
-  (Icons.circle, Night.live, 'good'),
-  (Icons.adjust, Night.caution, 'fair'),
-  (Icons.radio_button_unchecked, Night.problem, 'poor'),
-  (Icons.remove, Night.inkMuted, 'none'),
-];
-
-(IconData, Color, String) _icon(Contact c) => _markIcons[c.index];
+(IconData, Color, String) _icon(Contact c) => contactMark(c);
 
 Color _toneColor(Tone t) => switch (t) {
   Tone.calm => Night.inkMuted,
@@ -223,11 +206,15 @@ class SignalView extends StatefulWidget {
     required this.frames,
     required this.pose,
     this.onAction,
-    this.onMeasure,
     this.onPositions,
     this.onInfo,
     this.initialPart = SignalPart.head,
+    this.device,
   });
+
+  /// The headband card every screen shares (ui/device_status.dart): state, battery, each electrode, the foldable
+  /// signal panel. Null: none (the DIY board, a test).
+  final DeviceCard? device;
 
   final SignalViewModel model;
   final LiveSignal? signal;
@@ -236,7 +223,6 @@ class SignalView extends StatefulWidget {
   final Listenable frames;
   final ValueNotifier<HeadPose> pose;
   final ValueChanged<SignalAction>? onAction;
-  final VoidCallback? onMeasure;
 
   /// The positions page for sites outside the 10-10 names.
   final VoidCallback? onPositions;
@@ -384,6 +370,7 @@ class _SignalViewState extends State<SignalView> {
                 key: const PageStorageKey('signal-head'),
                 padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
                 children: [
+                  if (widget.device != null) ...[DeviceStatusCard(card: widget.device!), const SizedBox(height: 16)],
                   Text(
                     'Drag to turn, pinch to zoom, double-tap to straighten. Tap an electrode for its trace.',
                     style: muted,
@@ -402,17 +389,7 @@ class _SignalViewState extends State<SignalView> {
                       style: muted?.copyWith(color: Night.caution),
                     ),
                   ],
-                  const SizedBox(height: 12),
-                  Text(contactSource(m), style: muted),
                   if (m.montage.note != null) ...[const SizedBox(height: 8), Text(m.montage.note!, style: muted)],
-                  if (m.canMeasure) ...[
-                    const SizedBox(height: 16),
-                    OutlinedButton.icon(
-                      onPressed: widget.onMeasure,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Measure contact again'),
-                    ),
-                  ],
                   if (widget.onPositions != null) ...[
                     const SizedBox(height: 8),
                     Align(
@@ -446,7 +423,7 @@ class _SignalViewState extends State<SignalView> {
           spacing: 16,
           runSpacing: 6,
           children: [
-            for (final (icon, color, word) in _markIcons)
+            for (final (icon, color, word) in Contact.values.map(contactMark))
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -458,7 +435,10 @@ class _SignalViewState extends State<SignalView> {
           ],
         ),
         const SizedBox(height: 6),
-        Text('Good up to 1 MΩ, fair up to 2.5 MΩ: planning limits, not measured on your head.', style: muted),
+        Text(
+          'Good up to 300 kΩ, ok up to 1 MΩ, poor above. While the signal runs, the word follows the signal itself.',
+          style: muted,
+        ),
       ],
     );
   }

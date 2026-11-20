@@ -17,6 +17,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../dream/band_link.dart';
 import '../recorder/chunk_writer.dart' show Sample;
 import '../recorder/headband.dart';
 import '../recorder/status.dart';
@@ -370,6 +371,27 @@ class HeadbandConnection {
     try {
       await hold?.call(on);
     } catch (_) {}
+  }
+
+  /// "Connect" on the headband card: reaches the headband, checks contact once, starts the signal and keeps the
+  /// connection ([linger]) for whatever starts next. A failure is told in [status] (`problem`).
+  Future<void> connectNow() async {
+    if (_real != null || _connecting != null || _lending || nightRuns) return;
+    final link = BandLink(finder: finder, onBatch: (_, _) {}, clock: _now);
+    try {
+      if (await link.connect()) {
+        await link.contact();
+        await link.startSignal();
+        await Future<void>.delayed(const Duration(seconds: 1));
+      } else {
+        _problem = 'Headband not found. Is it switched on and charged?';
+      }
+    } catch (e) {
+      _problem = 'Could not connect: $e';
+    } finally {
+      await link.close();
+      _emit();
+    }
   }
 
   // ---- what a handle asks ---------------------------------------------------------------------------------------

@@ -124,7 +124,7 @@ List<Sample>? _samples(Map<Object?, Object?> m) {
 /// offer; every later try (and every try without one) goes to [inner], after the owner was told to let go.
 class LendFinder implements HeadbandFinder {
   LendFinder({required this.inner, required this.toScreen, LendOffer? offer, this.takeWait = const Duration(seconds: 4)})
-    : _offer = offer;
+    : _offer = offer; // ignore: prefer_initializing_formals
 
   final HeadbandFinder inner;
   final void Function(Object message) toScreen;

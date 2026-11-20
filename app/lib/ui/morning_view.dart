@@ -5,10 +5,11 @@ import 'package:flutter/material.dart';
 
 import '../alphatheta/rules.dart' show ReactionTest;
 import '../morning/controller.dart';
-import '../morning/live.dart';
 import '../recorder/contact.dart';
 import '../trends/trends.dart';
 import '../wearer/wearer.dart' show WearerLine;
+import '../signal/quality.dart' show formatOhms;
+import 'device_status.dart' show contactMark;
 import 'form_parts.dart';
 import 'parts.dart';
 import 'reaction_test.dart';
@@ -36,7 +37,8 @@ const Map<String, String> electrodePlace = {
   'T4': 'right side',
 };
 
-typedef ContactLine = ({String channel, Contact contact, Grade grade, String word, double spread});
+/// One electrode on the contact step: its word from the one judge (signal/quality.dart) and its contact reading.
+typedef ContactLine = ({String channel, Contact grade, double? ohms});
 
 /// This morning's result as the page shows it.
 typedef MorningOutcome = ({List<TrendRow> rows, String today, String time, double? cleanShare, bool noPeak});
@@ -399,20 +401,11 @@ class _ContactRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final c = line;
-    final (icon, color) = switch (c.grade) {
-      Grade.good => (Icons.circle, Night.live),
-      Grade.fair => (Icons.adjust, Night.caution),
-      Grade.bad => (Icons.radio_button_unchecked, Night.problem),
-    };
-    final ohms = switch (c.contact) {
-      Contact.none => 'no contact reading',
-      Contact.good => 'contact good',
-      Contact.fair => 'contact fair',
-      Contact.poor => 'contact poor',
-    };
+    final (icon, color, word) = contactMark(c.grade);
+    final ohms = c.ohms == null ? 'no contact reading' : 'contact ${formatOhms(c.ohms)}';
     return Semantics(
       container: true,
-      label: '${c.channel}, ${electrodePlace[c.channel]}: ${c.word}, $ohms',
+      label: '${c.channel}, ${electrodePlace[c.channel]}: $word, $ohms',
       excludeSemantics: true,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -425,7 +418,7 @@ class _ContactRow extends StatelessWidget {
                 children: [
                   Text(electrodePlace[c.channel] ?? '', style: text.bodyMedium?.copyWith(color: Night.inkMuted)),
                   Text(
-                    '$ohms · ${c.spread.round()}\u00a0µV',
+                    ohms,
                     style: text.bodyMedium?.copyWith(color: Night.inkMuted, fontFeatures: tabular),
                   ),
                 ],
@@ -434,7 +427,7 @@ class _ContactRow extends StatelessWidget {
             const SizedBox(width: 8),
             Icon(icon, size: 18, color: color),
             const SizedBox(width: 6),
-            Text(c.word, style: text.bodyLarge?.copyWith(color: color)),
+            Text(word, style: text.bodyLarge?.copyWith(color: color)),
           ],
         ),
       ),

@@ -12,7 +12,6 @@ import '../phone.dart';
 import 'experiments_screen.dart' show currentExperiment;
 import 'experiments_view.dart' show experimentLine;
 import '../recorder/brainbit.dart';
-import '../recorder/contact.dart';
 import '../session_keeper.dart';
 import '../sound/check_in_sound.dart';
 import '../trends/days.dart';
@@ -256,7 +255,7 @@ class _MorningScreenState extends State<MorningScreen> {
   @override
   Widget build(BuildContext context) {
     final c = _c;
-    final grades = c.stage == MorningStage.contact ? c.grades : null;
+    final quality = c.stage == MorningStage.contact ? c.quality : null;
     final model = MorningViewModel(
       stage: c.stage,
       message: c.message,
@@ -264,15 +263,8 @@ class _MorningScreenState extends State<MorningScreen> {
       experimentLine: _experiment,
       saveNote: c.saveNote ?? (c.store == null && c.stage == MorningStage.result ? 'This check-in was not saved.' : null),
       contact: [
-        if (grades != null)
-          for (final ch in channelNames)
-            (
-              channel: ch,
-              contact: classifyOhms(c.contact[ch]),
-              grade: grades[ch]!.grade,
-              word: grades[ch]!.word,
-              spread: grades[ch]!.spread,
-            ),
+        if (quality != null)
+          for (final e in quality.electrodes) (channel: e.name, grade: e.grade, ohms: e.ohms),
       ],
       rechecking: c.rechecking,
       noSignal: c.noSignal,

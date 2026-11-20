@@ -9,11 +9,11 @@ import '../dream/controller.dart' show DreamStage;
 import '../dream/store.dart';
 import '../dream/voice.dart' show AnswerEnd;
 import '../dream/rounds.dart' show DreamCause, DreamRule;
-import '../recorder/contact.dart';
 import '../recorder/nights.dart' show nightLabel;
 import 'dream_text_view.dart';
 import 'meditation_view.dart' show MarkShape, StateMark;
 import 'parts.dart';
+import 'device_status.dart';
 import 'theme.dart';
 
 /// The session face: true black (the phone's OLED pixels off) and ink at reduced strength.
@@ -502,10 +502,7 @@ class DreamView extends StatelessWidget {
               style: text.bodyMedium?.copyWith(color: faceMuted, fontFeatures: tabular),
             ),
           ],
-          if (m.stage == DreamStage.baseline && m.contact.isNotEmpty) ...[
-            const SizedBox(height: 28),
-            Opacity(opacity: 0.72, child: _Contact(m.contact)),
-          ],
+          if (m.stage == DreamStage.baseline) const Opacity(opacity: 0.72, child: SharedDeviceCard(top: 28)),
           const Spacer(flex: 4),
           OutlinedButton.icon(
             onPressed: m.stage == DreamStage.ending ? null : onStop,
@@ -842,12 +839,3 @@ class _Note extends StatelessWidget {
   }
 }
 
-class _Contact extends StatelessWidget {
-  const _Contact(this.contact);
-  final Map<String, double?> contact;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [for (final n in const ['O1', 'O2', 'T3', 'T4']) Expanded(child: ContactCell(n, classifyOhms(contact[n])))],
-  );
-}

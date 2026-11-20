@@ -433,10 +433,11 @@ class QualityJudge {
   }
 }
 
-/// `123 kΩ`, `1.2 MΩ`, or a dash for no reading.
+/// '820 kΩ', '1.4 MΩ', 'off' (infinite: off the head), '–' (no reading).
 String formatOhms(double? ohms) {
-  if (ohms == null || ohms.isNaN || ohms.isInfinite || ohms < 0) return '–';
-  if (ohms >= 1e6) return '${(ohms / 1e6).toStringAsFixed(1)} MΩ';
-  if (ohms >= 1e3) return '${(ohms / 1e3).round()} kΩ';
-  return '${ohms.round()} Ω';
+  if (ohms == null || ohms.isNaN || ohms < 0) return '–';
+  if (ohms.isInfinite) return 'off';
+  if (ohms < 1e3) return '${ohms.round()} Ω';
+  if (ohms < 1e6) return '${(ohms / 1e3).round()} kΩ';
+  return '${(ohms / 1e6).toStringAsFixed(1)} MΩ';
 }

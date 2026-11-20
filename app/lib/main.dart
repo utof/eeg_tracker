@@ -17,6 +17,7 @@ import 'recorder/recorder_service.dart';
 import 'sharp/prompts.dart';
 import 'start_log.dart';
 import 'ui/auto_hooks.dart';
+import 'ui/device_status.dart';
 import 'ui/night_screen.dart';
 import 'ui/sharp_rating_screen.dart';
 import 'ui/study_screen.dart' show StudyLogScreen;
@@ -59,6 +60,7 @@ class EegTrackerApp extends StatefulWidget {
 class _EegTrackerAppState extends State<EegTrackerApp> {
   final GlobalKey<NavigatorState> _navigator = GlobalKey<NavigatorState>();
   late final SharpPhone _sharp = widget.sharp ?? ChannelSharpPhone();
+  late final DeviceCard? _deviceCard = DeviceCard.shared();
   late final AutoHooks _auto = AutoHooks(_navigator); // the headband watcher (lib/auto, DECISIONS 600)
   bool _asking = false;
 
@@ -111,7 +113,11 @@ class _EegTrackerAppState extends State<EegTrackerApp> {
     theme: nightTheme(),
     // the usage log (DECISIONS 713): the page on top, and taps, drags and scrolls of the app's own screens
     navigatorObservers: [_usage],
-    builder: (context, child) => UsageGestures(child: child ?? const SizedBox.shrink()),
+    // the one headband card for every screen (ui/device_status.dart, DECISIONS 854)
+    builder: (context, child) => DeviceCardScope(
+      card: _deviceCard,
+      child: UsageGestures(child: child ?? const SizedBox.shrink()),
+    ),
     home: const NightScreen(),
   );
 }

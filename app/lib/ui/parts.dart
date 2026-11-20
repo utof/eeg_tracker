@@ -1,7 +1,6 @@
 // Pieces both screens share: a section heading under a hairline, and a big tabular readout.
 import 'package:flutter/material.dart';
 
-import '../recorder/contact.dart';
 import 'theme.dart';
 
 /// A hairline, then the section's name (titleMedium 500), 32 dp above it (DESIGN.md Layout).
@@ -57,38 +56,3 @@ class Readout extends StatelessWidget {
   }
 }
 
-/// One channel's contact: name, then a mark and a word in the trio's colour (DESIGN.md Shapes).
-class ContactCell extends StatelessWidget {
-  const ContactCell(this.channel, this.contact, {super.key});
-  final String channel;
-  final Contact contact;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final (icon, color, word) = switch (contact) {
-      Contact.good => (Icons.circle, Night.live, 'good'),
-      Contact.fair => (Icons.adjust, Night.caution, 'fair'),
-      Contact.poor => (Icons.radio_button_unchecked, Night.problem, 'poor'),
-      Contact.none => (Icons.remove, Night.inkMuted, 'none'),
-    };
-    return Semantics(
-      label: '$channel contact $word',
-      excludeSemantics: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(channel, style: text.titleMedium),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Icon(icon, size: 18, color: color),
-              const SizedBox(width: 6),
-              Text(word, style: text.bodyLarge?.copyWith(color: color)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
