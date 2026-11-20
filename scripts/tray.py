@@ -7,8 +7,10 @@ usage: python3 scripts/tray.py              the icon in the panel (the system py
 
 The logic is in scripts/laptop_work.py (tested in analysis/tests/test_laptop_work.py); this file is only the icon, its
 menu and the desktop notifications (tested with fake GTK in analysis/tests/test_tray.py). DECISIONS 570-579; meetings
-(a call app holding the microphone, or a meeting window in front, is work, never a break): 660-669.
-Settings: ~/.config/eeg_tracker/tray.json; records: <repo>/_local/laptop/work/. Nothing leaves the laptop.
+(a call app holding the microphone, or a meeting window in front, is work, never a break): 660-669; the paired phone
+and its headband (a ring around the icon, the menu's phone lines, the phone link kept running): 670-679.
+Settings: ~/.config/eeg_tracker/tray.json; records: <repo>/_local/laptop/work/. Nothing leaves the laptop but the
+paired phone's work signal and the looks at its /state, on the local network.
 """
 from __future__ import annotations
 
@@ -26,19 +28,25 @@ ICONS = HERE.parent / "tray-icons"
 POLL_S = 60          # ActivityWatch is read this often
 RENDER_S = 20        # the menu's clock lines are redrawn this often
 N_LINES = 5
+N_PHONE = 3          # the phone's lines: the phone, the headband, a break from the phone
 ICON_WORDS = {"working": "Working", "break": "On a break", "idle": "Not in a work session",
               "attention": "Waiting for an answer"}
+RING_WORDS = {"none": "", "dashed": "; phone not reachable", "amber": "; headband not recording",
+              "green": "; headband recording on the phone"}
 LABELS = {"yes": "Yes, a work session", "no": "Not work", "start": "Start work session",
           "stop": "Stop work session", "notwork": "Not work (end it, mark it not work)", "break": "On a break",
           "back": "Back from the break", "snooze": "Snooze the hint 20 min", "dismiss": "OK, no break now",
-          "folder": "Open data folder", "pair": "Pair phone…", "quit": "Quit"}
+          "folder": "Open data folder", "pair": "Pair phone…", "quit": "Quit",
+          "pairtop": "Phone not paired: Pair phone…", "forget": "Forget the phone…",
+          "forget_yes": "Yes, forget it (Pair phone… pairs again)"}
 TOP = ("yes", "no", "start", "stop", "notwork", "break", "back", "snooze", "dismiss")
 MODES = (("off", "Off: only when I press Start"), ("ask", "Ask me first"), ("auto", "Automatic when sure"))
 AWAY = ((30.0, "30 min"), (60.0, "1 hour"), (0.0, "Never"))
 
 
-def icon_path(name: str) -> str:
-    return str(ICONS / f"eeg-tray-{name}.svg")
+def icon_path(name: str, ring: str = "none") -> str:
+    """The icon of a state, with the phone's ring around it (DECISIONS 672): green, amber, dashed or none."""
+    return str(ICONS / (f"eeg-tray-{name}.svg" if ring == "none" else f"eeg-tray-{name}-{ring}.svg"))
 
 
 class DbusNotifier:
@@ -116,15 +124,17 @@ class TrayMenu:
                  python: str = sys.executable):
         self.ctl, self.Gtk, self.GLib = ctl, Gtk, GLib
         self.launch, self.now, self.spawn, self.pair, self.data_dir, self.python = launch, now, spawn, pair, data_dir, python
-        self.rendering = False; self.busy = False
+        self.rendering = False; self.busy = False; self.phone_busy = False
         self.ind = AI.Indicator.new("eeg-tracker-tray", icon_path("idle"), AI.IndicatorCategory.APPLICATION_STATUS)
         self.ind.set_status(AI.IndicatorStatus.ACTIVE); self.ind.set_title("EEG tracker: work sessions")
         menu = Gtk.Menu()
+        self.items = {"pairtop": self._item(menu, LABELS["pairtop"], "pairtop")}   # first, while no phone is paired
         self.lines = [self._item(menu, "", None) for _ in range(N_LINES)]
-        for x in self.lines:
+        self.phone_lines = [self._item(menu, "", None) for _ in range(N_PHONE)]
+        for x in self.lines + self.phone_lines:
             x.set_sensitive(False)
         menu.append(Gtk.SeparatorMenuItem())
-        self.items = {k: self._item(menu, LABELS[k], k) for k in TOP}
+        self.items.update({k: self._item(menu, LABELS[k], k) for k in TOP})
         menu.append(Gtk.SeparatorMenuItem())
         top = Gtk.MenuItem(label="Settings"); sub = Gtk.Menu(); top.set_submenu(sub); menu.append(top)
         self.checks: dict[tuple[str, object], Any] = {}
@@ -139,8 +149,11 @@ class TrayMenu:
         self._check(sub, "Start at login", ("autostart", True))
         self._item(sub, "More settings (opens the file)…", "settings_file")
         menu.append(Gtk.SeparatorMenuItem())
-        for k in ("folder", "pair", "quit"):
+        for k in ("folder", "pair"):
             self.items[k] = self._item(menu, LABELS[k], k)
+        forget = Gtk.MenuItem(label=LABELS["forget"]); ask = Gtk.Menu(); forget.set_submenu(ask); menu.append(forget)
+        self.items["forget"] = forget; self.items["forget_yes"] = self._item(ask, LABELS["forget_yes"], "forget_yes")
+        self.items["quit"] = self._item(menu, LABELS["quit"], "quit")
         menu.show_all(); self.ind.set_menu(menu)
 
     # --- building
@@ -170,6 +183,7 @@ class TrayMenu:
             "break": lambda: c.on_break(now), "back": lambda: c.back(now), "snooze": lambda: c.snooze(now),
             "dismiss": lambda: c.answer_hint("ok", now), "yes": lambda: c.answer_question(True, now),
             "no": lambda: c.answer_question(False, now), "folder": self.open_folder, "pair": self.open_pair,
+            "pairtop": self.open_pair, "forget_yes": lambda: c.forget_phone(now),
             "settings_file": self.open_settings, "quit": self.quit}
         acts[key]()
         if key != "quit":
@@ -229,6 +243,28 @@ class TrayMenu:
             self.spawn(work)
         return True
 
+    def phone_tick(self) -> bool:
+        """Looks at the paired phone in a thread (up to its timeout), keeping the phone link running first; the answer
+        is taken in the main loop. Nothing is asked over the network while no phone is paired."""
+        now = self.now()
+        if not self.phone_busy and self.ctl.phone_due(now):
+            self.phone_busy = True
+
+            def work() -> None:
+                try:
+                    look = self.ctl.phone_fetch(now)
+                except Exception as e:  # noqa: BLE001  (keep the icon alive; say what failed, never a token)
+                    print(f"phone: the look failed: {type(e).__name__}", flush=True); look = None
+                self.GLib.idle_add(self._phone_looked, look, now)
+            self.spawn(work)
+        return True
+
+    def _phone_looked(self, look: lw.PhoneLook | None, now: datetime) -> bool:
+        self.phone_busy = False
+        self.ctl.phone_seen(look, now)
+        self.render()
+        return False
+
     def _fetched(self, now: datetime, err: str | None) -> bool:
         self.busy = False
         if err is None:
@@ -246,17 +282,24 @@ class TrayMenu:
                 x.set_visible(i < len(v.lines))
                 if i < len(v.lines):
                     x.set_label(v.lines[i])
+            for i, x in enumerate(self.phone_lines):
+                x.set_visible(i < len(v.phone))
+                if i < len(v.phone):
+                    x.set_label(v.phone[i])
             for k in TOP:
                 self.items[k].set_visible(k in v.show)
             cmd = self.pair()
-            self.items["pair"].set_sensitive(cmd is not None)
+            for k in ("pair", "pairtop"):
+                self.items[k].set_sensitive(cmd is not None)
             self.items["pair"].set_label(LABELS["pair"] if cmd else "Pair phone… (needs scripts/phone_link.py)")
+            self.items["pairtop"].set_visible(v.phone_kind == "unpaired")
+            self.items["forget"].set_visible("forget" in v.show)
             s = v.settings
             for (kind, val), x in self.checks.items():
                 on = {"notifications": s.notifications, "mode": s.auto_start == val,
                       "away": s.end_after_away_min == val, "autostart": v.autostart}[kind]
                 x.set_active(bool(on))
-            self.ind.set_icon_full(icon_path(v.icon), ICON_WORDS[v.icon])
+            self.ind.set_icon_full(icon_path(v.icon, v.ring), ICON_WORDS[v.icon] + RING_WORDS[v.ring])
             self.ind.set_title(v.lines[0] if v.lines else "EEG tracker")
         finally:
             self.rendering = False
@@ -304,10 +347,10 @@ def run_tray(a: argparse.Namespace) -> int:
     store = lw.SettingsStore(a.config)
     hints = lw.FileHintLog(a.export)
     ctl = lw.WorkTray(lw.ActivityWatch(a.host), DbusNotifier(Gio, GLib), lw.Records(a.local / "laptop" / "work"),
-                      hints, store, a.local, lw.autostart_path(), lambda: lw.phone_line(a.local),
+                      hints, store, a.local, lw.autostart_path(), lambda now: lw.look_at_phone(a.local, now),
                       work_signal=lambda working: tell_phone(a.local, working,
                                                              meeting=working and ctl.meeting_now is not None),
-                      mic=lw.pactl_meeting)
+                      mic=lw.pactl_meeting, keeper=lw.LinkKeeper(a.local))
     for p in store.problems:
         print("settings:", p, flush=True)
     ctl.resume(datetime.now().astimezone())
@@ -318,8 +361,9 @@ def run_tray(a: argparse.Namespace) -> int:
                     pair=lambda: lw.pair_command(local=a.local))
     for sig in (15, 2, 1):   # SIGTERM (logout), SIGINT (Ctrl+C), SIGHUP: close the session file first
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, lambda *_: (menu.quit(), False)[1])
-    menu.render(); GLib.idle_add(lambda: (menu.tick(), False)[1])
+    menu.render(); GLib.idle_add(lambda: (menu.tick(), False)[1]); GLib.idle_add(lambda: (menu.phone_tick(), False)[1])
     GLib.timeout_add_seconds(POLL_S, menu.tick); GLib.timeout_add_seconds(RENDER_S, menu.render)
+    GLib.timeout_add_seconds(int(lw.PHONE_POLL_S), menu.phone_tick)
     print(f"tray: records in {a.local / 'laptop' / 'work'}, settings in {store.path}", flush=True)
     Gtk.main()
     return 0
@@ -330,7 +374,7 @@ def once(a: argparse.Namespace, out: Callable[[str], object] = print) -> int:
     store = lw.SettingsStore(a.config); s = store.load()
     ctl = lw.WorkTray(lw.ActivityWatch(a.host), lw.QueueNotifier({}), lw.Records(None),
                       lw.MemoryHintLog(lw.read_only_history(a.export)), lw.SettingsStore(None), a.local, None,
-                      lambda: lw.phone_line(a.local), mic=lw.pactl_meeting)
+                      lambda now: lw.look_at_phone(a.local, now), mic=lw.pactl_meeting)   # no link kept: read only
     ctl.s = s; now = datetime.now().astimezone()
     ctl.tick(now)
     if ctl.aw_error:
@@ -339,6 +383,8 @@ def once(a: argparse.Namespace, out: Callable[[str], object] = print) -> int:
     out(f"now {now:%H:%M}, auto-start {s.auto_start}, icon {v.icon}, "
         + (f"in a meeting ({ctl.meeting_now})" if ctl.meeting_now else "not in a meeting"))
     out("\n".join("  " + x for x in v.lines))
+    out(f"phone: {v.phone_kind}, ring {v.ring}" + ("".join("\n  " + x for x in v.phone) if v.phone else
+                                                  ("\n  Phone not paired: Pair phone…" if v.phone_kind == "unpaired" else "")))
     if r is not None:
         out(f"current run: {r.family}, {r.work_min:.1f} min {'in it' if r.family == 'meeting' else 'in work apps'} since {lw.hm(r.start)}, {r.away_min:.1f} min "
             f"elsewhere, clear {r.clear_min:.1f} min, in it now: {r.now_in}; verdict: {lw.verdict(r, s) or 'nothing yet'}")
