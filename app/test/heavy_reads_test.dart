@@ -29,7 +29,10 @@ import 'package:eeg_tracker/ui/nap_view.dart' show endWords;
 import 'package:eeg_tracker/ui/night_lines.dart';
 import 'package:eeg_tracker/wearer/check.dart';
 import 'package:eeg_tracker/wearer/wearer.dart';
+import 'package:eeg_tracker/try_these/cards.dart' show tryCards;
+import 'package:eeg_tracker/try_these/seen.dart';
 import 'package:eeg_tracker/ui/theme.dart';
+import 'package:eeg_tracker/ui/try_these_screen.dart' show TryTheseEntry;
 import 'package:eeg_tracker/ui/trends_screen.dart';
 import 'package:eeg_tracker/ui/trends_view.dart';
 import 'package:eeg_tracker/work/days.dart';
@@ -185,6 +188,48 @@ void main() {
         for (final f in Directory(workDirFor(rec).path).listSync().whereType<File>())
           jsonDecode(File(f.path).readAsStringSync()),
       ]));
+    });
+  });
+
+  group('Try these on the night screen', () {
+    testWidgets('looks once while the screen rebuilds for minutes; again when the newest report changes', (tester) async {
+      var lookups = 0;
+      Future<Map<String, String>> lookup(String files, Set<String> ids) async {
+        lookups++;
+        return const {};
+      }
+
+      // the night screen rebuilds every second
+      Widget page(Object? changed) => MaterialApp(
+        home: Scaffold(body: TryTheseEntry(recordingsDir: rec, seen: lookup, changed: changed)),
+      );
+      await tester.pumpWidget(page(('2026-11-19', true, true)));
+      for (var s = 0; s < 180; s++) {
+        await tester.pumpWidget(page(('2026-11-19', true, true)));
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(lookups, 1);
+      await tester.pumpWidget(page(('2026-11-20', false, false))); // last night's scoring began
+      await tester.pump();
+      expect(lookups, 2);
+    });
+
+    test('what the app saw: each report read once, also in a new isolate; the same sentences', () {
+      final files = Directory(rec).parent.path;
+      final ids = {for (final c in tryCards) if (c.auto) c.id};
+      final counts = countReads(addTearDown);
+      final first = seenByApp(Directory(files), ids);
+      expect(first['sleep-time'], 'Scored on this phone in 30 s: the night of Thu 19 Nov.');
+      expect(first.containsKey('night'), isFalse, reason: 'Lights off was never tapped');
+      expect(counts.of('/files/nights/'), 60);
+      counts.clear();
+      expect(seenByApp(Directory(files), ids), first);
+      expect(counts.of('/files/nights/'), 0, reason: '$counts');
+      SummaryIndex.forgetAll(); // the next look runs in a new isolate
+      counts.clear();
+      expect(seenByApp(Directory(files), ids), first);
+      expect(counts.of('/files/nights/'), 0, reason: '$counts');
+      expect(counts.of('/cache/try-reports.json'), 1);
     });
   });
 

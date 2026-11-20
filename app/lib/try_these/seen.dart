@@ -5,6 +5,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../cache/file_summaries.dart' show SummaryIndex;
 import '../recorder/chunk_writer.dart' show recordBytes;
 import '../recorder/nights.dart' show nightLabel;
 import '../recorder/packed.dart' show packedSuffix, plainFileOf, rawLength;
@@ -92,18 +93,33 @@ Iterable<Map<String, dynamic>> _lines(File f) sync* {
   }
 }
 
-Iterable<Map<String, dynamic>> _reports(Directory files) sync* {
-  for (final f in _files(files, 'nights', '.report.json')) {
-    final j = _json(f);
-    if (j != null && j['scored'] == true && j['night_of'] is String) yield j;
+/// The scored nights' reports, newest first, as far as the checks need them (`night_of`, `scoring_s`, the drift's
+/// `source`): kept per report in `files/cache/try-reports.json`, so a report is read again only when it changed
+/// (DECISIONS 620-629: [_night] read every report each time it looked).
+Iterable<Map<String, Object?>> _reports(Directory files) sync* {
+  final kept = SummaryIndex(File('${files.path}/cache/try-reports.json'), version: 1).summaries(
+    Directory('${files.path}/nights'),
+    '.report.json',
+    (f) {
+      final j = _json(f);
+      if (j == null || j['scored'] != true || j['night_of'] is! String) return null;
+      final drift = j['drift_off'];
+      return {
+        'night_of': j['night_of'],
+        'scoring_s': j['scoring_s'] is num ? j['scoring_s'] : null,
+        'drift_source': drift is Map ? drift['source'] : null,
+      };
+    },
+  );
+  for (final j in kept.values) {
+    if (j is Map<String, Object?> && j['night_of'] is String) yield j;
   }
 }
 
 /// A scored night whose lights off came from the button.
 String? _night(Directory files) {
   for (final r in _reports(files)) {
-    final drift = r['drift_off'];
-    if (drift is Map && drift['source'] == 'button') {
+    if (r['drift_source'] == 'button') {
       return 'A night with Lights off tapped, scored: the night of ${_day(r['night_of'] as String)}.';
     }
   }

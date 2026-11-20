@@ -292,11 +292,19 @@ class _TryTheseScreenState extends State<TryTheseScreen> {
 }
 
 /// The night screen's "Try these" section: reads the progress (and what the app saw) when it appears, when the app
-/// comes back, when the night screen is in front again, and at most once a minute otherwise.
+/// comes back, when the night screen is in front again, and when [changed] changes. Not on a timer: it used to look
+/// again every minute while the night screen was in front (DECISIONS 620-629).
 class TryTheseEntry extends StatefulWidget {
-  const TryTheseEntry({super.key, this.onSleepReport, this.onAlarm});
+  const TryTheseEntry({super.key, this.onSleepReport, this.onAlarm, this.changed, this.recordingsDir, this.seen});
   final VoidCallback? onSleepReport;
   final VoidCallback? onAlarm;
+
+  /// What the night screen saw change that the app may tick (the newest night's report and its scoring).
+  final Object? changed;
+
+  /// Tests: the app's recordings folder and a lookup on the test's own thread; null: the phone's, in the background.
+  final String? recordingsDir;
+  final SeenLookup? seen;
 
   @override
   State<TryTheseEntry> createState() => _TryTheseEntryState();
@@ -305,7 +313,6 @@ class TryTheseEntry extends StatefulWidget {
 class _TryTheseEntryState extends State<TryTheseEntry> with WidgetsBindingObserver {
   TryPage? _page;
   String? _rec;
-  DateTime? _readAt;
   bool _reading = false;
   bool _wasFront = true;
 
@@ -330,20 +337,19 @@ class _TryTheseEntryState extends State<TryTheseEntry> with WidgetsBindingObserv
   @override
   void didUpdateWidget(TryTheseEntry old) {
     super.didUpdateWidget(old);
-    // The night screen rebuilds every second: read again when it is back in front, or after a minute.
+    // The night screen rebuilds every second: read again only when it is back in front or something changed.
     final front = ModalRoute.of(context)?.isCurrent ?? true;
-    final stale = _readAt == null || DateTime.now().difference(_readAt!) > const Duration(minutes: 1);
-    if ((front && !_wasFront) || (front && stale)) unawaited(_read());
+    if (front && (!_wasFront || widget.changed != old.changed)) unawaited(_read());
     _wasFront = front;
   }
 
-  static Future<({String rec, Map<String, CardProgress> progress})?> _load() async {
-    final rec = await Phone.recordingsDir();
+  Future<({String rec, Map<String, CardProgress> progress})?> _load() async {
+    final rec = widget.recordingsDir ?? await Phone.recordingsDir();
     if (rec == null) return null;
     final progress = await refreshTry(
       TryStore(tryDirFor(rec)),
       Directory(rec).parent.path,
-      seenInBackground,
+      widget.seen ?? seenInBackground,
       DateTime.now(),
     );
     return (rec: rec, progress: progress);
@@ -352,7 +358,6 @@ class _TryTheseEntryState extends State<TryTheseEntry> with WidgetsBindingObserv
   Future<void> _read() async {
     if (_reading) return;
     _reading = true;
-    _readAt = DateTime.now();
     try {
       final r = await _load();
       if (r != null && mounted) {
