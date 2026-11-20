@@ -4,7 +4,8 @@
 //   - the normal day-to-day spread = 1.4826 x the median distance from it (MAD; equals the standard deviation for
 //     bell-shaped data, but one odd day barely moves it);
 //   - an arrow only from 14 days, and only when the day is at least 2 spreads away from the usual AND at least the
-//     measure's smallest change that matters (sleep 1 hour, ratings 2 points, a day's mean rating 1 point, reaction
+//     measure's smallest change that matters (sleep 1 hour, a stage or falling asleep 15 minutes, efficiency 5 points,
+//     wake-ups 2, ratings 2 points, a day's mean rating 1 point, reaction
 //     time 10 %, jaw muscle bursts a quarter of the usual, a planning value): the research's
 //     "beyond normal spread" rules (early-warning pass 2, Q4). The band shown as "your normal range" is exactly
 //     the stretch with no arrow.
@@ -23,6 +24,15 @@ const double arrowSpreads = 2;
 enum Scale {
   /// Minutes of sleep: 2 spreads and at least 60 minutes.
   minutes(minChange: 60),
+
+  /// Minutes of a stage, of falling asleep or of timing spread (DECISIONS row 652): 2 spreads and at least 15 minutes.
+  shortMinutes(minChange: 15),
+
+  /// A share in percent (sleep efficiency): 2 spreads and at least 5 percentage points.
+  percent(minChange: 5),
+
+  /// A count you do not choose (wake-ups in the night): 2 spreads and at least 2.
+  count(minChange: 2),
 
   /// A 1-5 or 1-9 rating: 2 spreads and at least 2 points.
   rating(minChange: 2),

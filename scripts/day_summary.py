@@ -19,16 +19,20 @@ with under 30 readable minutes. A day's time is the timestamp's own UTC offset (
 from __future__ import annotations
 
 import json
+import math
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
 SCHEMA = 1  # of the eeg_day event (docs/utof-interface.md)
-MEASURES_VERSION = 1  # of the measure list below
+MEASURES_VERSION = 2  # of the measure list below (2: sleep efficiency, sleep regularity, the sleep rating; DECISIONS 658)
 DAY_START_HOUR = 4
 SOMEONE_ELSE = "someone else"
 NOISY_NIGHT_SHARE = 0.5  # planning value (DECISIONS 553): more of the time asleep noisy or missing than this
 CLEAN_CHECKIN_SHARE = 0.5  # planning value (DECISIONS 553): less of a check-in's signal kept than this
+EFFICIENCY_MIN_IN_BED = 30  # sleep_days.dart efficiencyMinInBedMin (DECISIONS 654): shorter stays say nothing
+REGULARITY_DAYS, REGULARITY_MIN_NIGHTS = 7, 5  # sleep_days.dart (DECISIONS 655)
+REGULARITY_CAP_MIN = 720.0
 WORK_DAY_MIN_MINUTES = 30  # work/days.dart workDayMinMinutes (DECISIONS 481)
 BREAK_MIN, RECENT_EPOCHS, DROWSY_EPOCHS = 5, 12, 8  # work/breaks.dart BreakRule
 MORNING_VERSION = "morning-v1"
@@ -54,6 +58,12 @@ _M = [
      "awake stretches of over 5 minutes inside the sleep periods"),
     ("fall_asleep", "Falling asleep", "min", "sleep", "night before", "headband", "sleep-scoring", "some",
      "minutes from lights off (a tap or a marker, not the recording's start) to the sleep model's onset; first night"),
+    ("efficiency", "Sleep efficiency", "%", "sleep", "night before", "headband", "sleep-scoring", "weak",
+     "minutes asleep over the minutes from Lights off (a tap or a marker; else the recording's start) to the last "
+     "wake-up, all the day's nights together, at most 100; nights under 30 minutes in bed are left out"),
+    ("regularity", "Sleep regularity", "min", "sleep", "night before", "headband", "sleep-scoring", "weak",
+     "how far the first-sleep times and the last wake-up times of the last 7 days moved: each a circular standard "
+     "deviation of the time of day, the two averaged; needs 5 nights in the 7; smaller is steadier"),
     ("jaw", "Jaw muscle bursts", "per hour asleep", "sleep", "night before", "headband", "jaw-and-blinks", "strong",
      "bursts an hour asleep; a trend to compare nights, not a test for teeth grinding"),
     ("kss", "Sleepiness (check-in)", "1-9", "morning", "morning", "self-report", "morning-check-in", None,
@@ -62,6 +72,8 @@ _M = [
      "1 very bad to 5 very good, at the day's first check-in"),
     ("tension", "Tension (check-in)", "1-5", "morning", "morning", "self-report", "morning-check-in", None,
      "1 none to 5 very much, at the day's first check-in"),
+    ("slept", "How you slept (check-in)", "1-5", "morning", "morning", "self-report", "morning-check-in", None,
+     "the optional tap \"How did you sleep?\", 1 very badly to 5 very well, at the day's first check-in that has it"),
     ("reaction", "Reaction time (check-in)", "ms", "morning", "morning", "tap test", "morning-check-in", None,
      "median of the 1-minute tap test at the check-in"),
     ("iaf", "Alpha speed", "Hz", "morning", "morning", "headband", "morning-check-in", "strong",
@@ -246,6 +258,7 @@ class Days:
 def _nights(days: Days, local: Path) -> None:
     jaw: dict[str, list[tuple[float, float, float | None]]] = defaultdict(list)  # day -> (bursts, min, per hour)
     noise: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])  # day -> noisy or missing min, min asleep
+    stays: dict[str, list[tuple[datetime, float, float, float, float]]] = defaultdict(list)  # day -> see _timing
     for r in read_reports(local):
         day, night = day_key(final_wake(r)), r["night_of"]
         if r["_wearer"] == SOMEONE_ELSE:
@@ -277,14 +290,66 @@ def _nights(days: Days, local: Path) -> None:
         drift = r.get("drift_off") if isinstance(r.get("drift_off"), dict) else None
         if drift and drift.get("source") != "night start":
             days.first(day, "fall_asleep", _num(drift.get("model_onset_min")))
+        stay = _timing(r, drift)
+        if stay:
+            stays[day].append(stay)
         if asleep_x and _num(asleep_x.get("jaw_per_hour")) is not None and (_num(asleep_x.get("min")) or 0) > 0:
             jaw[day].append((_num(asleep_x.get("jaw_bursts")) or 0.0, _num(asleep_x["min"]),
                              _num(asleep_x["jaw_per_hour"])))
+    _efficiency_and_regularity(days, stays)
     for day, (bad, total) in noise.items():  # over the day's scored nights, the noisy ones too
         days.quality[day]["night_noisy_share"] = round(bad / total, 3)
     for day, a in jaw.items():  # trends.dart: the night's own number, or over all the day's hours asleep
         days.numbers[day]["jaw"] = a[0][2] if len(a) == 1 else \
             round(sum(x[0] for x in a) / (sum(x[1] for x in a) / 60) * 10) / 10
+
+
+def _minute_of_day(t: datetime) -> float:
+    return t.hour * 60.0 + t.minute + t.second / 60
+
+
+def _timing(r: dict, drift: dict | None) -> tuple[datetime, float, float, float, float] | None:
+    """(data start, minutes asleep, minutes in bed, first-sleep minute of the day, last-wake minute of the day) of a
+    counted night, or None without a sleep period. Time in bed runs from Lights off (a tap or a marker, not the night
+    start) else from the recording's start, but never from after the first sleep, to the last wake-up (sleep_days.dart
+    `_Night`, DECISIONS 654). Clock times are the timestamps' own wall clock."""
+    spans = [(parse_time(p.get("start")), parse_time(p.get("end")), _num(p.get("asleep_min")))
+             for p in r["periods"] if isinstance(p, dict)]
+    spans = [(a, b, m) for a, b, m in spans if a and b and m is not None]
+    if not spans:
+        return None
+    onset, wake = min(a for a, _, _ in spans), max(b for _, b, _ in spans)
+    tapped = parse_time(drift.get("lights_off")) if drift and drift.get("source") != "night start" else None
+    begin = min(tapped or parse_time(r["data_start"]), onset)
+    in_bed = (wake - begin).total_seconds() / 60
+    return parse_time(r["data_start"]), sum(m for _, _, m in spans), in_bed, _minute_of_day(onset), _minute_of_day(wake)
+
+
+def circular_spread(minutes: list[float]) -> float:
+    """The standard deviation of times of day as a circle (23:50 and 00:10 are 20 minutes apart): sqrt(-2 ln R) of
+    the times as unit arrows, in minutes, at most 12 hours (sleep_days.dart `circularSpreadMin`)."""
+    if len(minutes) < 2:
+        return 0.0
+    c = sum(math.cos(m * math.pi / 720) for m in minutes)
+    s = sum(math.sin(m * math.pi / 720) for m in minutes)
+    r = math.hypot(c, s) / len(minutes)
+    if r < 1e-9:
+        return REGULARITY_CAP_MIN
+    return min(REGULARITY_CAP_MIN, math.sqrt(-2 * math.log(min(1.0, r))) * 720 / math.pi)
+
+
+def _efficiency_and_regularity(days: Days, stays: dict[str, list[tuple[datetime, float, float, float, float]]]) -> None:
+    for day, nights in stays.items():
+        nights.sort(key=lambda n: n[0])
+        long = [n for n in nights if n[2] >= EFFICIENCY_MIN_IN_BED]
+        if long:
+            days.numbers[day]["efficiency"] = min(100.0, sum(n[1] for n in long) / sum(n[2] for n in long) * 100)
+    for day in sorted(stays):
+        window = [k for k in sorted(stays) if k <= day and
+                  (datetime.fromisoformat(day) - datetime.fromisoformat(k)).days < REGULARITY_DAYS]
+        if len(window) >= REGULARITY_MIN_NIGHTS:  # a day with two sleeps counts once: its first sleep, its last wake
+            days.numbers[day]["regularity"] = (circular_spread([stays[k][0][3] for k in window])
+                                               + circular_spread([stays[k][-1][4] for k in window])) / 2
 
 
 def _mornings(days: Days, local: Path) -> None:
@@ -299,7 +364,8 @@ def _mornings(days: Days, local: Path) -> None:
         habits = m.get("habits") if isinstance(m.get("habits"), dict) else {}
         reaction = m.get("reaction") if isinstance(m.get("reaction"), dict) else {}
         for mid, v in (("kss", _int_in(ratings.get("kss"), 1, 9)), ("mood", _int_in(ratings.get("mood"), 1, 5)),
-                       ("tension", _int_in(ratings.get("tension"), 1, 5)), ("reaction", _num(reaction.get("median_ms"))),
+                       ("tension", _int_in(ratings.get("tension"), 1, 5)), ("slept", _int_in(ratings.get("sleep"), 1, 5)),
+                       ("reaction", _num(reaction.get("median_ms"))),
                        ("caffeine", _int_in(habits.get("caffeine_cups"), 0, 5)),
                        ("alcohol", _int_in(habits.get("alcohol_drinks"), 0, 5))):
             days.first(day, mid, None if v is None else float(v))

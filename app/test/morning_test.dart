@@ -183,10 +183,35 @@ void main() {
     // the store reads it back for the trends
     final saved = MorningStore(tmp).list().single;
     expect(saved.kss, 4);
+    expect(saved.slept, isNull); // not tapped: no key in the result, no 6th marker field
     expect(saved.reactionMs, 312);
     expect(saved.caffeineCups, 2);
     expect(saved.caffeineLate, isTrue);
     expect(saved.iafHz, back['iaf_hz']);
+  });
+
+  test('"How did you sleep?" is kept with the check-in when tapped: result, markers, raw file and store', () async {
+    final (:c, band: _, sound: _) = make();
+    await c.start();
+    c.begin();
+    await until(c, () => c.stage == MorningStage.questions);
+    await c.save(const MorningAnswers(
+      kss: 4,
+      mood: 3,
+      tension: 2,
+      sleep: 2,
+      cups: 0,
+      caffeineToday: false,
+      drinks: 0,
+    ));
+    expect(c.result!['ratings'], {'kss': 4, 'mood': 3, 'tension': 2, 'sleep': 2});
+    final f32 = tmp.listSync().map((f) => f.path.split('/').last).singleWhere((f) => f.endsWith('.f32'));
+    final markers = File('${tmp.path}/${f32.replaceFirst('.f32', '.markers.jsonl')}').readAsLinesSync();
+    expect([for (final l in markers) (jsonDecode(l) as Map)['text']], contains('morning:ratings {"kss":4,"mood":3,"tension":2,"sleep":2}'));
+    expect(readCheckInRecording(File('${tmp.path}/$f32'))!.ratings, {'kss': 4, 'mood': 3, 'tension': 2, 'sleep': 2});
+    expect(MorningStore(tmp).list().single.slept, 2);
+    // the laptop's comparison rows are still its own three (morning_check.ROWS)
+    expect([for (final r in c.result!['compared']! as List) (r as Map)['label']], isNot(contains(contains('sleep'))));
   });
 
   test('a second check-in is compared with the first', () async {

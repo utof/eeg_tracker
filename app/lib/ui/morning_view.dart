@@ -455,6 +455,9 @@ class _Questions extends StatefulWidget {
 
 class _QuestionsState extends State<_Questions> {
   int? _kss, _mood, _tension, _cups, _drinks;
+
+  /// "How did you sleep?": optional, so it is not among what Save waits for.
+  int? _slept;
   bool? _late, _today;
   ReactionTest? _test;
 
@@ -495,6 +498,12 @@ class _QuestionsState extends State<_Questions> {
           ),
           scaleQuestion('Mood', _mood, (v) => setState(() => _mood = v), ('1 very bad', '5 very good')),
           scaleQuestion('Tension', _tension, (v) => setState(() => _tension = v), ('1 none', '5 very much')),
+          scaleQuestion(
+            'How did you sleep? (optional)',
+            _slept,
+            (v) => setState(() => _slept = v),
+            ('1 very badly', '5 very well'),
+          ),
           const SectionHeading('Yesterday'),
           ChoiceQuestion<int>(
             question: 'Cups of coffee, strong tea or energy drinks',
@@ -539,6 +548,7 @@ class _QuestionsState extends State<_Questions> {
                   kss: _kss!,
                   mood: _mood!,
                   tension: _tension!,
+                  sleep: _slept,
                   cups: _cups!,
                   caffeineLate: _cups == 0 ? false : _late,
                   drinks: _drinks!,

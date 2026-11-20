@@ -325,7 +325,8 @@ saved.
 `scripts/web/morning.html` writes these marker texts, in order: `morning:start`, `morning:eyes_closed:start`,
 `morning:eyes_closed:end`, `morning:eyes_open:start`, `morning:eyes_open:end`,
 `morning:ratings {"kss":5,"mood":3,"tension":2}`, `morning:end`; `morning:abort` if stopped (the session is then
-ignored). The setup test writes `setup:start`, `setup:blink` (at each cue), `setup:glance:left` / `right`,
+ignored). The phone's check-in adds `"sleep"` (1-5, "How did you sleep?") to the ratings object only when it was
+tapped, e.g. `{"kss":5,"mood":3,"tension":2,"sleep":4}`; the laptop page does not ask it. The setup test writes `setup:start`, `setup:blink` (at each cue), `setup:glance:left` / `right`,
 `setup:clench:start` / `end`, `setup:end` (`setup:abort` if stopped).
 
 `scripts/morning_check.py` writes `version`, `source`, `start`, `end`, `date`, `phase_s` (seconds between the
@@ -855,7 +856,7 @@ meant to be compared with their own earlier mornings, not with norms.
 | `aperiodic_slope_ec` | slope of log power on log frequency, 2-40 Hz without 7-14 Hz, eyes closed (negative; steeper = more negative) |
 | `clean_share` | share of 2 s segments kept after artefact rejection, both phases, both back channels |
 | `channels` | `{O1, O2}`, each with `alpha_ec_uv2 alpha_eo_uv2 ec_rise iaf_hz iaf_peak_hz alpha_peak_present aperiodic_slope_ec clean_share_ec clean_share_eo` |
-| `ratings` | `{kss, mood, tension}`: Karolinska Sleepiness Scale 1-9, mood 1-5 (very bad to very good), tension 1-5 (none to very much); `null` if not rated |
+| `ratings` | `{kss, mood, tension}`: Karolinska Sleepiness Scale 1-9, mood 1-5 (very bad to very good), tension 1-5 (none to very much); `null` if not rated. The phone adds `sleep` (1-5, "How did you sleep?", 1 very badly to 5 very well; DECISIONS row 657) when the optional tap was given; the key is absent otherwise, and the comparison rows stay the three above |
 | `setup_visible` | from a setup test in the same recording: `{blink, glance, clench}` true / false; `null` if none |
 | `method` | analysis version, e.g. `morning-v1` |
 | `validated` | `false`: the measures follow the literature but are not yet checked for day-to-day repeatability on this headband |
@@ -875,7 +876,7 @@ The numbers follow the phone's Trends rules (`app/lib/trends/`), so they match w
 |---|---|
 | `day` | `YYYY-MM-DD` |
 | `schema` | 1 (of this event) |
-| `measures` | the `eeg_measure_set` version the ids below mean (1) |
+| `measures` | the `eeg_measure_set` version the ids below mean (2) |
 | `complete` | `false` while the day is still going on when exported; a later event replaces it |
 | `numbers` | measure id -> value, to 2 decimals; only measures with a value that day (an absent id = no data, never 0) |
 | `counts` | what went into them: `nights`, `checkins`, `work_sessions`, `practice_sessions`, `sharp_ratings`, `sharp_tests` (absent = 0) |
@@ -891,7 +892,7 @@ event that `replaces` the old one. `ts` is when it was first exported.
 
 | Field | Meaning |
 |---|---|
-| `version` | 1 |
+| `version` | 2 (1 lacked `efficiency`, `regularity` and `slept`; DECISIONS row 658) |
 | `measures` | one per id: `id`, `label`, `unit`, `group` (`sleep morning day work practice`), `about` (`night before`, `morning`, `day before`, `day`), `source` (`headband`, `self-report`, `tap test`, `app`, `laptop`), `evidence_note` (`docs/evidence/<name>.md`), `evidence` (`strong some weak none`, `null` = not a headband measure), `status` (`seen together`), `rule` (how the day's number is made, one line) |
 | `day_rule`, `status_rule`, `grades` | the rules in words |
 

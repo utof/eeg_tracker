@@ -644,7 +644,8 @@ laptop's morning page did and works the numbers out itself, the same way (DECISI
    minutes. A last tone ends the recording. Without signal the countdown waits and says so. **Stop** keeps nothing.
    You may lock the phone (a notification with **Stop** keeps it going). A phone call or another app's sound
    stops the check-in and keeps nothing, as a drop does: start again when it is quiet.
-4. The questions: sleepiness (1-9, the words of each step shown), mood, tension, yesterday's cups of coffee or
+4. The questions: sleepiness (1-9, the words of each step shown), mood, tension, **How did you sleep?** (one
+   optional tap, 1 very badly to 5 very well; Save does not wait for it), yesterday's cups of coffee or
    strong tea (and whether one came in the 8 hours before sleep), drinks of alcohol, caffeine this morning. Then,
    if you like, the 1-minute reaction test (tap when the green dot appears). **Save**.
 5. This morning's numbers, each beside yesterday's and your usual (from 7 days), with an arrow and words only when
@@ -655,8 +656,11 @@ Kept in `files/mornings/` (the result in the laptop's format, and the raw signal
 
 ## Trends
 
-**Trends** (Morning section, or after a check-in) shows today's entry: last night's sleep, the morning's numbers,
-practice minutes, coffee and alcohol, each with yesterday's value and your usual; then sleep pressure, an estimate
+**Trends** (Morning section, or after a check-in) shows today's entry: last night's sleep (time asleep, minutes of
+light, deep and dream sleep, wake-ups, time to fall asleep after Lights off, sleep efficiency, and sleep regularity
+over the last 7 nights; from the sleep model, not yet checked against a lab test on this headband, nights marked
+"someone else" or mostly noise left out, DECISIONS rows 650-659), the morning's numbers (with your "How did you
+sleep?" tap), practice minutes, coffee and alcohol, each with yesterday's value and your usual; then sleep pressure, an estimate
 from your sleep times ("like 9 hours awake after a regular night", with a 36-hour curve); the last 14 days as
 small lines; the earlier days; and tomorrow's sleepiness forecast, which stays hidden until 60 mornings are rated
 and it beats "same as yesterday" by 5 %. With a few days, the page says what is still missing. The **i** button

@@ -278,5 +278,40 @@ void main() {
     expect(saved!.cups, 2);
     expect(saved!.caffeineLate, isFalse);
     expect(saved!.reaction, isNull);
+    expect(saved!.sleep, isNull); // "How did you sleep?" is optional: Save did not wait for it
+  });
+
+  testWidgets('the questions: one tap on "How did you sleep?" is kept, and Save still waits only for the others', (tester) async {
+    MorningAnswers? saved;
+    tester.view.physicalSize = const Size(1210, 2695);
+    tester.view.devicePixelRatio = 2.75;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: nightTheme(),
+        home: MorningView(model: const MorningViewModel(stage: MorningStage.questions), onSave: (a) => saved = a),
+      ),
+    );
+    Future<void> pick<T extends Object>(String question, String label) async {
+      await tester.scrollUntilVisible(find.text(question), 150);
+      await tester.pump();
+      final q = find.ancestor(of: find.text(question), matching: find.byType(ChoiceQuestion<T>));
+      await tester.tap(find.descendant(of: q, matching: find.text(label)));
+      await tester.pump();
+    }
+
+    await tester.drag(find.byType(Slider), const Offset(60, 0));
+    await tester.pump();
+    await pick<int>('Mood', '3');
+    await pick<int>('Tension', '2');
+    await pick<int>('How did you sleep? (optional)', '4');
+    expect(find.text('1 very badly'), findsOneWidget);
+    expect(find.text('5 very well'), findsOneWidget);
+    expect(find.text('Answer each question'), findsOneWidget); // the tap alone does not finish the questions
+    await pick<int>('Cups of coffee, strong tea or energy drinks', '0');
+    await pick<int>('Drinks of alcohol (a beer, a glass of wine or a shot each)', '0');
+    await pick<bool>('Any caffeine before this check-in?', 'No');
+    await tester.tap(find.text('Save without the reaction test'));
+    expect(saved!.sleep, 4);
   });
 }
