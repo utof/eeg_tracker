@@ -47,6 +47,16 @@ Three layers, from raw to summary. Each is written once and never edited in plac
   the end `drift-off detector: <s> s of work for <h> h of signal (<s> s an hour)`.
 - The device's Bluetooth address and serial number are in the `.log`. They stay on the owner's machine
   (`_local/` is never committed).
+- **A work session's raw EEG** (DECISIONS 683) is the same file set in the same folder (`files/recordings/` on the
+  phone, `_local/recordings/` once `pull_phone.py` or `import_phone.py` copied it), one per session from before its
+  first sample to Stop, calibration and breaks included, across drops (they show as gaps in the `.idx` times). Its
+  header says `"session": "work"`, so it is no part of any night: the phone's nights list and sleep scoring and the
+  laptop's `night_files.py` (sleep reports, the catalog's nights) leave it out, with or without samples. Its `.log`
+  starts `work session (not a night: its header says session work); headband <name>`, then the contact check, the
+  link's drops and reconnects, and ends `stopped`; its `.markers.jsonl` holds `work: calibrated`, `work: on a break
+  (tapped)` / `(the headband off)`, `work: back (tapped)` / `work: back from the break`, `work: meeting (<source>)`
+  and `work: meeting ended`. About 19.5 MB an hour (18 MB of `.f32`, 1.5 MB of `.idx`), packed after a day like a
+  night's. The session's `.work.json` names it (`raw`).
 
 ## Raw recording (DIY board)
 
@@ -99,6 +109,7 @@ says what its `.f32` holds, so a record can carry any number of channels (DECISI
 | `layout` | the layout the names and positions come from: `BrainBit`, `DIY board`, `Helmet plan (8)`, a montage file name, ... (optional) |
 | `reference`, `ground` | `{"name", "where", "site"}` (`where` in words, `site` a 10-10 name or `null`), or `null` when not known. BrainBit: `Ref`, `forehead`, `Fpz`; the DIY board: `Ref` on an earlobe (`A1`) and `Bias` on the other (`A2`), a plan |
 | `made_by` | the program that wrote it (optional) |
+| `session` | what kind of session wrote the file set when it is not sleep (optional): `work` for the phone's work session's raw EEG (DECISIONS 683), never part of a night; absent (every night, nap and file before it), `night` or `nap`: sleep |
 
 Required: `format`, `version`, `channels`, `sample_rate`, `unit`, `record`, `counter`; a missing `reference` or `ground`
 reads as `null`. A `site` is text of up to 16 characters (the writers fill it only for 10-10 names and A1 A2 M1 M2); an
@@ -551,26 +562,29 @@ The reminders' times are not stored when they follow the sleep: they are worked 
 
 One file per work session (ROADMAP row 35, DECISIONS 440-449): `<stamp>.work.json`, the session's start as
 `yyyy-MM-dd-HHmmss` local time. Written whole (a temporary name, then a rename) every 5 minutes while the session runs
-and at Stop, so a crash loses at most the last minutes; `ended` says which. Times are local ISO times. No raw EEG: the
-per-30-s numbers are enough to score a session again with other weights or lines. Compact JSON (one line); older files
-are indented, and read the same.
+and at Stop, so a crash loses at most the last minutes; `ended` says which. Times are local ISO times. The per-30-s
+numbers are enough to score a session again with other weights or lines; since 2026-11-20 the session's raw EEG is
+kept too, as a recording marked `session: work` (above, "Raw recording"; `raw` names it). Compact JSON (one line);
+older files are indented, and read the same.
 
 | Field | Content |
 |---|---|
 | `version`, `kind`, `app` | 1, `work_session`, `eeg_tracker work` |
 | `start`, `end`, `ended` | the session's span; `ended`: `running` (written during the session) or `stopped` |
 | `headband`, `contact_ohms` | the headband's name; the contact check at the start, ohms per channel (`null`: no contact) |
+| `raw` | the stem of the session's raw EEG in `recordings/` (`<stamp>.f32` ...; DECISIONS 683); `null` when it was not kept; absent in older files |
 | `closed_alpha` | the optional eyes-closed minute: median back alpha (µV²) of its clean seconds; `null` when skipped or too noisy |
-| `baseline` | `alpha` (µV², 8-12 Hz at O1/O2), `events` (blinks plus sideways eye movements per 30 s), `theta` (µV², 4-7 Hz at O1/O2) and `sem` (µV², T3-T4 at 0.2-0.7 Hz): medians of the 6 scored half minutes after the first minute; `null` before |
+| `baseline` | `alpha` (µV², 8-12 Hz at O1/O2), `events` (blinks plus sideways eye movements per 30 s), `theta` (µV², 4-7 Hz at O1/O2) and `sem` (µV², T3-T4 at 0.2-0.7 Hz): medians of the 6 quiet half minutes after the first minute (scored, at least 20 seconds free of talking, chewing, movement and holes, outside breaks and meetings; before 2026-11-20 any 6 scored ones); `null` before |
 | `calibrated_at_s` | seconds of signal when the baseline was complete |
-| `worn_min`, `active_min` | minutes the headband sent a usable signal outside breaks |
+| `worn_min`, `active_min` | minutes the headband was on the head outside breaks: skin contact judged from the signal (talking, chewing and moving count; DECISIONS 680); before 2026-11-20 minutes with a readable back channel |
 | `stretch_min` | worn minutes since the last break of 5 minutes or more (the hour's count) when the file was written; a session started under 5 minutes after this one's `end` carries it on (absent in older files) |
-| `minutes` | minutes after the baseline per level: `alert`, `getting_drowsy`, `drowsy`, `unknown` (not enough clean signal); `eyes_closed` (half minutes read as closed eyes, whole session) |
-| `epochs` | one entry per 30 s of signal: `at` (its start, local ISO time from the phone's clock; the first version of the file had no `at`), `s` (its first second of signal), `clean_s` (seconds read for alpha), `muscle_s`, `movement_s`, `gap_s`, `blinks`, `eye_moves`, `eye_s` (seconds counted for eye events: no hole or movement, all four channels usable for the detectors; absent in older files), `events` (per 30 of those seconds; `null` under 20), `alpha`, `theta`, `sem` (medians, µV²; `null` under 10 clean seconds), `eyes_closed`, `a` and `still` (log2 against the baseline: alpha, and eye stillness = log2((baseline events + 1) / (events + 1))), `t` and `s_eye` (theta and slow eye power the same way, logged only), `index` (the mean of `a` and `still`, where a positive `still` counts only as far as alpha is up: times `a` / 0.5, between 0 and 1; `a` alone when `still` is `null`; older files used the plain mean, at most 0.25 when `a` was negative), `window` (the median index of the last 10), `level` |
+| `minutes` | minutes after the baseline per level: `alert`, `getting_drowsy`, `drowsy`, `unknown` (not enough clean signal, or a meeting); `eyes_closed` (half minutes read as closed eyes, whole session); `meeting` (half minutes in a meeting, whole session; absent in older files) |
+| `meetings`, `meeting_min` | each meeting: `start`, `end`, `source` (`phone call`: a call held the phone's sound; `laptop`: the paired laptop said its session is in one; `phone call and laptop`); and their minutes (DECISIONS 685; absent in older files) |
+| `epochs` | one entry per 30 s of signal: `at` (its start, local ISO time from the phone's clock; the first version of the file had no `at`), `s` (its first second of signal), `clean_s` (seconds read for alpha), `muscle_s`, `movement_s`, `gap_s`, `blinks`, `eye_moves`, `eye_s` (seconds counted for eye events: no hole or movement, all four channels usable for the detectors; absent in older files), `events` (per 30 of those seconds; `null` under 20), `alpha`, `theta`, `sem` (medians, µV²; `null` under 10 clean seconds), `eyes_closed`, `meeting` (over half of it in a meeting: never scored, never closed eyes, its `level` `unknown`; absent in older files), `a` and `still` (log2 against the baseline: alpha, and eye stillness = log2((baseline events + 1) / (events + 1))), `t` and `s_eye` (theta and slow eye power the same way, logged only), `index` (the mean of `a` and `still`, where a positive `still` counts only as far as alpha is up: times `a` / 0.5, between 0 and 1; `a` alone when `still` is `null`; older files used the plain mean, at most 0.25 when `a` was negative), `window` (the median index of the last 10), `level` |
 | `hints` | `at`, `reason` (`stretch`, `drowsy`, `eyesClosed`, `snooze`), `active_min` (worn minutes of the stretch), `threshold_min`, `level`, `answer` (`onBreak`, `snoozed`, `notNow` or `null`), `answered_at`, `taken` (a break of 5 minutes or more started within 30 minutes) |
-| `breaks` | `start`, `end`, `source` (`tapped` or `headbandOff`: no usable signal for 5 minutes, counted from when it stopped), `end_source` (`back`: Back tapped; `auto`: a tapped break whose Back was forgotten ended by itself, at the moment the headband came back after a minute or more off, or after 20 minutes' worth of readable half minutes; `signal`: a headband-off break's signal came back; `stop`: Stop; absent in older files), `before` / `before_level` (the level's median just before; for `headbandOff`, just before the headband went off), `after` / `after_level` (over the first 5 minutes after; `null` if never readable) |
+| `breaks` | `start`, `end`, `source` (`tapped` or `headbandOff`: the headband off the head by its signal, or no data, for 5 minutes, counted from when it went off; before 2026-11-20: no usable signal, so talking could make one), `end_source` (`back`: Back tapped; `auto`: a tapped break whose Back was forgotten ended by itself, at the moment the headband came back after a minute or more off, or after 20 minutes' worth of readable half minutes; `signal`: a headband-off break's signal came back; `stop`: Stop; absent in older files), `before` / `before_level` (the level's median just before; for `headbandOff`, just before the headband went off), `after` / `after_level` (over the first 5 minutes after; `null` if never readable) |
 | `ratings` | `at`, `value` ("How sharp do you feel?", 1 Foggy to 5 Very sharp: the sharp-hours scale), `hint` (the index of the hint it answered, or `null`) |
-| `events` | `at`, `event`: the headband's drops, reconnects and stream restarts (also `no data for N s: stream restarted` and `no data for N s with the headband in range; reconnecting`), each hint, the eyes-closed minute's outcome, `chime waited: a call` (with `hint`, the hint's `at`) when a hint came during a call and its chime waited (DECISIONS 495), `break ended by itself (Back not tapped)` (with `end`), and `stretch carried over from a session that ended under 5 minutes ago` (with `stretch_min`) |
+| `events` | `at`, `event`: the headband's drops, reconnects and stream restarts (also `no data for N s: stream restarted` and `no data for N s with the headband in range; reconnecting`), each hint, the eyes-closed minute's outcome, `chime waited: a call` or `chime waited: a meeting` (with `hint`, the hint's `at`) when a call or meeting began as a hint came and its chime waited (DECISIONS 495, 685), `meeting started` (with `source`) and `meeting ended`, `calibration starts over: the headband was off 5 minutes`, `break ended by itself (Back not tapped)` (with `end`), and `stretch carried over from a session that ended under 5 minutes ago` (with `stretch_min`) |
 | `wearer` | optional, as in a night's report: `answer` (`me` or `someone else`) and `at`; a session marked `someone else` is left out of the Trends numbers below. The owner sets it by hand with "Someone else wore it" on the end page or under the session in the list of earlier sessions (DECISIONS rows 490-494); "Undo" removes the object. Nothing else in the file changes |
 
 The Trends page and the self-experiments read one set of day numbers from these files (DECISIONS rows 480-489; a day
@@ -657,7 +671,7 @@ cut off by a crash is skipped. Nothing here holds EEG (the minutes kept while th
 |---|---|
 | `settings.json` | `version` 1, `choices` (`night`, `work`, `other`: `start`, `ask` or `nothing`; `other` never `start` in phase 1), `work_chime` (automatic work sessions chime), `bed_min` and `wake_min` (the bedtime window set by hand, minutes after midnight; `null` while it follows the recorded nights) |
 | `state.json` | `version` 1, `quiet_until` (per kind: no question before then, after Not now or no answer), `yes_streak` (per kind), `offered` (kinds offered "start automatically" in this streak), `worn_since` (the wearing in progress), `asked_this_wearing`, `charge_notice_day` |
-| `laptop.json` | `version` 1, `working` (the laptop's latest word on a work session) and `at` |
+| `laptop.json` | `version` 1, `working` (the laptop's latest word on a work session), `at`, and `meeting` when the word said it (DECISIONS 685) |
 | `log.jsonl` | one line per event, each with `version` 1, `at` and `event`: `check` (`trigger`: `presence`, `bedtime`, `laptop`, `opened` or `now`; `near`, `worn` (`null` when it could not be told), `how` (`resistance`, `signal`, `simulated` in a debug build, `none`), `ohms` per channel (`null` = no contact), `battery` (%), `guess` (`night`, `work`, `other`), `reasons`, `choice`, `window` (`HH:MM-HH:MM`), `phone` (`charging`, `screen_on`, `screen_off_min`, `dnd`, `laptop`, `next_alarm`), `error`); `skipped` (`trigger`, `why`); `question` (`kind`, `text`); `answer` (`kind`, `answer`: `yes`, `no`, `none` (no answer in 15 minutes or swiped away), `released` (a start by hand), for `other` also `night` or `work`; `after_s`); `start` (`kind`, `how`: `automatic` or `yes`, `preroll_s` and `stem` (the run the kept minutes became), `quiet` and `limit_min` for work, `error`); `declined` (`kind`, `why`, `battery`); `offer` (`kind`, `yes_in_a_row`); `offer_answer` (`kind`, `accept`); `released` |
 
 A night the watcher started has a first line in its first run's `.log`: `started automatically: ...` or `started after
@@ -698,9 +712,12 @@ that send its code (`Authorization: Bearer <code>`, `X-EEG-Token`, or `?token=`)
   `reconnecting`, `checking contact`, `stopping`, `not recording`, or `session` (a meditation, check-in, dream
   catcher or sound session is recording). The field lists both recorders are tested against:
   `app/test/fixtures/share_api.json`.
-- `POST /work` with `{"working": true}` or `{"working": false}`: the paired laptop's tray says a work session
-  started or ended there (`scripts/laptop_work.py`; automatic recording, DECISIONS 603): 202, kept in
-  `auto-start/laptop.json`; 400 for any other body; 503 during a night (the recorder's server does not take it).
+- `POST /work` with `{"working": true}` or `{"working": false}`, optionally with `"meeting": true|false`: the paired
+  laptop's tray says a work session started or ended there, and whether it is in a meeting (`scripts/laptop_work.py`;
+  automatic recording, DECISIONS 603; meetings 666 and 685: sent at the session's start and end and at each
+  meeting's start and end inside it): 202, kept in `auto-start/laptop.json`; a word that only changes the meeting
+  asks for no headband check; the phone's work session labels its meeting minutes by it. 400 for any other body; 503
+  during a night (the recorder's server does not take it).
 - `GET /files`: `{"format": "eeg-tracker-phone-files", "version": 1, "listed", "recording", "files": [...],
   "totals"}`; each file has the manifest's `path`, `bytes`, `sha256`, `modified_ms` (the same files and paths as the
   export folder above) and, for a recording packed after a day, `original`. A file changed in the last 20 s is still

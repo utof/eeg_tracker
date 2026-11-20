@@ -2,10 +2,10 @@
 
 ## What it does
 
-Built in the phone app (2026-11-19), not yet worn at work. You wear the headband while you work. After 4 minutes
-that become your awake baseline, every half minute the app reads the last 5 minutes as alert, getting drowsy or
-drowsy against it, and with a soft chime suggests a break after an hour worn, or sooner when drowsiness stays up. It notices breaks and
-shows whether drowsiness went down after one.
+Built in the phone app (2026-11-19), worn at work first on 2026-11-20. You wear the headband while you work. After
+4 quiet minutes that become your awake baseline, every half minute the app reads the last 5 minutes as alert, getting
+drowsy or drowsy against it, and with a soft chime suggests a break after an hour worn, or sooner when drowsiness
+stays up. It notices breaks and shows whether drowsiness went down after one. It keeps the session's raw signal.
 
 ## Evidence for this headband: some
 
@@ -45,6 +45,13 @@ recorded morning the level rose 8 minutes before the sleep model saw the owner d
 - If your first 4 minutes were not your usual awake work (tests, talking, already drowsy), every later reading is
   off: with the morning's baseline taken during eye tests the level only reached "getting drowsy".
 - Taking the headband off and putting it back can shift the signal; the baseline stays the session's first minutes.
+- Talking, chewing and moving swamp these electrodes for as long as they last: those minutes cannot be read at all.
+  On the first working day (2026-11-20, in a video call) the first version took that noise for the headband being
+  off and called a break; now the headband counts as off only when the signal itself says so (flat, at the rails or
+  wild on most electrodes), and talking minutes are worn time with the reading paused. How a BrainBit lying on a desk
+  looks in its signal has not been recorded yet: if it looks like skin, a break shows only when tapped.
+- A meeting is mostly talking, so it gives no reading; its minutes are labelled and left out of the level and the
+  hints. A long day of meetings may leave too few quiet minutes to calibrate: then only the hourly hints come.
 - One electrode with no contact hides every blink and eye movement, which would read as very still eyes; the eye
   readings then pause (the signal line says so) and the level reads alpha alone.
 - "Mental fatigue" and "focus" are not measured: no study links these electrodes to either during real work.
@@ -54,9 +61,11 @@ recorded morning the level rose 8 minutes before the sleep model saw the owner d
 - Every 30 seconds: alpha (8-12 Hz) at O1/O2 from clean seconds only (no muscle, talking, chewing, movement, blink
   or hole), and blinks plus sideways eye movements per 30 seconds with all four electrodes usable; under 10 clean
   seconds the half minute is not read.
-- Your baseline: after 1 minute of settling in, the medians of the next 3 minutes. The index is the mean of alpha
-  against it and eye stillness against it (both on a log2 scale; stillness counts only as far as alpha is up); the
-  level is the median of the last 5 minutes
+- Your baseline: after 1 minute of settling in, the medians of the next 3 quiet minutes (half minutes with at least
+  20 seconds free of talking, chewing, movement and holes; blinks are fine), outside breaks and meetings: while you
+  talk, calibration waits and says so. Back after a break never redoes it; only a baseline not finished yet starts
+  over after the headband was off 5 minutes. The index is the mean of alpha against it and eye stillness against it
+  (both on a log2 scale; stillness counts only as far as alpha is up); the level is the median of the last 5 minutes
   (needs 3 readable minutes): under 0.5 alert, from 0.5 getting drowsy, from 1.0 drowsy.
 - Closed eyes are told apart by alpha 3 times the baseline with no blink and at most one glance in 30 seconds; with
   the optional eyes-closed minute, the line is halfway (geometrically) between your open and closed alpha, at least 2
@@ -66,7 +75,14 @@ recorded morning the level rose 8 minutes before the sleep model saw the owner d
   half minutes since the last break. At most 4 a day (04:00 to 04:00), 45 minutes apart, none 23:00-08:00; Snooze
   brings one back 20 minutes later. A soft chime and the words on the lock-screen card; an unanswered hint goes
   after 30 minutes.
-- A break: On a break / Back (also on the lock screen), or the headband off (no usable signal) for 5 minutes. A
+- Worn or off: judged every few seconds from the last 20 seconds of signal with the same check automatic recording
+  uses (an electrode is on skin when it is neither flat, nor at the rails, nor over 500 µV; the headband is on when
+  half of them are), with the contact check at Start until then. Talking, chewing and moving are worn, never a break.
+- A meeting: a call holding the phone's sound, or the laptop tray's word that its session is in a meeting (a call app
+  holding the microphone, or a meeting window). Its half minutes are labelled, give no reading, and no hint comes
+  until it ends.
+- A break: On a break / Back (also on the lock screen), or the headband really off (or no data) for 5 minutes, never
+  while still calibrating. A
   forgotten Back ends the break by itself 2 minutes after the headband is back on, or after 20 minutes of readable
   work with it on. A break of 5 minutes or more resets the hour; after it the app compares the level before it (for
   the headband taken off: before it came off) with the first 5 minutes after it.
@@ -80,6 +96,9 @@ recorded morning the level rose 8 minutes before the sleep model saw the owner d
   at their level). They are
   seen together with your other numbers, not tested; the share of work time drowsy and the tap mean can also be
   the outcome of a self-experiment (judged by the next day's number).
+- The raw signal of every session, calibration included, is kept beside the nights' (marked as a work session, so it
+  is never scored as sleep), about 19.5 MB an hour, packed after a day: the rules can be checked again on real
+  working days.
 - All planning values, set on one morning; your own weeks will tell.
 
 ## Sources
@@ -98,4 +117,4 @@ recorded morning the level rose 8 minutes before the sleep model saw the owner d
 - This project's own detectors (`app/lib/detectors/`, MIT) and drowsiness rules (`app/lib/work/`, MIT);
   flutter_soloud (MIT) for the chime; Android's foreground service for the locked phone.
 
-Checked: 2026-11-19
+Checked: 2026-11-20
