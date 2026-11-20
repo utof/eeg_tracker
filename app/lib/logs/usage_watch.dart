@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'log.dart' show Logs;
 import 'metrics.dart';
 import 'usage.dart';
 
@@ -262,6 +263,8 @@ class _UsageGesturesState extends State<UsageGestures> {
     final moved = d.$2 - d.$1;
     final ms = (_clock.elapsed - d.$3).inMilliseconds;
     final last = _down.isEmpty;
+    // nothing to find while "Record how I use the app" is off (its line would be dropped anyway)
+    if (widget.onTap == null && !(Logs.current?.settings.usage ?? false)) return;
     if (moved.distance < kTouchSlop && _fingers == 1) {
       TapTarget? t;
       try {

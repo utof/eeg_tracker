@@ -129,7 +129,7 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
     final f = server.servedFiles - told.files, b = server.servedBytes - told.bytes;
     if (f == 0) return;
     told = (files: server.servedFiles, bytes: server.servedBytes);
-    toHost.send(['log', 'sharing on Wi-Fi: the laptop copied $f files, ${(b / 1e6).toStringAsFixed(1)} MB']);
+    toHost.send(['log', 'sharing on Wi-Fi: the laptop fetched $f files or parts of files, ${(b / 1e6).toStringAsFixed(1)} MB']);
   }
 
   final copiedTimer = Timer.periodic(const Duration(minutes: 10), (_) => tellCopied());

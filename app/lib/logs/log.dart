@@ -117,7 +117,6 @@ class Logs {
     final running = _current;
     if (running != null) return running;
     final logs = _current = Logs._(engine, clock ?? DateTime.now);
-    hierarchicalLoggingEnabled = false;
     Logger.root.level = Level.INFO;
     logs._sub = Logger.root.onRecord.listen(logs._record);
     if (catchErrors) logs._catch();
