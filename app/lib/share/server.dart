@@ -582,11 +582,12 @@ class ShareServer {
       final nonce = caller.nonce;
       if (nonce != null) res.headers.set(replyHeader, replyProof(key!, nonce)); // the laptop knows it is this phone
       final path = req.uri.path;
+      final loopback = _loopback(client);
+      if (!loopback) _vouch(caller);
       if (path == '/who' || path == '/who/') {
         if (!caller.laptop) return await _json(res, 403, {'error': 'the paired laptop signs this'});
         return await _json(res, 200, {'app': 'eeg-tracker', 'v': 2, 'here': here});
       }
-      final loopback = _loopback(client);
       if (!loopback && !_mayShare(caller)) return await _json(res, 403, {'error': 'not sharing on this Wi-Fi'});
       final by = loopback ? 'cable' : (caller.laptop ? 'laptop' : 'code');
       if (path == '/files' || path == '/files/') {
@@ -730,13 +731,17 @@ class ShareServer {
     return null;
   }
 
-  /// Whether this caller, from the Wi-Fi, may have anything now ([here]). The paired laptop saying it is home makes
-  /// this Wi-Fi home (it knows its own network by its router: scripts/phone_link.py).
-  bool _mayShare(_Caller c) {
+  /// The paired laptop, from the Wi-Fi, says it is on its home network (it knows its own router: scripts/phone_link.py
+  /// `home_id`): then this Wi-Fi is home, also when its first word is /who (the tray's look, the search at home).
+  void _vouch(_Caller c) {
     if (c.laptop && c.home && _lan.isNotEmpty) {
       _home = lanSignature(_lan);
       _tellHere();
     }
+  }
+
+  /// Whether this caller, from the Wi-Fi, may have anything now ([here]).
+  bool _mayShare(_Caller c) {
     final h = here;
     if (c.laptop) return c.home || h == 'here';
     return h != 'waiting';

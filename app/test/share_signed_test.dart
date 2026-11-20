@@ -210,6 +210,14 @@ void main() {
       expect(copied, ['laptop', 'code']);
     });
 
+    test('the laptop finding the phone at home (a signed /who) already says it is home', () async {
+      // the emulator smoke of 2026-11-20: the tray's and the sweep's first word is /who
+      final w = await ask('/who', signWith: key);
+      expect(w.body['here'], 'home');
+      expect(server.here, 'home');
+      expect((await ask('/files', tok: token)).code, 200);
+    });
+
     test('another network forgets that it was home', () async {
       await ask('/state', signWith: key);
       expect(server.here, 'home');
