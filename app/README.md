@@ -32,6 +32,7 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
 
 **Another night**
 
+- [Sleep so far](#sleep-so-far): one look at the chart in the night (1 minute)
 - [Smart alarm](#smart-alarm): one morning
 - [Share on Wi-Fi](#share-on-wi-fi-the-laptop-watches-and-copies-while-the-phone-records): connect the laptop by one scan, then the first night mirrored to it (the first night doubles as the phone test)
 
@@ -94,6 +95,8 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
   `lib/meditation/` (session and report), `lib/ui/meditation_*.dart`; DECISIONS rows 72-77.
 - Sleep report: `lib/sleep/` and `lib/ui/sleep_*.dart`, scored on the phone after Stop (below); DECISIONS rows 95-99,
   night extras (jaw, movement, signal quality) rows 140-146.
+- Sleep so far (during a night): `lib/sleep/so_far.dart` (the windows, the cache, the look), `lib/sleep/live_log.dart`
+  (the live model's epochs written down), `lib/ui/sleep_so_far*.dart`; DECISIONS rows 640-648 (below).
 - Lights off and falling asleep: `lib/recorder/live_drift.dart`, `lib/sleep/drift.dart`, `lib/ui/lights_off_view.dart`
   (below); DECISIONS rows 180-186.
 - Self-experiments: `lib/experiments/` (plan, hidden order, randomisation test, store), `lib/ui/experiments_*.dart`,
@@ -581,6 +584,40 @@ prepare and 30 s for the model (two passes); a phone is likely 3-10 times slower
 3. Tell the assistant the two numbers, the noise share, and anything that looks wrong in **Hour by hour** (for
    example an hour you were awake and talking with no jaw bursts). The setup test's 5 clenches will check the jaw
    limits.
+
+## Sleep so far
+
+While a night records, the Night tab has **Sleep so far** under the Tonight strip: one line with what the last look
+found ("At the last look: 3 h 37 min asleep by 03:28.") and **See sleep so far**. Its page shows the night up to 2
+minutes behind the recording: the chart as in the sleep report, asleep so far and when you fell asleep (the first
+sleep period's start), then deep, dream, light, awake in between and the wake-ups over 5 minutes. It is marked as
+"so far": after **Stop** the whole night is scored together, which can move some edges between stages, so the
+report may differ slightly (DECISIONS rows 640-648).
+
+- **Nothing scores until you open it.** The page scores only what is new since the last look (each hour of the night
+  is scored once, in an 80-minute window of its own, and kept), then looks again every 15 minutes while it is open
+  and when you come back to it; never with the screen off. The line at the top says what it does ("Scoring 02:14 to
+  03:12 (2 of 2).") and has **Update**.
+- **The report after Stop is still scored from the whole night**, exactly as before; Sleep so far changes nothing in
+  it. It cannot reuse the looks: the sleep model weighs the night as a whole, so every number before Stop would move
+  after it. A finished night's so-far data is removed.
+- **With the smart alarm or the sound cues running their own live sleep model** the page waits ("Waiting: the live
+  sleep model runs for the smart alarm."), so two models never compete for the phone's memory while the recording
+  runs; meanwhile the live model's own readings fill in the chart, and the page says how many minutes are theirs.
+- A dropout and reconnect (a new file set, as on 2026-11-20 at 08:15) shows as hatched "no data"; the hours before it
+  are not scored again. The DIY board's nights have no sleep so far (the page says why).
+- Files: `files/cache/so-far/<night>.json` and `files/cache/live-stages/` (never exported; `docs/data-format.md`).
+
+### Owner step: one look in the night (1 minute, one night)
+
+1. Some night when you wake anyway (or before you get up), open the app while it still records. Under **Tonight**,
+   tap **See sleep so far**.
+2. Wait for the line at the top to say "Scored up to ..." (the first look late in a night takes the longest; note
+   about how long). Does the chart look like your night so far?
+3. In the morning press **Stop** as usual and open **Sleep report** once it is scored. Compare the asleep total and
+   the chart with what you saw in the night.
+4. Tell the assistant: what time you looked, how long the first look took, whether the phone got warm, and how far the
+   night's report differed from the look.
 
 ## Lights off and falling asleep
 

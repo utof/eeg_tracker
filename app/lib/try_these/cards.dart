@@ -229,6 +229,26 @@ const List<TryCard> tryCards = [
     auto: true,
   ),
   TryCard(
+    id: 'sleep-so-far',
+    group: TryGroup.anotherNight,
+    title: 'Sleep so far, in the night',
+    what: 'While the night still records, the phone can show the sleep chart and totals up to a few minutes ago.',
+    takes: '1 minute in the night, 2 in the morning',
+    steps: [
+      'Some night when you wake anyway, open the app while it records. Under Tonight, tap See sleep so far.',
+      'Wait until the top line says "Scored up to ...", and note about how long that took.',
+      'In the morning tap Stop, then open Sleep report once the night is scored.',
+      'Compare the night\'s report with what you saw in the night.',
+    ],
+    tell: [
+      'What time you looked, how long the first look took, and whether the phone got warm.',
+      'How far the morning\'s report differed from the look.',
+    ],
+    opens: TryOpen.nightScreen,
+    readme: [TryRef('Sleep so far', 'one look in the night')],
+    evidence: 'sleep-scoring',
+  ),
+  TryCard(
     id: 'smart-alarm',
     group: TryGroup.anotherNight,
     title: 'Smart alarm',

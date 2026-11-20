@@ -20,6 +20,9 @@ Each line says what it does. In brackets: how well the research backs it **for t
 - **Nights and sleep stages**: one tap records the night with the screen off; after Stop the phone scores sleep
   stages and shows a sleep report (time asleep, deep, dream, wake-ups, a chart, jaw and movement counts). The
   stages match the laptop's on every scored epoch of the test nights. (some)
+- **Sleep so far**: while the night still records, **See sleep so far** shows the chart and totals up to a few minutes
+  ago, scoring only what is new since the last look; marked as provisional, since the report after Stop scores the
+  whole night together. (some)
 - **Smart alarm**: wakes you at a light-sleep moment inside a window you choose, never in deep sleep, and always by
   the window's end. (weak)
 - **Nap coach**: a nap that ends before deep sleep or at the length you pick. (some)

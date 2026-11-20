@@ -202,6 +202,18 @@ file sits beside it; if it is still there when
 no scoring runs, the last attempt stopped (its text is the error, empty if the app was killed) and the app waits
 for "Try again". Export data copies the reports out (below).
 
+## The phone's "Sleep so far" files (`files/cache/`, never exported)
+
+While a night records, **Sleep so far** (`app/lib/sleep/so_far.dart`, DECISIONS 640-648) keeps what its looks scored
+in `files/cache/so-far/<night>.json`: `version` 1, `method` (the model and the windows), `night`, `start_unix` (the
+joined night's first sample; epoch e starts 30 e s after it), `seconds`, `looks` and `calls` (the work so far),
+`stretches` (`k`: stretch k keeps epochs 128 k to 128 k + 127; `key`: a hash of the files, records and gaps under its
+80-minute window; `stages`: 128 letters as the report's) and `tail` (`from`, `key`, `stages`: the newest minutes at
+the last look). A file that does not read back exactly is ignored and the night is scored again; the folder is emptied
+between nights. The night's live sleep model (smart alarm, sound cues) appends to
+`files/cache/live-stages/<stamp>.live`, one file per recorder process: `on <unix ms> <who>`, `e <epoch start, unix ms>
+<W 1 2 3 R -> <top probability>` per 30 s epoch it hands out, `off <unix ms>`; files older than 2 days are removed.
+
 ## The phone's `files/sound-states/<stamp>.sound.json`
 
 One file per sound-for-states session (`app/lib/states/store.dart`, DECISIONS row 136), in the app's private folder
