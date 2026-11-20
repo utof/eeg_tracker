@@ -12,6 +12,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart' show ServiceRequestFailure;
 
 import '../phone.dart';
+import '../start_log.dart';
 import '../recorder/brainbit.dart';
 import '../recorder/chunk_writer.dart' show Sample;
 import '../recorder/recorder_service.dart';
@@ -28,6 +29,7 @@ const MethodChannel _task = MethodChannel('eeg_tracker/auto_task');
 Future<void> runAutoWatch() async {
   WidgetsFlutterBinding.ensureInitialized();
   initRecorderService(); // the night recorder's options, in case this engine starts it
+  unawaited(logAppStart('watcher')); // files/app-starts.log (DECISIONS 734)
   await AutoTask().run();
 }
 
