@@ -112,7 +112,7 @@ class PhoneSessionKeeper implements SessionKeeper {
     }
     if (now != null && _same(now, spec)) return Future<bool>.value(true);
     _backgroundHeld = spec;
-    return _next(() => _hold(spec));
+    return _next(() => _hold(spec, background: true));
   }
 
   static bool _same(KeepSpec a, KeepSpec b) =>
@@ -169,7 +169,9 @@ class PhoneSessionKeeper implements SessionKeeper {
     });
   }
 
-  static Future<bool> _hold(KeepSpec spec) async {
+  /// [background]: the keep between sessions, not a session; Android's side tells the headband watcher and the
+  /// sharp-hours questions apart by it (`SessionService.sessionRunning`).
+  static Future<bool> _hold(KeepSpec spec, {bool background = false}) async {
     try {
       final kept = await _channel.invokeListMethod<String>('hold', {
         'title': spec.title,
@@ -178,6 +180,7 @@ class PhoneSessionKeeper implements SessionKeeper {
         'microphone': spec.microphone,
         'focus': spec.focus,
         'button': ?spec.button,
+        if (background) 'background': true,
       });
       if (kept == null) return false;
       return (!spec.headband || kept.contains('headband')) && (!spec.microphone || kept.contains('microphone'));
@@ -216,7 +219,7 @@ class PhoneSessionKeeper implements SessionKeeper {
       if (_holder != null) return; // another session took over meanwhile
       final bg = _backgroundHeld;
       if (bg != null) {
-        await _hold(bg); // the background keep takes the notification back
+        await _hold(bg, background: true); // the background keep takes the notification back
       } else {
         await _release();
       }

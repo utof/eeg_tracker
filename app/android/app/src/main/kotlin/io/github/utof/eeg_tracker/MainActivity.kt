@@ -51,7 +51,8 @@ class MainActivity : FlutterActivity() {
         // Sound sessions with the phone locked (SessionService.kt): "hold" answers with what is kept
         // ("headband", "microphone"), "release" ends it; Stop on the notification comes back as "stopTapped", the
         // session's own second button ("button", e.g. the work session's Back) as "buttonTapped", and the audio focus
-        // (a call, another app's sound) as "focus" with "loss", "lossTransient", "duck" or "gain".
+        // (a call, another app's sound) as "focus" with "loss", "lossTransient", "duck" or "gain". "background": the
+        // keep between sessions (Share on Wi-Fi), which is not a session.
         val session = MethodChannel(messenger, "eeg_tracker/session")
         session.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -63,6 +64,7 @@ class MainActivity : FlutterActivity() {
                     call.argument<Boolean>("microphone") == true,
                     call.argument<Boolean>("focus") != false,
                     call.argument<String>("button"),
+                    call.argument<Boolean>("background") == true,
                 ) { kept, error ->
                     runOnUiThread { if (kept != null) result.success(kept) else result.error("session", error, null) }
                 }

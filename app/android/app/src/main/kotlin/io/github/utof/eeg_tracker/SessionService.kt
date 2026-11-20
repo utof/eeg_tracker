@@ -75,6 +75,15 @@ class SessionService : Service() {
             private set
 
         /**
+         * The service runs for a session, not for the keep between sessions (Share on Wi-Fi between nights, DECISIONS
+         * 589: "background" in [hold]): only a session holds the headband or wants no question meanwhile, so the
+         * headband watcher (AutoWatch.kt) and the sharp-hours questions (SharpPrompts.kt) look at this.
+         */
+        @Volatile
+        private var background = false
+        val sessionRunning: Boolean get() = running && !background
+
+        /**
          * Starts (or updates) the service from the visible app. [done] gets the extras that are kept, or an error.
          * A plain startService: the app is on screen, and unlike startForegroundService it has no 5 s deadline
          * that would crash the app if the foreground start is refused.
@@ -87,6 +96,7 @@ class SessionService : Service() {
             microphone: Boolean,
             focus: Boolean,
             button: String?,
+            background: Boolean,
             done: (List<String>?, String?) -> Unit,
         ) {
             pending?.invoke(null, "replaced by a newer request")
@@ -100,7 +110,8 @@ class SessionService : Service() {
                         .putExtra("headband", headband)
                         .putExtra("microphone", microphone)
                         .putExtra("focus", focus)
-                        .putExtra("button", button),
+                        .putExtra("button", button)
+                        .putExtra("background", background),
                 )
             } catch (e: Exception) {
                 pending = null
@@ -169,6 +180,7 @@ class SessionService : Service() {
             }
             keptTypes = kept
             if (intent.getBooleanExtra("focus", true)) askFocus() else dropFocus()
+            background = intent.getBooleanExtra("background", false)
             running = true
             answer?.invoke(kept, null)
         } catch (e: Exception) {

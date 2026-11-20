@@ -189,7 +189,7 @@ object SharpPrompts {
 
     private fun busyReason(context: Context): String? = when {
         recorderRunning(context) -> "night recording"
-        SessionService.running -> "sound session"
+        SessionService.sessionRunning -> "sound session"
         screenHeld -> "session on screen"
         else -> null
     }

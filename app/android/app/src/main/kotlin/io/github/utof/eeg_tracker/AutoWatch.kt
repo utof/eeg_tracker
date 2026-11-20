@@ -225,7 +225,7 @@ object AutoWatch {
     /** The headband must not be touched: the night recorder, a sound or work session, or a session screen holds it. */
     fun busyReason(context: Context): String? = when {
         recorderRunning(context) -> "night recording"
-        SessionService.running -> "session"
+        SessionService.sessionRunning -> "session"
         SharpPrompts.screenHeld -> "session on screen"
         else -> null
     }

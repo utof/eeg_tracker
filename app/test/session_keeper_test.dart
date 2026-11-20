@@ -123,6 +123,9 @@ void main() {
     expect(PhoneSessionKeeper.held, isFalse, reason: 'not a session: the night scoring does not stop for it');
     expect(calls.single.method, 'hold');
     expect((calls.single.arguments as Map)['title'], 'Sharing on Wi-Fi');
+    // Android is told it is not a session: the headband watcher and the sharp-hours questions do not wait for it
+    // (AutoWatch.kt, SharpPrompts.kt `SessionService.sessionRunning`)
+    expect((calls.single.arguments as Map)['background'], isTrue);
     await PhoneSessionKeeper.keepInBackground(share, onStop: () => stops++); // the minute's sync: no second call
     expect(calls, hasLength(1));
     await tapStop();
@@ -131,11 +134,13 @@ void main() {
     final session = PhoneSessionKeeper()..onStop = () => sessionStops++;
     await session.hold(const KeepSpec(title: 'Meditation', headband: true));
     expect(PhoneSessionKeeper.held, isTrue);
+    expect((calls.last.arguments as Map).containsKey('background'), isFalse, reason: 'a session is a session');
     await tapStop();
     expect((stops, sessionStops), (1, 1));
     await session.release(); // the meditation ends: the notification goes back to sharing, the app keeps running
     expect(calls.map((c) => c.method), ['hold', 'hold', 'hold']);
     expect((calls.last.arguments as Map)['title'], 'Sharing on Wi-Fi');
+    expect((calls.last.arguments as Map)['background'], isTrue);
     expect(PhoneSessionKeeper.held, isFalse);
 
     expect(await PhoneSessionKeeper.keepInBackground(null), isFalse); // sharing off
