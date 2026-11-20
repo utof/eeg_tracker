@@ -1,7 +1,9 @@
 // The sleep report of one night (opened from the night screen's Sleep section), following the scorer live:
 // while the night is being scored the page says so, and the report appears when it is written. "Was this you?"
 // (DECISIONS 370-379) is worked out from the app's files when the page opens, when the report changes, and after
-// an answer.
+// an answer, in a background isolate (DECISIONS 620-629): its line appears a moment after the report.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../alarm/record.dart';
@@ -25,18 +27,26 @@ class SleepReportScreen extends StatefulWidget {
 class _SleepReportScreenState extends State<SleepReportScreen> {
   WearerResult? _wearer;
 
-  /// The report's `built` time the check was worked out for (a rebuilt report is checked again).
+  /// The report's `built` time the check was asked for (a rebuilt report is checked again), and whether it was.
   String? _checkedFor;
+  bool _asked = false;
+
+  /// The newest check asked for: an older one that ends later is dropped.
+  int _check = 0;
 
   String get _dir => widget.scoring.scorer.recordingsDir.path;
 
-  void _check(String? built) {
+  /// Works the check out in the background; the page shows it when it is done.
+  void _ask(String? built) {
     _checkedFor = built;
-    try {
-      _wearer = refreshWearer(_dir, DateTime.now());
-    } catch (_) {
-      _wearer = null; // the check is never worth breaking the report
-    }
+    _asked = true;
+    final n = ++_check;
+    unawaited(
+      wearerInBackground(_dir, DateTime.now()).then<WearerResult?>((w) => w, onError: (Object _) => null).then((w) {
+        // the check is never worth breaking the report
+        if (mounted && n == _check) setState(() => _wearer = w);
+      }),
+    );
   }
 
   void _answer(String? answer) {
@@ -45,7 +55,7 @@ class _SleepReportScreenState extends State<SleepReportScreen> {
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Not saved: $e')));
     }
-    setState(() => _check(_checkedFor));
+    _ask(_checkedFor);
   }
 
   @override
@@ -57,7 +67,7 @@ class _SleepReportScreenState extends State<SleepReportScreen> {
       final all = scoring.reports;
       final report = all.where((r) => r.nightOf == nightOf).firstOrNull;
       final built = report?.json['built'] as String?;
-      if (_wearer == null || built != _checkedFor) _check(built);
+      if (!_asked || built != _checkedFor) _ask(built);
       final w = _wearer;
       return SleepReportView(
         nightOf: nightOf,

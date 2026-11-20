@@ -132,15 +132,22 @@ class _MorningScreenState extends State<MorningScreen> {
     _checkWearer();
   }
 
-  /// The check over the app's files, for this check-in; never worth breaking the result page.
+  /// The newest check asked for: an older one that ends later is dropped.
+  int _wearerAsked = 0;
+
+  /// The check over the app's files, for this check-in, in a background isolate (DECISIONS 620-629); never worth
+  /// breaking the result page.
   void _checkWearer() {
     final rec = _recordings, id = _wearerId;
     if (rec == null || id == null) return;
-    try {
-      _wearer = wearerLine(refreshWearer(rec, DateTime.now()), kindCheckIn, id);
-    } catch (_) {
-      _wearer = null;
-    }
+    final n = ++_wearerAsked;
+    unawaited(
+      wearerInBackground(rec, DateTime.now())
+          .then<WearerLine?>((r) => wearerLine(r, kindCheckIn, id), onError: (Object _) => null)
+          .then((line) {
+            if (mounted && n == _wearerAsked) setState(() => _wearer = line);
+          }),
+    );
   }
 
   void _answerWearer(String? answer) {
@@ -151,7 +158,7 @@ class _MorningScreenState extends State<MorningScreen> {
     } catch (e) {
       _say('Not saved: $e');
     }
-    setState(_checkWearer);
+    _checkWearer();
   }
 
   void _screen({required bool on}) {

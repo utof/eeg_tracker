@@ -103,6 +103,17 @@ class MorningStore {
     return out..sort((a, b) => b.start.compareTo(a.start));
   }
 
+  /// The check-in whose id (its file stem) is [id], or null when it is not there or cannot be read.
+  MorningRecord? byId(String id) {
+    try {
+      return MorningRecord.fromJson(jsonDecode(File('${dir.path}/$id.morning.json').readAsStringSync()));
+    } on FileSystemException {
+      return null;
+    } on FormatException {
+      return null;
+    }
+  }
+
   /// The first readable check-in of [day] (04:00 to 04:00, trends/days.dart), found by the file names (their start):
   /// only that day's files are opened, and none again while they are unchanged (DECISIONS 620-629).
   MorningRecord? firstOfDay(String day) {

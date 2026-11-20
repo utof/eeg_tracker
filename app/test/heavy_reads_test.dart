@@ -17,6 +17,7 @@ import 'package:eeg_tracker/sharp/page.dart' show recentNights;
 import 'package:eeg_tracker/sharp/store.dart';
 import 'package:eeg_tracker/sleep/live_stager.dart' show LiveMode;
 import 'package:eeg_tracker/study/arm.dart';
+import 'package:eeg_tracker/sleep/report.dart';
 import 'package:eeg_tracker/study/store.dart';
 import 'package:eeg_tracker/ui/dream_view.dart' show clock;
 import 'package:eeg_tracker/ui/lucid_screen.dart';
@@ -25,6 +26,7 @@ import 'package:eeg_tracker/ui/memory_cues_screen.dart' show memoryNightLine;
 import 'package:eeg_tracker/ui/morning_screen.dart' show checkedInTodayAt;
 import 'package:eeg_tracker/ui/nap_view.dart' show endWords;
 import 'package:eeg_tracker/ui/night_lines.dart';
+import 'package:eeg_tracker/wearer/check.dart';
 import 'package:eeg_tracker/wearer/wearer.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -96,6 +98,49 @@ void main() {
       final bad = File('${dreamDirFor(rec).path}/2026-11-20-010000.dream.json')..writeAsStringSync('{cut');
       addTearDown(bad.deleteSync);
       expect(nightLines(rec, now).dream, contains('Thu 19 Nov 23:10'));
+    });
+  });
+
+  group('"Was this you?" on the sleep report, a check-in\'s result and Settings', () {
+    test('the same verdicts as judging every file; each file read once, also in a new process', () {
+      final counts = countReads(addTearDown);
+      final first = refreshWearer(rec, now);
+      final every = judgeWearer(
+        wearerRecordings(NightReportStore(nightsDirFor(rec)).all(), MorningStore(morningsDirFor(rec)).list()),
+      );
+      expect(first.verdicts.length, every.length);
+      for (final v in every) {
+        expect(first.of(v.kind, v.id)?.state, v.state, reason: '${v.kind}:${v.id}');
+      }
+      expect(first.ready(kindNight), isTrue);
+      counts.clear();
+      final again = refreshWearer(rec, now);
+      expect(counts.of('/files/nights/') + counts.of('/files/mornings/'), 0, reason: '$counts');
+      expect(again.verdicts.keys, first.verdicts.keys);
+      SummaryIndex.forgetAll(); // a new process, or the background isolate
+      counts.clear();
+      refreshWearer(rec, now);
+      expect(counts.of('/files/nights/') + counts.of('/files/mornings/'), 0, reason: '$counts');
+      expect(counts.of('/cache/wearer-'), 2, reason: 'the two kept indexes');
+    });
+
+    test('worked out in a background isolate: nothing read on the screen\'s thread', () async {
+      final counts = countReads(addTearDown);
+      final r = await wearerInBackground(rec, now);
+      expect(counts.total, 0, reason: '$counts');
+      expect(r.on, isTrue);
+      expect(r.verdicts, isNotEmpty);
+    });
+
+    test('an answer changes its file, and only that file is read again', () {
+      refreshWearer(rec, now);
+      final counts = countReads(addTearDown);
+      answerWearer(rec, kindNight, '2026-11-12', answerSomeoneElse, now);
+      addTearDown(() => answerWearer(rec, kindNight, '2026-11-12', null, now));
+      counts.clear();
+      final r = refreshWearer(rec, now);
+      expect(r.answers['$kindNight:2026-11-12'], answerSomeoneElse);
+      expect(counts.of('/files/nights/'), 1, reason: '$counts');
     });
   });
 

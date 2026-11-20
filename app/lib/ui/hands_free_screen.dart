@@ -72,7 +72,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     WearerResult? wearer;
     try {
       rec = await Phone.recordingsDir();
-      if (rec != null) wearer = refreshWearer(rec, DateTime.now());
+      if (rec != null) wearer = await wearerInBackground(rec, DateTime.now()); // off the screen's thread
     } catch (_) {
       wearer = null; // the section is left out; hands-free still works
     }
@@ -98,14 +98,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  void _setWearer(bool on) {
+  Future<void> _setWearer(bool on) async {
     final rec = _recordings;
     if (rec == null) return;
     try {
       WearerStore(wearerDirFor(rec)).setOn(on, DateTime.now());
-      setState(() => _wearer = refreshWearer(rec, DateTime.now()));
+      final w = await wearerInBackground(rec, DateTime.now());
+      if (mounted) setState(() => _wearer = w);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('The setting could not be saved: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('The setting could not be saved: $e')));
+      }
     }
   }
 
@@ -188,7 +191,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     onToggle: (on) => unawaited(_toggle(on)),
     onCalibrate: () => unawaited(_calibrate()),
     onInfo: () => showEvidence(context, 'hands-free'),
-    onWearerSwitch: _setWearer,
+    onWearerSwitch: (on) => unawaited(_setWearer(on)),
     onWearerInfo: () => showEvidence(context, 'was-this-you'),
     studyOn: _studyOn,
     onStudy: () => unawaited(_openStudy()),

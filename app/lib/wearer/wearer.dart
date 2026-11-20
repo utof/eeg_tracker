@@ -3,11 +3,15 @@
 // are kept in those same files (`wearer`: `answer`, `at`), and the words the sleep report and the check-in's result
 // show. Worked out again whenever one of those pages opens; while the check is on, each recording's first verdict
 // goes into the log once. Never a medical or identity claim: it says the signal looks unlike your usual and asks.
+import 'dart:convert';
+import 'dart:io';
+import 'dart:isolate';
 import 'dart:math' as math;
 
-import '../cache/file_summaries.dart' show newestFirst;
+import '../cache/file_summaries.dart' show SummaryIndex, newestFirst;
 import '../morning/store.dart';
 import '../recorder/nights.dart' show dateName;
+import '../sleep/progress.dart' show cacheDirFor;
 import '../sleep/report.dart';
 import '../work/store.dart';
 import 'check.dart';
@@ -55,6 +59,65 @@ List<WearerRecording> wearerRecordings(List<SleepReport> nights, List<MorningRec
       WearerRecording(id: m.id, kind: kindCheckIn, time: m.start, day: m.day, signal: s, why: why, answer: m.wearerAnswer),
 ];
 
+/// The kept summaries' version (cache/file_summaries.dart): what [wearerRecordingsIn] keeps of a file.
+const int _keptVersion = 1;
+
+Map<String, Object?> _keptJson(WearerRecording r) => {
+  'id': r.id,
+  'kind': r.kind,
+  'timeUs': r.time.microsecondsSinceEpoch,
+  'day': r.day,
+  'signal': r.signal,
+  'why': r.why,
+  'answer': r.answer,
+};
+
+WearerRecording? _fromKept(Object? j) {
+  if (j is! Map || j['id'] is! String || j['kind'] is! String || j['timeUs'] is! int || j['day'] is! String) {
+    return null;
+  }
+  final s = j['signal'];
+  return WearerRecording(
+    id: j['id'] as String,
+    kind: j['kind'] as String,
+    time: DateTime.fromMicrosecondsSinceEpoch(j['timeUs'] as int),
+    day: j['day'] as String,
+    signal: s is Map ? {for (final e in s.entries) if (e.value is num) '${e.key}': (e.value as num).toDouble()} : null,
+    why: j['why'] as String?,
+    answer: j['answer'] as String?,
+  );
+}
+
+/// [wearerRecordings] of every night report and check-in in the app's folders, each file read only when it is new
+/// or changed: what the check needs of a file is kept in `files/cache/wearer-nights.json` and `wearer-checkins.json`
+/// (DECISIONS 620-629: every report and check-in was read again whenever the sleep report, a check-in's result or
+/// Settings opened).
+List<WearerRecording> wearerRecordingsIn(String recordingsDir) {
+  final cache = cacheDirFor(recordingsDir).path;
+  final nights = SummaryIndex(File('$cache/wearer-nights.json'), version: _keptVersion).summaries(
+    nightsDirFor(recordingsDir),
+    '.report.json',
+    (f) {
+      final r = SleepReport.read(f);
+      return r == null ? null : wearerRecordings([r], const []).map(_keptJson).firstOrNull;
+    },
+  );
+  final checkIns = SummaryIndex(File('$cache/wearer-checkins.json'), version: _keptVersion).summaries(
+    morningsDirFor(recordingsDir),
+    '.morning.json',
+    (f) {
+      final m = MorningRecord.fromJson(jsonDecode(f.readAsStringSync()));
+      return m == null ? null : wearerRecordings(const [], [m]).map(_keptJson).firstOrNull;
+    },
+  );
+  return [for (final j in [...nights.values, ...checkIns.values]) ?_fromKept(j)];
+}
+
+/// [refreshWearer] in a background isolate: the pages that show the check (the sleep report, a check-in's result,
+/// Settings) never read the files on the screen's thread.
+Future<WearerResult> wearerInBackground(String recordingsDir, DateTime now) =>
+    Isolate.run(() => refreshWearer(recordingsDir, now), debugName: 'wearer');
+
 /// Every recording's verdict, the answers and signals by `kind:id`, and how far each kind has learned.
 class WearerResult {
   const WearerResult({
@@ -86,10 +149,7 @@ class WearerResult {
 WearerResult refreshWearer(String recordingsDir, DateTime now) {
   final store = WearerStore(wearerDirFor(recordingsDir));
   if (!store.on) return const WearerResult(on: false);
-  final recs = wearerRecordings(
-    NightReportStore(nightsDirFor(recordingsDir)).all(),
-    MorningStore(morningsDirFor(recordingsDir)).list(),
-  );
+  final recs = wearerRecordingsIn(recordingsDir);
   final byKey = {for (final r in recs) _key(r.kind, r.id): r};
   final verdicts = <String, WearerVerdict>{};
   final joined = <String, ({int have, Set<String> days})>{};
@@ -153,7 +213,7 @@ void answerWearer(String recordingsDir, String kind, String id, String? answer, 
     store.write(tagged(r.json).cast<String, dynamic>());
   } else {
     final store = MorningStore(morningsDirFor(recordingsDir));
-    final m = store.list().where((m) => m.id == id).firstOrNull ?? (throw StateError('no check-in $id'));
+    final m = store.byId(id) ?? (throw StateError('no check-in $id'));
     store.save(tagged(m.json), m.start);
   }
   WearerStore(wearerDirFor(recordingsDir)).event(now, 'answer', {'kind': kind, 'id': id, 'answer': answer});
