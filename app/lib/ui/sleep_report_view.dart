@@ -14,6 +14,7 @@ import '../wearer/wearer.dart' show WearerLine;
 import 'alarm_view.dart' show WakingUp, WakingUpSection;
 import 'lights_off_view.dart';
 import 'parts.dart';
+import 'rem_check_view.dart';
 import 'sleep_chart.dart';
 import 'sleep_extras_view.dart';
 import 'theme.dart';
@@ -45,6 +46,7 @@ class SleepReportView extends StatelessWidget {
     this.onInfo,
     this.onExtrasInfo,
     this.onDriftInfo,
+    this.onDreamInfo,
     this.alarm,
     this.onAlarmInfo,
     this.onOpenNight,
@@ -76,6 +78,9 @@ class SleepReportView extends StatelessWidget {
 
   /// The "i" of the falling asleep section (the drift-off detector's note).
   final VoidCallback? onDriftInfo;
+
+  /// The "i" of the dream sleep check (the sleep-scoring note).
+  final VoidCallback? onDreamInfo;
 
   /// The smart alarm of this night ("Waking up", alarm_view.dart), and its "i".
   final WakingUp? alarm;
@@ -140,6 +145,7 @@ class SleepReportView extends StatelessWidget {
     final quality = x?.quality;
     final noisyMin = x?.night.degradedMin ?? 0, unusableMin = x?.night.missingMin ?? 0;
     final drift = r.driftOff;
+    final dream = r.remCheckNumbers;
     return [
       IntrinsicHeight(
         child: Row(
@@ -199,6 +205,7 @@ class SleepReportView extends StatelessWidget {
           style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
         ),
       ],
+      if (dream != null) DreamSleepCheck(check: dream, onInfo: onDreamInfo),
       if (drift != null)
         FallingAsleepSection(drift: drift, check: driftCheck([r, ...others]), onInfo: onDriftInfo),
       if (alarm != null) WakingUpSection(content: alarm!, onInfo: onAlarmInfo),

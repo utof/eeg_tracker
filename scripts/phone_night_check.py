@@ -15,9 +15,10 @@ stop"), and a night is made of one source's recordings only. `--source laptop` c
 For that night it reads every gap in the data (from the `.idx` arrival times) with the log's reason for it, the
 packet counter in the `.f32` (lost samples per hour), the sample rate, drops and reconnect tries, restarts of the app
 by Android, when the phone was off Wi-Fi (Share on Wi-Fi cannot reach the laptop then), the phone and headband
-batteries, contact, the phone's sleep report and, when numpy is there (as under
-`uv run --project analysis`), flat, railed and 50 Hz hum per channel. `--compare` puts a laptop night's numbers next
-to it. Standard library only, apart from that optional numpy part. It only reads files.
+batteries, contact, the phone's sleep report with its dream sleep check (analysis/rem_check.py, the words the phone
+shows) and, when numpy is there (as under `uv run --project analysis`), flat, railed and 50 Hz hum per channel; for a
+report from before the check, the eye movements are then measured from the recordings here. `--compare` puts a
+laptop night's numbers next to it. Standard library only, apart from that optional numpy part. It only reads files.
 
 A recording may hold any number of channels: what each `.f32` holds (channels, rate, what its counter counts) comes
 from its `<stamp>.header.json` (scripts/recording.py), for files from before the header from the `.log`'s format line
@@ -38,6 +39,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import night_files as nf  # noqa: E402  (standard library only)
 import packed  # noqa: E402  (a recording packed after a day, <stamp>.f32.xz, reads as the plain one)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "analysis"))
+import rem_check as rc  # noqa: E402  (the dream sleep check; standard library only but its detector)
 import recording  # noqa: E402  (what a .f32 holds: its header; standard library only)
 from battery import STUCK  # noqa: E402  the headband gauge's stuck readings (0-2 %, 100 %)
 
@@ -725,7 +728,40 @@ def report_numbers(found: tuple[Path, dict] | None, runs: list[Run]) -> dict | N
     return dict(file=path.name, scored=bool(r.get("scored")), scoring_s=_num(str(r.get("scoring_s"))),
                 asleep_min=total.get("asleep_min"), periods=total.get("periods"),
                 recorded_min=total.get("recorded_min"), missing_min=total.get("missing_min"),
-                quality=night, covers=len(files & inputs), of=len(files), phone=r.get("source") == "phone")
+                quality=night, covers=len(files & inputs), of=len(files), phone=r.get("source") == "phone",
+                rem=rc.check_of_report(r), rem_eye_here=False, raw=r)
+
+
+def measure_eye(rep: dict, runs: list[Run]) -> tuple[dict | None, str | None]:
+    """For a report from before the dream sleep check: its check with the eye movements measured here from the
+    night's recordings (the files the report lists, joined as the phone joins them); (None, why) when that cannot be
+    done (no numpy, another start, no eye pair)."""
+    try:
+        import to_bdf  # noqa: PLC0415  (numpy, pyedflib)
+        import night_extras as nx  # noqa: PLC0415
+    except ImportError as e:
+        return None, f"eye movements not measured here ({e.name} not found: run under `uv run --project analysis`)"
+    done = {i.get("file") for i in rep.get("inputs") or [] if isinstance(i, dict)}
+    paths = [x.path for x in runs if x.path.name in done and x.samples > 0]
+    if not paths:
+        return None, "eye movements not measured here: the report's recordings are not in this folder"
+    head = to_bdf.night_header(paths)
+    pair = rc.eye_pair(head)
+    if pair is None:
+        eye = rc.eye_not(rc.NO_PAIR)
+    else:
+        start, uv, notes = to_bdf.join(paths)
+        if start.isoformat() != datetime.fromisoformat(rep["data_start"]).replace(tzinfo=None).isoformat():
+            return None, f"eye movements not measured here: the recordings start at {start:%H:%M:%S}, the report at " \
+                         f"{rep['data_start'][11:19]}"
+        lim = nx.LIMIT_UV
+        left, right = (uv[:, k].clip(-lim, lim) for k in (pair.left, pair.right))
+        eye = rc.eye_measured(pair.label, rc.eye_epochs(left, right, nx.missing_mask(len(uv), notes),
+                                                        int(round(head.sample_rate))))
+    stages = rc.stages_of(rep.get("stages"))
+    if stages is None:
+        return None, "eye movements not measured here: the report has no stages"
+    return rc.night_check(stages, rc.periods_of(rep), rc.decode_probs(rep.get("probs")), eye), None
 
 
 def signal_numbers(runs: list[Run]) -> dict | None:
@@ -862,6 +898,16 @@ def analyse(runs: list[Run], source: str, name: str, report_dirs: list[Path], si
         report=report_numbers(find_report(report_dirs, name, source), runs),
         signal=signal_numbers(data_runs) if signal else None, signal_tried=signal,
     )
+    r = s["report"]
+    if r is not None and r["rem"] is not None and r["rem"].get("eye") is None:
+        if signal:
+            full, why = measure_eye(r["raw"], data_runs)
+            if full is not None:
+                r.update(rem=full, rem_eye_here=True)
+            else:
+                r["rem_why"] = why
+        else:
+            r["rem_why"] = "eye movements not measured here (--no-signal)"
     judge(s)
     return s
 
@@ -1249,6 +1295,37 @@ def _render_report(s: dict) -> list[str]:
     if q:
         out.append(f"  quality: good {q.get('good_min')} min, degraded {q.get('degraded_min')} min, missing "
                    f"{q.get('missing_min')} min")
+    return out + _render_rem(r)
+
+
+def _render_rem(r: dict) -> list[str]:
+    """The dream sleep check in the phone's words, then its numbers (DECISIONS 740-749)."""
+    c = r.get("rem")
+    if c is None:
+        return [] if not r["scored"] else ["", "Dream sleep check: not possible (the report has no stages: an older "
+                                           "laptop report)"]
+    lines = rc.check_lines(c)
+    if r.get("rem_eye_here"):
+        lines = [x for x in lines if not x.startswith("This report is older than the check")]
+    out = ["", "Dream sleep check" + (" (eye movements measured here from the recordings; the report predates them)"
+                                      if r.get("rem_eye_here") else "")]
+    out += [f"  {x}" for x in lines]
+    if r.get("rem_why"):
+        out.append(f"  ({r['rem_why']})")
+    if c.get("rem_prob_min") is None and c.get("asleep_min"):
+        out.append("  (the scorer's likelihood is not in this report: it was scored before 2026-11-20; score it again)")
+    nums = [f"REM {c['rem_min']} of {c['asleep_min']} min asleep",
+            f"first REM {c['first_rem_min']} min after sleep onset" if c.get("first_rem_min") is not None else None,
+            f"thirds {' / '.join(str(t) for t in c['thirds_rem_min'])} min" if c.get("thirds_rem_min") else None,
+            f"REM likelihood {c['rem_prob_min']} min" if c.get("rem_prob_min") is not None else None]
+    out.append("  numbers: " + "; ".join(n for n in nums if n))
+    e = c.get("eye")
+    if e and e.get("pair"):
+        dense = ", ".join(f"{k} {v}" for k, v in (e.get("dense_share") or {}).items())
+        out.append(f"  eye movements ({e['pair']}): {e['measured_min']} min of sleep measured; share in REM "
+                   f"{e['in_rem_share']} (REM is {e['rem_epoch_share']} of it); seconds a minute in REM "
+                   f"{e['rem_per_min']}, in other sleep {e['other_per_min']}; epochs with {rc.DENSE_S}+ s by stage: "
+                   f"{dense}")
     return out
 
 

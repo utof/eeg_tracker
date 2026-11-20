@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 
 import night_files as nf
+import rem_check
 import score_sleep
 import sleep_report as sr
 
@@ -94,11 +95,13 @@ def test_nights_chain_recordings_and_name_them_by_the_evening():
 def test_stale_when_missing_old_or_10_minutes_behind():
     night = nf.Night("2026-11-17", [_rec("a.f32", 0, 1, 60), _rec("b.f32", 2, 3, 30)])
     rep = {"version": nf.VERSION, "inputs": [{"file": "a.f32", "bytes": night.recs[0].size},
-                                             {"file": "b.f32", "bytes": night.recs[1].size}], "drift_off": None}
+                                             {"file": "b.f32", "bytes": night.recs[1].size}], "drift_off": None,
+           "rem_check": None}
     assert nf.is_stale(night, None)
     assert nf.is_stale(night, dict(rep, version=0))
     assert not nf.is_stale(night, rep)
     assert nf.is_stale(night, {k: v for k, v in rep.items() if k != "drift_off"})  # written before drift_off: once
+    assert nf.is_stale(night, {k: v for k, v in rep.items() if k != "rem_check"})  # before the dream sleep check: once
     def behind(minutes: float) -> dict:
         b = {"file": "b.f32", "bytes": int((30 - minutes) * 60 * nf.FS) * nf.REC_BYTES}
         return dict(rep, inputs=[rep["inputs"][0], b])
@@ -185,6 +188,16 @@ def test_a_second_run_skips_an_up_to_date_night(tmp_path, fake_scorer, capsys):
     d = rep["drift_off"]  # no Lights off marker: the detector counts from the night's start (night_drift.py)
     assert rep["drift_off_error"] is None and d["source"] == "night start" and d["lights_off"] == rep["data_start"]
     assert d["model_onset_min"] == 1.0 and d["counted"] is False  # PATTERN: 2 awake epochs, then sleep
+    # the dream sleep check (rem_check.py), as on the phone: stage letters, the model's probabilities, the numbers
+    assert rep["stages"] == "WW" + "2" * 12 + "3" * 4 + "R" * 4 + "WW"
+    assert rem_check.decode_probs(rep["probs"])[0] == [600, 100, 100, 100, 100]
+    c = rep["rem_check"]
+    assert (c["asleep_min"], c["rem_min"], c["rem_share"], c["first_rem_min"]) == (10.0, 2.0, 0.2, 8.0)
+    assert c["rem_prob_min"] == (4 * 600 + 16 * 100) / 2000  # p(R) over the period's 20 epochs, in minutes
+    assert c["eye"]["pair"] == "T3-T4" and len(c["eye"]["epochs"]) == 24  # measured on the night's T3-T4
+    assert c == rem_check.night_check(rem_check.stages_of(rep["stages"]), rem_check.periods_of(rep),
+                                      rem_check.decode_probs(rep["probs"]),
+                                      rem_check.eye_measured("T3-T4", rem_check.eye_from_text(c["eye"]["epochs"])))
     before = (rep_file.read_bytes(), rep_file.stat().st_mtime_ns)
 
     assert sr.main(args) == 0  # nothing new: nothing scored, nothing written, nothing exported

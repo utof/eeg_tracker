@@ -10,7 +10,9 @@ evening date) whose report is missing or lacks 10+ minutes of newer samples, it 
 to_bdf.py's code into <nights>/<date>.bdf, scores it with score_sleep.py's code (<date>.sleep.json and
 <date>.hypnogram.png), splits the AnySleep stages into sleep periods, runs the shared detectors over the same samples
 for the night extras (analysis/night_extras.py: jaw, movement and signal quality, as on the phone) and the
-drift-off detector from the night's lights off against the model's sleep onset (analysis/night_drift.py), writes
+drift-off detector from the night's lights off against the model's sleep onset (analysis/night_drift.py) and the
+dream sleep check (analysis/rem_check.py: the model's per-epoch probabilities and side-to-side eye movements on the
+night's eye pair, T3-T4 on the BrainBit; measurement only, as on the phone), writes
 <date>.report.json
 (docs/data-format.md) and appends the eeg_sleep_night event (export_events.py). Nights already up to date are
 skipped, so running it twice does nothing the second time. A night may hold any number of channels (its files'
@@ -38,6 +40,7 @@ NOTE = "first guess; the scorer is not yet validated on this headband"
 
 
 SCORED = {"W"} | ASLEEP
+STAGE_CHAR = {"W": "W", "N1": "1", "N2": "2", "N3": "3", "R": "R"}  # the report's `stages`, as the phone's; `-` gap
 
 
 def _agreement(pairs: list[tuple[str, str]]) -> dict | None:
@@ -108,10 +111,11 @@ def _extras(seen: tuple | None, stages: list[str], found: list[dict], start: dat
 
 def make_report(name: str, night: nf.Night, scored: dict | None, seconds: float, data: tuple[datetime, float],
                 seen: tuple | None = None, extras_error: str | None = None, drift: dict | None = None,
-                drift_error: str | None = None) -> dict:
+                drift_error: str | None = None, eye: dict | None = None) -> dict:
     """<name>.report.json from score_sleep's result (None when there was too little data to score), what the
-    detectors saw (`night_extras.events`, None when that pass did not run) and the drift-off detector from lights
-    off (`night_drift.night`, None when it did not run; drift_error says why)."""
+    detectors saw (`night_extras.events`, None when that pass did not run), the drift-off detector from lights
+    off (`night_drift.night`, None when it did not run; drift_error says why) and the eye movements for the dream
+    sleep check (`rem_check.eye_measured` / `eye_not`; None: not measured)."""
     start, length_s = data
     at = lambda t: t.astimezone().isoformat(timespec="seconds")  # noqa: E731
     rep: dict = dict(version=nf.VERSION, night_of=name, built=at(datetime.now()), scoring_s=round(seconds, 1),
@@ -125,7 +129,8 @@ def make_report(name: str, night: nf.Night, scored: dict | None, seconds: float,
                                           periods=0, recorded_min=round(length_s / 60, 1), missing_min=0.0,
                                           stray_sleep_min=0.0),
                    hypnogram=None, sleep_json=None, bdf=None, model=None, cross_check=None, extras=None,
-                   extras_error=extras_error, drift_off=None, drift_off_error=None)
+                   extras_error=extras_error, drift_off=None, drift_off_error=None, stages="", probs=None,
+                   rem_check=None)
         return rep
     import export_events
     ep = scored["epochs"]
@@ -151,6 +156,14 @@ def make_report(name: str, night: nf.Night, scored: dict | None, seconds: float,
                         stage_min=sm, wake_ups=len(p["wake_ups"]),
                         wake_up_list=[dict(start=t(w["epoch"]), awake_min=w["awake_min"]) for w in p["wake_ups"]],
                         missing_min=p["missing_min"], agreement=p["agreement"], confidence=p["confidence"]))
+    if str(ROOT / "analysis") not in sys.path:
+        sys.path.insert(0, str(ROOT / "analysis"))
+    import rem_check as rc
+    stages = [e["anysleep"] for e in ep]
+    probs = rc.encode_probs([e["p"] for e in ep])
+    if eye is None:
+        eye = rc.eye_not("not measured: the signal pass failed (see extras_error)" if extras_error else "not measured")
+    check = rc.night_check(stages, [(p["first"], p["last"]) for p in found], rc.decode_probs(probs), eye)
     s = scored["summary"]
     total = {k: sum(p[k] for p in out) for k in ("asleep_min", "light_min", "deep_min", "dream_min", "wake_ups")}
     total.update(periods=len(out), recorded_min=s["recorded_min"], missing_min=s["gap_min"], stray_sleep_min=stray)
@@ -158,7 +171,8 @@ def make_report(name: str, night: nf.Night, scored: dict | None, seconds: float,
                bdf=f"{name}.bdf", model=export_events.MODEL,
                cross_check=dict(model=export_events.CROSS, agreement_5_stage=s.get("agreement_5_stage"),
                                 agreement_w_nrem_rem=s.get("agreement_w_nrem_rem")),
-               extras=extras, extras_error=extras_error, drift_off=drift_off, drift_off_error=drift_error)
+               extras=extras, extras_error=extras_error, drift_off=drift_off, drift_off_error=drift_error,
+               stages="".join(STAGE_CHAR.get(x, "-") for x in stages), probs=probs, rem_check=check)
     return rep
 
 
@@ -174,6 +188,26 @@ def _keep_foreign(folder: Path, name: str) -> None:
                 k += 1; dst = folder / f"{name}-manual{k}{suffix}"
             os.replace(p, dst)
             print(f"kept an earlier {p.name} as {dst.name}", flush=True)
+
+
+def night_eye(head: recording.Header, uv, notes: list) -> dict:
+    """Side-to-side eye movements per epoch on the night's eye pair (analysis/rem_check.py), for the dream sleep
+    check: `eye_measured`, or `eye_not` with why (no pair on this layout, or the detector failed). `uv` (n x channels,
+    µV) as to_bdf.join gives it; the pair's columns are clipped to the BDF's range as the phone reads them."""
+    sys.path.insert(0, str(ROOT / "analysis"))
+    import night_extras as nx
+    import numpy as np
+    import rem_check as rc
+    pair = rc.eye_pair(head)
+    if pair is None:
+        return rc.eye_not(rc.NO_PAIR)
+    try:
+        lim = nx.LIMIT_UV
+        left, right = (np.clip(uv[:, k], -lim, lim) for k in (pair.left, pair.right))
+        return rc.eye_measured(pair.label, rc.eye_epochs(left, right, nx.missing_mask(len(uv), notes),
+                                                         int(round(head.sample_rate))))
+    except Exception as e:  # noqa: BLE001 - the night is still scored without them; the check says why
+        return rc.eye_not(f"not measured: {type(e).__name__}: {e}")
 
 
 def build(night: nf.Night, a: argparse.Namespace, status: nf.Job) -> dict:
@@ -211,6 +245,7 @@ def build(night: nf.Night, a: argparse.Namespace, status: nf.Job) -> dict:
             del full
         except Exception as e:  # noqa: BLE001 - the night is still scored without the extras
             why = f"{type(e).__name__}: {e}"
+        eye = night_eye(head, uv, notes) if why is None else None
         part = folder / f"{name}.part.bdf"
         to_bdf.write(part, start, uv, notes, head.names, head.sample_rate, to_bdf.equipment(head))
         del uv
@@ -221,7 +256,8 @@ def build(night: nf.Night, a: argparse.Namespace, status: nf.Job) -> dict:
         status.step("Drawing the chart")
         score_sleep.save(scored, folder / name, title=f"Night of {name}")
         status.step("Finding sleep periods")
-        rep = make_report(name, night, scored, time.time() - t_start, (start, length_s), seen, why, drift, drift_why)
+        rep = make_report(name, night, scored, time.time() - t_start, (start, length_s), seen, why, drift, drift_why,
+                          eye)
     tmp = folder / f"{name}.report.tmp"
     tmp.write_text(json.dumps(rep, indent=1)); os.replace(tmp, folder / f"{name}.report.json")
     if rep["scored"]:

@@ -53,7 +53,8 @@ def test_the_end_without_an_index_uses_the_files_rate(tmp_path: Path) -> None:
 def test_out_of_date_counts_minutes_by_each_files_record(tmp_path: Path) -> None:
     f = nch.write_set(tmp_path, T0, nch.volts(250 * 60 * 11, 8), nch.EIGHT)
     night = nf.Night("2026-11-19", nf.recordings(tmp_path))
-    rep = {"version": nf.VERSION, "drift_off": None, "inputs": [{"file": f.name, "bytes": 36 * 250 * 60 * 2}]}
+    rep = {"version": nf.VERSION, "drift_off": None, "rem_check": None,
+           "inputs": [{"file": f.name, "bytes": 36 * 250 * 60 * 2}]}
     assert not nf.is_stale(night, rep)  # 9 min newer: 4 860 000 bytes, which 20-byte records would call 16 min
     rep["inputs"][0]["bytes"] = 36 * 250 * 60
     assert nf.is_stale(night, rep)  # 10 min newer
@@ -232,8 +233,11 @@ def test_the_sleep_report_scores_the_four_sites_of_an_eight_channel_night(tmp_pa
     name = nf.evening_date(start.timestamp())
     rep, rep4 = (json.loads((d / f"{name}.report.json").read_text()) for d in (nights, nights4))
     assert rep["scored"] and rep["extras_error"] is None and rep["drift_off_error"] is None
-    for key in ("periods", "total", "extras", "drift_off"):  # the detectors read the same four channels too
+    for key in ("periods", "total", "extras", "drift_off", "stages", "probs"):  # the detectors read the same four too
         assert rep[key] == rep4[key], key
+    eye, eye4 = rep["rem_check"]["eye"], rep4["rem_check"]["eye"]  # the eye pair by its own names: T7 T8 are T3 T4
+    assert (eye["pair"], eye4["pair"]) == ("T7-T8", "T3-T4") and eye["epochs"] == eye4["epochs"]
+    assert {**eye, "pair": None} == {**eye4, "pair": None}
     raw = mne.io.read_raw_bdf(nights / f"{name}.bdf", preload=False, verbose="error")
     assert raw.ch_names == list(nch.MIXED)  # the night's BDF keeps every channel under its own name
     assert rep["inputs"] == [{"file": f"{start:%Y-%m-%d-%H%M%S}.f32", "bytes": 36 * 250 * 60 * 12}]

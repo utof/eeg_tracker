@@ -9,6 +9,7 @@ import 'package:eeg_tracker/detectors/detectors.dart';
 import 'package:eeg_tracker/sleep/drift.dart';
 import 'package:eeg_tracker/sleep/extras.dart';
 import 'package:eeg_tracker/sleep/model.dart';
+import 'package:eeg_tracker/sleep/rem_check.dart';
 import 'package:eeg_tracker/sleep/report.dart';
 import 'package:eeg_tracker/ui/night_view.dart';
 import 'package:eeg_tracker/ui/sleep_report_view.dart';
@@ -50,8 +51,19 @@ NightSeen _seen(List<String> stages, {int jawEveryS = 200, DriftSeen? drift}) {
     ]..sort((a, b) => a.start.compareTo(b.start)),
     moves: [for (var k = 130; k < n; k += stages[k ~/ 30] == 'W' ? 150 : 520) (k, k + 1)],
     drift: drift,
+    // side-to-side eye movements: many in dream sleep, some awake, a few elsewhere; none where the data is missing
+    eye: EyeSeen.measured('T3-T4', [
+      for (var e = 0; e < stages.length; e++)
+        stages[e] == 'gap' ? null : stages[e] == 'R' ? 6 + e % 5 : stages[e] == 'W' ? 4 : e % 9 == 0 ? 5 : e % 3,
+    ]),
   );
 }
+
+/// Made-up model probabilities: most on the scored stage, a little dream sleep everywhere.
+List<double> _probs(List<String> stages) => [
+  for (final s in stages)
+    for (final k in ['W', 'N1', 'N2', 'N3', 'R']) k == s ? 0.7 : k == 'R' ? 0.1 : (s == 'R' ? 0.3 : 0.2) / 3,
+];
 
 SleepReport _report(String nightOf, DateTime start, List<String> stages, {int jawEveryS = 200, DriftSeen? drift}) =>
     SleepReport(
@@ -67,6 +79,7 @@ SleepReport _report(String nightOf, DateTime start, List<String> stages, {int ja
             model: phoneModelId,
             stages: stages,
             confidence: List.filled(stages.length, 0.74),
+            probabilities: _probs(stages),
             seen: _seen(stages, jawEveryS: jawEveryS, drift: drift),
           ),
         ),
@@ -233,9 +246,12 @@ void main() {
     await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: _reportStates['report']));
     expect(find.textContaining('through noise (movement, muscle or a loose electrode)'), findsOneWidget);
     // top to bottom, in order (the list builds only what is near the screen)
-    for (final heading in ['Sleep periods', 'Jaw and movement', 'Hour by hour', 'Past nights', 'Licences']) {
+    for (final heading in [
+      'Sleep periods', 'Dream sleep check', 'Jaw and movement', 'Hour by hour', 'Past nights', 'Licences',
+    ]) {
       await tester.scrollUntilVisible(find.text(heading), 300);
       expect(find.text(heading), findsOneWidget);
+      if (heading == 'Dream sleep check') expect(find.textContaining('Side-to-side eye movements (T3-T4): '), findsOneWidget);
       if (heading == 'Jaw and movement') expect(find.text('Jaw muscle bursts'), findsOneWidget);
       if (heading == 'Hour by hour') {
         await tester.scrollUntilVisible(find.textContaining('Jaw on earlier nights: '), -300);
