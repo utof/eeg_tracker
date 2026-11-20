@@ -29,6 +29,7 @@ import '../share/isolate.dart' show shareAddress;
 import '../sleep/onnx_runs.dart';
 import '../sleep/report.dart';
 import '../sleep/scorer.dart';
+import '../sleep/so_far.dart' show SoFarScorer;
 import 'alarm_view.dart';
 import '../sharp/prompts.dart' show ChannelSharpPhone;
 import '../study/arm.dart' show rearmPrompts;
@@ -55,6 +56,8 @@ import 'pair_dialog.dart';
 import 'share_sheet.dart';
 import 'sleep_report_screen.dart';
 import 'sleep_scoring.dart';
+import 'sleep_so_far.dart';
+import 'sleep_so_far_view.dart' show diySoFarRefusal, soFarLine;
 import '../signal/signal_feed.dart' show SignalFeed;
 import 'signal_phone.dart' show phoneSignal;
 import 'signal_screen.dart';
@@ -259,6 +262,9 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   int _ticks = 0;
   Completer<void>? _stopped;
   SleepScoring? _scoring;
+
+  /// "Sleep so far" while a night records (DECISIONS 640-649): scored only when its page is open.
+  SleepSoFar? _soFar;
   int? _lightsOffSentMs;
   String? _dreamLine;
   String? _napLine;
@@ -334,6 +340,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   void dispose() {
     _signal?.dispose();
     _scoring?.removeListener(_onScoring);
+    _soFar?.removeListener(_onScoring);
     _links.onOpen = null;
     _share.dispose();
     _clock?.cancel();
@@ -423,6 +430,23 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _openSoFar() async {
+    final s = _soFar;
+    if (s == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (c) => SleepSoFarScreen(soFar: s, onInfo: () => showEvidence(c, 'sleep-scoring')),
+      ),
+    );
+  }
+
+  /// The Sleep so far section's line while a night records; the DIY board's plain refusal.
+  String? _soFarLine() {
+    if (!_running) return null;
+    if (_diy.useDiy) return diySoFarRefusal(_diy.names);
+    return soFarLine(_soFar?.cached());
+  }
+
   Future<void> _refreshRunning() async {
     final running = await FlutterForegroundTask.isRunningService;
     if (mounted && running != _running) setState(() => _running = running);
@@ -474,8 +498,32 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
           log: debugPrint,
         ),
         stopFor: _scoringStopNow,
-        waitFor: () => _share.copying ? 'the laptop copies files' : null,
+        waitFor: () => _share.copying
+            ? 'the laptop copies files'
+            : (_soFar?.busy ?? false)
+            ? 'the sleep so far finishes'
+            : null,
       )..addListener(_onScoring);
+    }
+    if (dir != null && _soFar == null) {
+      _soFar = SleepSoFar(
+        SoFarScorer(
+          recordingsDir: Directory(dir),
+          openRun: (run) => OnnxStageRun.open(run, modelsDir: modelsDirFor(dir), threads: nightScoringThreads),
+          closeRun: (run) => (run as OnnxStageRun).close(),
+          log: debugPrint,
+        ),
+        nightStartMs: () {
+          final ms = _status?.nightStartMs ?? 0;
+          return ms > 0 ? ms : null;
+        },
+      )..addListener(_onScoring);
+    }
+    // a night that has ended has its report (or will): its so-far windows are never needed again
+    if (!running) {
+      try {
+        _soFar?.scorer.store.tidy();
+      } catch (_) {}
     }
     // Last night is scored on the phone once it has ended (DECISIONS rows 97 and 583): a short while after the app
     // opens, never while a night records or a session runs; it goes on from where it stopped. Then the recordings
@@ -699,6 +747,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       }
       final dir = _dir ?? await _safe<String?>(Phone.recordingsDir, null);
       _scoring?.halt(); // the night comes first: scoring stops at its next model call and goes on after Stop
+      _soFar?.reset(); // nothing of an earlier night's so far
       final plan = await _setAlarmClock(dir);
       await _share.beforeNight(); // the recorder serves during the night: the app lets go of the port
       final result = await startRecorderService(dir, alarm: plan);
@@ -743,6 +792,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     setState(() => _busy = true);
     try {
       _stopped = Completer<void>();
+      _soFar?.nightEnded(); // a look stops at its next model call; the report comes next
       FlutterForegroundTask.sendDataToTask(stopCommand);
       // The recorder closes its files and the headband first; then the service goes.
       await _stopped!.future.timeout(const Duration(seconds: 25), onTimeout: () {});
@@ -972,6 +1022,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
               now: DateTime.now(),
             ),
       sleep: _running ? null : _sleepSummary(),
+      soFarLine: _soFarLine(),
       dreamLine: _dreamLine,
       lightsOffLine: s == null
           ? null
@@ -1042,6 +1093,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onSound: _sound,
       onWork: _work,
       onSleepReport: sleep == null ? null : () => _openSleep(sleep.nightOf),
+      onSleepSoFar: _soFar == null || _diy.useDiy ? null : _openSoFar,
       onRetrySleep: sleep == null ? null : () => _scoring?.retry(sleep.nightOf),
       morning: MorningSection(
         doneAt: _checkedInAt,
