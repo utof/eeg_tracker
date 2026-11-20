@@ -14,8 +14,9 @@ which crashes ONNX Runtime with 4 cores), boots it headless, and checks what rea
   (b) Share on Wi-Fi while the app sits in the background, Doze forced, its standby bucket "rare" and `am freeze`
       sent: `/state` must answer within 5 s.
   (c) a replayed noisy work session (the made-up "talking" recording through the replay build's headband, at real
-      speed for 6.5 minutes): no break may start by itself. Runs only with --replay and --talking: on main it fails
-      until fix/app-work-session-day is merged (DECISIONS 735).
+      speed for 6.5 minutes): no break may start by itself. Runs only with --replay and --talking: the harness is
+      ready, to be switched on once fix/app-work-session-day is in main (DECISIONS 735); its navigation to the work
+      page has not yet completed in a scripted run (see there).
   (d) logcat, ANRs and Android's exit reasons are collected; a crash or an ANR of the app fails, and the app's own
       files/app-starts.log must have recorded its starts with the exit reasons.
 
@@ -268,6 +269,37 @@ def seed(pairs: list[tuple[Path, str]], stage: Path) -> None:
        f" && rm -rf /data/local/tmp/seed")
 
 
+OUT: Path | None = None  # the run's log folder (screenshots of a screen a step could not use)
+
+
+def screen_words(tag: str) -> list[str]:
+    """What is on screen now, for the details, and a screenshot `<out>/<tag>.png`."""
+    try:
+        if OUT is not None:
+            (OUT / f"{tag}.png").write_bytes(emu.adb("exec-out", "screencap", "-p"))
+        return [f"on screen ({tag}): " + " / ".join(l[:60] for l, _, _ in emu.nodes())[:600]]
+    except Exception as e:  # the screen is only evidence
+        return [f"on screen ({tag}): not readable ({e})"]
+
+
+def wait_main(limit: float = 120) -> bool:
+    """Until the app's main screen shows its bottom bar (a cold start under the ARM translation takes a while); taps
+    Wait on an "isn't responding" dialog meanwhile."""
+    t0 = time.time()
+    while time.time() - t0 < limit:
+        try:
+            labels = emu.nodes()
+        except Exception:
+            labels = []
+        if any(l.startswith("Night | Tab") for l, _, _ in labels):
+            return True
+        for l, x, y in labels:
+            if l.strip() == "Wait":
+                sh(f"input tap {x} {y}")
+        time.sleep(3)
+    return False
+
+
 def open_tab(name: str) -> bool:
     """Taps the bottom bar's tab [name] (Night, Sessions, Signal, Trends, More)."""
     _, h = emu.screen_size()
@@ -431,12 +463,13 @@ def quiet(command: str, timeout: float = 30) -> str:
 def check_share() -> Result:
     name = "(b) Share on Wi-Fi in the background"
     start_app()
-    time.sleep(5)
+    if not wait_main():
+        return Result(name, "FAIL", "the app's main screen did not come up within 2 minutes", screen_words("b-start"))
     if share_token() is None:
         open_tab("More")
         hit = find("Share on Wi-Fi")
         if hit is None:
-            return Result(name, "FAIL", "the Share on Wi-Fi switch was not found on the More tab")
+            return Result(name, "FAIL", "the Share on Wi-Fi switch was not found on the More tab", screen_words("b-share"))
         _, x, y = hit
         sh(f"input tap {x} {y}")
         time.sleep(4)
@@ -525,16 +558,17 @@ def check_talking(replay: Path, stage: Path) -> Result:
     sh("cmd bluetooth_manager enable", check=False)  # the work screen asks for Bluetooth before it starts
     time.sleep(3)
     start_app()
-    time.sleep(6)
+    if not wait_main():
+        return Result(name, "FAIL", "the app's main screen did not come up within 2 minutes", screen_words("c-start"))
     open_tab("Sessions")
     hit = find("Work session", exact=True)
     if hit is None:
-        return Result(name, "FAIL", "the Work session button was not found on the Sessions tab")
+        return Result(name, "FAIL", "the Work session button was not found on the Sessions tab", screen_words("c-tab"))
     sh(f"input tap {hit[1]} {hit[2]}")
     time.sleep(3)
     hit = find("Start work session", exact=True, scrolls=3)
     if hit is None:
-        return Result(name, "FAIL", "Start work session was not found on the work page")
+        return Result(name, "FAIL", "Start work session was not found on the work page", screen_words("c-work"))
     sh(f"input tap {hit[1]} {hit[2]}")
     details = []
     t0 = time.time()
@@ -644,6 +678,8 @@ def main() -> int:
     work = Path(f"/var/tmp/eeg-precheck-{stamp}")
     out = a.out or work / "out"
     out.mkdir(parents=True, exist_ok=True)
+    global OUT
+    OUT = out
     stage = work / "stage"
     t0 = time.time()
     started_ms = int(t0 * 1000)
@@ -668,8 +704,8 @@ def main() -> int:
         if "c" in a.only:
             if not (a.replay and a.talking):
                 results.append(Result("(c) a replayed noisy work session", "SKIP",
-                                      "needs --replay <replay build> --talking; enable once fix/app-work-session-day "
-                                      "is merged into main (on main it fails: talking starts a break)"))
+                                      "harness ready; enable (--replay <replay build> --talking) once "
+                                      "fix/app-work-session-day is in main (integration 17)"))
             else:
                 say("(c) a replayed noisy work session")
                 if talking_job:
