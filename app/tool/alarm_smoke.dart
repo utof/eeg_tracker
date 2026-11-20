@@ -1,8 +1,8 @@
 // The smart alarm's smoke test on a device (app/README.md, "Emulator smoke test"; DECISIONS 230-231): an entry point
 // of its own that runs the real night recorder service (flutter_foreground_task, its own Flutter engine) with a
-// replayed headband instead of the BrainBit, and the real smart alarm inside it: AnySleep's ONNX runs opened in the
-// service's engine, the early ring through the phone's alarm clock, the ringer. It never is part of the app: build it
-// with `-t tool/alarm_smoke.dart`, then reinstall the app.
+// replayed headband (the shared one, lib/headband/replay.dart) instead of the BrainBit, and the real smart alarm inside
+// it: AnySleep's ONNX runs opened in the service's engine, the early ring through the phone's alarm clock, the ringer.
+// It never is part of the app: build it with `-t tool/alarm_smoke.dart`, then reinstall the app.
 //
 // Put a recording into `files/smoke/` first (any `.f32` of the app's format; adb root and the app's owner, as for a
 // night) and, if wanted, `files/smoke/plan.json`:
@@ -18,17 +18,16 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:eeg_tracker/alarm/bell.dart';
 import 'package:eeg_tracker/alarm/live_alarm.dart';
 import 'package:eeg_tracker/alarm/notes.dart';
 import 'package:eeg_tracker/alarm/rule.dart';
+import 'package:eeg_tracker/headband/replay.dart';
 import 'package:eeg_tracker/lucid/bell.dart';
 import 'package:eeg_tracker/lucid/live_cues.dart';
 import 'package:eeg_tracker/lucid/store.dart';
 import 'package:eeg_tracker/phone.dart';
-import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/recorder_service.dart';
 import 'package:eeg_tracker/recorder/status.dart';
@@ -182,128 +181,30 @@ void alarmSmokeEntryPoint() {
   );
 }
 
+/// The shared replay headband (lib/headband/replay.dart) on `files/smoke/`'s recordings at the plan's speed, made on
+/// the first search (the folder is only known then).
 class _ReplayFinder implements HeadbandFinder {
-  bool _given = false;
+  ReplayFinder? _replay;
 
-  @override
-  Future<Headband?> find(Duration scanFor, {void Function(String name, int rssi)? onFound}) async {
-    await Future<void>.delayed(const Duration(seconds: 1));
-    if (_given) return null;
-    _given = true;
+  Future<ReplayFinder> _open() async {
+    final made = _replay;
+    if (made != null) return made;
     final rec = await Phone.recordingsDir();
     final files = Directory(rec!).parent.path;
     final cfg = jsonDecode(File('$files/smoke/config.json').readAsStringSync()) as Map<String, dynamic>;
     final f32 = Directory('$files/smoke').listSync().whereType<File>().where((f) => f.path.endsWith('.f32')).toList()
       ..sort((a, b) => a.path.compareTo(b.path));
-    onFound?.call('Replay', -50);
-    return _ReplayBand(f32, speed: (cfg['speed'] as num).toDouble(), skipS: (cfg['skipS'] as num).toDouble());
+    return _replay = ReplayFinder(
+      ReplayPlan(files: f32, speed: (cfg['speed'] as num).toDouble(), fromS: (cfg['skipS'] as num).toDouble()),
+    );
   }
 
   @override
-  Future<Headband> connectDirect(BandId id) async => throw StateError('replay: no reconnects');
-}
-
-/// Streams the recordings' samples in 0.25 s batches (of signal time) at [speed] times real time.
-class _ReplayBand implements Headband {
-  _ReplayBand(this.files, {required this.speed, required this.skipS});
-  final List<File> files;
-  final double speed;
-  final double skipS;
-  RandomAccessFile? _f;
-  int _file = -1;
-  Timer? _timer;
-  int _sent = 0;
-  final _signal = StreamController<List<Sample>>.broadcast(sync: true);
-  final _resist = StreamController<Map<String, double>>.broadcast();
-  final _range = StreamController<bool>.broadcast();
-
-  bool _next() {
-    _f?.closeSync();
-    _f = null;
-    while (++_file < files.length) {
-      _f = files[_file].openSync();
-      if (_file == 0) _f!.setPositionSync((skipS * 250).round() * recordBytes);
-      return true;
-    }
-    return false;
-  }
-
-  List<Sample> _read(int n) {
-    final out = <Sample>[];
-    while (out.length < n) {
-      final f = _f;
-      if (f == null && !_next()) break;
-      final bytes = _f!.readSync((n - out.length) * recordBytes);
-      if (bytes.length < recordBytes) {
-        if (!_next()) break;
-        continue;
-      }
-      final b = ByteData.sublistView(bytes);
-      for (var o = 0; o + recordBytes <= bytes.length; o += recordBytes) {
-        out.add(Sample.four(
-          pack: b.getUint32(o, Endian.little),
-          o1: b.getFloat32(o + 4, Endian.little),
-          o2: b.getFloat32(o + 8, Endian.little),
-          t3: b.getFloat32(o + 12, Endian.little),
-          t4: b.getFloat32(o + 16, Endian.little),
-        ));
-      }
-    }
-    return out;
+  Future<Headband?> find(Duration scanFor, {void Function(String name, int rssi)? onFound}) async {
+    await Future<void>.delayed(const Duration(seconds: 1));
+    return (await _open()).find(scanFor, onFound: onFound);
   }
 
   @override
-  String get name => 'Replay';
-  @override
-  String get address => '00:00';
-  @override
-  String get serial => 'replay';
-  @override
-  int? get rssi => -50;
-  @override
-  BandId get id => const BandId(name: 'Replay', address: '00:00', family: 'replay');
-  @override
-  Stream<List<Sample>> get signal => _signal.stream;
-  @override
-  Stream<Map<String, double>> get resistance => _resist.stream;
-  @override
-  Stream<bool> get rangeChanges => _range.stream;
-
-  @override
-  Future<void> startSignal() async {
-    _timer?.cancel();
-    var due = 0.0;
-    final sw = Stopwatch()..start();
-    _timer = Timer.periodic(const Duration(milliseconds: 50), (_) {
-      // the samples due by now at [speed] times real time, in batches of 0.25 s of signal (about the headband's)
-      due = sw.elapsedMicroseconds / 1e6 * speed * 250;
-      while (_sent + 62 <= due) {
-        final b = _read(62);
-        if (b.isEmpty) {
-          _timer?.cancel();
-          debugPrint('SMOKE replay: the files ran out after ${_sent ~/ 250} s');
-          return;
-        }
-        _sent += b.length;
-        if (_signal.hasListener) _signal.add(b);
-      }
-    });
-  }
-
-  @override
-  Future<void> stopSignal() async => _timer?.cancel();
-  @override
-  Future<void> startResist() async =>
-      Timer(const Duration(milliseconds: 50), () => _resist.add({'O1': 4e5, 'O2': 6e5, 'T3': 1.2e6, 'T4': 1.5e6}));
-  @override
-  Future<void> stopResist() async {}
-  @override
-  Future<bool> isInRange() async => true;
-  @override
-  Future<int> battery() async => 80;
-  @override
-  Future<void> disconnectAndDispose() async {
-    _timer?.cancel();
-    _f?.closeSync();
-  }
+  Future<Headband> connectDirect(BandId id) async => (await _open()).connectDirect(id);
 }
