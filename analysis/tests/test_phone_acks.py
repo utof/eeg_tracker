@@ -1,6 +1,6 @@
-"""The laptop's side of moving raw recordings off the phone (DECISIONS 690-699): scripts/pull_phone.py hashes its copies
-again from disk and acks only what equals the phone's list, under the pairing's key (POST /ack, the proof in
-app/test/fixtures/phone_ack.json); it never deletes; a phone's record of a set that left it is checked against what
+"""The laptop's side of moving raw recordings off the phone (DECISIONS 690-699, 755): scripts/pull_phone.py hashes its
+copies again from disk and acks only what equals the phone's list, in a request signed with the pairing's key (POST
+/ack; the signature's vectors in app/test/fixtures/phone_link.json); it never deletes; a phone's record of a set that left it is checked against what
 this laptop holds; the catalog marks such nights. Against the fake phone of test_pull_phone.py."""
 import json
 import os
@@ -20,8 +20,7 @@ from test_catalog import local  # noqa: E402,F401  (the catalog's fake _local, a
 from test_packed import phone_packed, signal  # noqa: E402
 from test_pull_phone import NOW, STEM, TOKEN, FakePhone, sha  # noqa: E402
 
-KEY = "a2V5LWZvci10aGUtYWNrLWZpeHR1cmUtb25seS0zMi1ieXRlcw"
-FIXTURE = json.loads((ROOT / "app" / "test" / "fixtures" / "phone_ack.json").read_text())
+KEY = "a" * 64
 
 
 @pytest.fixture
@@ -33,16 +32,20 @@ def phone():
 
 
 def run(phone: FakePhone, dest: Path, key: str | None = KEY, **kw) -> pp.Pass:
-    return pp.pull(pp.Phone(phone.base, TOKEN), dest, now=NOW, key=key, **kw)
+    """A pass as the paired laptop makes it (signed with the key), or by hand with the token (no key: no acks)."""
+    p = pp.Phone(phone.base, key=key, home=True) if key else pp.Phone(phone.base, TOKEN)
+    return pp.pull(p, dest, now=NOW, key=key, **kw)
 
 
 def acks_sent(phone: FakePhone) -> list[str]:
     return [f["path"] for post in phone.ack_posts for f in post]
 
 
-def test_the_proof_is_the_phones():
-    assert pp.ack_proof(FIXTURE["key"], FIXTURE["body"].encode()) == FIXTURE["proof"]
-    assert pp.ack_proof(FIXTURE["key"] + "x", FIXTURE["body"].encode()) != FIXTURE["proof"]
+def test_acks_are_signed_requests_and_the_token_never_leaves(phone, tmp_path):
+    phone.put(f"{STEM}.f32", b"\x01" * 4000)
+    rep = run(phone, tmp_path / "_local")
+    assert rep.acked == [f"{STEM}.f32"]
+    assert ("POST", "/ack", True) in phone.signed and phone.bearer == 0
 
 
 def test_finished_files_are_acked_after_they_are_hashed_again_once_and_nothing_is_deleted(phone, tmp_path):
@@ -102,10 +105,11 @@ def test_no_acks_without_the_pairing_or_from_an_older_app_and_nothing_hashed_the
     phone.no_ack = False
     rep = run(phone, dest)  # asked again only hours later
     assert rep.acked == [] and hashed == []
-    phone.key = "another-key-another-key-another-key"  # a pairing the phone no longer has
+    phone.key = "0" * 64  # a pairing the phone no longer has: every signed request is refused, acks too
     (dest / "phone" / "pull-state.json").unlink()
-    rep = run(phone, dest)
-    assert rep.acked == [] and hashed == [] and "wrong proof" in (rep.ack_note or "")
+    with pytest.raises(pp.Refused):
+        run(phone, dest)
+    assert hashed == [] and phone.ack_posts == []
 
 
 def test_a_pass_hashes_at_most_its_budget_oldest_first(phone, tmp_path):
@@ -148,3 +152,47 @@ def test_the_catalog_marks_a_night_moved_from_the_phone(local):
     moved = [n for n in cat["nights"] if n["moved_from_phone"]]
     assert len(moved) == 1 and any(f["path"].endswith(".removed.json") for f in moved[0]["file_list"])
     assert any("moved from phone" in line for line in catalog.table(cat, local, []))
+
+
+def test_before_the_phone_deletes_the_laptop_proves_it_still_holds_the_bytes_from_its_own_disk(phone, tmp_path):
+    """DECISIONS 756: the phone asks about random byte ranges with a fresh nonce; the laptop answers with an HMAC over
+    those bytes of its own copy (a packed .f32.xz unpacked), never fetching them from the phone; a copy it lost is said
+    plainly ("missing"), and a damaged one cannot prove anything."""
+    import phone_auth as pa
+    dest = tmp_path / "_local"
+    body = bytes(range(256)) * 400  # 102400 bytes
+    phone.put(f"{STEM}.f32", body)
+    phone.put(f"{STEM}.idx", b"\x02" * 48)
+    phone.put("recordings/2026-11-18-230000.f32", b"\x05" * 5000)
+    run(phone, dest)  # copied and acked
+    (dest / "recordings" / "2026-11-18-230000.f32").unlink()  # the laptop lost this one since
+    f = dest / f"{STEM}.idx"
+    st = f.stat()
+    f.write_bytes(b"\x09" * 48)  # and this one is damaged on its disk (its size and time as they were)
+    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
+    phone.asks = [
+        {"path": f"{STEM}.f32", "nonce": "cmVjaGVjay0wMDAwMDAwMQ", "bytes": len(body), "sha256": sha(body),
+         "ranges": [[0, 16], [4096, 4096], [len(body) - 10, 10]]},
+        {"path": f"{STEM}.idx", "nonce": "cmVjaGVjay0wMDAwMDAwMg", "bytes": 48, "sha256": sha(b"\x02" * 48),
+         "ranges": [[0, 48]]},
+        {"path": "recordings/2026-11-18-230000.f32", "nonce": "cmVjaGVjay0wMDAwMDAwMw", "bytes": 5000,
+         "sha256": sha(b"\x05" * 5000), "ranges": [[0, 5000]]},
+    ]
+    phone.fetched()
+    rep = run(phone, dest)
+    got = {r["path"]: r for r in phone.rechecks}
+    assert got[f"{STEM}.f32"]["ok"] is True
+    assert got[f"{STEM}.idx"]["ok"] is False and "mac" in got[f"{STEM}.idx"]   # other bytes: no proof
+    assert got["recordings/2026-11-18-230000.f32"]["missing"] is True       # lost: said plainly
+    assert rep.proven == [f"{STEM}.f32"] and len(rep.unproven) == 2
+    assert all(p != f"{STEM}.f32" for p, _ in phone.fetched())  # never from the phone itself
+    assert ("GET", "/recheck", False) in phone.signed or ("GET", "/recheck", True) in phone.signed
+    # a copy the laptop packed (.f32.xz) answers by its plain bytes
+    phone.rechecks.clear()
+    packed.pack(dest / f"{STEM}.f32")
+    assert not (dest / f"{STEM}.f32").exists()
+    phone.asks = phone.asks[:1]
+    phone.asks[0]["nonce"] = "cmVjaGVjay0wMDAwMDAwNA"
+    run(phone, dest)
+    assert phone.rechecks[0]["ok"] is True
+    assert pa.ranges_text([(0, 16), (4096, 4096)]) == "0+16,4096+4096"

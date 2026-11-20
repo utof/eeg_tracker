@@ -1,6 +1,7 @@
-// Pairing that lasts (DECISIONS 675-676): while a laptop is paired Share on Wi-Fi has no end time and survives a
-// night's Stop and a new code; a network that comes back makes the phone tell the laptop at once; and the Work
-// session's summary goes to the app's own server for the laptop tray (671).
+// Pairing that lasts (DECISIONS 675, 752): while a laptop is paired Share on Wi-Fi has no end time and survives a
+// night's Stop and a new code; it shares only on the home Wi-Fi (or one allowed by hand for 12 hours), and the line
+// under the switch says where and when the laptop last copied (no notification does); a network change reaches the
+// server at once; and the Work session's summary goes to the app's own server for the laptop tray (671).
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
@@ -12,29 +13,46 @@ import 'package:eeg_tracker/share/protocol.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'share_link_test.dart' show FakeLaptop, until;
+import 'share_link_test.dart' show until;
 
-const key = 'kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk';
+const key = '7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544';
 const laptop = PairedLaptop(host: '192.168.1.10', port: 8771, key: key, name: 'my-laptop', pairedAtMs: 5);
 
-/// A server that comes up at once on a made-up address.
-Future<void> fakeServer(List<Object?> args) async {
-  (args[0]! as SendPort).send(['up', <String>['192.168.1.23', '127.0.0.1'], args[3]]);
+/// What the next made-up server says of its Wi-Fi ([sharingStates]); each runs in its own isolate, so it is chosen
+/// when the host is made.
+String fakeHere = 'home';
+
+Future<void> _fake(List<Object?> args, String here) async {
+  final to = args[0]! as SendPort;
+  to.send(['up', <String>['192.168.1.23', '127.0.0.1'], args[3]]);
+  to.send(['here', here, '192.168.1.0/24']);
+  if (here == 'home') to.send(['copied', 'laptop']);
   await Future<void>.delayed(const Duration(hours: 1));
 }
+
+/// A server that comes up at once on a made-up address, says it is home, and copies a file to the laptop.
+Future<void> fakeServer(List<Object?> args) => _fake(args, 'home');
+Future<void> fakeServerWaiting(List<Object?> args) => _fake(args, 'waiting');
+Future<void> fakeServerHere(List<Object?> args) => _fake(args, 'here');
 
 /// The app's host, counting what ShareControl hands it.
 class CountingHost extends ShareHost {
   CountingHost(String dir, void Function(ShareStatus) onChange)
-    : super(filesDir: dir, onLog: (_) {}, onChange: onChange, entry: fakeServer);
-  int networkChanges = 0, tells = 0;
+    : super(
+        filesDir: dir,
+        onLog: (_) {},
+        onChange: onChange,
+        entry: switch (fakeHere) {
+          'waiting' => fakeServerWaiting,
+          'here' => fakeServerHere,
+          _ => fakeServer,
+        },
+      );
+  int networkChanges = 0;
   final List<Map<String, Object?>?> sessions = [];
 
   @override
   Future<void> networkChanged() async => networkChanges++;
-
-  @override
-  Future<void> tellLaptop() async => tells++;
 
   @override
   void setSession(Map<String, Object?>? session) {
@@ -84,6 +102,7 @@ void main() {
     var now = DateTime(2026, 11, 22, 8, 0);
 
     setUp(() {
+      fakeHere = 'home';
       files = Directory.systemTemp.createTempSync('share_paired_test');
       saved = const ShareConfig().switchedOn(now.millisecondsSinceEpoch).withLaptop(laptop);
       network = StreamController<void>.broadcast();
@@ -114,11 +133,11 @@ void main() {
 
     Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 150));
 
-    test('stays on a day later and after a night; the line says it is paired and when the laptop copies', () async {
+    test('stays on a day later and after a night; the line says it shares at home and when the laptop copied', () async {
       await c.sync(night: false, filesDir: files.path);
       await settle();
       expect(c.on, isTrue);
-      expect(c.line().text, 'On at 192.168.1.23:8765, paired with my-laptop. The laptop copies while this app is open or records.');
+      expect(c.line().text, 'On, on your home Wi-Fi, for my-laptop. Last copied by my-laptop at ${clockText(DateTime.now())}.');
       now = now.add(const Duration(hours: 30));
       await c.sync(night: false, filesDir: files.path);
       expect(c.on, isTrue);
@@ -136,7 +155,35 @@ void main() {
       await c.newToken();
       expect(saved.token, isNot(before));
       expect(saved.laptop, laptop);
-      expect(hosts, hasLength(2), reason: 'the server started again: its announcer tells the laptop the new token');
+      expect(hosts, hasLength(2), reason: 'the server started again with the new token; the laptop never needs it');
+    });
+
+    test('away from home: paused, until the owner shares here for 12 hours (this Wi-Fi only)', () async {
+      fakeHere = 'waiting';
+      await c.sync(night: false, filesDir: files.path);
+      await settle();
+      expect(c.line().text, 'Paused on this Wi-Fi until my-laptop says it is your home Wi-Fi. Not at home? Address and code: Share here.');
+      expect(c.status.net, '192.168.1.0/24');
+      fakeHere = 'here';
+      await c.shareHere(true);
+      await settle();
+      expect((saved.hereNet, saved.hereUntilMs), ('192.168.1.0/24', now.add(shareHereFor).millisecondsSinceEpoch));
+      expect(hosts, hasLength(2), reason: 'the server started again with it');
+      expect(c.line().text, startsWith('On, on this Wi-Fi until 20:00 (allowed by you).'));
+      await c.shareHere(false);
+      expect((saved.hereNet, saved.hereUntilMs), (null, 0));
+    });
+
+    test('a pairing from before this update: off, and the line asks for one new scan', () async {
+      saved = ShareConfig.fromJson({
+        'on': true,
+        'token': 'abcdefghjkmn',
+        'off_at_ms': 1,
+        'laptop': {'host': '192.168.1.10', 'port': 8771, 'key': 'k' * 43, 'name': 'my-laptop'},
+      });
+      await c.sync(night: false, filesDir: files.path);
+      expect(c.on, isFalse);
+      expect(c.line(), (on: false, text: 'Paired with my-laptop before this update: pair once more (one scan of its code) to share safely.', warn: true, address: null));
     });
 
     test('forgetting the laptop brings back the end time: past it, sharing goes off at the next look', () async {
@@ -167,81 +214,38 @@ void main() {
       session.value = null;
       expect(hosts.single.sessions.last, isNull);
     });
-
-    test('with no notification between nights (row 678) the laptop hears from the phone when a session starts and when '
-        'the app comes back to the front', () async {
-      await c.sync(night: false, filesDir: files.path);
-      session.value = {'kind': 'work', 'stage': 'calibrating'};
-      session.value = {'kind': 'work', 'stage': 'running'}; // the same session: told once
-      expect(hosts.single.tells, 1);
-      session.value = null;
-      session.value = {'kind': 'work', 'stage': 'calibrating'}; // a new one
-      expect(hosts.single.tells, 2);
-      c.resumed();
-      expect(hosts.single.tells, 3);
-    });
   });
 
-  group('telling the laptop at once', () {
-    late FakeLaptop fake;
-    setUp(() async => fake = await FakeLaptop.start());
-    tearDown(() => fake.close());
+  test('copied: by whom and when, in words', () {
+    final today = DateTime(2026, 11, 20, 18, 0);
+    ShareStatus at(DateTime t, String by) => shareStatusWith(shareDown, copiedAtMs: t.millisecondsSinceEpoch, copiedBy: by);
+    expect(copiedText(shareDown, 'my-laptop'), 'Nothing copied yet.');
+    expect(copiedText(at(DateTime(2026, 11, 20, 14, 5), 'laptop'), 'my-laptop', now: today), 'Last copied by my-laptop at 14:05.');
+    expect(copiedText(at(DateTime(2026, 11, 19, 7, 30), 'code'), 'my-laptop', now: today), 'Last copied by a device with the code on 19 Nov at 07:30.');
+    expect(copiedText(at(DateTime(2026, 11, 20, 9, 0), 'cable'), null, now: today), 'Last copied by a computer on the USB cable at 09:00.');
+  });
 
-    test('soon(): a network that comes back is told at once, not at the next 5 minutes', () async {
-      fake.key = key;
-      final a = LaptopAnnouncer(
-        laptop: PairedLaptop(host: '127.0.0.1', port: fake.port, key: key, name: 'my-laptop'),
-        sharePort: 8765,
-        token: 'abcdefghjkmn',
-        client: LinkClient(timeout: const Duration(seconds: 2)),
-        every: const Duration(hours: 1),
-        retries: const [Duration(hours: 1)],
-      )..start();
-      await until(() => fake.finishes.length == 1);
-      fake.status = 503; // the laptop's Wi-Fi is down
-      a.soon();
-      await until(() => fake.hellos >= 1 && fake.finishes.length == 1);
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      fake.status = 200; // back: the next try would be an hour away
-      a.soon();
-      await until(() => fake.finishes.length == 2);
-      a.soon();
-      a.soon(); // two at once: one more try, never two handshakes side by side
-      await until(() => fake.finishes.length == 3);
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      expect(fake.finishes, hasLength(3));
-      a.stop();
-      a.soon();
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      expect(fake.finishes, hasLength(3));
-    });
-
-    test('the real share isolate tells the laptop again when Android says the network changed', () async {
-      fake.key = key;
-      final files = Directory.systemTemp.createTempSync('share_paired_isolate');
-      final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      final port = s.port;
-      await s.close();
-      final host = ShareHost(filesDir: files.path, onLog: (_) {});
-      try {
-        await host.start(
-          ShareConfig(
-            on: true,
-            token: 'abcdefghjkmn',
-            port: port,
-            offAtMs: 1, // long past: paired, so it serves anyway
-            laptop: PairedLaptop(host: '127.0.0.1', port: fake.port, key: key, name: 'my-laptop'),
-          ),
-        );
-        expect(host.running, isTrue);
-        await until(() => fake.finishes.length == 1, ms: 10000);
-        await host.networkChanged();
-        await until(() => fake.finishes.length == 2, ms: 10000);
-        expect(fake.finishes.last, containsPair('port', port));
-      } finally {
-        await host.stop();
-        files.deleteSync(recursive: true);
-      }
-    });
+  test('the real share isolate: a paired phone waits for the laptop to say this Wi-Fi is home', () async {
+    final files = Directory.systemTemp.createTempSync('share_paired_isolate');
+    final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final port = s.port;
+    await s.close();
+    final host = ShareHost(filesDir: files.path, onLog: (_) {});
+    try {
+      await host.start(
+        ShareConfig(
+          on: true,
+          token: 'abcdefghjkmn',
+          port: port,
+          offAtMs: 1, // long past: paired, so it serves anyway
+          laptop: PairedLaptop(host: '127.0.0.1', port: 8771, key: key, name: 'my-laptop'),
+        ),
+      );
+      expect(host.running, isTrue);
+      await until(() => host.status.here == 'waiting', ms: 10000);
+    } finally {
+      await host.stop();
+      files.deleteSync(recursive: true);
+    }
   });
 }

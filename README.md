@@ -60,7 +60,7 @@ Each line says what it does. In brackets: how well the research backs it **for t
 - **Export data**: copies everything the app keeps to a folder you pick (with a checksum list) for the laptop.
 - **Share on Wi-Fi**: the laptop watches the phone's recording live and copies its files during the night. Off by
   default, home Wi-Fi only. **Connecting is one scan**: the laptop shows a QR code (`scripts/phone_link.py`), the
-  phone's camera opens the app, **Connect**; after that the phone tells the laptop where it is by itself.
+  phone's camera opens the app, **Connect**; after that the laptop finds the phone by itself (on your home Wi-Fi).
 - **Packing old nights**: raw recordings nothing has written for a day are packed (lossless, checked) to save space;
   every page and the laptop read them as before.
 - **Our own headband connection (test switch)**: our own Bluetooth code instead of BrainBit's library; BrainBit's
@@ -259,13 +259,17 @@ MIT licence.
 The recorder restarts itself after every Bluetooth drop and for every contact re-check, and its pages go away for
 20-40 s each time. `python3 scripts/page_server.py` (port 8770) never restarts: it serves the pages itself and
 passes live data through from the recorder, answering "reconnecting" while the recorder is away. Use
-`http://<laptop>:8770/` instead of port 8765. It answers the Sleep page and the morning result itself, so they
+`http://localhost:8770/` instead of port 8765: it answers this laptop only (127.0.0.1, with `Host` and `Origin`
+checked, DECISIONS 750), not other devices on the Wi-Fi. It answers the Sleep page and the morning result itself, so they
 work while the headband is off or charging (the recorder has no page server then).
 
 ### The phone as the recorder
 
 The phone app records nights too, and with **Share on Wi-Fi** switched on (off by default; app/README.md) it answers
-the same routes as the laptop recorder: `python3 scripts/page_server.py --recorder http://<phone>:8765 --token <code>`
-shows these pages on the phone's recording, and `python3 scripts/pull_phone.py http://<phone>:8765 --token <code>`
-mirrors its files into `_local/` every 2 minutes while it records, checked against the phone's SHA-256 list.
-Local network only, a code on every request, plain HTTP (not encrypted: home Wi-Fi only; DECISIONS rows 220-229).
+the same routes as the laptop recorder: `EEG_PHONE_TOKEN=<code> python3 scripts/page_server.py --recorder
+http://<phone>:8765` shows these pages on the phone's recording, and `EEG_PHONE_TOKEN=<code> python3
+scripts/pull_phone.py http://<phone>:8765` mirrors its files into `_local/` every 2 minutes while it records, checked
+against the phone's SHA-256 list (a paired phone needs neither: the tray does both). Local network only, a code or the
+pairing's signature on every request, plain HTTP (not encrypted: a paired phone shares only on your home Wi-Fi or one
+you allow for 12 hours; DECISIONS rows 220-229, 750-759). The laptop's own pages answer this laptop only
+(127.0.0.1, `Host` and `Origin` checked).

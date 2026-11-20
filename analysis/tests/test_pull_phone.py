@@ -16,9 +16,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 import import_phone as ip  # noqa: E402
 import page_server  # noqa: E402
+import phone_auth as pa  # noqa: E402
 import pull_phone as pp  # noqa: E402
 
 TOKEN = "abcdefghjkmn"
+KEY = "5" * 64  # a pairing's key as phone_link.py keeps it (64 hex)
 T0 = 1_763_500_000_000  # ms
 NOW = datetime(2026, 11, 19, 3, 12).astimezone()
 STEM = "recordings/2026-11-19-010000"
@@ -28,10 +30,21 @@ def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
-class FakePhone:
-    """The app's Share on Wi-Fi server, as far as the laptop scripts use it."""
+def signed_ok(h: BaseHTTPRequestHandler, key: str, body: bytes = b"") -> str | None:
+    """For a fake phone: the reply proof to send when request [h] is signed with [key]; None when it is not."""
+    t, n, home, sign = (h.headers.get(x) for x in (pa.TIME_H, pa.NONCE_H, pa.HOME_H, pa.SIGN_H))
+    if not (t and t.isdigit() and n and home in ("0", "1") and sign):
+        return None
+    if sign != pa.request_sign(key, h.command, h.path, int(t), n, home == "1", body):
+        return None
+    return pa.reply_proof(key, n)
 
-    def __init__(self) -> None:
+
+class FakePhone:
+    """The app's Share on Wi-Fi server, as far as the laptop scripts use it: the token in a header (a phone shared by
+    hand), or the paired laptop's signed requests (DECISIONS 751-755), answered with the reply proof."""
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 0) -> None:
         self.files: dict[str, bytes] = {}
         self.modified: dict[str, int] = {}
         self.growing: set[str] = set()
@@ -40,7 +53,14 @@ class FakePhone:
         self.lie: dict[str, dict] = {}  # extra list rows, as sent
         self.originals: dict[str, dict] = {}  # a packed file's `original` (path, bytes, sha256), as the app lists it
         self.down = False
-        self.key: str | None = None  # the pairing's key: POST /ack is taken only with its proof (403 without)
+        self.key: str | None = None  # the pairing's key: signed requests check against it; /ack takes only those
+        self.here = "home"  # "paused": a laptop off its home network is refused (403 not sharing on this Wi-Fi)
+        self.nonces: set[str] = set()  # used once
+        self.signed: list[tuple[str, str, bool]] = []  # (method, path, home) of every signed request taken
+        self.bearer = 0  # requests that carried the token
+        self.ignore_auth = False  # a stranger that answers anything, and cannot prove a key
+        self.asks: list[dict] = []  # the phone's questions before deleting (GET /recheck)
+        self.rechecks: list[dict] = []  # every answer taken (POST /recheck), with "ok"
         self.no_ack = False  # an app older than acks (404)
         self.acks: dict[str, str] = {}  # path -> the SHA-256 the laptop acked
         self.ack_posts: list[list[dict]] = []  # every /ack body's files, as taken
@@ -50,20 +70,55 @@ class FakePhone:
             def log_message(self, *_a) -> None:
                 pass
 
+            reply: str | None = None
+
             def _send(self, code: int, body: bytes, headers: dict[str, str] | None = None) -> None:
                 self.send_response(code)
                 for k, v in (headers or {}).items():
                     self.send_header(k, v)
+                if self.reply:
+                    self.send_header(pa.REPLY_H, self.reply)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+
+            def _who(self, body: bytes = b"") -> str | None:
+                """"laptop" for a good signature, "token" for the token; else answered (401/403) and None."""
+                self.reply = None
+                if fake.ignore_auth:
+                    return "token"
+                sign = self.headers.get(pa.SIGN_H)
+                if sign is not None:
+                    if fake.key is None:
+                        self._send(401, b'{"error": "not paired"}'); return None
+                    t, n, home = self.headers.get(pa.TIME_H, ""), self.headers.get(pa.NONCE_H, ""), self.headers.get(pa.HOME_H)
+                    if (not t.isdigit() or home not in ("0", "1") or n in fake.nonces
+                            or sign != pa.request_sign(fake.key, self.command, self.path, int(t), n, home == "1", body)):
+                        self._send(401, b'{"error": "signature"}'); return None
+                    fake.nonces.add(n)
+                    fake.signed.append((self.command, self.path, home == "1"))
+                    self.reply = pa.reply_proof(fake.key, n)
+                    if home == "0" and fake.here == "paused" and self.path != "/who":
+                        self._send(403, b'{"error": "not sharing on this Wi-Fi"}'); return None
+                    return "laptop"
+                if self.headers.get("Authorization") == f"Bearer {TOKEN}":
+                    fake.bearer += 1
+                    return "token"
+                self._send(401, b'{"error": "token missing or wrong"}'); return None
 
             def do_GET(self) -> None:
                 fake.requests.append(("GET", self.path, self.headers.get("Range")))
                 if fake.down:
                     self._send(500, b""); return
-                if self.headers.get("Authorization") != f"Bearer {TOKEN}":
-                    self._send(401, b'{"error": "token missing or wrong"}'); return
+                who = self._who()
+                if who is None:
+                    return
+                if self.path == "/who":
+                    self._send(200, json.dumps(dict(app="eeg-tracker", v=2, here=fake.here)).encode()); return
+                if self.path == "/recheck":
+                    if who != "laptop":
+                        self._send(403, b'{"error": "the paired laptop signs this"}'); return
+                    self._send(200, json.dumps(dict(v=1, asks=fake.asks)).encode()); return
                 if self.path == "/files":
                     rows = [dict(path=p, bytes=len(b), sha256=None if p in fake.growing else sha(b),
                                  modified_ms=fake.modified.get(p, T0), **({"growing": True} if p in fake.growing else {}),
@@ -74,6 +129,8 @@ class FakePhone:
                 if self.path == "/state":
                     self._send(200, json.dumps(dict(status="recording", via="phone")).encode()); return
                 p = urllib.request.unquote(self.path.removeprefix("/files/"))
+                if any(a["path"] == p for a in fake.asks):  # asked about before deleting: held back
+                    self._send(409, b'{"error": "being re-checked"}'); return
                 if not self.path.startswith("/files/") or p not in fake.files:
                     self._send(404, b"{}"); return
                 body = fake.files[p]
@@ -92,16 +149,28 @@ class FakePhone:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(n)
                 fake.requests.append(("POST", self.path, body.decode()))
-                if self.headers.get("Authorization") != f"Bearer {TOKEN}":
-                    self._send(401, b"{}"); return
+                who = self._who(body)
+                if who is None:
+                    return
+                if self.path == "/recheck":
+                    if who != "laptop":
+                        self._send(403, b'{"error": "the paired laptop signs this"}'); return
+                    proven, failed = [], []
+                    for a in json.loads(body)["proofs"]:
+                        q = next((x for x in fake.asks if x["path"] == a["path"] and x["nonce"] == a["nonce"]), None)
+                        data = fake.files.get(a["path"], b"")
+                        rs = [(s, n) for s, n in q["ranges"]] if q else []
+                        ok = (q is not None and not a.get("missing") and a.get("mac") == pa.recheck_mac(
+                            fake.key or "", q["path"], q["nonce"], q["bytes"], rs, (data[s:s + n] for s, n in rs)))
+                        fake.rechecks.append(dict(a, ok=ok))
+                        (proven.append(a["path"]) if ok else failed.append(dict(path=a["path"], why="no")))
+                    self._send(200, json.dumps(dict(v=1, proven=proven, failed=failed)).encode()); return
                 if self.path != "/ack":
                     self._send(200, b"ok"); return
                 if fake.no_ack:
                     self._send(404, b'{"error": "no such route"}'); return
-                if fake.key is None:
-                    self._send(403, b'{"error": "not paired"}'); return
-                if self.headers.get("X-Eeg-Ack") != pp.ack_proof(fake.key, body):
-                    self._send(403, b'{"error": "wrong proof"}'); return
+                if who != "laptop":
+                    self._send(403, b'{"error": "the paired laptop signs this"}'); return
                 files = json.loads(body)["files"]
                 fake.ack_posts.append(files)
                 acked, refused = [], []
@@ -113,10 +182,10 @@ class FakePhone:
                         refused.append(dict(path=f["path"], why="different bytes" if f["path"] in fake.files else "not on the phone"))
                 self._send(200, json.dumps(dict(v=1, acked=acked, refused=refused)).encode())
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.server = ThreadingHTTPServer((host, port), H)
         self.server.daemon_threads = True
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
-        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+        self.base = f"http://{host}:{self.server.server_address[1]}"
 
     def put(self, path: str, body: bytes, *, modified: int = T0, growing: bool = False) -> None:
         self.files[path] = body

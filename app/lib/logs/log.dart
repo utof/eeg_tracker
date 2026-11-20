@@ -141,9 +141,9 @@ class Logs {
       't': logTime(r.time),
       'level': levelWord(r.level),
       'sub': r.loggerName.isEmpty ? 'app' : r.loggerName,
-      'msg': r.message,
-      if (data != null && data.isNotEmpty) 'data': data,
-      if (r.error != null) 'error': _short('${r.error}', 2000),
+      'msg': noAddresses(r.message),
+      if (data != null && data.isNotEmpty) 'data': _clean(data),
+      if (r.error != null) 'error': noAddresses(_short('${r.error}', 2000)),
       if (r.stackTrace != null) 'stack': _stack(r.stackTrace!),
       if (serious && screen != null) 'screen': screen,
       if (serious) 'on': Activity.active,
@@ -209,6 +209,17 @@ class Logs {
   @visibleForTesting
   static Future<void> reset() async => _current?.stop();
 }
+
+/// [text] with every IPv4 address written as `#.#.#.#`: a log says that something happened on the network, never
+/// where (DECISIONS 757). The lines are written once, so the check is here and not at each caller.
+String noAddresses(String text) => text.replaceAll(RegExp(r'\b\d{1,3}(?:\.\d{1,3}){3}\b'), '#.#.#.#');
+
+Object? _clean(Object? v) => switch (v) {
+  String() => noAddresses(v),
+  Map() => {for (final e in v.entries) e.key: _clean(e.value)},
+  Iterable() => [for (final e in v) _clean(e)],
+  _ => v,
+};
 
 String _short(String s, int max) => s.length <= max ? s : '${s.substring(0, max)}…';
 

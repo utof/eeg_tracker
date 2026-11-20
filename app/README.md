@@ -337,8 +337,8 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    the app afterwards.
 9. **Share on Wi-Fi** (2026-11-19): switch it on in Your data, read the code from the sheet (`tool/emu.py texts`),
    `adb forward tcp:18765 tcp:8765`, then `curl -H "Authorization: Bearer <code>" http://127.0.0.1:18765/state`
-   (401 without the code), `scripts/page_server.py --recorder http://127.0.0.1:18765 --token <code>` and
-   `scripts/pull_phone.py http://127.0.0.1:18765 --token <code> --once --dest <scratch>`; Start night (the
+   (401 without the code), `EEG_PHONE_TOKEN=<code> scripts/page_server.py --recorder http://127.0.0.1:18765` and
+   `EEG_PHONE_TOKEN=<code> scripts/pull_phone.py http://127.0.0.1:18765 --once --dest <scratch>`; Start night (the
    recorder's service serves, status `reconnecting` without a headband), Stop (the app serves again), switch off
    (the port closes). All of it passed; the emulator cannot show Wi-Fi with the screen off or the battery cost.
 
@@ -1891,24 +1891,30 @@ Good to know:
 
 Off unless you switch it on. With it on, the phone answers the laptop over your home Wi-Fi: the live signal with
 contact, battery and drops (the same pages the laptop recorder has), and every file the app keeps, so the laptop has
-a copy of the night within minutes instead of after Stop and Export data. Nothing is sent anywhere by itself (only a
-paired laptop is told where the phone is), nothing goes to the internet, and nothing on the phone can be changed or
-deleted this way: the paired laptop can only say that it holds a checked copy of a file, and the phone itself then
-decides what leaves it (Storage, below).
+a copy of the night within minutes instead of after Stop and Export data. Nothing is sent anywhere by itself (the
+laptop asks), nothing goes to the internet, and nothing on the phone can be changed or deleted this way: the paired
+laptop can only say that it holds a checked copy of a file, prove it again before anything leaves, and the phone
+itself then decides what leaves it (Storage, below).
 
-**Safety, in plain words.** It is your brain data, so: every request needs the code the app shows (12 characters);
-only devices on the same local network are answered; it turns itself off 12 hours after you switched it on, and 15
-minutes after Stop, unless a laptop is paired: then it stays on until you switch it off or tap **Forget this laptop**
-(DECISIONS 675). No notification comes with it (row 678). It is **not encrypted** (plain HTTP; encryption is deferred, DECISIONS rows 37 and 225): a device
-on the same Wi-Fi could listen in, so use it on your home Wi-Fi only, never on a shared or public one. **New code**
-on the sheet shuts out every laptop that has the old one; a paired laptop is told the new one, so tap **Forget this
-laptop** first to shut it out too.
+**Safety, in plain words** (DECISIONS 750-759, after a security review). It is your brain data, so: every request
+needs the code the app shows (12 characters), or, from the paired laptop, a signature made with a key the two worked
+out at the scan and never sent; only devices on the same local network are answered; it turns itself off 12 hours
+after you switched it on, and 15 minutes after Stop, unless a laptop is paired: then it stays on until you switch it
+off or tap **Forget this laptop** (DECISIONS 675). It is **not encrypted** (plain HTTP): a device on the same Wi-Fi
+could listen in. So a paired phone shares only on your home Wi-Fi (the laptop recognises its own router and tells
+the phone) or on a Wi-Fi you allow for 12 hours with **Share here for 12 hours** on the sheet; anywhere else it is
+paused. No notification comes with it (row 678): the line under the switch and the sheet say where it shares and
+when the laptop last copied, and so does the laptop tray's menu. The sheet cannot be screenshotted, and its QR code
+holds only the address. **New code** shuts out every device that has the old one; the paired laptop does not use
+the code: **Forget this laptop** shuts it out.
 
-**Connecting the laptop by one scan** (DECISIONS rows 530-539, `../docs/phone-link.md`). The square code on the
-laptop works once, for 5 minutes. The app asks before anything is sent, and it sends its own code only to the laptop
-that proves it showed that square code; nothing leaves your home network. The two remember each other, so next time
-there is nothing to scan: a Wi-Fi drop on either side, a restart or **New code** needs no new scan (the phone tells
-the laptop where it is as soon as its Wi-Fi is back, DECISIONS 676; the laptop's tray keeps its side running, 677).
+**Connecting the laptop by one scan** (DECISIONS rows 530-539 and 753, `../docs/phone-link.md`). The square code on
+the laptop works once, for 5 minutes. The app asks before anything is sent; the laptop proves it showed that square
+code, and then both work out the same key from it, so neither the code, the key nor the phone's own code crosses the
+Wi-Fi. The two remember each other, so next time there is nothing to scan: a Wi-Fi drop on either side, a restart, a
+new address or **New code** needs no new scan (the laptop finds the phone again on your home network; its tray keeps
+its side running, DECISIONS 677). **Paired before this version?** Pair once more (one scan): the app and the tray
+say so, and nothing leaves the phone by itself until then.
 
 **It cannot hurt the recording.** The server runs apart from the recorder, which only hands it copies of the samples
 and never waits for it. If the server fails, sharing goes off with one line in the night's log and the night goes on
@@ -1922,7 +1928,7 @@ scoring waits while the laptop copies (row 583).
 it is open or holds a session (a Work session, meditation, ...: their own card keeps it running); during a night the
 recorder's service answers. In the background Android may freeze the app, and a frozen app's server takes connections
 and never answers: the laptop then copies what it missed the next time the app is open, a session runs or a night
-records (the phone tells a paired laptop where it is at each of those). Nothing is lost.
+records. Nothing is lost.
 
 **If the laptop loses the phone at night, nothing is lost (rows 610-616).** The night stays on the phone and the
 laptop copies what it missed once it reaches the phone again (Export data works without Wi-Fi at all). On 2026-11-20
@@ -1962,16 +1968,18 @@ were not checked on the owner's phone):
 5. **What to tell the assistant after the first night**: did the camera open the link, and did **Open EEG Tracker**
    open the app by itself or only after a tap? Did the laptop window keep printing lines all night with the phone's
    screen off, or "No answer" for long stretches? Was the phone on the charger? (The night's `.log` has the phone
-   battery once a minute, a line when the laptop was told where the phone is, and the phone's Wi-Fi at every change:
+   battery once a minute and the phone's Wi-Fi at every change:
    `scripts/phone_night_check.py` turns them into "Wi-Fi off from ... to ...".)
 
-Next time: run `python3 scripts/phone_link.py` again and switch **Share on Wi-Fi** on: the phone finds the laptop by
-itself within a minute, no scan. If the app is new or forgot the laptop, scan the code the window shows.
+Next time: nothing to do while the tray runs (or run `python3 scripts/phone_link.py` again) with **Share on Wi-Fi**
+on: the laptop finds the phone by itself, no scan. If the app is new or forgot the laptop, scan a new code.
 
 Good to know:
 
-- The code stays the same until you tap **New code**; after a new one the phone tells the paired laptop by itself.
-  For the commands by hand, set it once to keep it out of the shell history: `export EEG_PHONE_TOKEN=<code>`.
+- The code stays the same until you tap **New code**; the paired laptop does not need it. For the commands by hand,
+  give it as `EEG_PHONE_TOKEN=<code>` (never on the command line, where other programs can read it).
+- Away from home (a friend's, a hotel) the sheet says **Paused on this Wi-Fi**: tap **Share here for 12 hours** to
+  let the paired laptop copy there; **Stop sharing here** ends it. Only on a Wi-Fi you trust.
 - Between nights the phone answers while the app is open or a session runs (no notification of its own, row 678).
   The app keeps the screen on for the first 15 minutes.
   During a night it answers with the screen off, as long as the phone keeps its Wi-Fi (the settings above).
@@ -1979,15 +1987,15 @@ Good to know:
   (DECISIONS row 52). The Sleep page and the morning result are the laptop's own jobs and use the laptop's files,
   which `pull_phone.py` keeps filled.
 - If the phone's address changes (the router gave it a new one), the main screen and the sheet show the new one
-  within a minute, and the phone tells the paired laptop within 5 minutes; nothing to restart then. Laptop commands
-  started by hand need the new address. A fixed address for the phone in the router avoids this. If the laptop's
-  address changes, scan again. **Forget this laptop** on the sheet stops the phone telling it anything.
+  within a minute, and at home the paired laptop finds it within 10 minutes; nothing to restart then. Laptop commands
+  started by hand need the new address. A fixed address for the phone in the router avoids this. **Forget this
+  laptop** on the sheet refuses it from then on.
 - Did the code expire before you scanned it? Press Enter in the laptop window for a new one. Each code works once.
 - A VPN on the phone can stop the scan from reaching the laptop: turn it off for the scan, or let it bypass the local
   network.
 - By hand, without the scan (the sheet shows both commands whole): the live pages with
-  `python3 scripts/page_server.py --recorder http://<address> --token <code>`, the copy with
-  `python3 scripts/pull_phone.py http://<address> --token <code>`.
+  `EEG_PHONE_TOKEN=<code> python3 scripts/page_server.py --recorder http://<address>`, the copy with
+  `EEG_PHONE_TOKEN=<code> python3 scripts/pull_phone.py http://<address>`. Markers and acks need the pairing.
 - Without Wi-Fi but with a cable: `adb forward tcp:8765 tcp:8765`, then use `http://127.0.0.1:8765` as the address
   (or `python3 scripts/phone_link.py --phone-at http://127.0.0.1:8765` after a scan). When the sheet says the address
   is **not found**, it shows this way with the commands already on `127.0.0.1`.
@@ -2005,8 +2013,8 @@ What else it is useful for:
   stream, so the laptop's speakers can follow a night or a session the phone records.
 - **A continuous backup during the night**: if the phone dies at 5 a.m., the laptop has the night up to the last
   2 minutes.
-- **Other EEG tools**: `uv run --no-project --with pylsl python scripts/lsl_bridge.py --url http://<address>/stream
-  --token <code>` re-publishes the phone's signal as Lab Streaming Layer streams (MNE-LSL, OpenViBE, LabRecorder).
+- **Other EEG tools**: `EEG_PHONE_TOKEN=<code> uv run --no-project --with pylsl python scripts/lsl_bridge.py --url
+  http://<address>/stream` re-publishes the phone's signal as Lab Streaming Layer streams (MNE-LSL, OpenViBE, LabRecorder).
 - Meditation, the check-in, the dream catcher and sound sessions are served live too while they record.
 
 ## Storage (what the app keeps on this phone; More, Storage)
@@ -2020,7 +2028,9 @@ and `scripts/phone_link.py` do it by themselves; DECISIONS 690-699, `../docs/pho
 - **By itself:** while a laptop is paired, a raw recording leaves the phone **3 days** after the laptop checked it,
   between nights, never while something records, never before last night's sleep report is made. Per kind (sleep
   nights, work sessions, check-ins, the DIY board, the dream catcher's spoken answers) you can pick 3 days, 1 week,
-  1 month or Never. **Only deletes recordings your laptop has checked. Nothing that's only on this phone.**
+  1 month or Never. **Only deletes recordings your laptop has checked. Nothing that's only on this phone.** Right
+  before, the phone asks the laptop to prove it still holds those exact bytes (random parts of each file); no proof
+  at that moment, nothing is deleted, and a laptop that lost a file gets it copied again (DECISIONS 756).
 - **The statistics always stay:** sleep reports (stages and minutes), Trends, check-in results, session summaries,
   transcripts, every setting and each recording's notes (its log, header and markers). Every page that shows them
   works as before; a page that needs the raw signal says "This night's raw recording is on the laptop now" (Score

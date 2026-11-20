@@ -3,102 +3,154 @@
 **Pair phone…** in the laptop tray's menu (or `python3 scripts/phone_link.py`), the phone's camera on the square
 code it shows, **Open EEG Tracker**, **Connect**. That is the only scan: the pairing lasts (DECISIONS 675-677). The
 tray keeps the laptop's side running whenever a phone is paired, the phone keeps Share on Wi-Fi on while a laptop is
-paired, and each finds the other again by itself after a Wi-Fi drop, a restart or a new code. The owner's steps are
-in `app/README.md` ("Share on Wi-Fi"); the choices and their alternatives in DECISIONS rows 530-539 and 675-677. This
-page says what crosses the network and why it is safe enough for a home Wi-Fi.
+paired, and the laptop finds the phone again by itself after a Wi-Fi drop, a restart or a new address. The owner's
+steps are in `app/README.md` ("Share on Wi-Fi"); the choices and their alternatives in DECISIONS rows 530-539,
+675-677 and 750-759 (the second version of the link, after the security review of 2026-11-20). This page says what
+crosses the network and why it is safe enough for a home Wi-Fi.
 
 ## What happens
 
 1. The laptop makes a **one-time code** (16 random bytes, 22 characters) and shows a QR code of
-   `http://<laptop's Wi-Fi address>:8771/p?s=<code>`. The phone's token is not in it.
-2. Any camera app opens that link in the browser. The laptop's page opens the app with
-   `eegtracker://pair?h=<laptop>&p=8771&s=<code>&n=<laptop's name>` (as Chrome's `intent://` form, which names
-   the app's package, so no other app can take the link).
-3. The app asks **Connect to this laptop?** with the laptop's name and address. Nothing is sent before **Connect**.
-4. The handshake, two HTTP requests to the address in the link:
-   - `POST /link/hello {"v":1,"via":"code","nonce":N_phone}`. The laptop answers with its own nonce `N_laptop` and
-     `HMAC-SHA256(code, "eeg-tracker link v1|laptop|code|N_phone|N_laptop")`. The app checks it: a device that does
-     not know the code cannot make it, so the app stops there and **sends nothing more**.
-   - `POST /link/finish` with `HMAC-SHA256(code, "eeg-tracker link v1|phone|code|N_laptop|N_phone")`, the Share on
-     Wi-Fi port and the token. The laptop checks the proof, spends the code (it never works again) and answers with a
-     new 32-byte **key** that the two keep.
-5. The app switches Share on Wi-Fi on (if it was off) and remembers the laptop: address, port, key, name. The
-   laptop remembers the phone in `_local/phone/link.json` (mode 600): the address it saw the requests come from, the
-   port, the token and the key.
-6. From then on, whenever Share on Wi-Fi starts, every 5 minutes while it is on, and as soon as the phone's Wi-Fi
-   comes back or changes (Android's network callback, and the server's own look at its address every minute), the
-   phone repeats the same two steps with `"via":"key"` and the key instead of the code. The laptop takes the phone's
-   address from that connection, so a new address from the router is picked up at once, and a new token after
-   **New code** too.
+   `http://<laptop's Wi-Fi address>:8771/p#s=<code>`. The code sits after `#`, which a browser never sends: the
+   laptop's page reads it in the browser and opens the app with `eegtracker://pair?h=<laptop>&p=8771&s=<code>&n=<name>`
+   (as Chrome's `intent://` form, which names the app's package, so no other app can take the link). Only while a
+   code is shown does the laptop listen on its Wi-Fi address; otherwise on 127.0.0.1 only.
+2. The app asks **Connect to this laptop?** with the laptop's name and address. Nothing is sent before **Connect**.
+3. The handshake, two HTTP requests to the address in the link (`app/lib/share/auth.dart`,
+   `scripts/phone_auth.py`; test vectors in `app/test/fixtures/phone_link.json`):
+   - `POST /link/hello {"v":2,"nonce":N_phone}`. The laptop answers with its own nonce `N_laptop`, its name and
+     `HMAC-SHA256(code, "eeg-tracker link v2|laptop|N_phone|N_laptop")`. The app checks it: a device that does not
+     know the code cannot make it, so the app stops there and **sends nothing more**.
+   - `POST /link/finish {"v":2,"nonce":N_laptop,"proof":…,"port":<Share on Wi-Fi port>}` with
+     `HMAC-SHA256(code, "eeg-tracker link v2|phone|N_laptop|N_phone")`. The laptop checks it, spends the code (it never
+     works again) and answers with its name and a confirmation made with the new key.
+   - Both sides work the **key** out by themselves: `HMAC-SHA256(code, "eeg-tracker key v2|N_phone|N_laptop")`. The
+     key, the code and the phone's token never cross the Wi-Fi.
+4. The app switches Share on Wi-Fi on (if it was off) and remembers the laptop: address, port, key, name. The laptop
+   keeps `_local/phone/link.json` (mode 600): the key, the phone's address and port, and **home**: its router's
+   address and hardware address at the moment of pairing (`phone_link.home_id`, from `/proc/net/route` and
+   `/proc/net/arp`). The network you pair on is your home Wi-Fi.
+5. From then on the laptop asks; the phone never announces itself. Every request of the laptop is **signed** with the
+   key (below) and every answer of the phone proves the key too, so neither side talks to a device that only took the
+   other's address. The laptop tries the phone's last address; at home, when nothing answers there, it looks round its
+   own /24 network at most every 10 minutes and keeps the address whose answer proves the key (`find_phone`).
+
+## Signed requests (DECISIONS 751, 755)
+
+Each request of the paired laptop carries `X-Eeg-Time` (ms since 1970), `X-Eeg-Nonce` (16 random bytes, base64url),
+`X-Eeg-Home` (`1` when the laptop sees its home router now, else `0`) and
+`X-Eeg-Sign = HMAC-SHA256(key, "eeg-tracker request v2|METHOD|time|nonce|home|sha256(body)|sha256(path)|sha256(query)")`.
+The phone takes it within 5 minutes of its own clock, never the same nonce twice (it remembers them for 10 minutes),
+and answers with `X-Eeg-Reply = HMAC-SHA256(key, "eeg-tracker reply v2|nonce")`; the laptop drops an answer without it.
+Errors: 401 `not paired`, `signature`, `replayed`, or `clock` (with the phone's `phone_ms`).
+
+`POST /work`, `POST /marker`, `POST /ack`, `GET`/`POST /recheck` and `GET /who` take only signed requests. The token
+(the code on the Share sheet) still reads files and the live signal, for `scripts/pull_phone.py` and
+`scripts/page_server.py` run by hand, only in the `Authorization: Bearer` header (never `?token=`, never in a link).
+Ten wrong tries in a minute from one address make it wait a minute (429); the phone holds at most 16 connections from
+one address and 32 in all.
+
+## Where the phone shares (DECISIONS 752)
+
+Plain HTTP is safe enough on your own WPA2/WPA3 Wi-Fi, not on a shared one. A paired phone shares only:
+
+- **at home**: the paired laptop said so (a signed request with `X-Eeg-Home: 1` from the local network). The phone
+  cannot read the Wi-Fi's name itself without the location permission, which this app does not ask for; it trusts the
+  laptop, which recognises its own router. It lasts 30 minutes after the laptop last said so (the tray looks every 45
+  seconds and copies every 2 minutes, so at home it does not run out), and Android's word that the network changed
+  ends it at once: another Wi-Fi may use the same addresses;
+- **here, for 12 hours**: **Share here for 12 hours** on the Share sheet allows the Wi-Fi the phone is on now, until
+  then or until it changes networks (**Stop sharing here** ends it);
+- otherwise it is **paused**: 403 `not sharing on this Wi-Fi` to everyone on the network, the laptop too. A USB cable
+  (`adb forward`, the phone itself) always works.
+
+There is no notification for it (the owner's choice, DECISIONS 678). The Share sheet and the line under the switch say
+which of the three it is and when the laptop last copied ("Last copied by my-laptop at 14:05"); the laptop tray's
+menu says the same ("Phone: sharing on its home Wi-Fi · copied 14:05", or "on another Wi-Fi: sharing paused there").
+An unpaired phone shares as before: anyone on the Wi-Fi with the code, for 12 hours.
 
 ## Pairing that lasts (DECISIONS 675-677)
 
-- **The phone**: while a laptop is paired, Share on Wi-Fi has no end time (not 12 hours, not 15 minutes after a
-  night's Stop). It ends only when you switch it off or tap **Forget this laptop**. There is no notification for it
-  (DECISIONS 678): between nights the phone answers while the app is open or a session runs, and during a night; in
-  the background Android may freeze the app, so the laptop copies what it missed at the next app open, session or
-  night (the phone tells the laptop where it is at each). Nothing is lost: the phone keeps every file. **New code** changes the token, not the pairing: the key stays, and
-  the phone tells the laptop the new token itself.
+- **The phone**: while a laptop is paired, Share on Wi-Fi has no end time. It ends only when you switch it off or tap
+  **Forget this laptop**. Between nights the phone answers while the app is open or a session runs, and during a
+  night; in the background Android may freeze the app, so the laptop copies what it missed at the next app open,
+  session or night. Nothing is lost: the phone keeps every file. **New code** changes the token only; the paired
+  laptop does not use it.
 - **The laptop**: the tray runs `phone_link.py --keep` whenever `_local/phone/link.json` holds a phone and no other
-  copy answers on 127.0.0.1:8771 (a **Pair phone…** window, for instance). No window and no code; it listens on
-  127.0.0.1 at once and on the laptop's home-network address once it has one (Wi-Fi off: it waits; back, or a new
-  address: it listens there within 30 seconds). It copies the files and serves the live pages as before, writes
-  what it says to `_local/phone/link-keep.log` (addresses and file names, never the token), is started again when
-  it ends, and stops with the tray. **Pair phone…** then opens its page with a fresh code, for a new phone.
-- **Forget the phone…** in the tray's menu deletes `link.json`; the kept link ends by itself, and the phone hears
-  "no longer knows this phone" at its next announcement.
+  copy answers on 127.0.0.1:8771. It listens on 127.0.0.1 only (its page and **Pair phone…**, a POST from that page,
+  which then listens on the Wi-Fi for that code's 5 minutes), copies the files, serves the live pages on
+  `http://localhost:8770/`, and writes what it says to `_local/phone/link-keep.log` (file names and counts, never an
+  address, the token or the key).
+- **Forget the phone…** in the tray's menu deletes `link.json`; the kept link ends by itself.
 
-## Acknowledged receipt: moving raw recordings off the phone (DECISIONS 690-699)
+## Updating from the first version (re-pair once)
 
-7. After each copy pass the laptop hashes every finished copy the phone lists and has not acked yet **from its own
-   disk** (never from its index of hashes; a copy it packed as `.f32.xz` is unpacked to hash it), at most 4 GB a pass,
-   oldest first. Before any hashing an empty ack asks whether the phone takes acks from this key at all.
-8. Where its hash equals the phone's (for a packed `.f32.gz`, the `original`'s), it sends
-   `POST /ack` to the phone's Share on Wi-Fi port with the token, `{"v":1,"files":[{"path","sha256"}]}` and the header
-   `X-Eeg-Ack: HMAC-SHA256(key, "eeg-tracker ack v1|" + body)` with the pairing's key (vectors in
-   `app/test/fixtures/phone_ack.json`). The phone refuses the whole request without a pairing (403 `not paired`) or
-   with a wrong proof (403), then checks each file on its own: an ack is kept only for a shared file that rests (not
-   written in the last 20 s) and holds exactly those bytes now (`refused`: `different bytes`, `not on the phone`,
-   `still being written`, `not a file the phone shares`). Kept acks go to `files/transfer/acks.json` (never exported or
-   shared) and `/files` marks each acked file `"acked": true`, so a laptop that lost its notes does not hash it twice.
-9. The phone decides alone what leaves it (the Storage page, `app/README.md` "Storage"): while a laptop is paired, a
-   raw recording 3 days after its ack, never anything not acked as it is now, never the statistics. A set that left it
+Pairings made before this version (`link.json` `version` 1, which kept the phone's token; on the phone a laptop
+without the new key) are not used any more: their key had crossed the Wi-Fi. The app's line says "Paired with
+<laptop> before this update: pair once more", the tray says "paired the old way: Pair phone… once more", and the
+phone deletes nothing by itself until then. One scan of a new code pairs them the new way. Update the laptop's scripts
+with the app: a laptop of the first version answers the new app's hello with an error, and the new laptop answers an
+old app with 400 `old app`.
+
+## Acknowledged receipt: moving raw recordings off the phone (DECISIONS 690-699, 756)
+
+6. After each copy pass the laptop hashes every finished copy the phone lists and has not acked yet **from its own
+   disk** (a copy it packed as `.f32.xz` is unpacked to hash it), at most 4 GB a pass, oldest first.
+7. Where its hash equals the phone's (for a packed `.f32.gz`, the `original`'s), it sends a signed
+   `POST /ack {"v":1,"files":[{"path","sha256"}]}`. The phone checks each file on its own: an ack is kept only for a
+   shared file that rests (not written in the last 20 s) and holds exactly those bytes now. Kept acks go to
+   `files/transfer/acks.json` (never exported or shared).
+8. **The check right before deleting.** An ack says the laptop held the bytes then. When the Storage page's keep time
+   (3 days after the ack by default) is up, the phone asks again first:
+   - it writes a question per file into `files/transfer/recheck.json`: a fresh nonce and 8 random 4 KB ranges (all of
+     a file up to 32 KB) of the file's plain bytes;
+   - the laptop reads them (signed `GET /recheck`) at its next pass and answers (signed `POST /recheck`) with
+     `HMAC-SHA256(key, "eeg-tracker recheck v1|sha256(path)|nonce|size|start+length,…|" + those bytes)` of **its own
+     copy**, or `"missing": true` when it does not hold it as acked;
+   - while a question is open the phone does not hand that file out (409), so the answer cannot be made from the
+     phone's own copy; a hash, even one the phone lists itself, proves nothing here;
+   - the phone works the same HMAC out from its own bytes. Only a proof from the last 15 minutes lets the file go; no
+     proof, nothing is deleted. A laptop that lost the file or holds other bytes loses the ack: the file stays, and
+     the laptop copies and acks it again.
+9. The phone decides alone what leaves it (`app/README.md` "Storage"): while a laptop is paired, a raw recording 3
+   days after its ack and after that fresh proof, never anything not acked, never the statistics. A set that left it
    leaves `<stamp>.removed.json`, which the laptop copies like any file and checks against what it holds.
 
-The laptop never deletes anything; `_local/phone/acks.jsonl` has one line per ack sent and taken.
+The laptop never deletes anything; `_local/phone/acks.jsonl` has one line per ack (no addresses).
 
 ## Who can do what
 
-- **The code** works once and for 5 minutes. It is shown on the laptop's screen and in the phone's browser history;
-  someone who photographs it could pair *their* device with the laptop within those minutes (the laptop window says
-  "Paired with the phone at <address>", so it would show). They learn nothing about the owner's phone.
-- **The phone's token** goes only to the laptop at the address in the link, and only after that laptop proved it
-  knows the code (or, later, the key). A device that takes over the laptop's old address gets a hello and nothing
-  else.
+- **The code** works once and for 5 minutes, and only from the laptop's screen to the phone's camera (it is never
+  sent, and the browser never sends what follows `#`). Someone who photographs it could pair *their* device with the
+  laptop within those minutes (the laptop window would show it).
+- **The key** never crosses the Wi-Fi. Someone watching the Wi-Fi during pairing sees two nonces and two proofs; to
+  get the key they would need the code too.
+- **The token** is only for tools run by hand and for the cable; the paired laptop never sends it. It is never in a
+  link or the Share sheet's QR code, and Android keeps the Share sheet out of screenshots and the recent-apps preview.
+- **Changing things on the phone** (`/work`, `/marker`, acks, the check before deleting) takes the key: a copied
+  request is refused (its nonce was used), and a request changed on the way fails its signature.
 - **Only the local network**: the app accepts a laptop address only in 10.x, 172.16-31.x, 192.168.x, 169.254.x (or
-  the phone itself), never a name and never an internet address. The laptop listens on its Wi-Fi address and on
-  127.0.0.1 only (never on all interfaces) and answers local-network clients only. Its own page with the code
-  (`http://127.0.0.1:8771/`) and the live pages (`http://localhost:8770/`) answer this laptop only.
-- **Not encrypted**: plain HTTP, like Share on Wi-Fi itself (DECISIONS row 225). The proofs keep the code and the
-  key off the wire, but the token and the data cross the Wi-Fi as they always did. Home Wi-Fi only.
-- **Acks**: only the paired laptop can make the phone delete anything, and only what it vouches it holds byte for byte:
-  a proof made with the pairing's key covers each request's body, and every file is checked against the phone's own
-  bytes. A replayed ack changes nothing (the same file, the same bytes). Someone on the Wi-Fi with the token but not the
-  key can read files (as before) but cannot ack. Forgetting the laptop stops the automatic deleting (it runs only
-  while a laptop is paired).
-- **Forgetting**: **Forget this laptop** on the phone's Share sheet stops the phone telling it anything (and brings
-  back sharing's end time); **New code** on the sheet changes the token, which a paired laptop is told by the key, so
-  to shut a laptop out tap **Forget this laptop** first. **Forget the phone…** in the tray (or deleting
-  `_local/phone/link.json`) makes the laptop forget the phone. Pairing again replaces the key on both sides.
+  the phone itself), never a name and never an internet address. The laptop's own servers (`phone_link.py`'s page,
+  `page_server.py`, the recorder hub, the tray's) listen on 127.0.0.1 and check `Host` and `Origin`, so a web page in
+  the laptop's browser cannot reach them by another name (DNS rebinding) or post to them.
+- **Not encrypted**: plain HTTP. Someone on the same Wi-Fi can read what is copied and the live signal while the phone
+  shares there. Someone who controls the Wi-Fi at the moment of the scan could still step in between. Home Wi-Fi only,
+  with a strong WPA3 (or WPA2) password.
+- **Logs** keep no network addresses (the app writes them as `#.#.#.#`; the laptop's logs say "the paired phone").
+- **Forgetting**: **Forget this laptop** on the phone refuses its signed requests from then on and stops the automatic
+  deleting. **Forget the phone…** in the tray makes the laptop forget the phone. Pairing again replaces the key.
 
 ## Known limits
 
-- A VPN on the phone that sends local traffic into its tunnel stops the phone's two requests; the laptop's copies,
-  which go the other way, may still work. Turn the VPN off for the scan, or let it bypass the local network.
-- The phone and the laptop must be on the same network. If the **laptop's** address changes (a router hands out the
-  same one for days as a rule), the phone's announcements go to the old one: the laptop still reaches the phone at
-  its known address, so copying and the tray's headband line go on, but a new phone address or token after that
-  needs one new scan.
+- A VPN on the phone that sends local traffic into its tunnel stops pairing. Turn it off for the scan, or let it
+  bypass the local network.
+- The phone and the laptop must be on the same network. At home the laptop finds a phone with a new address within 10
+  minutes; elsewhere (Share here) only at the last address it knew.
 - Between nights the laptop reaches the phone only while the app runs (row 678), so the tray's headband line shows
   "not reachable" while the app sleeps in the background with no session.
+- A home with two routers on one network, or a laptop on a cable to another router, may not be recognised as home:
+  **Share here** covers it for 12 hours at a time.
 - One phone per laptop: a new pairing replaces the old one.
+- Android 17 asks for "Nearby devices" (local network) once the app targets it; the app asks when sharing is switched
+  on or a pairing starts (DECISIONS 758). Refused: nothing is shared or paired, and the line says where to allow it.
+- Encryption (TLS with certificates the two pin to each other) is the lasting fix; DECISIONS 759 has what was checked.

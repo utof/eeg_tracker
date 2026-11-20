@@ -55,6 +55,11 @@
     <!-- Share on Wi-Fi's address from Android's own list of networks (PhoneChannel.kt wifiNets; DECISIONS row 561):
          reading it needs ACCESS_NETWORK_STATE, granted at install like the two above. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Android 17 blocks local-network traffic (TCP in and out) for an app that targets API 37 or newer unless it
+         holds this permission; below that Android grants it by itself. Share on Wi-Fi's server listens on the local
+         network and pairing talks to the laptop, so both need it. lib/share/local_network.dart asks for it, and
+         only when the phone and the target are both 37+. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <!-- The DIY board (test; DECISIONS rows 360-369) sends its frames to the phone over Wi-Fi (UDP port 9000) and the
          night recorder only listens. Android 14 starts a connectedDevice service only for an app holding one of a
          list of permissions; Bluetooth's are asked at run time, so a night with the board alone, Bluetooth never

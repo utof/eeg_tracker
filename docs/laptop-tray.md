@@ -41,7 +41,7 @@ inside:
 |---|---|
 | green | the headband records on the phone now (a Work session with a usable signal, a night, or another session) and its newest data is under 30 s old: wearing it is not for nothing |
 | amber | the phone answers, but the headband is not recording, not on the head, has lost its signal, or its data is older than 30 s |
-| grey dashed | a phone is paired but does not answer (Share on Wi-Fi off? another network? or the app asleep: between nights it answers only while open or holding a session, DECISIONS 678) or refuses this laptop's token |
+| grey dashed | a phone is paired but does not answer (Share on Wi-Fi off? another network, where a paired phone pauses sharing? or the app asleep: between nights it answers only while open or holding a session, DECISIONS 678), refuses this laptop's signature, or was paired the old way (pair once more) |
 | none | no phone is paired (the menu's first line says so) |
 
 Clicking it opens the menu:
@@ -50,8 +50,11 @@ Clicking it opens the menu:
 - **Status lines**: "Working since 10:12 (0:42)", "Next break hint about 11:05 (by time: 42 min since the last
   break)", or "On a break since 10:51", "In a meeting (zoom) since 11:02", or "Not in a work session" and how long
   you have been in work apps.
-- **The phone's lines** once one is paired: "Phone: paired, reachable" (with "· copying its files" while the link
-  copies), or "Phone: not reachable (app asleep, or Share on Wi-Fi off?)"; then the headband: "Headband: recording on the phone
+- **The phone's lines** once one is paired (no notification says that the phone shares; these lines do, DECISIONS
+  752): "Phone: sharing on its home Wi-Fi · copied 14:05" (or "on a Wi-Fi allowed by hand", or "paired, reachable";
+  "· copying its files" while the link copies), "Phone: on another Wi-Fi: sharing paused there", "Phone: no longer
+  knows this laptop (Pair phone… again)", "Phone: paired the old way: Pair phone… once more (one scan)", or "Phone:
+  not reachable (app asleep, or Share on Wi-Fi off?)"; then the headband: "Headband: recording on the phone
   (work session since 12:26, signal good, alert)", "Headband: connected, not on the head (…)", "Headband: no data
   for 2 min (…)", "Headband: recording a night on the phone, 6h10 so far", "Headband: not recording on the phone",
   or "Headband: —"; and a break line from the phone when there is one: "Break hint on the phone since 12:50
@@ -152,21 +155,23 @@ written.
 
 **Pair phone…** runs `scripts/phone_link.py` in a terminal window (the QR code to scan with the phone; see
 [phone-link.md](phone-link.md)), copying the phone's files into the tray's own `_local`. While a copy already runs
-(that window, or the one the tray keeps), the item opens its page `http://127.0.0.1:8771/?new=1` with a fresh code,
+(that window, or the one the tray keeps), the item asks it for a fresh code (a POST to `http://127.0.0.1:8771/new`; one from a web page is refused by its `Origin`: DECISIONS 750) and opens its page,
 bigger, instead of starting a second copy. It is greyed out only without a terminal program. Pairing is needed once:
 
 - **The tray keeps the link running** (DECISIONS 677): whenever `_local/phone/link.json` holds a phone, it runs
-  `phone_link.py --keep` with no window (copying the files and hearing where the phone is), starts it again if it
-  ends, and stops it at Quit. A Wi-Fi drop on either side needs no new scan. Its output: `_local/phone/link-keep.log`.
+  `phone_link.py --keep` with no window (copying the files and, at home, finding the phone at a new address),
+  starts it again if it ends, and stops it at Quit. It listens on 127.0.0.1 only, and on the Wi-Fi only while a
+  pairing code is shown. A Wi-Fi drop on either side needs no new scan. Its output: `_local/phone/link-keep.log` (no
+  addresses).
 - **It looks at the phone** every 45 seconds, only while one is paired, in the background (2 seconds at most; the
-  menu never waits): the phone's Share on Wi-Fi `/state` with the token from `link.json` in a header, never written
-  anywhere. One look without an answer keeps the last one (a Wi-Fi blip); two in a row is "not reachable".
+  menu never waits): the phone's Share on Wi-Fi `/state` and `/who`, signed with the pairing's key from `link.json`
+  (DECISIONS 751); the phone's answer must prove the same key. One look without an answer keeps the last one (a Wi-Fi blip); two in a row is "not reachable".
 - **At the start**, if a phone was paired before and does not answer now, one notification says so (only with
   notifications on; never during a meeting). Afterwards only the ring and the menu change.
 - **Forget the phone…** → **Yes, forget it** deletes `link.json` and stops the kept link; the menu then offers
   Pair phone… first again.
-- When a work session starts or ends here, the tray tells the paired phone (Share on Wi-Fi's `POST /work`, between
-  nights), so the phone's automatic recording can check whether the headband is on and take it as work ("When I put
+- When a work session starts or ends here, the tray tells the paired phone (Share on Wi-Fi's signed `POST /work`,
+  between nights), so the phone's automatic recording can check whether the headband is on and take it as work ("When I put
   the headband on" in the app). It also says whether you are in a meeting (`"meeting": true`); the phone does not use
   that yet.
 - The phone's own Work-session drowsiness shows in the headband line; the tray gives no hint of its own from it (the

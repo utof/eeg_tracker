@@ -15,6 +15,7 @@ import 'package:eeg_tracker/recorder/acks.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart' show fileStem;
 import 'package:eeg_tracker/recorder/nights.dart';
 import 'package:eeg_tracker/recorder/packed.dart' show packRaw, packedFileOf;
+import 'package:eeg_tracker/recorder/recheck.dart';
 import 'package:eeg_tracker/recorder/remove.dart';
 import 'package:eeg_tracker/sleep/report.dart';
 import 'package:eeg_tracker/sleep/scorer.dart';
@@ -103,12 +104,6 @@ void main() {
   List<String> names(Directory d) => (d.listSync().whereType<File>().map((f) => f.uri.pathSegments.last).toList())..sort();
 
   group('the proof and the acks', () {
-    test('the proof is the one in the fixture, which the laptop computes too', () {
-      final fx = jsonDecode(File('test/fixtures/phone_ack.json').readAsStringSync()) as Map<String, Object?>;
-      expect(ackProof(fx['key']! as String, utf8.encode(fx['body']! as String)), fx['proof']);
-      expect(ackProof('${fx['key']}x', utf8.encode(fx['body']! as String)), isNot(fx['proof']));
-    });
-
     test('an ack is kept only for the bytes the phone holds: a wrong hash, a file still written or one not shared are refused', () async {
       final stem = run(DateTime(2026, 11, 17, 23));
       final f32 = File('${rec.path}/$stem.f32');
@@ -264,6 +259,14 @@ void main() {
       expect(File('${rec.path}/${stems[0]}.f32').existsSync(), isTrue);
       expect(StorageStore(files).load().keepDays('nights'), 3);
       expect(await autoClear(files, busy: () async => true, paired: true, clock: () => now), isNull, reason: 'busy');
+      // due, but the laptop must prove again that it holds the bytes (DECISIONS 756): asked now, deleted once proven
+      final asked = (await autoClear(files, busy: () async => false, paired: true, laptop: 'desk', clock: () => now))!;
+      expect(asked.removed, isEmpty);
+      final store = RecheckStore(files);
+      expect(store.asks().keys, everyElement(startsWith('recordings/${stems[0]}.')));
+      for (final a in store.asks().values) {
+        store.prove(a.path, a.nonce, ok: true, why: null, at: now);
+      }
       final r = (await autoClear(files, busy: () async => false, paired: true, laptop: 'desk', clock: () => now))!;
       expect(r.removed, ['2026-11-15']);
       expect(removedRecordOf(File('${rec.path}/${stems[0]}.f32'))!.why, whyKeepTime);

@@ -28,6 +28,7 @@ void main() {
       'work-session',
       'memory-cues',
       'auto-start',
+      'share-on-wifi',
     ]) {
       final md = await rootBundle.loadString('assets/evidence/$name.md');
       expect(md, startsWith('# '), reason: name);

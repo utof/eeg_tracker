@@ -1,10 +1,12 @@
-"""Writes phone_link.json: the pairing proofs (scripts/phone_link.py <-> app/lib/share/link.dart) and reference QR
-matrices for scripts/qr_code.py made by an independent encoder (python-qrcode, BSD).
+"""Writes phone_link.json: the link's signatures (scripts/phone_auth.py <-> app/lib/share/auth.dart: the pairing
+proofs, the key both sides work out, the laptop's confirm, a signed request, the phone's reply, a delete re-check's
+proof; DECISIONS 750-759) and reference QR matrices for scripts/qr_code.py made by an independent encoder
+(python-qrcode, BSD).
 
     /usr/bin/python3 app/test/fixtures/make_phone_link_fixture.py     # needs python-qrcode (Debian: python3-qrcode)
 
-The proofs are HMAC-SHA256 from Python's standard library, written out here by hand (not through phone_link.py), so
-both the laptop's and the app's code are checked against the same independent numbers.
+The signatures are HMAC-SHA256 from Python's standard library, written out here by hand (not through phone_auth.py),
+so both the laptop's and the app's code are checked against the same independent numbers.
 """
 import hashlib
 import hmac
@@ -23,19 +25,65 @@ def hm(key: str, msg: str) -> str:
     return hmac.new(key.encode(), msg.encode(), hashlib.sha256).hexdigest()
 
 
+def sha(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+
 def proofs() -> list[dict]:
+    """Pairing v2: the code proves itself both ways, then both sides derive the key and the laptop confirms it."""
     cases = [
-        ("code", "Zm9yLXRoZS1maXh0dXJlLW9ubHk", "cGhvbmUtbm9uY2UtMDAwMQ", "bGFwdG9wLW5vbmNlLTAwMDE"),
-        ("key", "a2V5LWZvci10aGUtZml4dHVyZS1vbmx5LTMyLWJ5dGVzLWxvbmc", "cGhvbmUtbm9uY2UtMDAwMg",
-         "bGFwdG9wLW5vbmNlLTAwMDI"),
+        ("Zm9yLXRoZS1maXh0dXJlLW9ubHk", "cGhvbmUtbm9uY2UtMDAwMQ", "bGFwdG9wLW5vbmNlLTAwMDE"),
+        ("YW5vdGhlci1maXh0dXJlLWNvZGU", "cGhvbmUtbm9uY2UtMDAwMg", "bGFwdG9wLW5vbmNlLTAwMDI"),
     ]
     out = []
-    for via, secret, phone_nonce, laptop_nonce in cases:
+    for code, phone_nonce, laptop_nonce in cases:
+        key = hm(code, f"eeg-tracker key v2|{phone_nonce}|{laptop_nonce}")
         out.append({
-            "via": via, "secret": secret, "phone_nonce": phone_nonce, "laptop_nonce": laptop_nonce,
-            "laptop_proof": hm(secret, f"eeg-tracker link v1|laptop|{via}|{phone_nonce}|{laptop_nonce}"),
-            "phone_proof": hm(secret, f"eeg-tracker link v1|phone|{via}|{laptop_nonce}|{phone_nonce}"),
+            "code": code, "phone_nonce": phone_nonce, "laptop_nonce": laptop_nonce,
+            "laptop_proof": hm(code, f"eeg-tracker link v2|laptop|{phone_nonce}|{laptop_nonce}"),
+            "phone_proof": hm(code, f"eeg-tracker link v2|phone|{laptop_nonce}|{phone_nonce}"),
+            "key": key,
+            "confirm": hm(key, f"eeg-tracker link v2|laptop|confirm|{phone_nonce}|{laptop_nonce}"),
         })
+    return out
+
+
+def requests() -> list[dict]:
+    """Signed requests of the paired laptop and the phone's reply over the same nonce."""
+    key = "7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544"
+    cases = [
+        ("GET", "/files", "", "", 1763500000123, "cmVxdWVzdC1ub25jZS0wMDE", True, b""),
+        ("GET", "/files/recordings/2026-11-19-010000.f32", "/files/recordings/2026-11-19-010000.f32", "", 1763500000456,
+         "cmVxdWVzdC1ub25jZS0wMDI", False, b""),
+        ("GET", "/files?sha=0", "/files", "sha=0", 1763500000789, "cmVxdWVzdC1ub25jZS0wMDM", True, b""),
+        ("POST", "/work", "/work", "", 1763500001000, "cmVxdWVzdC1ub25jZS0wMDQ", True, b'{"working":true}'),
+        ("GET", "/files/dream-catcher/a%20b.wav", "/files/dream-catcher/a b.wav", "", 1763500002000,
+         "cmVxdWVzdC1ub25jZS0wMDU", True, b""),
+    ]
+    out = []
+    for method, target, path, query, t, nonce, home, body in cases:
+        path = path or target
+        msg = "|".join(("eeg-tracker request v2", method, str(t), nonce, "1" if home else "0", sha(body),
+                        sha(path.encode()), sha(query.encode())))
+        out.append({"key": key, "method": method, "target": target, "time_ms": t, "nonce": nonce, "home": home,
+                    "body": body.decode(), "sign": hm(key, msg), "reply": hm(key, f"eeg-tracker reply v2|{nonce}")})
+    return out
+
+
+def rechecks() -> list[dict]:
+    """A delete re-check: the phone's ranges of a file and the laptop's HMAC over those bytes of its own copy."""
+    key = "7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544"
+    data = bytes((i * 7 + 3) % 256 for i in range(10_000))  # the file both sides hold
+    out = []
+    for path, nonce, ranges in [
+        ("recordings/2026-11-19-010000.f32", "cmVjaGVjay1ub25jZS0wMDE", [(0, 16), (4096, 100), (9990, 10)]),
+        ("dream-catcher/2026-11-19-040000-r1.wav", "cmVjaGVjay1ub25jZS0wMDI", [(0, 10_000)]),
+    ]:
+        head = "|".join(("eeg-tracker recheck v1", sha(path.encode()), nonce, str(len(data)),
+                         ",".join(f"{s}+{n}" for s, n in ranges), ""))
+        mac = hmac.new(key.encode(), head.encode() + b"".join(data[s:s + n] for s, n in ranges), hashlib.sha256)
+        out.append({"key": key, "path": path, "nonce": nonce, "size": len(data), "ranges": [list(r) for r in ranges],
+                    "data": "(i * 7 + 3) % 256 for i in range(10000)", "mac": mac.hexdigest()})
     return out
 
 
@@ -49,6 +97,7 @@ def matrix(text: str, level: str, version: int, mask: int) -> list[str]:
 def qr_cases() -> list[dict]:
     cases = [
         ("http://192.168.1.10:8771/p?s=AbCdEfGhIjKlMnOpQrStUv", "M", 4, range(8)),
+        ("http://192.168.1.10:8771/p#s=AbCdEfGhIjKlMnOpQrStUv", "M", 4, (5,)),  # the code in the part never sent
         ("eegtracker://pair?h=10.0.2.2&p=8771&s=AbCdEfGhIjKlMnOpQrStUv&n=my-laptop", "M", 5, (3,)),
         ("hi", "L", 1, (0, 5)),
         ("x" * 60, "Q", 7, (6,)),  # carries the version bits
@@ -61,5 +110,6 @@ def qr_cases() -> list[dict]:
 if __name__ == "__main__":
     OUT.write_text(json.dumps({"made_by": "make_phone_link_fixture.py (python-qrcode " +
                                getattr(qrcode, "__version__", "7.4.2 (Debian python3-qrcode)") + ")",
-                               "proofs": proofs(), "qr": qr_cases()}, indent=1) + "\n")
+                               "proofs": proofs(), "requests": requests(), "rechecks": rechecks(),
+                               "qr": qr_cases()}, indent=1) + "\n")
     print(f"wrote {OUT}")

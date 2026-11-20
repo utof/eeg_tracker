@@ -13,19 +13,23 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 import laptop_work as lw  # noqa: E402
 import tray  # noqa: E402
+from test_pull_phone import signed_ok  # noqa: E402
 from test_tray import FakeAI, FakeGLib, FakeGtk, Notes, find  # noqa: E402
 
 TZ = timezone(timedelta(hours=3))
 T0 = datetime(2026, 11, 20, 12, 30, tzinfo=TZ)
 TOKEN = "abcdefghjkmn"
+KEY = "7" * 64
 
 
 class FakePhone:
-    """The phone's Share on Wi-Fi on loopback: GET /state with the token, whatever `state` holds now."""
+    """The phone's Share on Wi-Fi on loopback: GET /state signed with the pairing's key (DECISIONS 751), answered
+    with its reply proof, whatever `state` holds now; `here` "paused" refuses a laptop off its home network."""
 
     def __init__(self) -> None:
         self.state: dict = {"status": "not recording", "age": 999, "minutes": 0, "session": None}
         self.asked = 0; self.auth: list[str | None] = []
+        self.here = "home"
         phone = self
 
         class H(BaseHTTPRequestHandler):
@@ -34,14 +38,19 @@ class FakePhone:
 
             def do_GET(self) -> None:
                 phone.asked += 1; phone.auth.append(self.headers.get("Authorization"))
-                if self.headers.get("Authorization") != f"Bearer {TOKEN}":
-                    code, body = 401, {"error": "token missing or wrong"}
+                reply = signed_ok(self, KEY)
+                if reply is None:
+                    code, body = 401, {"error": "signature"}
+                elif phone.here == "paused" and self.headers.get("X-Eeg-Home") == "0":
+                    code, body = 403, {"error": "not sharing on this Wi-Fi"}
                 elif self.path == "/state":
                     code, body = 200, phone.state
                 else:
                     code, body = 404, {"error": "no such route"}
                 raw = json.dumps(body).encode()
                 self.send_response(code); self.send_header("Content-Type", "application/json")
+                if reply:
+                    self.send_header("X-Eeg-Reply", reply)
                 self.send_header("Content-Length", str(len(raw))); self.end_headers(); self.wfile.write(raw)
 
         self.srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
@@ -59,11 +68,12 @@ def phone():
     p.close()
 
 
-def pair(local: Path, port: int, token: str = TOKEN) -> None:
+def pair(local: Path, port: int, key: str = KEY) -> None:
+    """link.json as phone_link.py writes it after a pairing (version 2: the key, no token)."""
     (local / "phone").mkdir(parents=True, exist_ok=True)
     (local / "phone" / "link.json").write_text(json.dumps(
-        {"version": 1, "laptop_key": "k" * 43, "paired": "2026-11-19T21:00:00+03:00",
-         "phone": {"address": "127.0.0.1", "port": port, "token": token}}))
+        {"version": 2, "key": key, "paired": "2026-11-19T21:00:00+03:00", "home": None,
+         "phone": {"address": "127.0.0.1", "port": port}}))
 
 
 def work(**kw) -> dict:
@@ -99,7 +109,7 @@ def test_a_work_session_recording_on_the_phone_is_a_green_ring(tmp_path, phone):
     assert v.kind == "reachable" and v.ring == "green"
     assert v.lines == ("Phone: paired, reachable",
                        "Headband: recording on the phone (work session since 12:26, signal good, alert)")
-    assert phone.auth == [f"Bearer {TOKEN}"]                     # the token in the header, nowhere else
+    assert phone.auth == [None]                                  # signed with the key: no token at all
     phone.state = work(level="getting_drowsy")
     assert view_of(tmp_path).lines[2] == "Drowsiness is rising: a break soon may help"
     phone.state = work(level="drowsy", hint={"reason": "drowsy", "at": "2026-11-20T09:50:00Z"})
@@ -156,10 +166,16 @@ def test_odd_answers_read_as_missing(tmp_path, phone):
 
 
 def test_unreachable_and_refused(tmp_path, phone):
-    pair(tmp_path, phone.port, token="wrongtoken12")
+    pair(tmp_path, phone.port, key="8" * 64)                    # the phone forgot this pairing
     v = view_of(tmp_path)
     assert v.ring == "dashed" and v.lines == (
-        "Phone: does not take this laptop's token any more (Pair phone… again)", "Headband: —")
+        "Phone: no longer knows this laptop (Pair phone… again)", "Headband: —")
+    pair(tmp_path, phone.port)
+    phone.here = "paused"                                       # the phone on another Wi-Fi, not allowed there
+    v = view_of(tmp_path)
+    assert v.ring == "dashed" and v.lines == (
+        "Phone: on another Wi-Fi: sharing paused there", "Headband: —")
+    phone.here = "home"
     port = phone.port
     phone.close()
     pair(tmp_path, port)
@@ -167,7 +183,27 @@ def test_unreachable_and_refused(tmp_path, phone):
     assert lk.result == "unreachable" and lk.address == "127.0.0.1"
     assert lw.phone_view(lk, None, 1) == lw.PhoneView(
         "unreachable", "dashed", ("Phone: not reachable (app asleep, or Share on Wi-Fi off?)", "Headband: —"))
-    assert TOKEN not in repr(lk)
+    assert KEY not in repr(lk)
+
+
+def test_an_old_pairing_asks_for_one_new_scan(tmp_path, phone):
+    (tmp_path / "phone").mkdir()
+    (tmp_path / "phone" / "link.json").write_text(json.dumps(
+        {"version": 1, "laptop_key": "k" * 43, "phone": {"address": "127.0.0.1", "port": phone.port, "token": TOKEN}}))
+    lk = look(tmp_path)
+    assert lk.result == "repair" and phone.asked == 0
+    assert lw.phone_view(lk, None, 1) == lw.PhoneView(
+        "repair", "dashed", ("Phone: paired the old way: Pair phone… once more (one scan)",))
+
+
+def test_the_menu_says_when_the_laptop_last_copied(tmp_path, phone):
+    pair(tmp_path, phone.port)
+    phone.state = {"status": "not recording", "age": 999, "minutes": 0}
+    lk = lw.look_at_phone(tmp_path, T0, probe=lambda: {"connected": True, "last_copy": "2026-11-20T14:05:09+03:00",
+                                                       "sharing": "home"})
+    assert lw.phone_view(lk, lk, 0).lines[0] == "Phone: sharing on its home Wi-Fi · copied 14:05"
+    lk = lw.look_at_phone(tmp_path, T0, probe=lambda: {"connected": False, "last_copy": None, "sharing": "here"})
+    assert lw.phone_view(lk, lk, 0).lines[0] == "Phone: sharing on a Wi-Fi allowed by hand"
 
 
 def test_one_failed_look_keeps_the_last_answer_two_do_not(tmp_path, phone):
@@ -369,4 +405,4 @@ def test_a_real_kept_link_starts_and_stops(tmp_path):
         k.stop()
     assert k.proc is None
     log = (tmp_path / "phone" / "link-keep.log").read_text()
-    assert "Remembered phone" in log and TOKEN not in log
+    assert "Remembered phone" in log and KEY not in log and "127.0.0.1" not in log

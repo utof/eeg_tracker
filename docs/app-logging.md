@@ -39,8 +39,9 @@ warning or an error also `error`, the first 25 frames of `stack`, the `screen` s
 - `recorder`: the night's notes (start, Stop, restarts), `connected <band>` with its signal strength and battery,
   `headband link dropped: <cause>`, `headband back after a drop` with `reconnect_ms`, `how` and `try`
 - `ble`: each scan's headband found and its signal strength (the BrainBit gives no live value, PRODUCT.md)
-- `share`: Share on Wi-Fi on and off, its addresses, its errors, its uptime (`up_s`), and every 10 minutes the
-  laptop copied anything: files and MB
+- `share`: Share on Wi-Fi on and off, its port and how many addresses it has (never the addresses), its errors, its
+  uptime (`up_s`), whether it shares on this Wi-Fi (home, allowed here, paused), the laptop's proofs before deleting,
+  and every 10 minutes the laptop copied anything: files and MB
 - `scoring` (each night's scoring time), `packing` (what was packed), `export` (files, bytes, time), `sessions` (a
   session held or let go), `sound` (a call or another app taking the sound), `auto` (every line of the headband
   watcher's own log), `usage` and `battery` (their switches)
@@ -53,7 +54,8 @@ warning or an error also `error`, the first 25 frames of `stack`, the `screen` s
 - `view` the screen on top: a page's widget name (`MeditationScreen`), a home tab (`tab:Signal`), `dialog`, `sheet`
 - `app` the app came to the front or left it
 - `tap`: `control` (its kind: `FilledButton`, `Switch`, `ListTile`, ... or `nothing` for a tap on no control),
-  `label` (the control's own words, at most 40 characters, every digit as `#`), `id` (its key), `long`
+  `label` (the control's own words, at most 40 characters, every digit as `#`; never words the owner typed, see
+  below), `id` (its key), `long`
 - `scroll` (by finger): `axis`, `dir`, `px`, `ms`, `reach` (how far down the page, 0-1); `drag`: a swipe that
   scrolled nothing (the 3D head): `dir`, `px`, `ms`, `fingers`
 - `feature` started or stopped with how long it ran (`s`); `setting` changed
@@ -82,10 +84,20 @@ The features (`on`, `feature`): `app-open`, `night`, `headband` (streaming), `li
 - Nothing outside this app: no other app, no window, no notification. That would take an Android accessibility
   service, and there is none. A switch for one (to see which apps the owner uses around a session) is a possible
   opt-in later, not built.
-- Nothing typed into a text field (a dream answer, a note, an experiment's name as you type it). A tap's label is
-  the tapped control's own words: a button says what it does; a row may show something the owner wrote earlier (an
-  experiment's name), and then those words, digits as `#`, are its label.
-- No position, no network names or addresses, no sound, no EEG in these files (the recordings are their own files).
+- Nothing the owner typed, anywhere in these files: not in a text field (a dream answer, a note, an experiment's
+  name as you type it), and not later either, when the app shows it back (an archive tag, an experiment's line, a
+  "Try these" note, a stop plan, a DIY board's channel names). A tap's label is the tapped control's own words: a
+  button says what it does, a row says what it is. Where a row shows something the owner wrote, the app marks those
+  words (`OwnText`, `lib/logs/own_text.dart`) and the label skips them, and a tooltip inside a mark; the label then
+  falls to the row's other words, its kind or nothing, and `control` and `id` stay. Whoever shows owner-typed text
+  inside or beside a control wraps it in `OwnText` (`test/logs_private_test.dart` checks the places that sit inside a control). A site
+  name is read only when it is a 10-10 name (`O1`, `Fz`), the same word for everybody.
+- No experiment's name or question in any file: the log carries only fixed words (`session:Meditation`, the screen
+  `Self-experiments`). A session's name is the fixed title of its screen, never typed text (a test reads every
+  `KeepSpec` title).
+- No position, no network names, no sound, no EEG in these files (the recordings are their own files). No network
+  address either: the app log writes any IPv4 address as `#.#.#.#` (message, data and error alike), and the DIY
+  board's `.log` says "datagrams from the board on the Wi-Fi" and counts its senders, never names one.
 
 ## Turning it off and deleting it
 

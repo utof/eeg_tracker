@@ -193,6 +193,23 @@ void main() {
       expect(logs.screen, 'MeditationScreen');
     });
 
+    test('a network address in a line, its data or its error is never written (DECISIONS 757)', () async {
+      Logs.start(engine: 'screen', recordingsDir: () async => null, catchErrors: false).attach(tmp);
+      AppLog('share').error(
+        'the laptop at 192.168.1.20 asked',
+        error: const SocketException('Connection refused', address: null, port: 8080, osError: OSError('to 10.0.0.7', 111)),
+        data: {'from': '172.16.0.9:8080', 'n': 3, 'more': ['a 192.168.1.5 b']},
+      );
+      final text = logFiles(tmp, kind: LogKind.app).single.readAsStringSync();
+      expect(text, isNot(contains('192.168')));
+      expect(text, isNot(contains('10.0.0.7')));
+      expect(text, isNot(contains('172.16')));
+      final l = _lines(logFiles(tmp, kind: LogKind.app).single).last;
+      expect(l['msg'], 'the laptop at #.#.#.# asked');
+      expect((l['data']! as Map)['from'], '#.#.#.#:8080');
+      expect((l['data']! as Map)['n'], 3);
+    });
+
     test('timed: how long it took, or the failure with its time; rethrown', () async {
       Logs.start(engine: 'screen', recordingsDir: () async => null, catchErrors: false).attach(tmp);
       final log = AppLog('scoring');

@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../headband/diy/e9.dart' show diyUdpPort;
 import '../headband/diy/settings.dart';
+import '../logs/own_text.dart';
 import '../recorder/status.dart' show BoardLive;
 import 'form_parts.dart' show Para;
 import 'meditation_view.dart' show MarkShape, StateMark;
@@ -95,10 +96,12 @@ class _Row extends StatelessWidget {
           const SizedBox(width: 16),
           Expanded(
             flex: 2,
-            child: SelectableText(
-              value,
-              textAlign: TextAlign.end,
-              style: text.titleLarge?.copyWith(fontFeatures: tabular),
+            child: OwnText(
+              child: SelectableText(
+                value,
+                textAlign: TextAlign.end,
+                style: text.titleLarge?.copyWith(fontFeatures: tabular),
+              ),
             ),
           ),
         ],
@@ -137,11 +140,13 @@ class DiySection extends StatelessWidget {
         if (m.address != null) _Row('This phone', m.address!) else _NoWifi(),
         _Row('Port', 'UDP ${m.port}'),
         const SizedBox(height: 12),
-        Text(
-          'In the firmware\'s board_config.h: USE_WIFI_UDP = true, your Wi-Fi\'s name and password, and UDP_HOST = '
-          '${m.address ?? 'this phone\'s address'}. The phone and the board must be on the same Wi-Fi. The address can '
-          'change when the phone joins again; reserving it in the router keeps it.',
-          style: muted,
+        OwnText(
+          child: Text(
+            'In the firmware\'s board_config.h: USE_WIFI_UDP = true, your Wi-Fi\'s name and password, and UDP_HOST = '
+            '${m.address ?? 'this phone\'s address'}. The phone and the board must be on the same Wi-Fi. The address '
+            'can change when the phone joins again; reserving it in the router keeps it.',
+            style: muted,
+          ),
         ),
         const SectionHeading('Channels'),
         _ChannelNames(names: m.names, onSave: onNames),
@@ -256,7 +261,7 @@ class _ChannelNamesState extends State<_ChannelNames> {
                               children: [
                                 Text('CH${i + 1}', style: text.bodyMedium?.copyWith(color: Night.inkMuted)),
                                 const SizedBox(height: 4),
-                                Text(widget.names[i], style: text.titleLarge, overflow: TextOverflow.ellipsis),
+                                OwnText(child: Text(widget.names[i], style: text.titleLarge, overflow: TextOverflow.ellipsis)),
                               ],
                             ),
                           ),
@@ -341,10 +346,12 @@ class DiyNightBlock extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 20),
-        Text(
-          'UDP ${b.link.contains('port') ? _port(b.link) : diyUdpPort}${b.sender == null ? '' : ' from ${b.sender}'}'
-          ' · $lost${b.bad > 0 ? ' · ${b.bad} damaged' : ''}',
-          style: muted?.copyWith(fontFeatures: tabular),
+        OwnText(
+          child: Text(
+            'UDP ${b.link.contains('port') ? _port(b.link) : diyUdpPort}${b.sender == null ? '' : ' from ${b.sender}'}'
+            ' · $lost${b.bad > 0 ? ' · ${b.bad} damaged' : ''}',
+            style: muted?.copyWith(fontFeatures: tabular),
+          ),
         ),
       ],
     );
@@ -371,7 +378,7 @@ class _Level extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(name, style: text.titleMedium, overflow: TextOverflow.ellipsis),
+            OwnText(child: Text(name, style: text.titleMedium, overflow: TextOverflow.ellipsis)),
             const SizedBox(height: 6),
             FittedBox(
               fit: BoxFit.scaleDown,
@@ -398,9 +405,11 @@ class DiyIdleBlock extends StatelessWidget {
       children: [
         Text('DIY board (test). Not connected.', style: text.bodyLarge),
         const SizedBox(height: 8),
-        Text(
-          'Channels ${names.join(' ')}. No contact or battery reading from this board.',
-          style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.4),
+        OwnText(
+          child: Text(
+            'Channels ${names.join(' ')}. No contact or battery reading from this board.',
+            style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.4),
+          ),
         ),
       ],
     );

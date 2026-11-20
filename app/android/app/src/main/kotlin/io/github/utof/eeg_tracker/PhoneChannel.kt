@@ -38,6 +38,9 @@ import java.util.Date
 import java.util.Locale
 
 /** Small phone facts and settings shortcuts for the screen and the recorder service ("eeg_tracker/phone"). */
+
+/** An IPv4 address, for keeping addresses out of logcat. */
+private val IPV4 = Regex("""\b\d{1,3}(\.\d{1,3}){3}\b""")
 class PhoneChannel private constructor(private val context: Context) : MethodChannel.MethodCallHandler {
     companion object {
         const val NAME = "eeg_tracker/phone"
@@ -239,7 +242,8 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
         }
         val note = seen.joinToString("; ")
         if (nets.isEmpty()) {
-            if (note != lastNoWifi) Log.w("eeg_tracker", "share: no Wi-Fi IPv4 address from Android: $note")
+            // logcat keeps no network addresses (DECISIONS 757): the note says which source saw what kind of address
+            if (note != lastNoWifi) Log.w("eeg_tracker", "share: no Wi-Fi IPv4 address from Android: ${note.replace(IPV4, "#.#.#.#")}")
             lastNoWifi = note
         } else {
             lastNoWifi = null
@@ -340,6 +344,7 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
         val pm = context.getSystemService(PowerManager::class.java)
         val m = HashMap<String, Any?>()
         m["sdkInt"] = Build.VERSION.SDK_INT
+        m["targetSdk"] = context.applicationInfo.targetSdkVersion
         m["ignoringBatteryOptimizations"] = pm?.isIgnoringBatteryOptimizations(context.packageName)
         m["powerSaveMode"] = pm?.isPowerSaveMode
         m["deviceIdle"] = pm?.isDeviceIdleMode

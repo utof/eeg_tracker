@@ -7,6 +7,7 @@ import '../archive/bands.dart';
 import '../archive/items.dart';
 import '../archive/raw_remover.dart' show OnLaptop;
 import '../archive/tags.dart';
+import '../logs/own_text.dart';
 import '../recorder/nights.dart' show nightLabel;
 import 'archive_timeline.dart';
 import 'archive_view.dart' show sizeWords, lengthText, spanText;
@@ -140,7 +141,7 @@ class RecordingView extends StatelessWidget {
                   constraints: const BoxConstraints(minHeight: 56),
                   child: Row(
                     children: [
-                      Expanded(child: Text(t.label, style: text.bodyLarge)),
+                      Expanded(child: OwnText(child: Text(t.label, style: text.bodyLarge))),
                       Text(spanText(t.start, t.end), style: text.titleMedium?.copyWith(fontFeatures: tabular)),
                       const SizedBox(width: 8),
                       const Icon(Icons.edit_outlined, size: 20, color: Night.inkMuted),

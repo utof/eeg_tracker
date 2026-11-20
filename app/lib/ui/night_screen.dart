@@ -317,7 +317,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     keepScreenOn: (on) => Phone.keepScreenOn(on: on, session: false),
     // the app's own server between nights holds the Wi-Fi lock too (DECISIONS 612); the recorder holds its own
     wifiLock: (on) => Phone.wifiLock(on: on, who: 'screen'),
-    networkChanges: NetworkWatch.changes(), // the paired laptop hears from this phone at once (DECISIONS 676)
+    networkChanges: NetworkWatch.changes(), // the server looks at its Wi-Fi again at once
   )..addListener(_onScoring);
 
   /// Pairing with a laptop by one scan (DECISIONS rows 530-539): its QR code opens the app with a pair link.
@@ -345,8 +345,17 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       if (_ticks % 2 == 0 && (_running || _clockState.endMs != null)) unawaited(_refreshAlarm());
     });
     unawaited(_refresh());
+    // the laptop proved again that it holds files due to leave the phone (DECISIONS 756): delete those now, while the
+    // proof is fresh
+    _share.proofs.addListener(_onProofs);
     _links.onOpen = () => unawaited(_takeLink());
     WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_takeLink()));
+  }
+
+  void _onProofs() {
+    final dir = _dir;
+    if (dir == null || _running || _packing != null) return;
+    _packing = _moveOld(dir).whenComplete(() => _packing = null);
   }
 
   Future<void> _takeLink() async {
@@ -368,6 +377,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     _scoring?.removeListener(_onScoring);
     _soFar?.removeListener(_onScoring);
     _links.onOpen = null;
+    _share.proofs.removeListener(_onProofs);
     _share.dispose();
     _clock?.cancel();
     FlutterForegroundTask.removeTaskDataCallback(_onData);
@@ -379,7 +389,6 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _resumedAtMs = DateTime.now().millisecondsSinceEpoch;
-      _share.resumed(); // the paired laptop hears from this phone again (DECISIONS 678)
       unawaited(_refresh());
     }
   }
@@ -900,9 +909,13 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
             until: DateTime.fromMillisecondsSinceEpoch(_share.config.offAtMs),
             night: _running,
             laptop: _share.config.laptop,
+            here: _share.status.here,
+            hereUntil: _share.config.hereUntilMs > 0 ? DateTime.fromMillisecondsSinceEpoch(_share.config.hereUntilMs) : null,
+            copied: copiedText(_share.status, _share.config.laptop?.name),
           ),
           onNewToken: _share.newToken,
           onForgetLaptop: _share.forgetLaptop,
+          onShareHere: _share.shareHere,
         );
       },
     ),
