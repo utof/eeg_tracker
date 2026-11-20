@@ -26,10 +26,15 @@ class PushJobService : JobService() {
     private var running: JobParameters? = null
 
     override fun onStartJob(params: JobParameters): Boolean {
-        if (running != null || busy) return false // one push at a time; the other job's next turn comes
+        val soon = params.jobId != REGULAR_ID
+        if (running != null || busy) {
+            // one push at a time. The regular job's next turn comes by itself; the one after a recording is asked for
+            // again in a minute, since the push that runs may have listed the files before the recording ended.
+            if (soon) again(applicationContext)
+            return false
+        }
         busy = true
         running = params
-        val soon = params.jobId == SOON_ID
         val loader = FlutterInjector.instance().flutterLoader()
         loader.startInitialization(applicationContext)
         loader.ensureInitializationCompleteAsync(applicationContext, null, main) {
@@ -66,7 +71,7 @@ class PushJobService : JobService() {
     override fun onStopJob(params: JobParameters): Boolean {
         val mine = running === params
         if (mine) stopEngine()
-        return mine && params.jobId == SOON_ID
+        return mine && params.jobId != REGULAR_ID
     }
 
     private fun finish(params: JobParameters, again: Boolean) {
@@ -98,6 +103,7 @@ class PushJobService : JobService() {
     companion object {
         private const val REGULAR_ID = 877201
         private const val SOON_ID = 877202
+        private const val AGAIN_ID = 877203
         private const val EVERY_MS = 15 * 60 * 1000L
 
         @Volatile
@@ -115,6 +121,7 @@ class PushJobService : JobService() {
             if (!on) {
                 js.cancel(REGULAR_ID)
                 js.cancel(SOON_ID)
+                js.cancel(AGAIN_ID)
                 return
             }
             if (js.getPendingJob(REGULAR_ID) != null) return
@@ -125,7 +132,15 @@ class PushJobService : JobService() {
         fun soon(context: Context) {
             val js = scheduler(context)
             if (js.getPendingJob(REGULAR_ID) == null) return // not armed: sharing is off or no laptop is paired
-            js.schedule(builder(context, SOON_ID).setMinimumLatency(2000).setOverrideDeadline(60 * 60 * 1000L).build())
+            js.schedule(builder(context, SOON_ID).setMinimumLatency(2000).build())
+        }
+
+        /** The push after a recording found another one running: once more in a minute. */
+        private fun again(context: Context) {
+            try {
+                scheduler(context).schedule(builder(context, AGAIN_ID).setMinimumLatency(60 * 1000L).build())
+            } catch (_: Throwable) {
+            }
         }
     }
 }
