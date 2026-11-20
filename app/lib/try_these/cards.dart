@@ -36,6 +36,7 @@ enum TryOpen {
   study,
   memory,
   ownBle,
+  archive,
 }
 
 /// The button's words for each screen.
@@ -60,6 +61,7 @@ const Map<TryOpen, String> tryOpenLabels = {
   TryOpen.study: 'Open Study reminders',
   TryOpen.memory: 'Open Memory cues',
   TryOpen.ownBle: 'Open Headband connection',
+  TryOpen.archive: 'Open the archive',
 };
 
 /// Where a card comes from in app/README.md: a `## ` section (its title without the part in brackets) and, when it
@@ -227,6 +229,26 @@ const List<TryCard> tryCards = [
     opens: TryOpen.export,
     readme: [TryRef('Export data', 'set it up once, then export every few days')],
     auto: true,
+  ),
+  TryCard(
+    id: 'archive',
+    group: TryGroup.tonight,
+    title: 'The archive: a day of recordings',
+    what: 'Every recording on the phone by day, how it started and what was found in it; open one, tag it, delete what you do not need.',
+    takes: '5 minutes, the morning after a night',
+    steps: [
+      'More, Open the archive. Find last night: is it one recording, and does it say who started it?',
+      'Open it. Wait for the lanes to fill, then tap a few bands and the clock to see the signal.',
+      'Add a tag where you know what you did: sleep, a walk, a meeting.',
+      'Delete an old test recording you do not need. The danger zone asks twice when it is the only copy.',
+    ],
+    tell: [
+      'Did the bands match what you did? Which ones were wrong, at what time?',
+      'How long the lanes took to fill for a night.',
+      'Anything you wanted to delete and could not, and what it said.',
+    ],
+    opens: TryOpen.archive,
+    readme: [TryRef('Archive', 'look through a day, tag it, delete one')],
   ),
   TryCard(
     id: 'smart-alarm',

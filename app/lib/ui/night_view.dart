@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../recorder/contact.dart';
 import '../recorder/status.dart' show BoardLive;
 import 'alarm_view.dart';
+import 'archive_view.dart' show ArchiveEntry;
 import 'diy_board_view.dart';
 import 'home_tabs.dart';
 import 'lights_off_view.dart';
@@ -174,6 +175,7 @@ class NightView extends StatelessWidget {
     this.onHeadbandPage,
     this.tab,
     this.onLicences,
+    this.onArchive,
   });
 
   final NightViewModel model;
@@ -220,6 +222,9 @@ class NightView extends StatelessWidget {
 
   /// The licences page (More).
   final VoidCallback? onLicences;
+
+  /// The Archive (More; DECISIONS 700-709): every recording, its timeline and tags, and deleting; null: no section.
+  final VoidCallback? onArchive;
 
   @override
   Widget build(BuildContext context) {
@@ -282,6 +287,8 @@ class NightView extends StatelessWidget {
           // Between nights the Headband section also leads to the connection page (the probe and the switch).
           if (!m.running) ...[...headband, OwnBleEntry(onReturn: onHeadbandPage, diy: m.diy)],
           const TabStart(HomeTab.more),
+          // The Archive leads More: every recording on the phone, open to browse during a night too (DECISIONS 700-709).
+          if (onArchive != null) ...[const SectionHeading('Archive'), ArchiveEntry(onOpen: onArchive)],
           // A night being recorded is not finished, so Export waits for Stop (DECISIONS rows 56, 150); Share on
           // Wi-Fi is there during the night too (rows 220-229).
           if (m.share != null || (!m.running && (m.nightsOnPhone > 0 || m.exportLine != null))) ...[

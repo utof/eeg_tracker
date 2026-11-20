@@ -264,23 +264,30 @@ abstract final class ActivityRule {
   static const int joinEpochs = 1;
 }
 
-/// The list's minutes of every kept pass, by recording id, read through a summary index (the passes themselves are
-/// tens of KB each).
-Map<String, Map<String, double>> keptMinutes(Directory filesDir) {
+/// What the list knows of each kept pass, by recording id: the raw files' key it was made for, its minutes per activity
+/// (null when it could not run) and why not. Read through a summary index (the passes themselves are tens of KB each).
+Map<String, ({String key, Map<String, double>? minutes, String? why})> keptPasses(Directory filesDir) {
   final index = SummaryIndex(File('${filesDir.path}/cache/archive-seen-index.json'), version: seenVersion);
-  final out = <String, Map<String, double>>{};
+  final out = <String, ({String key, Map<String, double>? minutes, String? why})>{};
   final sums = index.summaries(Directory('${filesDir.path}/$seenFolder'), '.json', (f) {
     final j = jsonDecode(f.readAsStringSync());
     return j is Map && j['version'] == seenVersion ? {'key': j['key'], 'minutes': j['minutes'], 'why': j['why']} : null;
   });
   for (final e in sums.entries) {
     final v = e.value;
-    if (v is! Map || v['minutes'] is! Map) continue;
+    if (v is! Map || v['key'] is! String) continue;
     final id = e.key.substring(0, e.key.length - '.json'.length);
-    out[id] = {
-      for (final m in (v['minutes'] as Map).entries)
-        if (m.key is String && m.value is num) m.key as String: (m.value as num).toDouble(),
-    };
+    final m = v['minutes'];
+    out[id] = (
+      key: v['key'] as String,
+      minutes: m is Map
+          ? {
+              for (final x in m.entries)
+                if (x.key is String && x.value is num) x.key as String: (x.value as num).toDouble(),
+            }
+          : null,
+      why: v['why'] is String ? v['why'] as String : null,
+    );
   }
   return out;
 }

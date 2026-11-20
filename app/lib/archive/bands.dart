@@ -11,8 +11,6 @@
 //   Your tags    the spans you tagged
 // A band is a run of 30 s epochs (bridging one odd epoch), at least the rule's length (seen.dart ActivityRule: planning
 // values). Asleep wins: eyes closed, drowsy and talking are not shown asleep. Plain Dart.
-import 'dart:math' as math;
-
 import '../detectors/detectors.dart' show epochS;
 import 'items.dart';
 import 'seen.dart';
@@ -345,5 +343,3 @@ const List<Lane> lanes = Lane.values;
 
 /// Rounds [d] to whole minutes in words ("6 h 12", "14 min").
 String durationWords(Duration d) => _minutes(d);
-
-int clampInt(int v, int lo, int hi) => math.max(lo, math.min(hi, v));

@@ -138,6 +138,32 @@ DeletePlan planDelete(ArchiveItem item, DeleteMode mode) {
   return DeletePlan(mode: mode, freedBytes: item.rawBytes, removes: raw, keeps: stats, onlyCopy: onlyCopy);
 }
 
+/// What deleting [items] together would remove and keep (a day of the list); one item's own words for one.
+DeletePlan planDeleteAll(List<ArchiveItem> items, DeleteMode mode) {
+  if (items.length == 1) return planDelete(items.single, mode);
+  final plans = [for (final i in items) planDelete(i, mode)];
+  final sets = items.fold(0, (n, i) => n + i.sets.where((s) => !s.removed && s.samplesBytes > 0).length);
+  final logs = items.any((i) => i.sessions.any((s) => s.rawCompanions.isNotEmpty));
+  final reports = items.where((i) => i.report != null).length;
+  final sessions = items.fold(0, (n, i) => n + i.sessions.length);
+  final tags = items.fold(0, (n, i) => n + i.manualTags.length);
+  final raw = [if (sets > 0) 'the raw signal (${_plural(sets, 'file set')})', if (logs) 'the whole session logs'];
+  final stats = [
+    if (reports > 0) _plural(reports, 'sleep report'),
+    if (sessions > 0) 'the results of ${_plural(sessions, 'session')}',
+    if (tags > 0) 'your ${_plural(tags, 'tag')}',
+    if (items.any((i) => i.sets.isNotEmpty)) "the file sets' logs",
+  ];
+  final everything = mode == DeleteMode.everything;
+  return DeletePlan(
+    mode: mode,
+    freedBytes: plans.fold(0, (n, p) => n + p.freedBytes),
+    removes: everything ? [...raw, ...stats] : raw,
+    keeps: everything ? const [] : stats,
+    onlyCopy: plans.any((p) => p.onlyCopy),
+  );
+}
+
 /// What a delete did.
 class DeleteOutcome {
   const DeleteOutcome({required this.freedBytes, required this.refused});

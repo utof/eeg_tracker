@@ -125,7 +125,7 @@ void main() {
       writeJson(File('${files.path}/work-sessions/2026-11-18-090000.work.json'), {
         'start': at(9, 0).toIso8601String(),
         'end': at(11, 30).toIso8601String(),
-        'epochs': const [],
+        'epochs': const <Object?>[],
       });
       writeJson(File('${files.path}/work-sessions/2026-11-18-160000.work.json'), {
         'start': at(16, 0).toIso8601String(),
@@ -180,7 +180,7 @@ void main() {
           {'file': '$night.f32', 'bytes': 1},
         ],
         'total': {'asleep_min': 0},
-        'periods': const [],
+        'periods': const <Object?>[],
       });
       final l = listArchive(files);
       expect(l.items, hasLength(1));
@@ -336,7 +336,7 @@ void main() {
       expect(planDelete(i, DeleteMode.rawOnLaptop).onlyCopy, isFalse);
       final out = deleteItem(files, i, DeleteMode.rawOnLaptop, all: l.items, remover: PhoneRawRemover(files), now: later);
       expect(out.complete, isTrue);
-      expect(jsonDecode(File('${rec.path}/$s$removedSuffix').readAsStringSync())['on_laptop'], isTrue);
+      expect((jsonDecode(File('${rec.path}/$s$removedSuffix').readAsStringSync()) as Map)['on_laptop'], isTrue);
       expect(listArchive(files).items.single.removedToLaptop, isTrue);
     });
 
@@ -364,7 +364,7 @@ void main() {
           {'file': '$dream.f32', 'bytes': 1},
         ],
         'total': {'asleep_min': 0},
-        'periods': const [],
+        'periods': const <Object?>[],
       });
       TagStore(files).add(dream, ManualTag(start: at(22, 30), end: at(22, 31), label: 'sleep'));
       final keep = writeSet(rec, at(5, 0, 1), seconds: 10);
@@ -414,7 +414,7 @@ void main() {
       final out = deleteItem(files, l.items.single, DeleteMode.rawOnly, all: l.items, remover: PhoneRawRemover(files), now: later);
       expect(out.complete, isTrue);
       expect(packedFileOf(File('${rec.path}/$s.f32')).existsSync(), isFalse);
-      final f = (jsonDecode(File('${rec.path}/$s$removedSuffix').readAsStringSync())['files'] as List).first as Map;
+      final f = ((jsonDecode(File('${rec.path}/$s$removedSuffix').readAsStringSync()) as Map)['files'] as List).first as Map;
       expect(f['name'], '$s.f32');
       expect(f['bytes'], 30 * 250 * 20);
       expect(f['phone_name'], '$s.f32.gz');
@@ -450,7 +450,7 @@ void main() {
       (j['seen'] as Map)['eyes'] = 'cc';
       kept.writeAsStringSync(jsonEncode(j));
       expect(seeAndKeep(files, a, f32).seen!.eyes, 'cc');
-      expect(keptMinutes(files)[a], isNotNull);
+      expect(keptPasses(files)[a]!.minutes, isNotNull);
       // the recording grew: read again
       File('${rec.path}/$a.idx').writeAsBytesSync([...File('${rec.path}/$a.idx').readAsBytesSync()]);
       File('${rec.path}/$a.f32').setLastModifiedSync(DateTime.now().add(const Duration(seconds: 5)));

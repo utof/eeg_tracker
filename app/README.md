@@ -29,6 +29,7 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
 - [Sleep report](#sleep-report): how long the phone takes to score a night; the noise, jaw and movement numbers
 - [Morning check-in](#morning-check-in) and [Trends](#trends): the first check-ins on two mornings (about 10 minutes); the owner step is under Trends
 - [Export data](#export-data-everything-every-few-days): set it up once, then every few days
+- [Archive](#archive-every-recording-its-timeline-and-tags): look through a day, tag it, delete one (5 minutes)
 
 **Another night**
 
@@ -1680,6 +1681,47 @@ The app saves what it has and reconnects by itself: first straight to the same h
 because Android blocks scans while the screen is off), after 2, 5, 10, 30 s and then every minute; every
 third try is a short scan instead. Each try is written in the night's `.log` with its time (`drop`,
 `reconnect try`, `reconnected`), so gaps can be marked later. It never stops trying until you press Stop.
+
+## Archive (every recording, its timeline and tags)
+
+**More** → **Open the archive** lists everything the phone keeps, newest first, under each day (a day runs from 04:00
+to 04:00, as in Trends): every night, nap, dream catcher and sound session, check-in, calibration, work session and
+meditation. The bar on top shows the space each kind takes; tap a part of it (or its word) to see only that kind. Each
+row says when it ran and how long, what it is and **who started it** ("You: Start night", "By itself: the headband
+watcher", "The headband watcher asked; you said Yes"), its tags (the button gives one: Start night means "sleep"; yours
+follow), what was found in it, its size and whether the laptop holds a checked copy.
+
+A night is one recording even when the headband dropped out and came back: the recorder's reconnects join it, and so
+does whatever its sleep report scored with it (the dream catcher before it, a morning nap). Open a recording for its
+**timeline**: lanes for Sleep (the sleep report's stages, where scored), Eyes closed, Drowsy, Talking (jaw muscle,
+also chewing), Moving, Signal (none, or noisy), Work and Meeting (from the work session's file), Sessions and Your
+tags. Zoom with two fingers or the buttons; tap a band to see it, anywhere else to see the raw signal at that moment
+(every channel, as recorded or filtered, 5 to 30 seconds, earlier and later). **Add a tag** (sleep, work, walk,
+meeting, meditation, rest, or your own word) on any span; tags are kept per recording in `archive/` and leave with
+Export data and Share on Wi-Fi.
+
+The activity lanes come from the detectors the rest of the app uses, run once per recording in the background while
+the archive is open (a night takes about a minute on the laptop; the phone is untested), kept until the recording
+changes, and never while a night or a session records. They need O1 O2 T3 T4 at 250 a second: another layout shows
+its sessions and tags only, and says why. All their limits are planning values, not checked against what you did:
+your tags are the check.
+
+**Deleting** (the owner's rules): when the laptop holds a checked copy of a recording's raw files, **Remove from this
+phone** removes them (the raw samples and index) and keeps every statistic: the sleep report, the session's results,
+the logs and your tags. Anything only on this phone is the **Danger zone**'s, in red: it says it is the only copy and
+asks twice, and only there can you pick **Everything** (the statistics too). A day's menu does the same for the whole
+day. Nothing in use goes: the night being recorded, a running session, the night being scored, or anything written in
+the last hour. Until the laptop reports its checked copies (the move-off-phone work), every delete is the Danger zone's.
+
+### Owner step: look through a day, tag it, delete one (5 minutes, the morning after a night)
+
+1. **More** → **Open the archive**. Find last night: is it one row, with the right start and end, and does it say
+   who started it?
+2. Open it. The lanes fill within a minute or two. Tap a few bands, then a moment on the clock: the signal page opens.
+3. Add a tag where you know what you did (sleep, a walk, a meeting).
+4. Delete an old test recording you do not need: the Danger zone asks twice when it is the only copy.
+5. Tell the assistant: which bands were wrong and when; how long the lanes took for a night; anything you could not
+   delete, and what it said.
 
 ## Export data (everything, every few days)
 

@@ -27,6 +27,7 @@ import '../sleep/onnx_runs.dart';
 import '../sleep/report.dart';
 import '../sleep/scorer.dart';
 import 'alarm_view.dart';
+import 'archive_screen.dart' show ArchiveScreen;
 import '../sharp/prompts.dart' show ChannelSharpPhone;
 import '../study/arm.dart' show rearmInBackground;
 import 'dream_screen.dart';
@@ -787,6 +788,13 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// The Archive: every recording and session on the phone, during a night too (deleting refuses what is in use;
+  /// DECISIONS 700-709).
+  Future<void> _archive() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ArchiveScreen()));
+    unawaited(_refresh());
+  }
+
   /// Export data: everything new, from its own page, only between nights (DECISIONS rows 150-156).
   Future<void> _exportData() async {
     if (_running) return;
@@ -1059,6 +1067,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onAwake: _awake,
       onHeadbandPage: () => unawaited(_refresh()),
       onLicences: () => showLicensePage(context: context, applicationName: 'EEG Tracker'),
+      onArchive: _archive,
     );
     // the bottom bar (DECISIONS 597); the alarm's wake face fills the screen with none
     if (model.ringing != null) return page(null);
