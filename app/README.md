@@ -347,6 +347,23 @@ APKs under the ARM translation, x86_64 API 36 image):
   the emulator's translator: most likely the translator's doing; a phone (arm64, no translator) cannot be tried here.
   Either way a hang there is now a stall the recorder ends, not a frozen app.
 
+12. **When I put the headband on** (DECISIONS rows 600-609; a **debug** build: only it has the fake "headband came
+   near"): `flutter build apk --debug --target-platform android-x64`, install with `-g`, and allow background starts the
+   way the owner's fallback does (`adb shell dumpsys deviceidle whitelist +io.github.utof.eeg_tracker`; the emulator
+   has no companion pairing). Open Settings, **When I put the headband on**. Put "now" inside the bedtime window
+   (`run-as io.github.utof.eeg_tracker` and write `files/auto-start/settings.json` with `bed_min` an hour ahead), press
+   Home, then `adb shell am broadcast -n io.github.utof.eeg_tracker/.AutoDebugReceiver -a
+   io.github.utof.eeg_tracker.auto.DEBUG_PRESENCE --es fake worn` (`--es fake off` for a headband off the head,
+   `--ez force true` for a check past the quiet time). Within seconds the quiet notification "Headband on. Start the
+   night?" shows; **Not now** must leave `files/recordings/` empty, and **Start the night** must leave one run of the
+   simulated minutes (its `.log` begins `auto-start: the headband was found on`) and the recorder's notification
+   ("Looking for the headband"). `files/auto-start/log.jsonl` has every step. First run 2026-11-20 (`0b92c6f`,
+   API 36 x86_64, `hw.cpu.ncore=2`): the app-opened check searched and found nothing, the fake presence asked within
+   13 s, Not now wrote nothing, a forced check with the headband off logged `worn: false`, and Start the night saved
+   20 s (4,960 samples) as `2026-11-20-032859` and started the recorder from the watcher's own engine. The first try
+   found that engine could not start (its entry point sat outside the libraries main reaches); it now sits in
+   `main.dart`.
+
 The plugin's JVM tests: `cd android && ./gradlew :neurosdk2:testDebugUnitTest` after one `flutter build apk`.
 
 **The rest of the night pipeline review and BrainBit's calls off the main thread together** (seventh integration,
