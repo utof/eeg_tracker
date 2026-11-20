@@ -39,8 +39,9 @@ warning or an error also `error`, the first 25 frames of `stack`, the `screen` s
 - `recorder`: the night's notes (start, Stop, restarts), `connected <band>` with its signal strength and battery,
   `headband link dropped: <cause>`, `headband back after a drop` with `reconnect_ms`, `how` and `try`
 - `ble`: each scan's headband found and its signal strength (the BrainBit gives no live value, PRODUCT.md)
-- `share`: Share on Wi-Fi on and off, its addresses, its errors, its uptime (`up_s`), and every 10 minutes the
-  laptop copied anything: files and MB
+- `share`: Share on Wi-Fi on and off, its port and how many addresses it has (never the addresses), its errors, its
+  uptime (`up_s`), whether it shares on this Wi-Fi (home, allowed here, paused), the laptop's proofs before deleting,
+  and every 10 minutes the laptop copied anything: files and MB
 - `scoring` (each night's scoring time), `packing` (what was packed), `export` (files, bytes, time), `sessions` (a
   session held or let go), `sound` (a call or another app taking the sound), `auto` (every line of the headband
   watcher's own log), `usage` and `battery` (their switches)

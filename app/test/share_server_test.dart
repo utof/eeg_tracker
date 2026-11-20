@@ -663,6 +663,17 @@ void main() {
       expect(r.body, [95, 96, 97, 98, 99]);
       expect(r.headers.value('content-range'), 'bytes 95-99/100');
 
+      // as shelf_static 1.2.0: a number too big for an int is no 500; a suffix of nothing is the whole file
+      const huge = '99999999999999999999';
+      r = await ask('/files/recordings/2026-11-19-030000.f32', headers: {'Range': 'bytes=-$huge'});
+      expect((r.code, r.body.length), (206, 100));
+      r = await ask('/files/recordings/2026-11-19-030000.f32', headers: {'Range': 'bytes=90-$huge'});
+      expect((r.code, r.body.length), (206, 10));
+      r = await ask('/files/recordings/2026-11-19-030000.f32', headers: {'Range': 'bytes=$huge-'});
+      expect(r.code, 416);
+      r = await ask('/files/recordings/2026-11-19-030000.f32', headers: {'Range': 'bytes=-0'});
+      expect((r.code, r.body.length), (200, 100));
+
       // nothing new yet: 416 with the size
       r = await ask('/files/recordings/2026-11-19-030000.f32', headers: {'Range': 'bytes=100-'});
       expect(r.code, 416);
@@ -718,6 +729,17 @@ void main() {
       expect(parseRange('lines=1-2', 100), isNull);
       expect(() => parseRange('bytes=100-', 100), throwsRangeError);
       expect(() => parseRange('bytes=0-', 0), throwsRangeError);
+      // shelf_static 1.2.0's rules: no FormatException (a 500) from a number too big for an int, and a suffix that
+      // selects no bytes is ignored (the whole file, 200), not refused
+      const huge = '99999999999999999999';
+      expect(parseRange('bytes=-$huge', 100), (start: 0, end: 99));
+      expect(parseRange('bytes=0-$huge', 100), (start: 0, end: 99));
+      expect(() => parseRange('bytes=$huge-', 100), throwsRangeError);
+      expect(() => parseRange('bytes=$huge-$huge', 100), throwsRangeError);
+      expect(parseRange('bytes=$huge-5', 100), isNull);
+      expect(parseRange('bytes=-0', 100), isNull);
+      expect(parseRange('bytes=-5', 0), isNull);
+      expect(parseRange('bytes=50-10', 100), isNull);
     });
   });
 

@@ -56,6 +56,7 @@ String pairFailureText(LinkFailure f) => switch (f) {
     'The laptop\'s scripts are older than this app. Update them on the laptop (the same version as this app), then '
         'scan a new code.',
   LinkFailure.refused || LinkFailure.bad => 'The laptop said no. Scan a new code and try again.',
+  LinkFailure.localNetwork => lanBlockedText,
 };
 
 class PairDialog extends StatefulWidget {

@@ -17,6 +17,7 @@ import '../auto/laptop.dart' show laptopWorkSignal;
 import '../phone.dart';
 import 'isolate.dart';
 import 'link.dart';
+import 'local_network.dart';
 import 'protocol.dart';
 import 'shared_session.dart';
 
@@ -41,7 +42,9 @@ class ShareControl extends ChangeNotifier {
     DateTime Function()? clock,
     ValueListenable<Map<String, Object?>?>? session,
     Stream<void>? networkChanges,
+    Future<bool> Function()? localNetwork,
   }) : _makeHost = host ?? _appHost,
+       _localNetwork = localNetwork ?? ensureLocalNetwork,
        _now = clock ?? DateTime.now,
        _session = session ?? sharedSession {
     _session.addListener(_sessionChanged);
@@ -49,6 +52,22 @@ class ShareControl extends ChangeNotifier {
   }
 
   /// Android's network changes (NetworkWatch): the server looks at its Wi-Fi again at once.
+
+  /// Android 17's local-network permission (local_network.dart, DECISIONS 758): asked when the owner switches sharing
+  /// on or pairs; the minute's look only reads the last answer, so a refusal is not asked about again and again.
+  final Future<bool> Function() _localNetwork;
+  bool? _lan;
+
+  /// Whether the app may use the local network; [ask]: the owner just asked for it, so the permission may be asked.
+  Future<bool> _mayUseLan({bool ask = false}) async {
+    if (_lan == true || (_lan == false && !ask)) return _lan!;
+    try {
+      _lan = await _localNetwork();
+    } catch (_) {
+      _lan = true; // no answer (no Android): the socket says the rest
+    }
+    return _lan!;
+  }
 
   /// The daytime session that holds the headband (lib/share/shared_session.dart), for /state (DECISIONS 671).
   final ValueListenable<Map<String, Object?>?> _session;
@@ -132,6 +151,7 @@ class ShareControl extends ChangeNotifier {
   });
 
   Future<void> setOn(bool value) => _serial(() async {
+    if (value) await _mayUseLan(ask: true);
     _config = value ? _config.switchedOn(_now().millisecondsSinceEpoch) : _config.switchedOff();
     await save(_config);
     await _apply();
@@ -152,6 +172,7 @@ class ShareControl extends ChangeNotifier {
     unawaited(
       _serial(() async {
         try {
+          if (!await _mayUseLan(ask: true)) throw const LinkError(LinkFailure.localNetwork);
           var c = await load();
           if (c.token.length < tokenLength) {
             c = c.withNewToken(); // the server needs a token for the cable and for tools given the code by hand
@@ -234,6 +255,11 @@ class ShareControl extends ChangeNotifier {
       return;
     }
     if (_host?.running ?? false) return;
+    if (_lan == false || (_lan == null && !await _mayUseLan())) {
+      await _stopHost();
+      _status = shareDown;
+      return;
+    }
     final host = _host = _makeHost(dir, (s) {
       if (_night) return;
       _status = s;
@@ -265,6 +291,7 @@ class ShareControl extends ChangeNotifier {
   ShareLine line() {
     final nowMs = _now().millisecondsSinceEpoch;
     final old = _config.oldLaptop;
+    if (_lan == false && _config.activeAt(nowMs)) return (on: true, text: lanBlockedText, warn: true, address: null);
     if (!_config.activeAt(nowMs)) {
       if (old != null && !_config.paired) {
         return (on: false, text: 'Paired with $old before this update: pair once more (one scan of its code) to share safely.', warn: true, address: null);
@@ -317,6 +344,11 @@ class ShareControl extends ChangeNotifier {
     super.dispose();
   }
 }
+
+/// Android 17 blocks the local network for this app (DECISIONS 758).
+const String lanBlockedText =
+    'Android blocks the local network for this app. Allow "Nearby devices" in Settings, Apps, EEG tracker, '
+    'Permissions, then switch sharing off and on.';
 
 /// `07:40`.
 String clockText(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';

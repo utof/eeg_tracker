@@ -131,6 +131,9 @@ enum LinkFailure {
 
   /// The laptop's scripts are older than this app (they speak the first version of pairing).
   oldLaptop,
+
+  /// Android 17 blocks the local network for this app: the owner refused its "Nearby devices" permission.
+  localNetwork,
 }
 
 class LinkError implements Exception {

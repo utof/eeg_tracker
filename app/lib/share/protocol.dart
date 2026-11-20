@@ -325,15 +325,22 @@ ByteRange? parseRange(String? header, int size) {
   if (m == null) return null;
   final a = m[1]!, b = m[2]!;
   if (a.isEmpty && b.isEmpty) return null;
+  // As shelf_static 1.2.0: a number too big for an int is never a 500 (int.tryParse), and a range that selects no
+  // bytes or ends before it starts is ignored (the whole file).
   if (a.isEmpty) {
-    final n = int.parse(b);
-    if (n == 0 || size == 0) throw RangeError('empty range');
-    return (start: max(0, size - n), end: size - 1);
+    final n = int.tryParse(b); // too big: more than the file holds, so all of it
+    final start = n == null ? 0 : max(0, size - n);
+    if (start > size - 1) return null; // `bytes=-0`, or an empty file
+    return (start: start, end: size - 1);
   }
-  final start = int.parse(a);
+  final start = int.tryParse(a), last = b.isEmpty ? null : int.tryParse(b);
+  if (start == null) {
+    if (last == null) throw RangeError('range starts past the end'); // `bytes=<huge>-`
+    return null; // `bytes=<huge>-5`: ends before it starts
+  }
+  final end = last == null ? size - 1 : min(last, size - 1);
+  if (last != null && last < start) return null;
   if (start >= size) throw RangeError('range starts past the end');
-  final end = b.isEmpty ? size - 1 : min(int.parse(b), size - 1);
-  if (end < start) return null;
   return (start: start, end: end);
 }
 
