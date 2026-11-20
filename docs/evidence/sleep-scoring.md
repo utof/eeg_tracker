@@ -51,6 +51,8 @@ headband has never been checked against a lab recording, and the five-stage deta
 - While the night still records, **Sleep so far** scores it up to 2 minutes ago, one 64-minute stretch at a time
   with 8 minutes on either side, each scored once and kept. AnySleep weighs everything it is given together, so these
   stretches can differ a little from the report after Stop, which scores the whole night at once; the page says so.
+  On one recorded night (6 hours, on the laptop's stand-in for a phone) 96 in 100 of the 30-second stretches got the
+  same stage as the report, and the totals were within a minute or two.
 - Noise is shown, not hidden: the report says how much of your sleep the model read through a noisy signal
   (movement, jaw muscle or a loose electrode) or with no usable electrode, and a Signal line under the chart marks
   where. Nobody has tested how well the model copes with that noise on this headband, so treat those stretches with
