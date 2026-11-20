@@ -29,6 +29,25 @@ network and why it is safe enough for a home Wi-Fi.
    connection, so a new address from the router is picked up within 5 minutes, and a new token after **New code**
    at once.
 
+## Acknowledged receipt: moving raw recordings off the phone (DECISIONS 690-699)
+
+7. After each copy pass the laptop hashes every finished copy the phone lists and has not acked yet **from its own
+   disk** (never from its index of hashes; a copy it packed as `.f32.xz` is unpacked to hash it), at most 4 GB a pass,
+   oldest first. Before any hashing an empty ack asks whether the phone takes acks from this key at all.
+8. Where its hash equals the phone's (for a packed `.f32.gz`, the `original`'s), it sends
+   `POST /ack` to the phone's Share on Wi-Fi port with the token, `{"v":1,"files":[{"path","sha256"}]}` and the header
+   `X-Eeg-Ack: HMAC-SHA256(key, "eeg-tracker ack v1|" + body)` with the pairing's key (vectors in
+   `app/test/fixtures/phone_ack.json`). The phone refuses the whole request without a pairing (403 `not paired`) or
+   with a wrong proof (403), then checks each file on its own: an ack is kept only for a shared file that rests (not
+   written in the last 20 s) and holds exactly those bytes now (`refused`: `different bytes`, `not on the phone`,
+   `still being written`, `not a file the phone shares`). Kept acks go to `files/transfer/acks.json` (never exported or
+   shared) and `/files` marks each acked file `"acked": true`, so a laptop that lost its notes does not hash it twice.
+9. The phone decides alone what leaves it (the Storage page, `app/README.md` "Storage"): while a laptop is paired, a
+   raw recording 3 days after its ack, never anything not acked as it is now, never the statistics. A set that left it
+   leaves `<stamp>.removed.json`, which the laptop copies like any file and checks against what it holds.
+
+The laptop never deletes anything; `_local/phone/acks.jsonl` has one line per ack sent and taken.
+
 ## Who can do what
 
 - **The code** works once and for 5 minutes. It is shown on the laptop's screen and in the phone's browser history;
@@ -43,6 +62,11 @@ network and why it is safe enough for a home Wi-Fi.
   (`http://127.0.0.1:8771/`) and the live pages (`http://localhost:8770/`) answer this laptop only.
 - **Not encrypted**: plain HTTP, like Share on Wi-Fi itself (DECISIONS row 225). The proofs keep the code and the
   key off the wire, but the token and the data cross the Wi-Fi as they always did. Home Wi-Fi only.
+- **Acks**: only the paired laptop can make the phone delete anything, and only what it vouches it holds byte for byte:
+  a proof made with the pairing's key covers each request's body, and every file is checked against the phone's own
+  bytes. A replayed ack changes nothing (the same file, the same bytes). Someone on the Wi-Fi with the token but not the
+  key can read files (as before) but cannot ack. Forgetting the laptop stops the automatic deleting (it runs only
+  while a laptop is paired).
 - **Forgetting**: **Forget this laptop** on the phone's Share sheet stops the phone telling it anything; **New code**
   on the sheet shuts out the token the laptop holds. Deleting `_local/phone/link.json` makes the laptop forget the
   phone. Pairing again replaces the key on both sides.

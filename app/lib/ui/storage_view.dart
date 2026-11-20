@@ -177,7 +177,7 @@ class _Overview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    final total = sizeText(usage.total).split(' ');
+    final total = sizeText(usage.total).split(RegExp(r'[ \u00a0]')); // number and unit (kept together by a no-break space)
     final s = space;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -458,11 +458,21 @@ class _DangerZone extends StatelessWidget {
                   Expanded(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 12),
-                      child: Text('${c.label}: ${i.label.toLowerCase()}', style: text.bodyLarge),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('${c.label}: ${i.label.toLowerCase()}', style: text.bodyLarge),
+                          Text(
+                            '${u.phoneOnlyCount[i.id] ?? 0} not on the laptop',
+                            style: text.bodyMedium?.copyWith(color: Night.inkMuted),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
+                  const SizedBox(width: 12),
                   Text(
-                    '${u.phoneOnlyCount[i.id] ?? 0} · ${sizeText(u.phoneOnly[i.id] ?? 0)}',
+                    sizeText(u.phoneOnly[i.id] ?? 0),
                     style: text.bodyLarge?.copyWith(color: Night.inkMuted, fontFeatures: tabular),
                   ),
                 ],
