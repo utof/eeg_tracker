@@ -65,6 +65,7 @@ class Laptop {
       '--push-port', '$port',
       '--no-pages',
       '--no-mirror',
+      '--no-after-pull',
       '--push-loopback-home',
       '--address', '127.0.0.1',
     ]);

@@ -102,6 +102,7 @@ class SettingsView extends StatelessWidget {
     this.onMemory,
     this.autoStart,
     this.onAutoStart,
+    this.phoneSteps,
   });
 
   final SettingsViewModel model;
@@ -122,6 +123,9 @@ class SettingsView extends StatelessWidget {
   /// "When I put the headband on" (lib/auto): its choices in words, and the page that holds them.
   final String? autoStart;
   final VoidCallback? onAutoStart;
+
+  /// "Count steps with the phone while recording" (DECISIONS 800-809); null while the app's folder is not known.
+  final Widget? phoneSteps;
 
   @override
   Widget build(BuildContext context) {
@@ -241,6 +245,7 @@ class SettingsView extends StatelessWidget {
           ),
           if (m.wearerOn != null)
             WearerSettings(on: m.wearerOn!, status: m.wearerStatus, onSwitch: onWearerSwitch, onInfo: onWearerInfo),
+          ?phoneSteps,
         ],
       ),
     );

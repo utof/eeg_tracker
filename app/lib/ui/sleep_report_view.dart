@@ -2,11 +2,14 @@
 // total and missing time, the honest note (with how much of the sleep was read through noise), the chart with its
 // Signal lane, the sleep periods as numbered log entries, jaw and movement with the night hour by hour
 // (sleep_extras_view.dart), "Was this you?" (wearer_view.dart: a question right after the honest note, otherwise a
-// remark after the night's entries), and the past nights. Design: DESIGN.md and
+// remark after the night's entries), the night's pulse (a Pulse lane under the chart and one line with its "i",
+// DECISIONS 815-816), and the past nights. Design: DESIGN.md and
 // .impeccable/surfaces/app-lib-ui-sleep-report-screen-dart.md.
 import 'package:flutter/material.dart';
 
 import '../detectors/detectors.dart' show EpochQuality;
+import '../pulse/detector.dart' show pulseAsleep;
+import '../pulse/night.dart' show pulseAsleepWords, pulseLowestWords;
 import '../recorder/nights.dart' show nightLabel;
 import '../sleep/drift.dart' show driftCheck;
 import '../sleep/report.dart';
@@ -14,6 +17,8 @@ import '../wearer/wearer.dart' show WearerLine;
 import 'alarm_view.dart' show WakingUp, WakingUpSection;
 import 'lights_off_view.dart';
 import 'parts.dart';
+import 'rem_check_view.dart';
+import 'pulse_lane.dart';
 import 'sleep_chart.dart';
 import 'sleep_extras_view.dart';
 import 'theme.dart';
@@ -45,6 +50,7 @@ class SleepReportView extends StatelessWidget {
     this.onInfo,
     this.onExtrasInfo,
     this.onDriftInfo,
+    this.onDreamInfo,
     this.alarm,
     this.onAlarmInfo,
     this.onOpenNight,
@@ -55,6 +61,9 @@ class SleepReportView extends StatelessWidget {
     this.wearer,
     this.onWearerAnswer,
     this.onWearerInfo,
+    this.pulse,
+    this.pulseReading = false,
+    this.onPulseInfo,
   });
 
   final String nightOf;
@@ -78,6 +87,9 @@ class SleepReportView extends StatelessWidget {
   /// The "i" of the falling asleep section (the drift-off detector's note).
   final VoidCallback? onDriftInfo;
 
+  /// The "i" of the dream sleep check (the sleep-scoring note).
+  final VoidCallback? onDreamInfo;
+
   /// The smart alarm of this night ("Waking up", alarm_view.dart), and its "i".
   final WakingUp? alarm;
   final VoidCallback? onAlarmInfo;
@@ -95,6 +107,12 @@ class SleepReportView extends StatelessWidget {
   final WearerLine? wearer;
   final ValueChanged<String?>? onWearerAnswer;
   final VoidCallback? onWearerInfo;
+
+  /// The night's pulse a minute per epoch on the report's clock (null where not read); null: no pulse file covers the
+  /// night (yet). [pulseReading]: it is being read now. [onPulseInfo]: its "i".
+  final List<double?>? pulse;
+  final bool pulseReading;
+  final VoidCallback? onPulseInfo;
 
   @override
   Widget build(BuildContext context) {
@@ -145,6 +163,7 @@ class SleepReportView extends StatelessWidget {
     final quality = x?.quality;
     final noisyMin = x?.night.degradedMin ?? 0, unusableMin = x?.night.missingMin ?? 0;
     final drift = r.driftOff;
+    final dream = r.remCheckNumbers;
     return [
       IntrinsicHeight(
         child: Row(
@@ -175,6 +194,7 @@ class SleepReportView extends StatelessWidget {
         stages: stages,
         periods: bands,
         quality: quality,
+        pulse: pulse,
         label: 'Sleep chart, ${clock(r.dataStart)} to ${clock(r.dataEnd)}: '
             '${periods.length == 1 ? '1 sleep period' : '${periods.length} sleep periods'}, '
             '${durationText(missing)} not recorded'
@@ -186,7 +206,16 @@ class SleepReportView extends StatelessWidget {
         showGap: stages.contains('gap'),
         showNoisy: quality?.contains(EpochQuality.degraded) ?? false,
         showUnusable: quality?.contains(EpochQuality.missing) ?? false,
+        showPulse: pulse?.any((b) => b != null) ?? false,
       ),
+      if (pulse != null || pulseReading) ...[
+        const SizedBox(height: 16),
+        PulseAsleepLine(
+          words: pulse == null ? 'Pulse while asleep: reading the night…' : pulseAsleepWords(pulseAsleep(pulse!, stages)),
+          lowest: pulse == null ? null : pulseLowestWords(pulseAsleep(pulse!, stages)),
+          onInfo: onPulseInfo,
+        ),
+      ],
       const SectionHeading('Sleep periods'),
       if (periods.isEmpty)
         Text(
@@ -204,6 +233,7 @@ class SleepReportView extends StatelessWidget {
           style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
         ),
       ],
+      if (dream != null) DreamSleepCheck(check: dream, onInfo: onDreamInfo),
       if (drift != null)
         FallingAsleepSection(drift: drift, check: driftCheck([r, ...others]), onInfo: onDriftInfo),
       if (alarm != null) WakingUpSection(content: alarm!, onInfo: onAlarmInfo),
@@ -259,11 +289,13 @@ class SleepLegend extends StatelessWidget {
     this.showNoisy = false,
     this.showUnusable = false,
     this.showUnscored = false,
+    this.showPulse = false,
   });
   final bool showGap;
   final bool showNoisy;
   final bool showUnusable;
   final bool showUnscored;
+  final bool showPulse;
 
   @override
   Widget build(BuildContext context) {
@@ -312,6 +344,7 @@ class SleepLegend extends StatelessWidget {
               Text('not scored yet', style: style),
             ],
           ),
+        if (showPulse) const PulseSwatch(),
       ],
     );
   }

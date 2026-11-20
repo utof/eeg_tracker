@@ -12,6 +12,7 @@ import '../handsfree/calibration_controller.dart';
 import '../handsfree/store.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
+import '../recorder/phone_steps.dart' show StepSettings, stepsDirFor;
 import '../memory_cues/store.dart' show MemoryStore, memoryDirFor;
 import '../study/store.dart' show StudyStore, studyDirFor;
 import '../sound/check_in_sound.dart';
@@ -22,6 +23,7 @@ import 'auto_start_view.dart' show autoSummary;
 import 'evidence_sheet.dart';
 import 'hands_free_view.dart';
 import 'nearby.dart';
+import 'phone_steps_view.dart';
 import 'memory_cues_screen.dart';
 import 'study_screen.dart';
 
@@ -199,6 +201,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     onMemory: () => unawaited(_openMemory()),
     autoStart: _auto,
     onAutoStart: () => unawaited(_openAuto()),
+    phoneSteps: _recordings == null ? null : PhoneStepsSwitch(settings: StepSettings(stepsDirFor(_recordings!))),
   );
 
   Future<void> _openAuto() async {

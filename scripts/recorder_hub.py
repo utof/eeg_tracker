@@ -26,7 +26,7 @@ import local_http  # scripts/local_http.py: this laptop only (DECISIONS 750)
 import recording  # scripts/recording.py: the recording header (standard library only)
 
 try:
-    import battery as batt  # scripts/battery.py: drops the gauge's stuck values, time left from the trend
+    import battery as batt  # scripts/battery.py: the gauge's stuck values, time left, the charge by wear time
 except Exception:
     batt = None
 try:
@@ -68,7 +68,7 @@ class Hub:
         self.want_contact = threading.Event()
         self.live: dict = dict(status="recording", t=time.time(), battery_note=None)
         self.subs: list[queue.Queue] = []; self.subs_lock = threading.Lock()  # live stream: one queue per reader
-        self.batt_pts: list = []  # (unix time, %) of the last 3 hours, earlier runs' logs included
+        self.batt_pts: list = []  # (unix time, %) of the last 16 hours (battery.WEAR_HOURS), earlier runs' logs included
         self.last_report = time.time(); self.last_total = 0
         self.stamp: str | None = None
         self.data = self.logf = self.idxf = self.markf = None
@@ -191,7 +191,7 @@ class Hub:
         """The battery note from earlier runs' logs, so it shows before this run has its own trend."""
         if batt:
             try:
-                self.batt_pts = batt.from_logs(self.out, time.time())
+                self.batt_pts = batt.from_logs(self.out, time.time(), batt.WEAR_HOURS)
                 self.live["battery_note"] = batt.estimate(self.batt_pts, time.time())["text"]
             except Exception:
                 self.batt_pts, self.live["battery_note"] = [], None
@@ -202,7 +202,7 @@ class Hub:
         self.log(f"samples {self.total} (+{got}) battery {self.live.get('battery', '?')}%")
         if batt and isinstance(self.live.get("battery"), int):
             try:
-                self.batt_pts.append((time.time(), self.live["battery"])); del self.batt_pts[:-1100]
+                self.batt_pts.append((time.time(), self.live["battery"])); del self.batt_pts[:-6000]  # 16 h at 10 s
                 self.live["battery_note"] = batt.estimate(self.batt_pts, time.time())["text"]
             except Exception:
                 pass

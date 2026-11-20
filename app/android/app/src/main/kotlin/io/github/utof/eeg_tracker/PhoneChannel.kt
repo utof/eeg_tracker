@@ -131,6 +131,12 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
                 "inCall" -> result.success(inCall())
                 "wifiNets" -> result.success(wifiNets())
                 "storageSpace" -> result.success(storageSpace())
+                "stepCounterStart" -> result.success(StepCounter.start(context))
+                "stepCounterRead" -> result.success(StepCounter.read())
+                "stepCounterStop" -> {
+                    StepCounter.stop()
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {
@@ -503,6 +509,12 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
         ApplicationExitInfo.REASON_USER_STOPPED -> "user-stopped"
         ApplicationExitInfo.REASON_DEPENDENCY_DIED -> "dependency-died"
         ApplicationExitInfo.REASON_OTHER -> "other"
+        // the newer ones by number (Android 13 and 14 added them): a frozen app ended by the freezer is the Share on
+        // Wi-Fi hang's suspect (DECISIONS 589), an update the most common exit (DECISIONS 734)
+        7 -> "initialization-failure"
+        14 -> "freezer"
+        15 -> "package-state-change"
+        16 -> "package-updated"
         else -> "reason-$reason"
     }
 

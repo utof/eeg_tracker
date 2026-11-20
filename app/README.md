@@ -35,6 +35,7 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
 
 - [Sleep so far](#sleep-so-far): one look at the chart in the night (1 minute)
 - [Smart alarm](#smart-alarm): one morning
+- [Pulse](#pulse-heart-rate-from-the-headband-an-experiment): a night with a watch on, then 10 minutes (evidence weak)
 - [Share on Wi-Fi](#share-on-wi-fi-the-laptop-watches-and-copies-while-the-phone-records): connect the laptop by one scan, then the first night mirrored to it (the first night doubles as the phone test)
 
 **Daytime sessions**
@@ -47,6 +48,7 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
 - [Sessions with the phone locked](#sessions-with-the-phone-locked): 15 minutes, then one bedtime
 - [Dream catcher](#dream-catcher): a 20-minute nap; then the answers as words
 - [Hands-free controls](#hands-free-controls-off-unless-you-switch-it-on): calibrate and try (about 10 minutes)
+- [Walking](#walking-steps-from-the-headband): a walk of 15 minutes or more with the phone's step counter on
 
 **Tries that take weeks**
 
@@ -187,6 +189,8 @@ sound-for-states sessions the same way, and `test/state_synth_test.dart` checks 
 edges, the beat in the sound or only between the ears) without an audio device.
 `test/wearer_cross_check_test.dart` checks "Was this you?" against `analysis/wearer_check.py` (fixture made by
 `analysis/make_wearer_fixture.py` from made-up signals and histories).
+`test/replay_headband_test.dart` plays made-up recordings of any layout through the replay headband into the night
+recorder and whole work sessions (DECISIONS 730-739); `test/start_log_test.dart` checks `files/app-starts.log`.
 `test/heavy_reads_test.dart` counts the files the app opens on the screen's thread (DECISIONS 620-629) on a made-up
 folder with 60 days of history (`test/support/app_folder.dart`, `test/support/read_count.dart` wraps every `File` the
 code makes): the night screen's lines, the study reminders, "Was this you?", Trends, Try these, the Lucid page and the
@@ -207,6 +211,65 @@ The first build on the owner's laptop (2026-11-18) took about 5 minutes and fits
 compressed; 51 MB since the dream catcher's speech engine, DECISIONS row 257; only the named ABI is packaged and native libraries are compressed, `android/app/build.gradle.kts`;
 `android/app/proguard-rules.pro` keeps ONNX Runtime's Java classes). The neurosdk2 1.0.21 plugin shrinks its own release build without keep
 rules, which stripped its `Neurosdk2Plugin` class; `android/build.gradle.kts` builds that one plugin unshrunk.
+
+## Pre-install check (before every phone install)
+
+One command on a temporary emulator checks what reached the owner's phone on 2026-11-19/20 (DECISIONS 730-739).
+Build the candidate (`flutter build apk --release --target-platform android-arm64
+-Pkotlin.compiler.execution.strategy=in-process`) and, for (c), its replay build (the same command with
+`--dart-define=EEG_REPLAY=true`; never install that one on the phone), then:
+
+```bash
+source ~/.local/share/linsa/env.sh
+cd app && python3 tool/precheck.py --old <the APK on the phone now> --new build/app/outputs/flutter-apk/app-release.apk \
+  [--replay <replay build>] [--adb-port N]     # run it in the heavy build slot: it boots an emulator
+```
+
+It makes an AVD under `/var/tmp` (API 36 x86_64 image, **2 cores**: the phone's arm64 APK runs there through Android's
+ARM translation, and ONNX Runtime crashes at launch with 4), uses a private adb server (port 5041 or `--adb-port`,
+`ADB_LIBUSB=0 ADB_USB=0`) and the emulator's own serial on every call, never the phone or the default adb server, and removes the
+AVD, the emulator and its adb server at the end. It prints PASS / FAIL / SKIP:
+
+- **(a) update over yesterday**: the old APK with the phone's finished nights (copies of the reports in
+  `_local/phone/nights/` and the recordings they name from `_local/recordings/`, read-only; `--reports`, `--nights`),
+  then `adb install -r` of the new one: no night may be scored again, every report stays byte for byte. Catches the
+  "old nights scored again after each update" bug (DECISIONS 580).
+- **(b) Share on Wi-Fi between nights**: sharing on (More tab), `/state` must answer with the app in front. Then
+  Home, Doze forced, standby bucket "rare", past Android's freezer delay: since DECISIONS 678 (no notification, so
+  nothing keeps the app running for sharing between nights) the app is a cached process there and need not answer;
+  the run only reports it. Once the app is started again `/state` must answer within 2 minutes: a server that stays
+  dead (the Share hang of 2026-11-19, DECISIONS 587) fails. On the emulator Android can take minutes to take the
+  commands right after it froze the app (its ActivityManager stalls on the translated process); that wait is not
+  counted.
+- **(b2) Share on Wi-Fi in the background during a work session** (with (c)): the same background steps while the
+  replayed work session runs; its service holds the app, so `/state` must answer within 5 s, three times.
+- **(c) a replayed noisy work session** (with `--replay`; a SKIP without it): the made-up talking recording through
+  the replay headband into a real work session for 6.5 minutes; no break may start by itself, and the saved session
+  must name the replay as its headband. Catches the "calibrating, then on break" loop of 2026-11-20 (DECISIONS 680,
+  735); the laptop's replay tests check the same with talking from the start and after calibration.
+- **(d) crashes, ANRs, exit reasons**: logcat, `/data/anr` and `dumpsys activity exit-info` are kept; a crash or an
+  ANR fails, and the app's own `files/app-starts.log` must hold its starts with Android's exit reasons.
+
+Logs and details go to `/var/tmp/eeg-precheck-<time>/out/` (`--out`). About 12 minutes, 30 with (c) on the 2-core AVD.
+
+## Replay headband (test and replay builds only)
+
+`lib/headband/replay.dart` plays a recording in the app's own format (`.f32` plain or packed, `.idx`, the header) into
+the app through the same slot the tests' fake headbands use (the finder that hands out a headband): batch by batch
+at the recorded arrival times, so drop-outs, talking or the headband off reach the real sessions and the real night
+recorder. Any layout: four channels at the BrainBit's sites at 250 Hz play as a BrainBit; any other count, rate or
+place plays as another board (the recorder keeps it under its own header, sessions say they need O1 O2 T3 T4).
+Laptop tests drive it on a clock of its own (`ReplayPace.virtual`: a working day in seconds;
+`test/replay_headband_test.dart`). Made-up recordings only in the repository: `lib/headband/replay_scenarios.dart`
+(quiet work, talking, the headband off, drop-outs, the helmet plan's 8 channels at 500 Hz, 3 channels with one at a
+custom place); `dart run tool/replay_scenario.dart list` shows them, `... <name|all> <folder>` writes them.
+
+On a device it needs a **replay build** (`--dart-define=EEG_REPLAY=true`; a normal build has no replay code at all)
+and `files/replay/plan.json` (only `adb root` can put it there):
+`{"files": ["talking/2026-11-20-100000.f32"], "speed": 1, "from_s": 0, "max_gap_s": 60, "loop": false}` with the
+files under `files/replay/` (the app's owner and SELinux label, as in step 1 below). Every session and Start night
+then use the replay instead of the headband (the DIY board's switch still wins in the night recorder: turn it off);
+its name is "Replay (not a headband)" and the night's `.log` says what it plays.
 
 ## Emulator smoke test
 
@@ -596,6 +659,51 @@ prepare and 30 s for the model (two passes); a phone is likely 3-10 times slower
 3. Tell the assistant the two numbers, the noise share, and anything that looks wrong in **Hour by hour** (for
    example an hour you were awake and talking with no jaw bursts). The setup test's 5 clenches will check the jaw
    limits.
+
+## Pulse (heart rate from the headband; an experiment)
+
+The headband has no pulse sensor, but each heartbeat moves the head and the skin under the electrodes a little (the
+temple artery runs under T3 and T4; the back of the head presses on the pillow), and that leaves a slow wave at your
+heart rate in the signal. After a recording ends, the app looks for it every 30 seconds on every electrode the recording
+has (any number, any layout) and reads it where it shows: a red **Pulse** line in its own lane under the **Sleep
+report**'s chart and under the recording's timeline in the **Archive**, drawn only where there is a reading, with gaps
+everywhere else. The sleep report adds one line, "Pulse while asleep: about X/min (read in Y % of the night)", the
+lowest 5 minutes and an **i** (`docs/evidence/pulse.md`); **Trends** gets **Pulse while asleep** night by night against
+your usual (an arrow only from 14 nights, and only for a change of 5 a minute or more). It runs once per recording in
+the background (when the sleep report, the recording's page or the Archive opens), never while a night or a session
+records, and the result stays after the raw signal moves to the laptop (`files/pulse/<recording>.pulse.json`,
+`docs/data-format.md`).
+
+It is an experiment: no study has checked heart rate from EEG electrodes on a headband, and this method was tried on
+three of the owner's recordings only, with no watch to compare: it read the pulse in 29 % of the time asleep of the nap
+of 2026-11-20 (about 56 a minute), 22 % of the night of 2026-11-19 and 16 % of the night of 2026-11-17 (about 55 both),
+and never during the 2 hours of the walk of 2026-11-20. It says "no reading" while you move, walk or talk, in most
+deep sleep (the slow brain waves cover it), and whenever the rhythm looks like steps or is not clear. A pulse under 42 or
+over 120 a minute is outside what it looks for.
+
+On the laptop, `scripts/compare_pulse.py` runs the same detector (`analysis/pulse.py`, the phone's twin) on a night's
+BDF, a recording's `.f32` files or the phone's pulse file, and compares it with a watch's heart-rate export (Health
+Connect's "Export data", Mi Fitness's data copy, Samsung Health's "Download personal data", Garmin's FIT files through
+the FIT SDK's FitCSVTool, Apple Health's `export.xml`, Fitbit's Takeout files, or any CSV with a time and a bpm column):
+the bias, the 95 % limits of agreement, the mean difference and the share of half minutes within 5 a minute.
+
+```
+uv run --project analysis python scripts/compare_pulse.py _local/nights/2026-11-21.bdf \
+    --stages _local/nights/2026-11-21.sleep.json --reference _local/watch/heart_rate.csv
+```
+
+### Owner step: a night with a watch on (a night, then 10 minutes)
+
+1. Wear a watch that records heart rate through the night (a friend's will do) together with the headband; **Start
+   night** as usual.
+2. In the morning, once the night is scored, open **Sleep report**: the red **Pulse** lane under the chart and the line
+   "Pulse while asleep" (it appears a minute after the report).
+3. Open the night in the **Archive** (**More** → **Open the archive**): the same Pulse lane under the timeline.
+4. Export the watch's heart rate from its app (Health Connect, Mi Fitness, Samsung Health, Garmin, or a CSV) and put
+   the file in the laptop's `_local/` folder.
+5. Tell the assistant: the "Pulse while asleep" line and the lowest 5 minutes; the watch's own number for the night
+   (its sleeping or resting heart rate) and which app the export came from; anything odd (a pulse line where you were
+   moving, or none all night). The assistant runs `scripts/compare_pulse.py` with the export.
 
 ## Sleep so far
 
@@ -1787,6 +1895,41 @@ it uses the same delete helper as the Storage page.
 4. Delete an old test recording you do not need: the Danger zone asks twice when it is the only copy.
 5. Tell the assistant: which bands were wrong and when; how long the lanes took for a night; anything you could not
    delete, and what it said.
+
+## Walking (steps from the headband)
+
+The headband has no motion sensor, but every step shakes it a little, and that leaves a rhythm in its signal. After a
+recording ends, the app looks for that rhythm (every electrode the recording has, any layout): **walking** wherever it
+holds for 30 seconds or more, its **pace** in steps a minute, **running** where the pace stays at 150 or more for a
+minute, the **stops** of a minute or more between, and **steps** as pace times time, counted only where the rhythm is
+clear. A walk also needs the headband to shake as much as in walking and a rhythm that is not a heartbeat's (the pulse
+leaves one too, strongest asleep). The Archive's timeline gets a **Walking** lane with the pace; **Trends** gets **Walking** (minutes) and **Steps
+(estimated)** per day with your usual, a round **i** for what the research says, and a line saying where the day's
+steps came from. It runs once per recording in the background (from the Archive, a recording's page or Trends), never
+while a night or a session records, and is kept even after the raw signal moves to the laptop.
+
+**The phone as the second opinion** (off until you switch it on): **Settings** → **Count steps with the phone while
+recording**. Android asks for "Physical activity"; then, while the headband records, the phone's own step counter is
+written into the recording's log once a minute (nothing leaves the phone). Wherever the phone counted steps in a minute,
+its steps are used and the minute says so; where it lay still (left on a desk), the headband's estimate fills in. It
+works best with the phone in a front trouser pocket. Once 10 minutes have been walked with both, the app checks the
+headband against the phone: its pace within 5 % in 8 of 10 minutes and the totals within 15 %, or its steps are left
+out and only the phone's count and the walking minutes show. Until then Trends says the steps are not yet checked.
+
+Slow strolls, short walks indoors, stairs, cycling and buses are not seen; a walk read at half or double the pace is
+the main way it can be wrong. On the laptop, `scripts/walks.py` makes the same walk files from the raw recordings, and
+`scripts/export_events.py --daily` sends each day's walking minutes and steps to utof_tracker
+([docs/utof-interface.md](../docs/utof-interface.md)).
+
+### Owner step: a walk with the headband and the phone (2 minutes to set up, then a walk of 15 minutes or more)
+
+1. **Settings** → switch on **Count steps with the phone while recording**; allow **Physical activity**.
+2. Headband on, **Start night** (it records in the day too); the phone in your front trouser pocket.
+3. Walk as you usually do for 15 minutes or more, with a stop or two; then **Stop**.
+4. Open **Trends** (Walking, Steps (estimated) and where they came from) and the recording in the **Archive** (the
+   Walking lane: tap a band for its pace and steps).
+5. Tell the assistant: roughly when you walked and stopped, and whether the lane matches; the steps Trends shows and
+   its source line; whether Android asked for Physical activity; anything odd.
 
 ## Export data (everything, every few days)
 

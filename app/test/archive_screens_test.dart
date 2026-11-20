@@ -365,6 +365,35 @@ void main() {
       expect([for (final t in tags) t.label], ['sleep']);
     });
 
+    testWidgets('a tag marked "This is what I was doing" is saved as truth and shows its mark', (tester) async {
+      tester.view.physicalSize = const Size(1210, 2695);
+      tester.view.devicePixelRatio = 2.75;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(recording(_night, []));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.text('Asleep'), 300);
+      await tester.tap(find.text('Asleep'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(ListTile).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Tag this span'));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('This is what I was doing'),
+        200,
+        scrollable: find.byType(Scrollable).last,
+      );
+      expect(tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value, isFalse);
+      await tester.tap(find.text('This is what I was doing'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      final tags = TagStore(files).tags(_night.id);
+      expect([for (final t in tags) (t.label, t.truth)], [('sleep', true)]);
+      await tester.scrollUntilVisible(find.byIcon(Icons.check_circle_outline), 300);
+      expect(find.byIcon(Icons.check_circle_outline), findsOneWidget);
+    });
+
     testWidgets('More leads with the archive', (tester) async {
       var opened = 0;
       await tester.pumpWidget(

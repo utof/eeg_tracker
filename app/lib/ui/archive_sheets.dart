@@ -166,6 +166,7 @@ class _TagEditor extends StatefulWidget {
 class _TagEditorState extends State<_TagEditor> {
   late String _word = widget.tag?.label ?? widget.label ?? '';
   late DateTime _start = widget.start, _end = widget.end;
+  late bool _truth = widget.tag?.truth ?? false;
   late final TextEditingController _typed = TextEditingController(
     text: presetTags.contains(_word) ? '' : _word,
   );
@@ -248,11 +249,23 @@ class _TagEditorState extends State<_TagEditor> {
                 padding: const EdgeInsets.only(top: 8),
                 child: Text('The end comes before the start.', style: text.bodyMedium?.copyWith(color: Night.caution)),
               ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 8),
+            CheckboxListTile(
+              value: _truth,
+              onChanged: (v) => setState(() => _truth = v ?? false),
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: const Text('This is what I was doing'),
+              subtitle: Text(
+                'Sure of the word and the times? The laptop then checks its detectors against it.',
+                style: _muted(context),
+              ),
+            ),
+            const SizedBox(height: 12),
             FilledButton(
               onPressed: ok
                   ? () => Navigator.pop(context, (
-                      save: ManualTag(start: _start, end: _end, label: word, made: widget.tag?.made),
+                      save: ManualTag(start: _start, end: _end, label: word, made: widget.tag?.made, truth: _truth),
                       remove: false,
                     ))
                   : null,

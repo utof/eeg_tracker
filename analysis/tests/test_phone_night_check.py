@@ -696,3 +696,132 @@ def test_a_damaged_header_is_said_and_nothing_is_guessed(tmp_path: Path, capsys:
                                            (2**32 - 1, 0, ("ok", 0)), (2**32 - 2, 1, ("lost", 2))])
 def test_a_board_sequence_number_has_no_2048_wrap(prev: int, cur: int, want: tuple[str, int]) -> None:
     assert pnc.jump(prev, cur, "board sequence number") == want
+
+
+# ---- the dream sleep check (DECISIONS 740-749) ----
+
+def _with_stages(folder: Path, runs: list[Path], stages: str, **more: object) -> dict:
+    """The fake phone report with stages, a period over every asleep epoch and `data_start` where the night joins."""
+    import json
+
+    import rem_check as rc
+    import to_bdf
+    start, _, _ = to_bdf.join(runs)
+    t0 = start.astimezone()
+    first = next(i for i, c in enumerate(stages) if c in "123R")
+    last = max(i for i, c in enumerate(stages) if c in "123R")
+    f = folder / f"{NIGHT}.report.json"
+    rep = json.loads(f.read_text())
+    rep.update(stages=stages, data_start=t0.isoformat(timespec="seconds"),
+               periods=[{"start": (t0 + timedelta(seconds=30 * first)).isoformat(timespec="seconds"),
+                         "end": (t0 + timedelta(seconds=30 * last + 30)).isoformat(timespec="seconds")}], **more)
+    assert rc.periods_of(rep) == [(first, last)]
+    f.write_text(json.dumps(rep))
+    return rep
+
+
+STAGES = "WW" + "2" * 10 + "R" * 6 + "22"  # 10 minutes: 8 asleep, 3 of them dream sleep
+
+
+def test_the_dream_sleep_check_in_the_phones_words(tmp_path: Path) -> None:
+    pytest.importorskip("numpy")
+    import rem_check as rc
+    p = write_run(tmp_path / "recordings", PhoneRun(T, seconds=600, night_end=True, hum_t3=False, flat_t4=False))
+    write_report(tmp_path / "phone" / "nights", NIGHT, [p])
+    st = rc.stages_of(STAGES)
+    own = rc.night_check(st, [(2, 19)], [[0, 0, 0, 0, 700]] * 20, rc.eye_measured("T3-T4", [1] * 12 + [6] * 6 + [1] * 2))
+    _with_stages(tmp_path / "phone" / "nights", [p], STAGES, rem_check=own)
+    s = pnc.check(tmp_path, NIGHT)
+    assert s["report"]["rem"] == own and not s["report"]["rem_eye_here"]  # the report's own: nothing measured here
+    text = pnc.render(s)
+    for line in rc.check_lines(own):
+        assert f"  {line}" in text
+    assert "Dream sleep 3 min (33 %). Usual for adults is 20-25 %; this night is above it." in text
+    assert "eye movements (T3-T4): 9.0 min of sleep measured; share in REM 0.75 (REM is 0.333 of it)" in text
+
+
+def test_an_older_report_gets_its_eye_movements_measured_from_the_recordings(tmp_path: Path) -> None:
+    pytest.importorskip("numpy")
+    p = write_run(tmp_path / "recordings", PhoneRun(T, seconds=600, night_end=True, hum_t3=False, flat_t4=False))
+    write_report(tmp_path / "phone" / "nights", NIGHT, [p])
+    _with_stages(tmp_path / "phone" / "nights", [p], STAGES)
+    s = pnc.check(tmp_path, NIGHT)
+    r = s["report"]
+    assert r["rem_eye_here"] and r["rem"]["eye"]["pair"] == "T3-T4" and len(r["rem"]["eye"]["epochs"]) == 20
+    assert r["rem"]["rem_min"] == 3.0 and r["rem"]["rem_prob_min"] is None
+    text = pnc.render(s)
+    assert "Dream sleep check (eye movements measured here from the recordings; the report predates them)" in text
+    assert "This report is older than the check" not in text
+    assert "the scorer's likelihood is not in this report" in text
+    s = pnc.check(tmp_path, NIGHT, signal=False)  # --no-signal: the stage-only check, and why
+    assert s["report"]["rem"]["eye"] is None and "--no-signal" in s["report"]["rem_why"]
+
+
+# ---- batteries: the one stuck rule, the charge by wear time, the phone's own cost (DECISIONS 766-767) ---------------
+
+def _log(start: datetime, lines: list[tuple[float, str]]) -> list:
+    text = "".join(f"{(start + timedelta(seconds=s)).strftime('%Y-%m-%dT%H:%M:%S.000')} {x}\n" for s, x in lines)
+    return pnc.parse_log(text, stem(start))[0]
+
+
+def test_a_gauge_frozen_at_6_percent_is_no_reason_to_say_it_ended_at_6() -> None:
+    """The 2026-11-19 night: 99 % at connect, 6 % at every reading after, 100 % at a reconnect after a short drop."""
+    lines = [(0, f"connected BB Black {ADDRESS} serial 0 battery 99% signal -70 dBm")]
+    lines += [(10 + 10 * k, f"samples {2500 * (k + 1)} (+2500) battery 6%") for k in range(5 * 360)]
+    t = 10 + 10 * 5 * 360
+    lines += [(t + 20, f"connected BB Black {ADDRESS} serial 0 battery 100% signal unknown (no scan)")]
+    lines += [(t + 30 + 10 * k, f"samples {2500 * (k + 1)} (+2500) battery 6%") for k in range(9 * 180)]
+    lines += [(t + 30 + 10 * 9 * 180, "stopped, battery 6%")]
+    band = pnc.band_numbers(_log(T, lines))
+    assert band["stuck_at"] == [6, 100] and band["first"] == 99 and band["last"] == 99
+    est = band["estimate"]
+    assert est["full"] == 99 and 9.4 < est["hours"] < 9.6 and est["pct"] == 0
+    fix = pnc.band_issue(band)
+    assert "6 %" not in fix and "ended at" not in fix
+    assert fix.startswith("The headband streamed 9.5 h after its 99 % reading, longer than the estimate of 11 %/h "
+                          "allows (so it drained under 10.4 %/h)")
+    short = pnc.band_numbers(_log(T, lines[: 7 * 360]))  # 7 h: about 22 % left, nothing to say
+    assert short["estimate"]["pct"] == round(99 - 11 * short["estimate"]["hours"]) and pnc.band_issue(short) is None
+    mid = pnc.band_numbers(_log(T, lines[: 8 * 360]))  # 8 h: about 11 % left
+    assert pnc.band_issue(mid).startswith(f"The headband streamed 8.0 h after its 99 % reading: about "
+                                          f"{mid['estimate']['pct']} % left by wear time (an estimate")
+    text = pnc.band_text(band)
+    assert "stuck at 6 %, 100 %" in text and "by wear time (an estimate" in text
+
+
+def test_a_moving_gauge_and_a_full_charge_say_nothing() -> None:
+    lines = [(0, f"connected BB Black {ADDRESS} serial 0 battery 98% signal -70 dBm")]
+    lines += [(10 + 10 * k, f"samples {2500 * (k + 1)} (+2500) battery {98 - k // 33}%") for k in range(360)]
+    band = pnc.band_numbers(_log(T, lines))
+    assert band["stuck"] == 0 and band["first"] == 98 and band["last"] == 98 - 359 // 33
+    assert band["estimate"]["pct"] == round(98 - 11.0 * band["estimate"]["hours"])
+    assert pnc.band_issue(band) is None
+
+
+def _phone_lines(hours: float, plateau_min: float, screen_hour: int | None, wifi: bool) -> list[tuple[float, str]]:
+    """A phone battery line a minute: 100 % with a flat counter for `plateau_min` after unplugging, then 60 mA (the
+    screen hour 300 mA); with `wifi`, Wi-Fi lines that say when the screen was on."""
+    out, uah = [], 4_000_000.0
+    for m in range(int(hours * 60)):
+        on = screen_hour is not None and screen_hour * 60 <= m < (screen_hour + 1) * 60
+        ma = 300.0 if on else 60.0
+        if m >= plateau_min:
+            uah -= ma * 1000 / 60
+        pct = 100 if m < plateau_min else int(uah / 40_000)
+        out.append((m * 60.0, f"phone battery {pct}% charge {uah:.0f} uAh current {ma * 1000:.0f} uA unplugged "
+                              "temp 30.0 C"))
+        if wifi and m % 30 == 0:
+            out.append((m * 60.0, f"wifi connected, 144 Mbps, -52 dBm, 2.4 GHz; default route wifi; screen "
+                                      f"{'on' if on else 'off'}; idle no; lock not held"))
+    return out
+
+
+@pytest.mark.parametrize("wifi", [True, False])
+def test_the_phones_cost_leaves_out_the_first_hour_and_the_screen(wifi: bool) -> None:
+    start = datetime(2026, 11, 20, 2, 0, 0)  # on the hour, so the screen hour is one clock hour
+    st = pnc.battery_numbers(_log(start, _phone_lines(8, 60, 5, wifi)))["phone"]["steady"]
+    assert st["mah_per_hour"] == pytest.approx(60, abs=1) and st["ma"] == pytest.approx(60, abs=1)
+    assert st["unplug_skipped_h"] == pytest.approx(1.0, abs=0.05) and st["screen_hours"] == 1
+    assert st["hours"] == pytest.approx(6.0, abs=0.1)
+    assert st["screen"] == ("logged" if wifi else "guessed from the current")
+    assert "left out: the first 1.0 h after unplugging, 1 hour with" in pnc.phone_cost_text(st)

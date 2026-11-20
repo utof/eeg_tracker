@@ -19,7 +19,9 @@ Each line says what it does. In brackets: how well the research backs it **for t
 
 - **Nights and sleep stages**: one tap records the night with the screen off; after Stop the phone scores sleep
   stages and shows a sleep report (time asleep, deep, dream, wake-ups, a chart, jaw and movement counts). The
-  stages match the laptop's on every scored epoch of the test nights. (some)
+  stages match the laptop's on every scored epoch of the test nights. A **Dream sleep check** in each report says
+  how much dream sleep was scored against the usual share and checks it against eye movements: dream sleep may be
+  under-counted on this headband (7-10 % on the first phone nights). (some)
 - **Sleep so far**: while the night still records, **See sleep so far** shows the chart and totals up to a few minutes
   ago, scoring only what is new since the last look; marked as provisional, since the report after Stop scores the
   whole night together. (some)
@@ -53,8 +55,16 @@ Each line says what it does. In brackets: how well the research backs it **for t
   end, marked "tested" apart from "seen together". (some)
 - **"Was this you?"**: a soft question when someone else seems to have worn the headband, so a borrowed headband
   does not spoil your trends. A weak check, tested only on made-up people. (weak)
+- **Pulse (experiment)**: after a recording, the pulse your heartbeat leaves in the headband's signal (any
+  electrodes), as a red Pulse lane under the sleep report's chart and the Archive's timeline where it could be read,
+  "Pulse while asleep: about X/min" in the sleep report and in Trends; `scripts/compare_pulse.py` checks it against a
+  watch's export. (weak)
 - **Hands-free controls**: a double jaw clench or a look left then right as a switch during sessions. Off by
   default. (some)
+- **Walking and steps**: after a recording, walking, its pace, running, stops and estimated steps from the rhythm your
+  steps leave in the headband's signal (any electrodes), as a Walking lane in the Archive and Walking and Steps
+  (estimated) in Trends; an optional switch writes the phone's own step counter into the recording once a minute,
+  which wins where it counted and checks the headband. (weak)
 - **Export data**: copies everything the app keeps to a folder you pick (with a checksum list) for the laptop.
 - **Share on Wi-Fi**: the laptop watches the phone's recording live and copies its files during the night. Off by
   default, home Wi-Fi only. **Connecting is one scan**: the laptop shows a QR code (`scripts/phone_link.py`), the
@@ -90,8 +100,19 @@ Each line says what it does. In brackets: how well the research backs it **for t
 - **Tools for the phone's files**: `import_phone.py`, `phone_night_check.py`, `catalog.py`, `pull_phone.py`
   (below), and `pack_old.py`, which packs raw recordings older than a day (both sides pack: lossless, checked).
 - **Pairing with the phone** (`python3 scripts/phone_link.py`, also the tray's **Pair phone…**): a QR code to scan,
-  then the phone's files copied every 2 minutes and its live pages at `http://localhost:8770/`.
+  then the phone's files copied every 2 minutes and its live pages at `http://localhost:8770/`; after a copy that
+  brought something new it packs old recordings, exports the day numbers for utof_tracker, updates the data book and
+  scores the detectors against the truth labels (`scripts/after_pull.py`). A phone paired before 2026-11-21 is
+  paired once more (one scan); update the laptop's scripts and the app together.
   ([docs/phone-link.md](docs/phone-link.md))
+- **The data book** (`uv run --project analysis python scripts/data_book.py`): every night, nap, session, day, 30 s
+  of signal and label in six tables in `_local/data/` that open in a spreadsheet, each row with its model version
+  and the SHA-256 of the files it came from. ([docs/data-format.md](docs/data-format.md), "The data book")
+- **Truth labels and the detectors scored against them**: what really happened (awake, walking, eating, a watch's
+  pulse), typed against a vocabulary (`scripts/truth_vocabulary.tsv`), from the hand file
+  `_local/analyses/truth-labels.tsv` (`python3 scripts/truth.py check`) and the Archive's tags marked "This is what I
+  was doing", into `_local/data/truth.tsv`; `scripts/validate_detectors.py` writes `validation.tsv` and `validation.md`
+  (agreement, false minutes per detector and label). ([docs/data-format.md](docs/data-format.md), "`truth.tsv`")
 - **Every day's numbers for utof_tracker** (`python3 scripts/export_events.py --daily`): one event per day with what
   the phone's Trends page shows, for the owner's life tracker. ([docs/utof-interface.md](docs/utof-interface.md))
 - **The same scoring and detectors in Python**: the phone's rules were written and checked there first (`analysis/`).
@@ -156,6 +177,9 @@ python3 scripts/export_events.py _local/recordings/*.morning.json             # 
 (every Trends number, sleep stages, what was left out and why), the nights and the check-ins into
 `_local/export/events/`; re-running adds only what changed. utof_tracker reads that folder itself. The contract:
 [docs/utof-interface.md](docs/utof-interface.md).
+Walking minutes and steps come with each day: from the phone's walk files, and from the laptop's own
+(`uv run --project analysis python scripts/walks.py --all` walks every recording in `_local/recordings/`;
+[docs/detectors.md](docs/detectors.md#walking-pace-and-estimated-steps-decisions-800-809)).
 
 Tests (no headband): `uv run --project analysis --with pytest pytest analysis/tests` (add `-m "not slow"` to skip
 the 2.5-minute fake-headband run) and `node --test tests/js/*.test.mjs`.

@@ -22,6 +22,7 @@ import '../cues/night_cues.dart' show CueFactory, oneKindANight;
 import '../lucid/live_cues.dart' show lucidCuesFor;
 import '../memory_cues/live_cues.dart' show memoryCuesFor;
 import '../phone.dart';
+import '../start_log.dart';
 import '../share/isolate.dart';
 import '../share/protocol.dart';
 import '../signal/live_tap.dart';
@@ -34,6 +35,7 @@ import 'chunk_writer.dart' show ChunkWriter;
 import 'headband.dart';
 import 'live_drift.dart';
 import 'night_recorder.dart';
+import 'phone_steps.dart' show StepSettings, stepsDirFor;
 import 'status.dart';
 import 'wifi_watch.dart';
 
@@ -258,6 +260,7 @@ class RecorderTaskHandler extends TaskHandler {
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    unawaited(logAppStart('recorder')); // files/app-starts.log (DECISIONS 734)
     final rec = await _recordingsDir();
     final plan = await _alarmPlan();
     final auto = await _autoNotes();
@@ -270,7 +273,7 @@ class RecorderTaskHandler extends TaskHandler {
     if (this.finder != null) {
       finder = this.finder!();
     } else {
-      final b = diy == null ? BrainBitFinder() : BrainBitFinder(pick: () async => diy.finder());
+      final b = diy == null ? BrainBitFinder(recorder: true) : BrainBitFinder(pick: () async => diy.finder());
       _finder = b;
       finder = b;
     }
@@ -282,6 +285,8 @@ class RecorderTaskHandler extends TaskHandler {
       dir: Directory(dir),
       store: _PrefsNightStore(),
       probe: ChannelPhoneProbe(),
+      // the phone's step counter in the log once a minute, when the owner switched it on (DECISIONS 800-809)
+      stepProbe: ChannelStepProbe(StepSettings(stepsDirFor(rec))),
       onStatus: _onStatus,
       onStuck: _restartProcess,
       timing: diy == null ? const RecorderTiming() : diyRecorderTiming,
