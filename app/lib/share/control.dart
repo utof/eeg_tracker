@@ -43,6 +43,7 @@ class ShareControl extends ChangeNotifier {
        _now = clock ?? DateTime.now,
        _session = session ?? sharedSession {
     _session.addListener(_sessionChanged);
+    sharedAlert.addListener(_alertChanged);
     _network = networkChanges?.listen((_) => unawaited(_host?.networkChanged()), onError: (Object _) {});
   }
 
@@ -59,8 +60,15 @@ class ShareControl extends ChangeNotifier {
   void _sessionChanged() {
     final now = _session.value, was = _sessionWas;
     _sessionWas = now;
-    _host?.setSession(now);
+    _host?.setSession(sessionWithAlert(now, sharedAlert.value));
     if (was == null && now != null) unawaited(_host?.tellLaptop());
+  }
+
+  /// A headband notice (lost, back, battery): /state carries it, and the paired laptop is told where this phone is so
+  /// its tray looks soon (DECISIONS 857).
+  void _alertChanged() {
+    _host?.setSession(sessionWithAlert(_session.value, sharedAlert.value));
+    unawaited(_host?.tellLaptop());
   }
 
   /// The app came to the front again (it may have been frozen in the background): the paired laptop hears where this
@@ -244,7 +252,7 @@ class ShareControl extends ChangeNotifier {
       notifyListeners();
     }, wifiLock);
     host.setLive(const {});
-    host.setSession(_session.value);
+    host.setSession(sessionWithAlert(_session.value, sharedAlert.value));
     await host.start(_config);
   }
 
@@ -306,6 +314,7 @@ class ShareControl extends ChangeNotifier {
   @override
   void dispose() {
     _session.removeListener(_sessionChanged);
+    sharedAlert.removeListener(_alertChanged);
     unawaited(_network?.cancel());
     unawaited(_stopHost());
     super.dispose();

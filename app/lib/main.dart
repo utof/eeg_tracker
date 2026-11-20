@@ -7,6 +7,8 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import 'auto/task.dart' show runAutoWatch;
 import 'dream/speech_model.dart' show parakeetNotice;
+import 'headband/connection.dart';
+import 'headband/phone_connection.dart';
 import 'logs/engine.dart' show ScreenRecords;
 import 'logs/usage.dart' show Usage;
 import 'logs/usage_watch.dart' show UsageGestures, UsageNavigatorObserver;
@@ -27,6 +29,8 @@ void main() {
   ScreenRecords.start(recordingsDir: Phone.recordingsDir, power: Phone.powerMap, mainStarted: started, processAgeMs: Phone.processAge);
   FlutterForegroundTask.initCommunicationPort(); // status messages from the recorder isolate
   initRecorderService();
+  // the one headband connection every screen shares (lib/headband/connection.dart, DECISIONS 855)
+  HeadbandConnection.shared = startPhoneConnection();
   unawaited(logAppStart('screen')); // why the process before this one ended (files/app-starts.log, DECISIONS 734)
   // AnySleep's weights ship in the APK (assets/models); its MIT licence travels with them.
   LicenseRegistry.addLicense(() async* {
