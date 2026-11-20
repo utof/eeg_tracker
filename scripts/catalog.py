@@ -35,6 +35,8 @@ its own size and SHA-256 (so `sha256sum -c` of the sidecar still works) and, in 
 bytes and SHA-256 of the .f32 it holds, read from the xz file's end. A .f32 that became a .f32.xz holding the same
 bytes is "packed", not missing; holding other bytes it is a PROBLEM ("changed"). --check unpacks every packed file
 and compares what comes out with `original` ("damaged" when it differs or does not unpack).
+A night whose raw set left the phone after this laptop acked it (the phone's `<stamp>.removed.json` with `on_laptop`,
+pulled beside the recording; DECISIONS 690-699) is marked `moved_from_phone`: its raw files are only here now.
 Read-only on the data: it never deletes, moves or packs a recording or a report. Standard library only.
 """
 from __future__ import annotations
@@ -52,6 +54,7 @@ import recording  # noqa: E402
 FORMAT, VERSION = "eeg-tracker-catalog", 1
 RAW = (".f32", *packed.PACKED_FORMS, ".idx", ".log", ".markers.jsonl", recording.SUFFIX)
 LAPTOP_REPORT = (".report.json", ".sleep.json", ".hypnogram.png", ".bdf")  # scripts/sleep_report.py's files
+REMOVED = ".removed.json"  # the phone's record of a raw set that left it (DECISIONS 690-699)
 MORNING_WITHIN_S = 12 * 3600
 DIY = "recordings-diy"
 CHUNK = 1 << 20
@@ -98,7 +101,7 @@ def _numbers(rep: dict | None, by: str) -> dict | None:
 
 def _row(date: str, start: float | None, end: float | None) -> dict:
     return dict(date=date, id=date, source="", recordings=0, start=start, end=end, hours_recorded=0.0, minutes_missing=0.0,
-                raw=False, report=None, morning=[], paths=[])
+                raw=False, moved_from_phone=False, report=None, morning=[], paths=[])
 
 
 def _add(local: Path, row: dict, rel: str, kind: str) -> None:
@@ -139,6 +142,8 @@ def _recording_nights(local: Path, phone: set[str], folder: str = "recordings", 
             for f in sorted(where.glob(f"{stem}.*")):
                 if f.is_file() and not f.name.endswith(".morning.json"):
                     rows[key]["paths"].append((f"{folder}/{f.name}", "raw" if f.name.endswith(RAW) else "derived"))
+                if f.name.endswith(REMOVED) and (_json(f) or {}).get("on_laptop") is True:
+                    rows[key]["moved_from_phone"] = True
     return rows
 
 
@@ -392,6 +397,8 @@ def table(cat: dict, local: Path, others: list[Path]) -> list[str]:
     for n in rows:
         r = n["report"] or {}
         note = "" if n["raw"] else "  (report only: the raw night is not on the laptop)"
+        if n.get("moved_from_phone"):
+            note += "  (moved from phone: the raw files are only here now)"
         out.append(f"{n['date']:<11} {n['source']:<12} {n['files']:>5} {n['bytes'] / 1e6:>7.1f} "
                    f"{n['hours_recorded']:>6.1f} h {n['minutes_missing']:>4.0f} min  {r.get('by', 'none'):<7}"
                    f"{_num(r.get('asleep_min')):>6} {_num(r.get('deep_min')):>5} {_num(r.get('dream_min')):>5}  "

@@ -40,6 +40,10 @@ class FakePhone:
         self.lie: dict[str, dict] = {}  # extra list rows, as sent
         self.originals: dict[str, dict] = {}  # a packed file's `original` (path, bytes, sha256), as the app lists it
         self.down = False
+        self.key: str | None = None  # the pairing's key: POST /ack is taken only with its proof (403 without)
+        self.no_ack = False  # an app older than acks (404)
+        self.acks: dict[str, str] = {}  # path -> the SHA-256 the laptop acked
+        self.ack_posts: list[list[dict]] = []  # every /ack body's files, as taken
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -63,7 +67,8 @@ class FakePhone:
                 if self.path == "/files":
                     rows = [dict(path=p, bytes=len(b), sha256=None if p in fake.growing else sha(b),
                                  modified_ms=fake.modified.get(p, T0), **({"growing": True} if p in fake.growing else {}),
-                                 **({"original": fake.originals[p]} if p in fake.originals else {}))
+                                 **({"original": fake.originals[p]} if p in fake.originals else {}),
+                                 **({"acked": True} if fake.acks.get(p) == fake.content(p) else {}))
                             for p, b in sorted(fake.files.items())] + list(fake.lie.values())
                     self._send(200, json.dumps(dict(format=pp.FORMAT, version=1, files=rows)).encode()); return
                 if self.path == "/state":
@@ -85,8 +90,28 @@ class FakePhone:
 
             def do_POST(self) -> None:
                 n = int(self.headers.get("Content-Length") or 0)
-                fake.requests.append(("POST", self.path, self.rfile.read(n).decode()))
-                self._send(200 if self.headers.get("Authorization") == f"Bearer {TOKEN}" else 401, b"ok")
+                body = self.rfile.read(n)
+                fake.requests.append(("POST", self.path, body.decode()))
+                if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+                    self._send(401, b"{}"); return
+                if self.path != "/ack":
+                    self._send(200, b"ok"); return
+                if fake.no_ack:
+                    self._send(404, b'{"error": "no such route"}'); return
+                if fake.key is None:
+                    self._send(403, b'{"error": "not paired"}'); return
+                if self.headers.get("X-Eeg-Ack") != pp.ack_proof(fake.key, body):
+                    self._send(403, b'{"error": "wrong proof"}'); return
+                files = json.loads(body)["files"]
+                fake.ack_posts.append(files)
+                acked, refused = [], []
+                for f in files:
+                    if f["path"] in fake.files and fake.content(f["path"]) == f["sha256"] and f["path"] not in fake.growing:
+                        fake.acks[f["path"]] = f["sha256"]
+                        acked.append(f["path"])
+                    else:
+                        refused.append(dict(path=f["path"], why="different bytes" if f["path"] in fake.files else "not on the phone"))
+                self._send(200, json.dumps(dict(v=1, acked=acked, refused=refused)).encode())
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
         self.server.daemon_threads = True
@@ -97,6 +122,12 @@ class FakePhone:
         self.files[path] = body
         self.modified[path] = modified
         (self.growing.add if growing else self.growing.discard)(path)
+
+    def content(self, path: str) -> str | None:
+        """The SHA-256 an ack of [path] must name: the file's, or a packed file's original's."""
+        if path in self.originals:
+            return self.originals[path]["sha256"]
+        return sha(self.files[path]) if path in self.files else None
 
     def fetched(self) -> list[tuple[str, str | None]]:
         got = [(p.removeprefix("/files/"), r) for m, p, r in self.requests if m == "GET" and p.startswith("/files/")]
