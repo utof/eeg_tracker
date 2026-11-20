@@ -2,6 +2,7 @@
 // tests use a fake, so the recorder's rules can be checked without a phone.
 import 'battery.dart';
 import 'chunk_writer.dart';
+import 'header.dart';
 import 'packets.dart';
 import 'status.dart' show BoardLive;
 
@@ -101,13 +102,19 @@ abstract class BandNotes {
   Stream<BandNote> get notes;
 }
 
-/// A board that is not a BrainBit (the DIY ADS1299 board, headband/diy/): its own channel names, and no contact or
+/// A board that is not a BrainBit (the DIY ADS1299 board, headband/diy/): its own channels, and no contact or
 /// battery reading. The night recorder skips the contact check and the battery lines for it, never feeds its samples
-/// to the drift-off detector or the smart alarm (they read BrainBit's O1 O2 T3 T4), and shows [board] on the night
-/// screen (DECISIONS rows 360-369).
+/// to the drift-off detector or the smart alarm (DECISIONS rows 360-369), writes its [header] beside its files and
+/// shows [board] on the night screen.
 abstract class OtherBoard {
   BoardLive get board;
+
+  /// What its samples hold: how many channels, which, where, at what rate (header.dart; DECISIONS 630-639).
+  RecordingHeader get header;
 }
+
+/// What [band]'s samples hold: a board's own header, else the BrainBit's (O1 O2 T3 T4 at 250 Hz).
+RecordingHeader headerOf(Headband band) => band is OtherBoard ? (band as OtherBoard).header : brainBitHeader;
 
 /// A headband that mends a drop by itself (our own connection, DECISIONS 213): it sends the start command again on a
 /// stall, reconnects to the same address, and says "out of range" once it gives up. The recorder does not restart its

@@ -182,6 +182,13 @@ sound-for-states sessions the same way, and `test/state_synth_test.dart` checks 
 edges, the beat in the sound or only between the ears) without an audio device.
 `test/wearer_cross_check_test.dart` checks "Was this you?" against `analysis/wearer_check.py` (fixture made by
 `analysis/make_wearer_fixture.py` from made-up signals and histories).
+`test/heavy_reads_test.dart` counts the files the app opens on the screen's thread (DECISIONS 620-629) on a made-up
+folder with 60 days of history (`test/support/app_folder.dart`, `test/support/read_count.dart` wraps every `File` the
+code makes): the night screen's lines, the study reminders, "Was this you?", Trends, Try these, the Lucid page and the
+nights' list the sleep scoring and the bedtime checks ask for (each file set opened again only when one of its files,
+its header included, changed).
+Work that reads more than a few KB belongs in a background isolate, and a file shown again and again is read once
+(`lib/cache/file_summaries.dart`: newest by name, kept JSON, kept summaries in `files/cache/`).
 `test/sleep_prep_test.dart` checks the sleep model's input against a fixture made by the laptop's Python
 (`test/fixtures/make_sleep_fixture.py`); `test/night_extras_cross_check_test.dart` checks the night extras against
 `analysis/night_extras.py` (fixture made by `analysis/make_extras_fixture.py`), and `tool/night_extras.dart` runs them
@@ -1653,10 +1660,11 @@ Night screen, Headband section, **Headband connection** (between nights only), *
 (test)**:
 
 - **DIY board (test)**: Start night listens for the board instead of looking for the BrainBit. Its nights go to
-  `files/recordings-diy/` (`.f32 .idx .log .markers.jsonl`, the laptop's `<I4f` layout: the board's sequence
-  number, then CH1-CH4 in volts at 4.5 V reference and gain 24), never among the BrainBit nights. The page shows
-  this phone's Wi-Fi address for the firmware's `UDP_HOST`, and the channel names (default O1 O2 Fz Fp1, the
-  breadboard's plan; four names, CH1 to CH4).
+  `files/recordings-diy/` (`.f32 .idx .log .markers.jsonl .header.json`, the laptop's layout: the board's sequence
+  number, then each of its 4, 6 or 8 channels in volts at 4.5 V reference and gain 24, and a header naming them),
+  never among the BrainBit nights. The page shows this phone's Wi-Fi address for the firmware's `UDP_HOST`, and the
+  channel names (default O1 O2 Fz Fp1, the breadboard's plan; 4, 6 or 8 names from CH1, one per channel of the board;
+  a board with another count records as Ch1..ChN).
 - **While it records**: the night screen shows each channel's swing over the last second (the test square reads
   about 3750 µV), "Test signal, not EEG" (or "Shorted inputs, not EEG"), where the frames come from and how many
   samples were lost. A board restart or a new mode starts a new file set, never joined to the old one; lost frames
@@ -1665,8 +1673,8 @@ Night screen, Headband section, **Headband connection** (between nights only), *
   when started), the drift-off detector, hands-free, the smart alarm's sleep model and the lucid dream cues (with the
   live sleep model they share): all read the BrainBit's O1 O2 T3 T4. The phone's alarm itself still rings. No contact
   or battery reading from the board.
-- **Not built**: USB (OTG serial) to the phone, the 8-channel chip (the laptop records it), Bluetooth (the firmware
-  has none).
+- **Not built**: USB (OTG serial) to the phone, Bluetooth (the firmware has none). The 8-channel chip records on the
+  phone since 2026-11-20 (DECISIONS 630-639).
 - **Your data**: Export data takes `recordings-diy/` with everything else; `scripts/import_phone.py` files it under
   `_local/recordings-diy/`, beside the laptop's DIY recordings. Export a night lists BrainBit nights only.
 

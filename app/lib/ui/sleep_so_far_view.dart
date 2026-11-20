@@ -4,6 +4,8 @@
 // .impeccable/surfaces/app-lib-ui-sleep-so-far-view-dart.md.
 import 'package:flutter/material.dart';
 
+import '../recorder/header.dart' show HeaderChannel, MissingSites, RecordingHeader, sleepSites;
+import '../signal/layout.dart' show standardName;
 import '../sleep/periods.dart' show gapStage;
 import '../sleep/so_far.dart';
 import 'parts.dart';
@@ -21,15 +23,16 @@ String soFarLine(SoFarResult? r, {String? refusal}) {
   return 'At the last look: ${durationText(r.asleepMin)} asleep by ${clock(r.end)}.';
 }
 
-/// Why a board's night has no sleep so far: the sleep model reads O1, O2, T3 and T4 (T7 and T8 are the same sites);
-/// null when [names] has them.
+/// Which of the sleep model's O1, O2, T3 and T4 a board named [names] lacks, by the recording header's own rule (by
+/// name, else by 10-10 site: T7 and T8 are T3 and T4); null when it has them all.
 String? sleepChannelsMissing(List<String> names) {
-  final have = {for (final n in names) n.toUpperCase()};
-  final missing = [
-    for (final (want, alias) in const [('O1', 'O1'), ('O2', 'O2'), ('T3', 'T7'), ('T4', 'T8')])
-      if (!have.contains(want) && !have.contains(alias)) want,
-  ];
-  return missing.isEmpty ? null : missing.join(', ');
+  final h = RecordingHeader(channels: [for (final n in names) HeaderChannel(n, site: standardName(n))]);
+  try {
+    h.pick(sleepSites, who: 'Sleep so far');
+    return null;
+  } on MissingSites catch (e) {
+    return e.missing.join(', ');
+  }
 }
 
 /// The DIY board's plain refusal.
@@ -70,7 +73,7 @@ class SoFarSection extends StatelessWidget {
 
 /// What the page is doing, in the status line.
 class SoFarState {
-  const SoFarState({this.step, this.waiting, this.failed, this.ended = false, this.busy = false});
+  const SoFarState({this.step, this.waiting, this.failed, this.refused, this.ended = false, this.busy = false});
 
   /// The look's current step ("Scoring 01:04 to 02:08 (2 of 4)").
   final String? step;
@@ -80,6 +83,9 @@ class SoFarState {
 
   /// Why the last look failed.
   final String? failed;
+
+  /// Why tonight's recording cannot be scored at all, in words (it lacks one of O1 O2 T3 T4).
+  final String? refused;
 
   /// The night was stopped: its report comes next.
   final bool ended;
@@ -107,6 +113,7 @@ class SleepSoFarView extends StatelessWidget {
     final s = state;
     if (s.ended) return 'The night has ended. Its report is scored after Stop and replaces this.';
     if (s.step != null) return '${s.step}.';
+    if (s.refused != null) return s.refused!;
     if (s.failed != null) return 'Could not score just now: ${s.failed}';
     if (s.waiting != null) {
       return 'Waiting: ${s.waiting}. Its readings fill in until it is done.';

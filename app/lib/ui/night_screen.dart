@@ -10,14 +10,11 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../alarm/bell.dart';
 import '../alarm/notes.dart';
 import '../alarm/rule.dart' show AlarmPlan;
-import '../dream/store.dart';
 import '../export/store.dart';
 import '../headband/diy/settings.dart';
 import '../phone.dart';
 import 'experiments_screen.dart' show currentExperiment;
 import 'experiments_view.dart' show experimentLine;
-import '../morning/store.dart';
-import '../nap/store.dart';
 import '../recorder/headband.dart';
 import '../recorder/nights.dart';
 import '../recorder/packed.dart' show packInBackground, packOldRecordings;
@@ -32,9 +29,8 @@ import '../sleep/scorer.dart';
 import '../sleep/so_far.dart' show SoFarScorer;
 import 'alarm_view.dart';
 import '../sharp/prompts.dart' show ChannelSharpPhone;
-import '../study/arm.dart' show rearmPrompts;
+import '../study/arm.dart' show rearmInBackground;
 import 'dream_screen.dart';
-import 'dream_view.dart' show clock;
 import 'evidence_sheet.dart' show showEvidence;
 import 'export_screen.dart';
 import 'hands_free_screen.dart' show SettingsScreen;
@@ -44,10 +40,10 @@ import 'meditation_screen.dart';
 import 'lucid_screen.dart';
 import 'memory_cues_screen.dart';
 import 'nap_screen.dart';
-import 'nap_view.dart' show endWords;
 import 'morning_screen.dart';
 import 'morning_section.dart';
 import 'nearby.dart';
+import 'night_lines.dart';
 import 'own_ble_screen.dart' show phoneWifiAddress;
 import 'night_strip.dart';
 import 'night_view.dart';
@@ -236,6 +232,32 @@ const String _xiaomiDoneKey = 'xiaomiChecked';
   }
 }
 
+/// Start night and the screen's refreshes (integration 14, DECISIONS 620-629). Closing Android's notification
+/// question at Start brings the app back, and the refresh that follows asks "is a night recording?" before the
+/// recorder's service runs: acting on that "no" brought the app's own Share on Wi-Fi server and its keep back for half
+/// a second, and the recorder's server waited for the port. A refresh takes a [token] before it asks; its "no night"
+/// is trusted only when it began with no Start under way and none began since.
+class NightStartGate {
+  int _starts = 0;
+  bool _starting = false;
+
+  /// What a refresh holds while it asks; a refresh begun during a Start never gets a trusted one.
+  int get token => _starting ? -1 : _starts;
+
+  /// This screen's Start is under way.
+  bool get starting => _starting;
+
+  void begin() {
+    _starting = true;
+    _starts++;
+  }
+
+  void end() => _starting = false;
+
+  /// A "no night" asked at [token] may be acted on.
+  bool trusts(int token) => token >= 0 && !_starting && token == _starts;
+}
+
 class NightScreen extends StatefulWidget {
   const NightScreen({super.key, this.links});
 
@@ -266,6 +288,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   /// "Sleep so far" while a night records (DECISIONS 640-649): scored only when its page is open.
   SleepSoFar? _soFar;
   int? _lightsOffSentMs;
+  final NightStartGate _gate = NightStartGate();
   String? _dreamLine;
   String? _napLine;
   String? _lucidLine;
@@ -314,7 +337,9 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       setState(() {}); // data age and the current half hour move on
       if (++_ticks % 5 == 0) unawaited(_refreshRunning());
       // Its time may be up, or Android may have ended the recorder: once a minute is enough.
-      if (_ticks % 60 == 0) unawaited(_share.sync(night: _running, filesDir: _filesDir, front: _front));
+      if (_ticks % 60 == 0 && !_gate.starting) {
+        unawaited(_share.sync(night: _running, filesDir: _filesDir, front: _front));
+      }
       // the phone's alarm: is it ringing (the wake face), was "I'm awake" tapped elsewhere
       if (_ticks % 2 == 0 && (_running || _clockState.endMs != null)) unawaited(_refreshAlarm());
     });
@@ -475,14 +500,17 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _refresh() async {
+    final asked = _gate.token;
     final phone = await _safe(Phone.snapshot, const PhoneSnapshot({}));
     final nearby = await nearbyAllowed(phone.sdkInt);
     final running = await FlutterForegroundTask.isRunningService;
     final last = await loadNight();
     final xiaomiDone = await FlutterForegroundTask.getData<bool>(key: _xiaomiDoneKey) ?? false;
     final dir = _dir ?? await _safe<String?>(Phone.recordingsDir, null);
-    final nights = dir == null || running ? const <NightFiles>[] : _listNights(dir);
-    final checkedInAt = dir == null ? null : _checkedInToday(dir);
+    // the nights' chaining opens every recording's index (and a packed one's header): off the screen's thread
+    final nights = dir == null || running ? const <NightFiles>[] : await _listNights(dir);
+    final now = DateTime.now();
+    final lines = dir == null ? null : nightLines(dir, now);
     final alarm = dir == null ? const AlarmSetup() : AlarmSetupStore.forRecordings(dir).read();
     final diy = _readDiy(dir);
     final address = diy.useDiy ? await phoneWifiAddress() : null;
@@ -519,8 +547,10 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
         },
       )..addListener(_onScoring);
     }
+    // a "no night" asked before or during this screen's own Start is not acted on (NightStartGate)
+    final trusted = running || _gate.trusts(asked);
     // a night that has ended has its report (or will): its so-far windows are never needed again
-    if (!running) {
+    if (trusted && !running) {
       try {
         _soFar?.scorer.store.tidy();
       } catch (_) {}
@@ -528,38 +558,38 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     // Last night is scored on the phone once it has ended (DECISIONS rows 97 and 583): a short while after the app
     // opens, never while a night records or a session runs; it goes on from where it stopped. Then the recordings
     // nothing has written for a day are packed (DECISIONS 540-549).
-    if (_scoringStop(running: running) == null) {
+    if (trusted && _scoringStop(running: running) == null) {
       _scoring?.runSoon(then: dir == null ? null : () => _packOld(dir));
     }
-    final dreamLine = dir == null ? null : _lastDream(dir);
-    final napLine = dir == null ? null : _lastNap(dir);
-    final lucidLine = dir == null ? null : lucidNightLine(dir);
-    final memoryLine = dir == null ? null : memoryNightLine(dir);
     final pending = dir == null || running ? null : await _pendingExport(dir);
     String? experiment;
     try {
-      experiment = dir == null ? null : experimentLine(currentExperiment(dir, DateTime.now()));
+      experiment = dir == null ? null : experimentLine(currentExperiment(dir, now));
     } catch (_) {
       // a line of text is never worth breaking the night screen
     }
     final unusual = dir == null || running ? null : await _unusualLine(dir);
-    // the sharp-hours questions (DECISIONS row 283): the moments ahead, handed to the phone at every start and return
-    if (dir != null) unawaited(rearmPrompts(dir, ChannelSharpPhone(), DateTime.now()).catchError((Object _) {}));
-    await _share.sync(night: running, filesDir: dir == null ? null : Directory(dir).parent.path, front: _front);
+    // the sharp-hours questions (DECISIONS row 283): the moments ahead, handed to the phone at every start and return;
+    // the files are read off the screen's thread (DECISIONS 620-629)
+    if (dir != null) unawaited(rearmInBackground(dir, ChannelSharpPhone(), now).catchError((Object _) {}));
+    if (running || _gate.trusts(asked)) {
+      await _share.sync(night: running, filesDir: dir == null ? null : Directory(dir).parent.path, front: _front);
+    }
     if (!mounted) return;
+    final stale = !running && !_gate.trusts(asked);
     setState(() {
       _nights = nights;
       _phone = phone;
       _nearby = nearby;
-      _running = running;
+      if (!stale) _running = running;
       _last = last;
       _xiaomiDone = xiaomiDone;
       _dir = dir;
-      _dreamLine = dreamLine;
-      _napLine = napLine;
-      _lucidLine = lucidLine;
-      _memoryLine = memoryLine;
-      _checkedInAt = checkedInAt;
+      _dreamLine = lines?.dream;
+      _napLine = lines?.nap;
+      _lucidLine = lines?.lucid;
+      _memoryLine = lines?.memory;
+      _checkedInAt = lines?.checkedInAt;
       _experiment = experiment;
       _unusual = unusual;
       _pending = pending;
@@ -675,41 +705,6 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// The nap coach's newest nap in a line, when it is under a day old.
-  static String? _lastNap(String dir) {
-    try {
-      final naps = NapStore(napDirFor(dir)).list();
-      if (naps.isEmpty) return null;
-      final s = naps.first;
-      if (DateTime.now().difference(s.start) > const Duration(hours: 24)) return null;
-      return 'Last nap: ${nightLabel(s.start)} ${clock(s.start)}, ${s.lengthMin} min, ${endWords(s)}.';
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// The dream catcher's newest session in a line, when it is under a day old.
-  static String? _lastDream(String dir) {
-    try {
-      final sessions = DreamStore(dreamDirFor(dir)).list();
-      if (sessions.isEmpty) return null;
-      final s = sessions.first;
-      if (DateTime.now().difference(s.start) > const Duration(hours: 24)) return null;
-      final n = s.answers;
-      return 'Last session: ${n == 1 ? '1 answer' : '$n answers'}, ${nightLabel(s.start)} ${clock(s.start)}.';
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static String? _checkedInToday(String dir) {
-    try {
-      return checkedInTodayAt(MorningStore(morningsDirFor(dir)).list(), DateTime.now());
-    } catch (_) {
-      return null;
-    }
-  }
-
   static Future<T> _safe<T>(Future<T> Function() f, T fallback) async {
     try {
       return await f();
@@ -722,6 +717,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
 
   Future<void> _start() async {
     setState(() => _busy = true);
+    _gate.begin();
     try {
       // the DIY board comes over Wi-Fi: no Bluetooth needed, but a Wi-Fi address the board can send to
       final diy = _readDiy(_dir).useDiy;
@@ -755,6 +751,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       _status = null;
       _statusAtMs = null;
     } finally {
+      _gate.end();
       if (mounted) setState(() => _busy = false);
       unawaited(_refresh());
     }
@@ -806,18 +803,24 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     }
   }
 
-  static List<NightFiles> _listNights(String dir) {
+  /// The nights on the phone, worked out in a background isolate: the chaining opens the last `.idx` row of every
+  /// recording (and a packed one's header), hundreds of files after a few weeks (DECISIONS 620-629).
+  static Future<List<NightFiles>> _listNights(String dir) async {
     try {
-      return nightsIn(Directory(dir));
+      return await Isolate.run(() => nightsIn(Directory(dir)), debugName: 'nights');
     } catch (_) {
       return const [];
     }
   }
 
-  /// Export: the owner picks a night, then a folder (system picker); the night's files are copied there.
+  /// Export: the owner picks a night, then a folder (system picker); the night's files are copied there. The nights are
+  /// listed again first, in the background isolate: the packing after the scoring turns a night's `.f32` files into
+  /// `.f32.gz` with no refresh of the screen, and the list of the last refresh would name files that are gone (the
+  /// picker failed on a packed recording's length; DECISIONS 629).
   Future<void> _export() async {
-    final nights = _nights;
-    if (nights.isEmpty) return;
+    final dir = _dir;
+    final nights = dir == null ? _nights : await _listNights(dir);
+    if (nights.isEmpty || !mounted) return;
     final night = await showModalBottomSheet<NightFiles>(
       context: context,
       showDragHandle: true,

@@ -331,3 +331,33 @@ def test_page_server_passes_the_token_on(phone, tmp_path):
         assert e.value.code == 401
     finally:
         srv.shutdown(); srv.server_close()
+
+
+def test_recording_headers_are_pulled_beside_their_f32_also_raw_only(phone, tmp_path):
+    """<stamp>.header.json (docs/data-format.md "The recording header"): of a night, of a DIY capture, of a check-in."""
+    import recording
+    head = (json.dumps(recording.to_json(recording.diy_board(tuple(f"Ch{i}" for i in range(1, 9)), 250))) + "\n").encode()
+    phone.put(f"{STEM}.header.json", head, modified=T0 + 20)
+    phone.put(f"{STEM}.f32", bytes(36 * 5), modified=T0 + 20, growing=True)
+    phone.put("recordings-diy/2026-11-19-020000.header.json", head)
+    phone.put("recordings-diy/2026-11-19-020000.f32", bytes(36 * 2))
+    phone.put("mornings/2026-11-19-070000.header.json", head)
+    phone.put("mornings/2026-11-19-070000.f32", bytes(36))
+    phone.put("nights/2026-11-18.report.json", b"{}", modified=T0 + 9000)
+    for p in (f"{STEM}.header.json", "recordings-diy/2026-11-19-020000.header.json", "recordings-diy/2026-11-19-020000.f32"):
+        assert pp.is_raw(ip.safe_path(p)), p
+    assert not pp.is_raw(ip.safe_path("nights/2026-11-18.header.json"))
+    only = tmp_path / "only"
+    rep = run(phone, only, raw_only=True)
+    assert not rep.problems
+    assert sorted(str(p.relative_to(only)) for p in only.rglob("*.header.json")) == [
+        "recordings-diy/2026-11-19-020000.header.json", "recordings/2026-11-19-010000.header.json"]
+    assert (only / "recordings-diy" / "2026-11-19-020000.f32").is_file() and not (only / "phone" / "mornings").exists()
+    assert recording.read(only / "recordings" / "2026-11-19-010000.f32").record_bytes == 36
+    phone.requests.clear()
+    rep = run(phone, tmp_path / "all")
+    assert not rep.problems
+    order = [p for p, _ in phone.fetched()]
+    assert order.index("nights/2026-11-18.report.json") > order.index("recordings-diy/2026-11-19-020000.f32")  # raw first
+    assert (tmp_path / "all" / "phone" / "mornings" / "2026-11-19-070000.header.json").read_bytes() == head
+    assert (tmp_path / "all" / "recordings-diy" / "2026-11-19-020000.header.json").read_bytes() == head

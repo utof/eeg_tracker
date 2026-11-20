@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../recorder/header.dart' show MissingSites;
 import '../sleep/scorer.dart' show ScoringPaused;
 import '../sleep/so_far.dart';
 import 'sleep_so_far_view.dart';
@@ -26,6 +27,7 @@ class SleepSoFar extends ChangeNotifier {
   String? step;
   String? waiting;
   String? failed;
+  String? refused;
   bool ended = false;
 
   /// When the last look ended, and whether it was cut short (the page closed, the screen went off).
@@ -37,7 +39,8 @@ class SleepSoFar extends ChangeNotifier {
 
   bool get busy => _running != null;
 
-  SoFarState get state => SoFarState(step: step, waiting: waiting, failed: failed, ended: ended, busy: busy);
+  SoFarState get state =>
+      SoFarState(step: step, waiting: waiting, failed: failed, refused: refused, ended: ended, busy: busy);
 
   /// The last look's result for tonight (read once from the cache); never throws.
   SoFarResult? cached() {
@@ -60,7 +63,7 @@ class SleepSoFar extends ChangeNotifier {
     halt();
     _forNight = null;
     result = null;
-    step = waiting = failed = null;
+    step = waiting = failed = refused = null;
     ended = false;
     lookedAt = null;
     notifyListeners();
@@ -81,7 +84,7 @@ class SleepSoFar extends ChangeNotifier {
   Future<void> _look() async {
     cached();
     step = 'Looking at the recordings';
-    waiting = failed = null;
+    waiting = failed = refused = null;
     cut = false;
     notifyListeners();
     try {
@@ -100,6 +103,8 @@ class SleepSoFar extends ChangeNotifier {
       result = scorer.latest ?? result;
       if (!_halted) waiting = e.why;
       cut = _halted;
+    } on MissingSites catch (e) {
+      refused = e.message; // the recording lacks O1 O2 T3 or T4: said in words, never read from another channel
     } catch (e) {
       result = scorer.latest ?? result;
       failed = '$e';

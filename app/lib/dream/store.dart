@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../cache/file_summaries.dart' show firstParsed, newestFirst;
 import '../recorder/chunk_writer.dart' show fileStem;
 import 'rounds.dart';
 import 'voice.dart';
@@ -282,6 +283,10 @@ class DreamStore {
     }
     return out..sort((a, b) => b.start.compareTo(a.start));
   }
+
+  /// The newest readable session, found by its file name (its start): the night screen's line opens this one file,
+  /// and none while it is unchanged (DECISIONS 620-629).
+  DreamSession? newest() => firstParsed(newestFirst(dir, '.dream.json'), DreamSession.fromJson);
 }
 
 /// Round 1's latency in earlier sessions where the detector, not the timer, asked (minutes after lights off):

@@ -248,19 +248,31 @@ void main() {
       tester.view.physicalSize = const Size(1080, 2400);
       tester.view.devicePixelRatio = 1080 / 393;
       addTearDown(tester.view.reset);
+      // the check is worked out in a background isolate (DECISIONS 620-629): real time passes until it shows
+      Future<void> until(Finder f) async {
+        for (var i = 0; i < 200 && f.evaluate().isEmpty; i++) {
+          await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+          await tester.pump();
+        }
+      }
+
       await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: SleepReportScreen(scoring: scoring, nightOf: '2026-11-11')));
+      await until(find.text("This doesn't look like your usual brain signal. Was it you?"));
       expect(find.text("This doesn't look like your usual brain signal. Was it you?"), findsOneWidget);
       await tester.tap(find.text('Someone else'));
       await tester.pump();
       expect(store.read('2026-11-11')!.wearerAnswer, answerSomeoneElse);
+      await until(find.textContaining('this night is left out of your trends'));
       expect(find.textContaining('this night is left out of your trends'), findsOneWidget);
       await tester.tap(find.text('Undo'));
       await tester.pump();
       expect(store.read('2026-11-11')!.wearerAnswer, isNull);
+      await until(find.text("This doesn't look like your usual brain signal. Was it you?"));
       expect(find.text("This doesn't look like your usual brain signal. Was it you?"), findsOneWidget);
       final events = File('${wearerDirFor(rec.path).path}/events.jsonl').readAsLinesSync();
       expect(events, hasLength(2));
       await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: SleepReportScreen(scoring: scoring, nightOf: '2026-11-05')));
+      await until(find.text('Learning what your brain looks like: 4 of 10 nights.'));
       await tester.scrollUntilVisible(find.text('Someone else wore it'), 300);
       expect(find.text('Learning what your brain looks like: 4 of 10 nights.'), findsOneWidget);
     });

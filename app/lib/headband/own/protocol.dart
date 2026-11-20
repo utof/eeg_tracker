@@ -12,6 +12,8 @@
 // phone: the "Own connection" page) checks each on the owner's headband (docs/own-ble-driver.md).
 import 'dart:typed_data';
 
+import '../../recorder/chunk_writer.dart' show Sample;
+
 /// Order of every sample this driver returns and of the `.f32` records.
 const List<String> names = ['O1', 'O2', 'T3', 'T4'];
 
@@ -163,7 +165,7 @@ List<String> parseOrder(String text) => [
 ];
 
 /// One sample: the packet number and O1 O2 T3 T4 in volts (one `.f32` record).
-typedef BleSample = ({int pack, double o1, double o2, double t3, double t4});
+typedef BleSample = Sample;
 
 class SignalPacket {
   const SignalPacket(this.counter, this.samples, this.markers, this.counts);
@@ -200,7 +202,7 @@ SignalPacket decodeSignal(Uint8List data, [Layout? layout]) {
       c[j] = u >= 0x800000 ? u - 0x1000000 : u; // signed 24-bit, little-endian (TO VERIFY)
     }
     counts.add(c);
-    samples.add((
+    samples.add(Sample.four(
       pack: (counter + k) % counterMod,
       o1: c[where[0]] * scale,
       o2: c[where[1]] * scale,

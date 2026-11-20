@@ -242,3 +242,27 @@ def test_the_fixture_the_phone_app_wrote_imports_cleanly(tmp_path: Path) -> None
     assert code == 0, text
     assert list((tmp_path / "_local" / "recordings").glob("*.f32"))
     assert (tmp_path / "_local" / "phone" / "dream-catcher" / "prompts").is_dir()
+
+
+def test_recording_headers_land_beside_their_f32(tmp_path: Path) -> None:
+    """<stamp>.header.json (docs/data-format.md "The recording header") of a night, a DIY capture and a check-in."""
+    import recording
+    eight = recording.diy_board(tuple(f"Ch{i}" for i in range(1, 9)), 250, layout="Helmet plan (8)")
+    heads = {"recordings/2026-11-20-231200.header.json": recording.brainbit("eeg_tracker app"),
+             "recordings-diy/2026-11-20-120000.header.json": eight,
+             "mornings/2026-11-21-070000.header.json": recording.brainbit("eeg_tracker app")}
+    files = {p: (json.dumps(recording.to_json(h)) + "\n").encode() for p, h in heads.items()}
+    files |= {"recordings/2026-11-20-231200.f32": bytes(20), "recordings-diy/2026-11-20-120000.f32": bytes(36 * 3),
+              "mornings/2026-11-21-070000.f32": bytes(40)}
+    exp, dest = make_export(tmp_path / "eeg-export", files), tmp_path / "_local"
+    code, text = run(exp, dest)
+    assert code == 0, text
+    for folder, stem in (("recordings", "2026-11-20-231200"), ("recordings-diy", "2026-11-20-120000"),
+                         ("phone/mornings", "2026-11-21-070000")):
+        assert (dest / folder / f"{stem}.header.json").is_file() and (dest / folder / f"{stem}.f32").is_file()
+    got = recording.read(dest / "recordings-diy" / "2026-11-20-120000.f32")
+    assert got == eight and got.record_bytes == 36
+    assert recording.read(dest / "phone" / "mornings" / "2026-11-21-070000.f32").source == "header"
+    assert "2 into _local/recordings" in text and "2 into _local/recordings-diy" in text
+    code, text = run(exp, dest)
+    assert code == 0 and "6 already here" in text

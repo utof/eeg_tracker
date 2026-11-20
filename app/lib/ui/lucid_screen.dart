@@ -14,11 +14,49 @@ import '../lucid/practice.dart';
 import '../lucid/store.dart';
 import '../phone.dart';
 import '../recorder/recorder_service.dart' show loadNight;
+import '../session_keeper.dart' show PhoneSessionKeeper;
+import 'dream_screen.dart' show dreamSessionRunning;
 import 'evidence_sheet.dart';
 import 'lucid_view.dart';
+import 'nap_screen.dart' show napSessionRunning;
+import 'sleep_scoring.dart' show nightScoringBusy;
+import 'states_screen.dart' show soundSessionRunning;
+import 'work_screen.dart' show workSessionRunning;
 
 /// A night's morning questions may be answered until this long after the night's start.
 const Duration answerWithin = Duration(hours: 30);
+
+/// What is due from the settings, the newest finished night and its answers, and the evening practices; and when the
+/// last practice in the 3 hours before [now] ended. Shared by the page and the night screen's line.
+({LucidDue due, DateTime? practised}) lucidDue({
+  required LucidSettings settings,
+  required LucidNightRecord? last,
+  required LucidAnswers? lastAnswers,
+  required List<PracticeRecord> practices,
+  required DateTime now,
+  required bool nightRunning,
+}) {
+  final s = settings;
+  DateTime? practised;
+  for (final p in practices) {
+    if (!p.completed) continue;
+    final age = now.difference(p.end);
+    if (age >= Duration.zero && age <= const Duration(hours: 3)) practised = p.end;
+  }
+  final due = !s.on && last == null
+      ? LucidDue.turnOn
+      : last != null &&
+            lastAnswers == null &&
+            !nightRunning &&
+            now.millisecondsSinceEpoch - last.startMs < answerWithin.inMilliseconds
+      ? LucidDue.answer
+      : !s.on
+      ? LucidDue.turnOn
+      : s.level == null || (practised == null && !nightRunning)
+      ? LucidDue.practise
+      : LucidDue.ready;
+  return (due: due, practised: practised);
+}
 
 /// What the page needs from the files (pure, for tests).
 LucidViewModel lucidModel({
@@ -38,25 +76,15 @@ LucidViewModel lucidModel({
   ];
   final last = done.isEmpty ? null : done.last;
   final answers = {for (final r in records) r.stamp: store.answers(r.stamp)};
-  DateTime? practised;
-  for (final p in practices) {
-    if (!p.completed) continue;
-    final age = now.difference(p.end);
-    if (age >= Duration.zero && age <= const Duration(hours: 3)) practised = p.end;
-  }
   final lastAnswers = last == null ? null : answers[last.stamp];
-  final due = !s.on && last == null
-      ? LucidDue.turnOn
-      : last != null &&
-            lastAnswers == null &&
-            !nightRunning &&
-            now.millisecondsSinceEpoch - last.startMs < answerWithin.inMilliseconds
-      ? LucidDue.answer
-      : !s.on
-      ? LucidDue.turnOn
-      : s.level == null || (practised == null && !nightRunning)
-      ? LucidDue.practise
-      : LucidDue.ready;
+  final (:due, :practised) = lucidDue(
+    settings: s,
+    last: last,
+    lastAnswers: lastAnswers,
+    practices: practices,
+    now: now,
+    nightRunning: nightRunning,
+  );
   LucidResults? results;
   final test = store.test();
   if (test != null) {
@@ -99,28 +127,57 @@ LucidViewModel lucidModel({
   );
 }
 
-/// The night screen's one line for the Lucid dreams section; null when the cues were never used.
+/// The night screen's one line for the Lucid dreams section; null when the cues were never used. Read at every start
+/// and return: only the settings, the newest night (by its file name), its answers and the practices are opened, and
+/// none again while they are unchanged (DECISIONS 620-629; it used to build the whole page, every night twice).
 String? lucidNightLine(String recordingsDir, {DateTime? now}) {
   try {
     final store = LucidStore(lucidDirFor(recordingsDir));
-    final m = lucidModel(store: store, now: now ?? DateTime.now(), nightRunning: false);
-    if (!m.on && m.last == null) return null;
-    return switch (m.due) {
+    final s = store.settings();
+    final last = store.newestNight();
+    if (!s.on && last == null) return null;
+    final (:due, :practised) = lucidDue(
+      settings: s,
+      last: last,
+      lastAnswers: last == null ? null : store.answers(last.stamp),
+      practices: store.practices(),
+      now: now ?? DateTime.now(),
+      nightRunning: false,
+    );
+    return switch (due) {
       LucidDue.answer => 'Last night\'s questions are waiting.',
       LucidDue.turnOn => 'Off.',
       LucidDue.practise =>
-        m.level == null ? 'On: practise first, it sets the loudness.' : 'On: practise before you sleep.',
+        s.level == null ? 'On: practise first, it sets the loudness.' : 'On: practise before you sleep.',
       LucidDue.ready =>
-        'On; practised at ${m.practisedAt!.hour.toString().padLeft(2, '0')}:'
-            '${m.practisedAt!.minute.toString().padLeft(2, '0')}.',
+        'On; practised at ${practised!.hour.toString().padLeft(2, '0')}:'
+            '${practised.minute.toString().padLeft(2, '0')}.',
     };
   } catch (_) {
     return null;
   }
 }
 
+/// Searches last night for dream signals and keeps the result (lucid/morning.dart searchAndKeep).
+typedef LucidSearch =
+    Future<NightSignals?> Function(String recordingsDir, LucidStore store, LucidNightRecord record, {bool onlyIfScored});
+
+/// A session records or last night is being scored: the search over the whole night waits (it would compete with
+/// them for the phone; DECISIONS 583, 620-629).
+bool get _othersBusy =>
+    nightScoringBusy ||
+    dreamSessionRunning ||
+    soundSessionRunning ||
+    napSessionRunning ||
+    workSessionRunning ||
+    PhoneSessionKeeper.held;
+
 class LucidScreen extends StatefulWidget {
-  const LucidScreen({super.key});
+  const LucidScreen({super.key, this.recordingsDir, this.search});
+
+  /// Tests: the app's recordings folder and the search; null: the phone's, searchAndKeep.
+  final String? recordingsDir;
+  final LucidSearch? search;
 
   @override
   State<LucidScreen> createState() => _LucidScreenState();
@@ -143,7 +200,7 @@ class _LucidScreenState extends State<LucidScreen> {
 
   Future<void> _prepare() async {
     try {
-      _rec = await Phone.recordingsDir();
+      _rec = widget.recordingsDir ?? await Phone.recordingsDir();
       if (_rec != null) _store = LucidStore(lucidDirFor(_rec!));
       _running = await FlutterForegroundTask.isRunningService;
       if (_running) _runningStart = (await loadNight()).startMs;
@@ -171,18 +228,21 @@ class _LucidScreenState extends State<LucidScreen> {
     });
   }
 
-  /// Last night's search for dream signals, when it has none yet or its stages came later.
+  /// Last night's search for dream signals, when it has none yet, or again once the night is scored when the first
+  /// search came before its stages (the search then reads the night only when its report is scored: until that it is
+  /// not read again at every open). Never while a night records, a session runs or last night is being scored.
   void _searchIfDue() {
     final st = _store, rec = _rec, last = _model?.last;
-    if (st == null || rec == null || last == null || _running) return;
+    if (st == null || rec == null || last == null || _running || _othersBusy) return;
     final have = last.signals;
     if (have != null && have.staged) return;
     final stamp = last.record.stamp;
     if (_searching.contains(stamp)) return;
     _searching.add(stamp);
     _reload();
+    final search = widget.search ?? searchAndKeep;
     unawaited(
-      searchAndKeep(rec, st, last.record).catchError((Object _) => null).whenComplete(() {
+      search(rec, st, last.record, onlyIfScored: have != null).catchError((Object _) => null).whenComplete(() {
         _searching.remove(stamp);
         _reload();
       }),

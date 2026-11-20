@@ -14,6 +14,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../cache/file_summaries.dart' show folderValue;
+import '../sleep/progress.dart' show cacheDirFor;
 import '../trends/days.dart' show dayKey;
 import '../wearer/check.dart' show answerSomeoneElse;
 import 'breaks.dart' show BreakRule;
@@ -132,9 +134,31 @@ Map<String, Map<String, double>> workDayNumbers(Iterable<Object?> sessions) {
 }
 
 /// The numbers from the session files beside [recordingsDir]; a missing folder, a damaged file or a foreign one is
-/// simply not there.
+/// simply not there. Worked out again only when a session file is new, changed or gone: the numbers are kept with the
+/// files' sizes and times in `files/cache/work-days.json` (DECISIONS 620-629; a 10-hour session's file is about
+/// 345 KB, and Trends, the unusual card and the experiments ask at every open).
 Map<String, Map<String, double>> readWorkDayNumbers(String recordingsDir) {
   final dir = workDirFor(recordingsDir);
+  final kept = folderValue(
+    File('${cacheDirFor(recordingsDir).path}/work-days.json'),
+    dir,
+    workSuffix,
+    version: 1,
+    compute: () => workDayNumbers(_sessionFiles(dir)),
+  );
+  return {
+    if (kept is Map)
+      for (final MapEntry(key: id, value: days) in kept.entries)
+        if (id is String && days is Map)
+          id: {
+            for (final MapEntry(key: day, value: v) in days.entries)
+              if (day is String && v is num) day: v.toDouble(),
+          },
+  };
+}
+
+/// Every session file in [dir], decoded (a damaged one is left out).
+List<Object?> _sessionFiles(Directory dir) {
   final files = <Object?>[];
   if (dir.existsSync()) {
     for (final f in dir.listSync().whereType<File>()) {
@@ -148,5 +172,5 @@ Map<String, Map<String, double>> readWorkDayNumbers(String recordingsDir) {
       }
     }
   }
-  return workDayNumbers(files);
+  return files;
 }

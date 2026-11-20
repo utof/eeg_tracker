@@ -13,7 +13,10 @@ for the night extras (analysis/night_extras.py: jaw, movement and signal quality
 drift-off detector from the night's lights off against the model's sleep onset (analysis/night_drift.py), writes
 <date>.report.json
 (docs/data-format.md) and appends the eeg_sleep_night event (export_events.py). Nights already up to date are
-skipped, so running it twice does nothing the second time. One run at a time (a lock file); it lowers its own
+skipped, so running it twice does nothing the second time. A night may hold any number of channels (its files'
+<stamp>.header.json, scripts/recording.py): its BDF keeps them all under their names, and the model and the detectors
+read O1 O2 T3 T4, found by name or 10-10 site. A night without those four (or whose files hold different channels)
+is refused in words, nothing is written for it, and the other nights are still built (exit status 1). One run at a time (a lock file); it lowers its own
 CPU priority and stops itself past --max-minutes or --max-mb, so the recorder keeps going.
 """
 from __future__ import annotations
@@ -23,6 +26,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import night_files as nf
+import recording
 
 ROOT = Path(__file__).resolve().parent.parent
 EPOCH = 30
@@ -177,9 +181,12 @@ def build(night: nf.Night, a: argparse.Namespace, status: nf.Job) -> dict:
     name, folder = night.name, a.nights
     t_start = time.time()
     hours = sum(r.minutes for r in night.recs) / 60
+    paths = [r.path for r in night.recs]
+    head = to_bdf.night_header(paths)  # the files hold the same channels, else refused here
+    four = recording.pick(head, score_sleep.CHANNELS, score_sleep.WHO)  # refused here without O1 O2 T3 T4
     status.step(f"Night of {name}: joining {len(night.recs)} recordings ({hours:.1f} h)")
-    start, uv, notes = to_bdf.join([r.path for r in night.recs])
-    length_s = len(uv) / to_bdf.FS
+    start, uv, notes = to_bdf.join(paths)
+    length_s = len(uv) / head.sample_rate
     if length_s < 10 * EPOCH:
         rep = make_report(name, night, None, time.time() - t_start, (start, length_s))
     else:
@@ -188,7 +195,13 @@ def build(night: nf.Night, a: argparse.Namespace, status: nf.Job) -> dict:
         try:  # before scoring, so its memory is free again when the model runs
             sys.path.insert(0, str(ROOT / "analysis"))
             import night_extras as nx
-            full = nx.see(uv, notes, in_place=True)  # clipped as the BDF below clips it: no second copy
+            if head.sample_rate != nx.det.FS:
+                raise recording.RecordingError(f"the detectors read {nx.det.FS} Hz; this night is "
+                                               f"{head.sample_rate:g} Hz")
+            if four == list(range(uv.shape[1])):
+                full = nx.see(uv, notes, in_place=True)  # clipped as the BDF below clips it: no second copy
+            else:  # more channels than the four: the detectors get those four, the BDF keeps them all
+                full = nx.see(uv[:, four], notes, in_place=True)
             seen = nx.events(full)
             try:  # the drift-off detector from the night's lights off (night_drift.py)
                 import night_drift as nd
@@ -199,7 +212,7 @@ def build(night: nf.Night, a: argparse.Namespace, status: nf.Job) -> dict:
         except Exception as e:  # noqa: BLE001 - the night is still scored without the extras
             why = f"{type(e).__name__}: {e}"
         part = folder / f"{name}.part.bdf"
-        to_bdf.write(part, start, uv, notes)
+        to_bdf.write(part, start, uv, notes, head.names, head.sample_rate, to_bdf.equipment(head))
         del uv
         scored = score_sleep.score(part, a.anysleep, a.device, progress=status.step)
         scored["source"] = f"{name}.bdf"
@@ -269,12 +282,20 @@ def main(argv: list[str] | None = None) -> int:
                 if a.force or nf.is_stale(n, nf.read_report(a.nights, n.name))]
         if not todo:
             print("sleep reports are up to date", flush=True)
+        refused: list[str] = []
         for n in todo:
             status.write(nights=[x.name for x in todo])
-            build(n, a, status)
+            try:
+                build(n, a, status)
+            except recording.RecordingError as e:  # not a night this can score: say so, go on with the others
+                refused.append(f"night of {n.name}: {e}")
+                print(f"{refused[-1]}; not scored", flush=True)
         if todo:
             print(nf.drift_check_line(*nf.drift_check([r for p in nf.reports(a.nights) if (r := nf.read_json(p))])),
                   flush=True)
+        if refused:
+            status.write(state="failed", step="Done", error="; ".join(refused)[:600])
+            return 1
         status.write(state="done", step="Done", error=None)
         return 0
     except BaseException as e:

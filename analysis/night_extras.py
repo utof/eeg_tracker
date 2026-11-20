@@ -171,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
     if not nights:
         raise SystemExit(f"no night {a.night} in {a.recordings}")
     t0 = time.time()
-    start, uv, notes = to_bdf.join([r.path for r in nights[0].recs])
+    start, uv, notes = to_bdf.join_sites([r.path for r in nights[0].recs], ("O1", "O2", "T3", "T4"), "the detector pass")
     t_join = time.time() - t0
     seen = see(uv, notes)
     del uv

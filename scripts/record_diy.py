@@ -18,9 +18,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # find the modules beside this file even under `python3 -I`
 import diy_board as db  # noqa: E402
+import recording  # noqa: E402
 from recorder_hub import Hub  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
+MADE_BY = "eeg_tracker scripts/record_diy.py"
 DEFAULT_MONTAGE = Path(__file__).resolve().parent / "montages" / "diy-breadboard-4.json"
 NAME_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,16}$")
 RETRY_S = 1.0  # a USB port that is not there fails at once; looking every second costs nothing
@@ -66,6 +68,15 @@ def channel_names(names: tuple[str, ...], n: int) -> tuple[tuple[str, ...], str 
     return tuple(f"Ch{i}" for i in range(1, n + 1)), (
         f"the montage names {len(names)} channels but the board sends {n}: using Ch1..Ch{n}; "
         f"pass --montage with {n} names")
+
+
+def header_for(montage: Montage, names: tuple[str, ...], fs: int, mismatch: bool) -> recording.Header:
+    """The file set's <stamp>.header.json (scripts/recording.py): the channels the .f32 holds, the layout they come
+    from (the montage; "DIY board" when its names did not fit and the channels are Ch1..ChN), and the montage's words
+    for where the reference and the bias sit (a plan)."""
+    said = lambda text: None if text == "not given" else text  # noqa: E731
+    return recording.diy_board(names, fs, layout=recording.DIY_BOARD if mismatch else montage.label,
+                               reference=said(montage.reference), bias=said(montage.bias), made_by=MADE_BY)
 
 
 def timestamped(msg: str) -> str:
@@ -207,7 +218,7 @@ class Recording:
         """The first frame of a capture: files, and the lines that say what is in them."""
         hub = self.hub
         names, mismatch = channel_names(self.montage.names, f.channels)
-        hub.configure(names, f.fs)
+        hub.configure(names, f.fs, header_for(self.montage, names, f.fs, mismatch is not None))
         hub.open_files()
         hub.log_lines(self.early); self.early = []
         if self.prev_stamp:

@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
+import 'package:eeg_tracker/recorder/header.dart';
 import 'package:eeg_tracker/recorder/packed.dart' show packRaw;
 import 'package:eeg_tracker/sleep/live_log.dart';
 import 'package:eeg_tracker/sleep/live_prep.dart' show LiveWindow;
@@ -22,12 +23,30 @@ import 'package:eeg_tracker/sleep/so_far.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// One recorder file set that grows as a night records: one batch a second, its `.idx` row just after its last sample.
+/// With [names], a recording of that many channels with its header (header.dart); channel `names[i]` carries what the
+/// BrainBit's channel of the same name would (O1 O2 T3 T4), any other a signal of its own.
 class GrowingRun {
-  GrowingRun(this.dir, this.start) : stem = fileStem(start);
+  GrowingRun(this.dir, this.start, {this.names}) : stem = fileStem(start) {
+    final n = names;
+    if (n != null) {
+      writeHeader(f32, RecordingHeader(channels: [for (final c in n) HeaderChannel(c, site: c == 'T3' ? 'T7' : c)]));
+    }
+  }
   final Directory dir;
   final DateTime start;
   final String stem;
+  final List<String>? names;
   int samples = 0;
+
+  int get width => names?.length ?? 4;
+
+  /// The BrainBit channel a column carries (0-3), or another signal (4 on).
+  int _source(int column) {
+    final n = names;
+    if (n == null) return column;
+    final i = const ['O1', 'O2', 'T3', 'T4'].indexOf(n[column]);
+    return i >= 0 ? i : 4 + column;
+  }
 
   File get f32 => File('${dir.path}/$stem.f32');
 
@@ -41,12 +60,13 @@ class GrowingRun {
 
   void grow(double minutes) {
     final n = (minutes * 60 * 250).round();
-    final rec = ByteData(n * recordBytes);
+    final rb = 4 + 4 * width;
+    final rec = ByteData(n * rb);
     for (var j = 0; j < n; j++) {
       final i = samples + j;
-      rec.setUint32(j * recordBytes, i % 2048, Endian.little);
-      for (var c = 0; c < 4; c++) {
-        rec.setFloat32(j * recordBytes + 4 + 4 * c, _v(i, c), Endian.little);
+      rec.setUint32(j * rb, i % 2048, Endian.little);
+      for (var c = 0; c < width; c++) {
+        rec.setFloat32(j * rb + 4 + 4 * c, _v(i, _source(c)), Endian.little);
       }
     }
     final rows = n ~/ 250;
@@ -151,6 +171,35 @@ void main() {
           }
         }
       }
+    });
+  });
+
+  group('any number of channels, picked by name', () {
+    test('a recording of 8 channels with its header gives the stages of the same 4 in a BrainBit file', () async {
+      final wide = Directory('${root.path}/wide/recordings')..createSync(recursive: true);
+      final eight = ['Fp1', 'O2', 'Cz', 'T3', 'O1', 'Fz', 'T4', 'Pz'];
+      GrowingRun(wide, start, names: eight).grow(170);
+      GrowingRun(recordings, start).grow(170);
+      final layout = joinLayout([File('${wide.path}/${fileStem(start)}.f32')]);
+      final plain = joinLayout([File('${recordings.path}/${fileStem(start)}.f32')]);
+      for (var c = 0; c < 4; c++) {
+        expect(layout.channelRange(c, 123456, 201234), plain.channelRange(c, 123456, 201234), reason: 'channel $c');
+        expect(layout.channelRange(c, 0, 9000), layout.channel(c).sublist(0, 9000));
+      }
+      final a = (await soFar(wide, <String>[]).update())!, b = (await soFar(recordings, <String>[]).update())!;
+      expect(a.stages, b.stages);
+    });
+
+    test('a recording without T3 and T4 is refused in words, never read from other channels', () async {
+      GrowingRun(recordings, start, names: ['O1', 'O2', 'Fz', 'Cz']).grow(30);
+      final calls = <String>[];
+      await expectLater(
+        soFar(recordings, calls).update(),
+        throwsA(
+          isA<MissingSites>().having((e) => e.message, 'message', allOf(startsWith('Sleep so far needs'), contains('T3, T4'))),
+        ),
+      );
+      expect(calls, isEmpty);
     });
   });
 
@@ -365,7 +414,7 @@ void main() {
       for (var s = 0; s < 8 * 60; s++) {
         scorer.add(
           DateTime.fromMillisecondsSinceEpoch(t0 + (s + 1) * 1000),
-          [for (var j = 0; j < 250; j++) (pack: 0, o1: 1e-5, o2: 1e-5, t3: 1e-5, t4: 1e-5)],
+          [for (var j = 0; j < 250; j++) Sample.four(pack: 0, o1: 1e-5, o2: 1e-5, t3: 1e-5, t4: 1e-5)],
           firstOfFile: s == 0,
         );
         await Future<void>.delayed(Duration.zero);

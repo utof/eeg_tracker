@@ -141,7 +141,7 @@ SoFarPlan? planSoFar(String recordingsDir, int? sinceMs) {
   if (nights.isEmpty) return null;
   final n = nights.first;
   if (n.recordings.isEmpty || (sinceMs != null && n.end.millisecondsSinceEpoch < sinceMs)) return null;
-  final layout = joinLayout(n.recordings);
+  final layout = joinLayout(n.recordings, who: 'Sleep so far'); // O1 O2 T3 T4 by name or site, or MissingSites
   final epochs = layout.samples ~/ epochInputSamples;
   final complete = completeStretches(epochs);
   return SoFarPlan(

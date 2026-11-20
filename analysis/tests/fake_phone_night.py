@@ -2,6 +2,11 @@
 tests of scripts/phone_night_check.py: drops with reconnect tries, lost packets, data held back by Android, a killed
 process, Android's restart, a stuck SDK call, the phone and headband battery lines.
 
+A run may hold any number of channels (`names`; docs/data-format.md "The recording header"): its record is then
+`<I` + one float per name, the first four carry the BrainBit run's signal (the third with hum, the fourth flat), the
+others a quiet 8 Hz wave, and `header` writes its `<stamp>.header.json` (the default, no header, is a file from
+before 2026-11-20).
+
 Nothing real: the signal is made up (alpha-like sines and noise, T3 with mains hum, T4 flat), the address and the
 serial are zeros. Times are seconds after the run's file stamp, the stamp is local time like the app's.
 """
@@ -57,6 +62,8 @@ class PhoneRun:
     extra: list[tuple[float, str]] = field(default_factory=list)  # (seconds after the stamp, line): lines anywhere
     # in the run, such as the Wi-Fi lines (lib/recorder/wifi_watch.dart)
     app_counts: str | None = None  # the app's packet line ("N samples, missing ..."), the night's; else this run's
+    names: tuple[str, ...] = ("O1", "O2", "T3", "T4")  # the channels in record order
+    header: bool = False  # write <stamp>.header.json (scripts/recording.py), as recordings since 2026-11-20 have
 
     @property
     def first(self) -> datetime:
@@ -77,6 +84,10 @@ def signal(n: int, run: PhoneRun, seed: int = 1) -> np.ndarray:
                                                                  else 0)
     if not run.flat_t4:
         v[:, 3] = 15e-6 * np.sin(2 * np.pi * 9 * t) + noise[:, 0] * 0.8
+    if len(run.names) != 4:  # the first four as above, any further channel a quiet 8 Hz wave
+        more = np.random.default_rng(seed + 1).normal(0, 5e-6, (n, max(0, len(run.names) - 4)))
+        more += 12e-6 * np.sin(2 * np.pi * 8 * t)[:, None]
+        v = np.hstack([v, more])[:, :len(run.names)]
     return v
 
 
@@ -161,11 +172,15 @@ def write_run(folder: Path, run: PhoneRun, seed: int = 1) -> Path:
     """Writes the run's three files; returns its `.f32` path."""
     folder.mkdir(parents=True, exist_ok=True)
     n = int(round(run.seconds * FS))
-    rec = np.zeros(n, dtype=REC)
+    rec = np.zeros(n, dtype=[("pack", "<u4"), ("v", "<f4", (len(run.names),))])
     rec["pack"] = packets(run, n) % 2**32
     rec["v"] = signal(n, run, seed)
     name = stem(run.start)
     rec.tofile(folder / f"{name}.f32")
+    if run.header:
+        import recording  # noqa: PLC0415  (scripts/)
+        recording.write(folder / f"{name}.f32", recording.brainbit("fake_phone_night.py") if run.names == recording.BRAINBIT_NAMES
+                        else recording.diy_board(run.names, FS, layout="Helmet plan (8)", made_by="fake_phone_night.py"))
     t, first = arrivals(run, n)
     idx = np.zeros(len(t), dtype=IDX)
     idx["t"], idx["i"] = t, first

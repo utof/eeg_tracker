@@ -56,7 +56,7 @@ class WorkBand implements Headband {
     for (var k = 0; k < 250; k++, _i++) {
       final t = _i / 250;
       if (mode == Mode.off || mode == Mode.stall) {
-        out.add((pack: _pack++ % 2048, o1: 0.4, o2: 0.4, t3: 0.4, t4: 0.4));
+        out.add(Sample.four(pack: _pack++ % 2048, o1: 0.4, o2: 0.4, t3: 0.4, t4: 0.4));
         continue;
       }
       final amp = switch (mode) {
@@ -76,7 +76,7 @@ class WorkBand implements Headband {
         double ramp(double x) => x <= 0 ? 0 : x >= 1 ? 1 : 0.5 - 0.5 * math.cos(math.pi * x);
         eye = dir * 60 * (et < 2.5 ? ramp(et / 0.08) : 1 - ramp((et - 2.5) / 0.08));
       }
-      out.add((
+      out.add(Sample.four(
         pack: _pack++ % 2048,
         o1: (alpha + blink + slow + _noise()) * 1e-6,
         o2: (alpha * 0.9 + blink - slow + _noise()) * 1e-6,

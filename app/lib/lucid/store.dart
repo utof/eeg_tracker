@@ -15,10 +15,12 @@
 //   files/lucid/cue.wav                the cue (written by the app; the night recorder plays it)
 // <stamp> is the night's start (the recorder's first Start of the night), yyyy-MM-dd-HHmmss local time.
 // Each JSON file is written under a temporary name and then renamed. A missing or damaged file reads as "off",
-// "never" or "none".
+// "never" or "none". Reads go through cache/file_summaries.dart's JsonMemo: a file is decoded again only when its size
+// or time changed (the night screen asks for its line at every start and return, DECISIONS 620-629).
 import 'dart:convert';
 import 'dart:io';
 
+import '../cache/file_summaries.dart' show JsonMemo, firstParsed, newestFirst;
 import '../cues/night_cues.dart' show CueMoment;
 import '../sleep/report.dart' show isoLocal;
 import 'plan.dart';
@@ -304,15 +306,7 @@ class LucidStore {
   Directory get signalsDir => Directory('${dir.path}/signals');
   File get cueWav => File('${dir.path}/cue.wav');
 
-  Object? _read(File f) {
-    try {
-      return jsonDecode(f.readAsStringSync());
-    } on FileSystemException {
-      return null;
-    } on FormatException {
-      return null;
-    }
-  }
+  Object? _read(File f) => JsonMemo.read(f);
 
   void _write(File f, Object j) {
     f.parent.createSync(recursive: true);
@@ -396,6 +390,9 @@ class LucidStore {
     return out;
   }
 
+  /// The newest readable night (by its file name, the night's start): the only one opened.
+  LucidNightRecord? newestNight() => firstParsed(newestFirst(nightsDir, '.json'), LucidNightRecord.fromJson);
+
   /// The number the next night gets in the test.
   int nextIndex() => nights().fold(0, (n, r) => r.index >= n ? r.index + 1 : n);
 
@@ -408,24 +405,7 @@ class LucidStore {
 
   void addPractice(PracticeRecord p) => _append(_practice, p.toJson());
 
-  List<PracticeRecord> practices() {
-    try {
-      return [
-        for (final l in _practice.readAsLinesSync())
-          if (l.trim().isNotEmpty) ?PracticeRecord.fromJson(_decode(l)),
-      ];
-    } on FileSystemException {
-      return const [];
-    }
-  }
-
-  static Object? _decode(String line) {
-    try {
-      return jsonDecode(line);
-    } on FormatException {
-      return null;
-    }
-  }
+  List<PracticeRecord> practices() => [for (final j in JsonMemo.lines(_practice)) ?PracticeRecord.fromJson(j)];
 
   File _morning(String stamp) => File('${morningsDir.path}/$stamp.json');
 

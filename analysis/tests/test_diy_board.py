@@ -30,6 +30,7 @@ import fake_board  # noqa: E402
 import record_diy  # noqa: E402
 import recorder_hub  # noqa: E402
 import recorder_poll  # noqa: E402
+import recording  # noqa: E402
 import to_bdf  # noqa: E402
 
 VECTORS = json.loads((FAKE / "golden" / "e9_vectors.json").read_text())
@@ -329,7 +330,7 @@ def lost_in_log(text: str) -> tuple[int, int, int]:
 def test_recorder_writes_the_same_files_and_pages_as_the_brainbit_recorders(runs):
     assert runs["rc"]["serial"] == 0, runs["out"]["serial"]
     (files,) = sets(runs["dirs"]["serial"])
-    assert set(files) == {".f32", ".idx", ".log", ".markers.jsonl"}
+    assert set(files) == {".f32", ".idx", ".log", ".markers.jsonl", ".header.json"}
     recs = records(files[".f32"])
     assert 1200 < len(recs) < 1800, len(recs)  # 6-7 s at 250 Hz (--seconds is checked once a second), minus damage
     seqs = [r[0] for r in recs]
@@ -352,6 +353,10 @@ def test_recorder_writes_the_same_files_and_pages_as_the_brainbit_recorders(runs
     marks = [json.loads(x) for x in files[".markers.jsonl"].read_text().splitlines()]
     assert [m["text"] for m in marks] == ["test-marker"]
     assert len(to_bdf.runs(files[".f32"])) == 1  # 4 channels: the BrainBit record, so the BDF tool can read it
+    h = recording.read(files[".f32"])  # the set's header, written by the recorder itself
+    assert h.source == "header" and h.names == ("O1", "O2", "Fz", "Fp1") and h.sample_rate == 250
+    assert (h.device, h.counter, h.record) == ("DIY board", "board sequence number", "<I4f")
+    assert h.layout.endswith("diy-breadboard-4.json") and h.reference.where.startswith("an earlobe")
     s = runs["seen"]["serial"]
     assert set(s["state"]) == STATE_KEYS and set(s["hello"]) == HELLO_KEYS and s["marker"]
     assert s["state"]["names"] == s["hello"]["names"] == ["O1", "O2", "Fz", "Fp1"] and s["state"]["fs"] == 250
@@ -408,6 +413,9 @@ def test_the_wifi_route_with_eight_channels(runs):
     idx = files[".idx"].read_bytes()
     assert len(idx) // 16 < len(recs) / 4  # every waiting datagram per read, in batches
     assert "the montage names 4 channels but the board sends 8" in log, log
+    h = recording.read(files[".f32"])
+    assert h.source == "header" and h.names == tuple(f"Ch{i}" for i in range(1, 9)) and h.record == "<I8f"
+    assert h.layout == "DIY board" and all(c.site is None for c in h.channels)
     assert "mode shorted inputs" in log
     s = runs["seen"]["udp"]
     assert s["state"]["names"] == [f"Ch{i}" for i in range(1, 9)] and len(s["state"]["data"]) == 8

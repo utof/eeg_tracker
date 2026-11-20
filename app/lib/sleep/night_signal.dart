@@ -3,16 +3,23 @@
 // down to a whole second, and missing time is filled by holding the last value and marked bad; the end is padded
 // to a whole second (bad too). The layout is read first (small); the samples are read one channel at a time, so an
 // 8-hour night needs about 58 MB per channel instead of all four at once.
+//
+// Each file's header (recorder/header.dart) says how wide its records are and which channels they hold; the layout
+// reads the channels it is asked for by name (the sleep tools: O1 O2 T3 T4), wherever each file holds them, and a file
+// without one is refused in words ([MissingSites]), never read from another channel (DECISIONS 630-639).
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import '../recorder/chunk_writer.dart' show indexBytes, recordBytes;
+import '../recorder/chunk_writer.dart' show indexBytes;
+import '../recorder/header.dart';
 import '../recorder/nights.dart' show stemTime;
 import '../recorder/packed.dart' show RawReader, openRaw, rawLength;
 
 const int sampleRate = 250;
-const List<String> channelNames = ['O1', 'O2', 'T3', 'T4'];
+
+/// The channels the sleep tools read, in their order (the BrainBit's; header.dart [sleepSites]).
+const List<String> channelNames = sleepSites;
 
 /// to_bdf.py: a pause over 0.5 s between batches is missing time.
 const double minGapSeconds = 0.5;
@@ -22,8 +29,13 @@ const double limitMicrovolts = 400000;
 
 /// One stretch of unbroken samples inside a file.
 class Run {
-  const Run(this.file, this.first, this.count, this.t0);
+  const Run(this.file, this.first, this.count, this.t0, {this.recordBytes = 20, this.columns = const [0, 1, 2, 3]});
   final File file;
+
+  /// Bytes per record in its file (its header's), and where in a record the layout's channels are, in the layout's
+  /// order (column k = float k after the counter).
+  final int recordBytes;
+  final List<int> columns;
 
   /// Index of its first record in the file.
   final int first;
@@ -47,7 +59,10 @@ class Part {
 typedef Bad = ({int at, int samples, String text});
 
 class NightLayout {
-  NightLayout(this.startUnix, this.samples, this.parts, this.bad);
+  NightLayout(this.startUnix, this.samples, this.parts, this.bad, {this.names = channelNames});
+
+  /// The channels it reads, in this order: [channel]'s index and [forEachRow]'s row.
+  final List<String> names;
 
   /// The joined night's first sample, a whole second.
   final int startUnix;
@@ -116,9 +131,10 @@ class NightLayout {
 
     // record [k] of [r]: 0 where the file has shrunk under us, as [channel] keeps it
     double valueAt(Run r, int k) {
-      final f = reader(r.file)..setPositionSync((r.first + k) * recordBytes);
-      final b = f.readSync(recordBytes);
-      return b.length < recordBytes ? 0 : ByteData.sublistView(b).getFloat32(4 + 4 * c, Endian.little) * 1e6;
+      final rb = r.recordBytes;
+      final f = reader(r.file)..setPositionSync((r.first + k) * rb);
+      final b = f.readSync(rb);
+      return b.length < rb ? 0 : ByteData.sublistView(b).getFloat32(4 + 4 * r.columns[c], Endian.little) * 1e6;
     }
 
     try {
@@ -151,28 +167,31 @@ class NightLayout {
     return out;
   }
 
-  /// [n] records of [run] from its record [skip], channel [c], into out[at..]; zeros past a file that shrank.
+  /// [n] records of [run] from its record [skip], the layout's channel [c], into out[at..]; zeros past a file that
+  /// shrank.
   static void _readRange(RawReader f, Run run, int skip, int n, int c, Float64List out, int at) {
     const chunk = 16384; // records per read
-    f.setPositionSync((run.first + skip) * recordBytes);
+    final rb = run.recordBytes, offset = 4 + 4 * run.columns[c];
+    f.setPositionSync((run.first + skip) * rb);
     for (var done = 0; done < n;) {
       final want = math.min(chunk, n - done);
-      final bytes = f.readSync(want * recordBytes);
+      final bytes = f.readSync(want * rb);
       final view = ByteData.sublistView(bytes);
-      final got = bytes.length ~/ recordBytes;
+      final got = bytes.length ~/ rb;
       for (var k = 0; k < got; k++) {
-        out[at + done + k] = view.getFloat32(k * recordBytes + 4 + 4 * c, Endian.little) * 1e6;
+        out[at + done + k] = view.getFloat32(k * rb + offset, Endian.little) * 1e6;
       }
       if (got < want) break;
       done += want;
     }
   }
 
-  /// Every sample of the night in time order, all four channels at once, the values [channel] gives (held over
-  /// gaps, clipped to ±400 000 µV), with whether it was filled in (a gap or the end padding). [row] is reused
-  /// between calls. For the detectors' pass over a whole night: one 330 KB read at a time.
+  /// Every sample of the night in time order, all [names] at once, the values [channel] gives (held over gaps, clipped
+  /// to ±400 000 µV), with whether it was filled in (a gap or the end padding). [row] is reused between calls. For the
+  /// detectors' pass over a whole night: one 330 KB read at a time.
   void forEachRow(void Function(Float64List row, bool missing) emit) {
-    final row = Float64List(4);
+    final width = names.length;
+    final row = Float64List(width);
     var started = false;
     var pending = 0; // a gap before the first run holds that run's first value
     RawReader? open;
@@ -196,16 +215,17 @@ class NightLayout {
           openFile = run.file;
         }
         const chunk = 16384; // records per read
-        open!.setPositionSync(run.first * recordBytes);
+        final rb = run.recordBytes, cols = run.columns;
+        open!.setPositionSync(run.first * rb);
         var done = 0;
         while (done < run.count) {
           final n = math.min(chunk, run.count - done);
-          final bytes = open.readSync(n * recordBytes);
+          final bytes = open.readSync(n * rb);
           final view = ByteData.sublistView(bytes);
-          final got = bytes.length ~/ recordBytes;
+          final got = bytes.length ~/ rb;
           for (var k = 0; k < got; k++) {
-            for (var c = 0; c < 4; c++) {
-              row[c] = (view.getFloat32(k * recordBytes + 4 + 4 * c, Endian.little) * 1e6)
+            for (var c = 0; c < width; c++) {
+              row[c] = (view.getFloat32(k * rb + 4 + 4 * cols[c], Endian.little) * 1e6)
                   .clamp(-limitMicrovolts, limitMicrovolts);
             }
             if (!started) {
@@ -220,7 +240,7 @@ class NightLayout {
           if (got < n) break; // the file shrank under us: [channel] keeps zeros there, so do we
         }
         if (done < run.count) {
-          row.fillRange(0, 4, 0);
+          row.fillRange(0, width, 0);
           started = true;
           for (var i = done; i < run.count; i++) {
             emit(row, false);
@@ -238,14 +258,15 @@ class NightLayout {
 
   static void _readChannel(RawReader f, Run run, int c, Float64List out, int at) {
     const chunk = 16384; // records per read
-    f.setPositionSync(run.first * recordBytes);
+    final rb = run.recordBytes, offset = 4 + 4 * run.columns[c];
+    f.setPositionSync(run.first * rb);
     for (var done = 0; done < run.count;) {
       final n = math.min(chunk, run.count - done);
-      final bytes = f.readSync(n * recordBytes);
+      final bytes = f.readSync(n * rb);
       final view = ByteData.sublistView(bytes);
-      final got = bytes.length ~/ recordBytes;
+      final got = bytes.length ~/ rb;
       for (var k = 0; k < got; k++) {
-        out[at + done + k] = view.getFloat32(k * recordBytes + 4 + 4 * c, Endian.little) * 1e6;
+        out[at + done + k] = view.getFloat32(k * rb + offset, Endian.little) * 1e6;
       }
       if (got < n) break; // the file shrank under us: keep what was there
       done += n;
@@ -254,10 +275,16 @@ class NightLayout {
 }
 
 /// to_bdf.py `runs`: one file's runs of unbroken samples, from its .idx (one run at the file name's time if the
-/// index is missing or empty). [f32] by its plain name, also when it is packed (`.f32.gz`).
-List<Run> runsOf(File f32) {
+/// index is missing or empty). [f32] by its plain name, also when it is packed (`.f32.gz`). The channels [names] are
+/// picked from its header by name ([who] needs them): [MissingSites] when it lacks one, [HeaderError] for a header
+/// that cannot be used.
+List<Run> runsOf(File f32, {List<String> names = channelNames, String who = 'The sleep report'}) {
+  final header = readHeader(f32);
+  final recordBytes = header.recordBytes;
   final records = rawLength(f32) ~/ recordBytes;
   if (records == 0) return const [];
+  final columns = List<int>.unmodifiable(header.pick(names, who: who));
+  Run run(int first, int count, double t0) => Run(f32, first, count, t0, recordBytes: recordBytes, columns: columns);
   final idxFile = File('${f32.path.substring(0, f32.path.length - 4)}.idx');
   final rows = <(double, int)>[];
   if (idxFile.existsSync()) {
@@ -269,7 +296,7 @@ List<Run> runsOf(File f32) {
   }
   if (rows.isEmpty) {
     final t = stemTime(f32.uri.pathSegments.last);
-    return t == null ? const [] : [Run(f32, 0, records, t.millisecondsSinceEpoch / 1000)];
+    return t == null ? const [] : [run(0, records, t.millisecondsSinceEpoch / 1000)];
   }
   final t0 = [
     for (var k = 0; k < rows.length; k++)
@@ -279,24 +306,26 @@ List<Run> runsOf(File f32) {
   var start = 0;
   for (var k = 1; k < rows.length; k++) {
     if (t0[k] - rows[k - 1].$1 > minGapSeconds) {
-      out.add(Run(f32, rows[start].$2, rows[k].$2 - rows[start].$2, t0[start]));
+      out.add(run(rows[start].$2, rows[k].$2 - rows[start].$2, t0[start]));
       start = k;
     }
   }
-  out.add(Run(f32, rows[start].$2, records - rows[start].$2, t0[start]));
+  out.add(run(rows[start].$2, records - rows[start].$2, t0[start]));
   final before = rows.first.$2;
   if (before > 0) {
     // samples before the first index row (should not happen) join the first run
     final r = out.first;
-    out[0] = Run(f32, 0, r.count + before, r.t0 - before / sampleRate);
+    out[0] = run(0, r.count + before, r.t0 - before / sampleRate);
   }
   return out;
 }
 
-/// to_bdf.py `join` for the night's `.f32` files (oldest first), without reading the samples.
-NightLayout joinLayout(List<File> f32Files) {
-  final runs = [for (final f in f32Files) ...runsOf(f)];
-  if (runs.isEmpty) return NightLayout(0, 0, const [], const []);
+/// to_bdf.py `join` for the night's `.f32` files (oldest first), without reading the samples. The layout reads the
+/// channels [names] (the sleep tools' O1 O2 T3 T4 unless said), picked by name in each file: a file without one is
+/// refused ([MissingSites], naming what [who] needs and what the file has).
+NightLayout joinLayout(List<File> f32Files, {List<String> names = channelNames, String who = 'The sleep report'}) {
+  final runs = [for (final f in f32Files) ...runsOf(f, names: names, who: who)];
+  if (runs.isEmpty) return NightLayout(0, 0, const [], const [], names: names);
   _stableSortByT0(runs);
   final start = _wholeSecond(runs.first.t0);
   final parts = <Part>[];
@@ -315,7 +344,7 @@ NightLayout joinLayout(List<File> f32Files) {
   }
   final pad = (sampleRate - n % sampleRate) % sampleRate;
   if (pad > 0) bad.add((at: n, samples: pad, text: 'BAD_padding'));
-  return NightLayout(start, n + pad, parts, bad);
+  return NightLayout(start, n + pad, parts, bad, names: names);
 }
 
 void _stableSortByT0(List<Run> runs) {

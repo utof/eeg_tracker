@@ -172,6 +172,15 @@ void main() {
       expect(find.textContaining('Awake once over 5 minutes: 01:22 (9 min).'), findsOneWidget);
     });
 
+    testWidgets('a recording without the sleep model\'s sites: the reason in words, nothing else', (tester) async {
+      const why = 'Sleep so far needs O1 O2 T3 T4; this recording (DIY: O1 O2 Fz Cz) has no T3, T4.';
+      await tester.pumpWidget(
+        MaterialApp(theme: nightTheme(), home: SleepSoFarView(result: null, state: const SoFarState(refused: why))),
+      );
+      expect(find.text(why), findsOneWidget);
+      expect(find.textContaining('Could not score'), findsNothing);
+    });
+
     testWidgets('Update is off while a look runs and after Stop', (tester) async {
       await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: _pages['scoring']));
       expect(find.text('Scoring 02:14 to 03:12 (2 of 2).'), findsOneWidget);

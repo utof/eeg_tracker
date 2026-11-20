@@ -11,6 +11,9 @@ date (its start minus 12 hours, like night_of in export_events.py); a night neve
 24 hours or more after the night's first one. The night is named after the evening date of its first recording,
 so the owner's night and a late-morning sleep after it land in one report. The chain always starts from the
 oldest recording in the folder, so the same files always give the same nights.
+
+A recording's record size and rate are its own (scripts/recording.py: its <stamp>.header.json, else its .log's
+format line, else the BrainBit's 20 bytes at 250 Hz), so minutes are right for any number of channels.
 """
 from __future__ import annotations
 
@@ -18,13 +21,15 @@ import json, os, re, shutil, struct, subprocess, sys, threading, time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import packed  # noqa: E402  (a raw file packed after a day, <stamp>.f32.xz, reads as the plain one)
+import recording  # noqa: E402  (what a .f32 holds: its header, or what files from before the header held)
 
 VERSION = 2  # of <night>.report.json; a report of another version is rebuilt (2: adds `extras`)
-FS = 250
-REC_BYTES = 20  # one <I4f record in a .f32
+FS = 250  # the BrainBit's; a recording's own rate is Rec.fs
+REC_BYTES = 20  # one <I4f record in a BrainBit .f32; a recording's own record size is Rec.rec_bytes
 IDX = struct.Struct("<dQ")
 CHAIN_GAP_S = 3 * 3600
 MAX_SPAN_S = 24 * 3600
@@ -42,10 +47,16 @@ class Rec:
     start: float  # unix time from the file name
     end: float  # arrival time of the last batch in the .idx
     size: int  # bytes of the .f32 (unpacked)
+    rec_bytes: int = REC_BYTES  # bytes of one record: 4 + 4 per channel (recording.read)
+    fs: float = FS  # samples a second
+
+    @property
+    def samples(self) -> int:
+        return self.size // self.rec_bytes
 
     @property
     def minutes(self) -> float:
-        return self.size // REC_BYTES / FS / 60
+        return self.samples / self.fs / 60
 
 
 @dataclass
@@ -73,19 +84,19 @@ def evening_date(t: float) -> str:
     return (datetime.fromtimestamp(t) - timedelta(hours=12)).date().isoformat()
 
 
-_ends: dict[tuple[str, int, int], float] = {}
+_ends: dict[tuple[str, int, int, int, float], float] = {}
 
 
-def _end(path: Path, start: float, size: int) -> float:
-    """Arrival time of the last batch (last .idx row); start + samples / 250 without an index."""
+def _end(path: Path, start: float, size: int, rec_bytes: int = REC_BYTES, fs: float = FS) -> float:
+    """Arrival time of the last batch (last .idx row); start + samples / rate without an index."""
     ip = path.with_suffix(".idx")
     try:
         isize = ip.stat().st_size
     except OSError:
         isize = 0
-    key = (str(path), size, isize)
+    key = (str(path), size, isize, rec_bytes, fs)
     if key not in _ends:
-        end = start + size // REC_BYTES / FS
+        end = start + size // rec_bytes / fs
         if isize >= IDX.size:
             with open(ip, "rb") as f:
                 f.seek((isize // IDX.size - 1) * IDX.size)
@@ -96,17 +107,29 @@ def _end(path: Path, start: float, size: int) -> float:
     return _ends[key]
 
 
-def recordings(folder: Path) -> list[Rec]:
-    """Every recording with at least one sample, oldest first; a packed one by its plain name."""
+def recordings(folder: Path, on_bad: Callable[[Path, Exception], None] | None = None) -> list[Rec]:
+    """Every recording with at least one sample, oldest first; a packed one by its plain name. A recording whose
+    header is damaged is an error naming the file (recording.HeaderError), never a guess at its record size; with
+    `on_bad` it is handed over (path, error) and left out instead."""
     out = []
     for p in packed.raw_files(folder):
         start = stamp_time(p)
+        if start is None:
+            continue
         try:
             size = packed.size(p)
         except OSError:
             continue
-        if start is not None and size >= REC_BYTES:
-            out.append(Rec(p, start, _end(p, start, size), size))
+        try:
+            h = recording.read(p)
+        except recording.HeaderError as e:
+            if on_bad is None:
+                raise
+            on_bad(p, e)
+            continue
+        if size >= h.record_bytes:
+            out.append(Rec(p, start, _end(p, start, size, h.record_bytes, h.sample_rate), size, h.record_bytes,
+                           h.sample_rate))
     return sorted(out, key=lambda r: (r.start, r.path.name))
 
 
@@ -149,8 +172,8 @@ def is_stale(night: Night, report: dict | None) -> bool:
     now = {r.path.name: r.size for r in night.recs}
     if set(done) - set(now) or any(now[f] < b for f, b in done.items()):
         return True  # a file went away or shrank: the report no longer matches the files
-    new = sum(size - done.get(f, 0) for f, size in now.items()) // REC_BYTES
-    return new >= NEW_DATA_MIN * 60 * FS
+    new_s = sum((r.size - done.get(r.path.name, 0)) // r.rec_bytes / r.fs for r in night.recs)
+    return new_s >= NEW_DATA_MIN * 60
 
 
 # ---- lights off and the drift-off check (DECISIONS 180-184; analysis/night_drift.py, app/lib/sleep/drift.dart) ----

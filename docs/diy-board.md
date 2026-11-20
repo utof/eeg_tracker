@@ -107,8 +107,8 @@ in `app/lib/headband/diy/`, and a test keeps it so.
 - **Switch.** Night screen, Headband section, **Headband connection**: **Headband: BrainBit / DIY board (test)**, off by
   default (`files/diy-board/settings.json`), locked while a night records or a session runs. The page states the
   safety rule (the app only listens; nothing in it makes the board safe for a body or power or changes its gates),
-  shows this phone's Wi-Fi address for the firmware's `UDP_HOST`, and holds the channel names (four, CH1 to CH4;
-  default O1 O2 Fz Fp1, as on the laptop).
+  shows this phone's Wi-Fi address for the firmware's `UDP_HOST`, and holds the channel names (4, 6 or 8, from CH1;
+  default O1 O2 Fz Fp1, as on the laptop; a board whose count differs records as Ch1..ChN, said in the `.log`).
 - **The night.** The recorder's service builds the board's finder itself (`app/lib/headband/diy/night.dart`): one UDP
   listener all night on every IPv4 interface (alone when it can be, else shared with address reuse, said in the log:
   the emulator's OpenThread simulator holds port 9000 on a multicast address), a Wi-Fi lock while it records (shared
@@ -118,8 +118,11 @@ in `app/lib/headband/diy/`, and a test keeps it so.
   port of `scripts/diy_board.py` and both are pinned to the same results by `app/test/fixtures/diy_vectors.json`
   (made by the Python driver from the firmware's golden frames, the fake board and damaged frames;
   `analysis/tests/test_diy_vectors.py` fails when it is stale).
-- **Files.** `files/recordings-diy/<stamp>.f32 .idx .log .markers.jsonl`, byte for byte the laptop's DIY layout
-  (`<I4f`: the board's sequence number, then CH1-CH4 in volts); about 10 frames per `.idx` row (the laptop's 40 ms).
+- **Files.** `files/recordings-diy/<stamp>.f32 .idx .log .markers.jsonl .header.json`, byte for byte the laptop's DIY
+  layout (`<I4f`, `<I6f` or `<I8f`: the board's sequence number, then each channel in volts) with the recording header
+  that names the channels, their places (the Signal tab's positions file, else their 10-10 names), the earlobe
+  reference and bias, the board's rate and volts ([data-format.md](data-format.md), "The recording header";
+  DECISIONS 630-639); about 10 frames per `.idx` row (the laptop's 40 ms).
   The `.log` names the driver, the link and every sender, the channels, scaling (vref 4.5 V assumed), format and mode
   ("not EEG"). Export data takes the folder; `scripts/import_phone.py` files it under `_local/recordings-diy/`.
 - **Same rules as the laptop**: missing frames counted ("lost N samples in M gaps (board missed X, link lost Y)" every
@@ -129,8 +132,15 @@ in `app/lib/headband/diy/`, and a test keeps it so.
 - **Differences from the laptop.** A run also ends after 40 s without frames (the phone recorder's rule for every
   headband) and the next frames start a new file set, where the laptop keeps one set through a USB drop. Frames that
   arrive while no file set is open (between two sets) are kept, up to 10 s, and go into the next one. Datagrams from
-  outside the local network are ignored and counted. The 8-channel chip is refused in words (the phone keeps the
-  BrainBit's 20-byte record; the owner's chip is the ADS1299-4). No contact check, no battery lines.
+  outside the local network are ignored and counted. The 6- and 8-channel chips record all their channels (until
+  2026-11-20 the phone refused them; DECISIONS 634). No contact check, no battery lines.
+- **More channels: what the firmware must send.** Nothing new for 6 or 8: E9 version 1 already carries 4, 6 or 8
+  channels (byte 3), and the bench firmware sends what the chip's ID register says (eeg_ads1299_lab
+  `docs/PROTOCOL.md`); only its board profile guards the chip (`EXPECTED_ADS_CHANNELS = 4` in the Rev A and
+  breadboard profiles: an ADS1299-8 board needs its own profile there, the lab's decision). 16 channels (two ADS1299-8
+  in a daisy chain) do not fit E9 version 1 (4, 6 or 8 only, one status word): they need a new frame version (a
+  channel count of 16 and both chips' status words), or two boards each sending its own frames. The phone's record and
+  header already take up to 64 channels; only `e9.dart` (and `scripts/diy_board.py`) would learn the new version.
 - **Refused with the board** (DECISIONS row 358's reason): the sleep report (the board's nights are never in
   `files/recordings/`, and the Sleep section says so), the morning check-in and every session (their finder refuses in
   words: "The DIY board (test) is chosen as the headband. This needs the BrainBit: it reads O1 O2 T3 T4."), the

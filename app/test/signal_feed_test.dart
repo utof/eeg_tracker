@@ -11,6 +11,7 @@ import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/status.dart';
 import 'package:eeg_tracker/signal/layout.dart';
+import 'package:eeg_tracker/signal/live_signal.dart' show LiveBatch;
 import 'package:eeg_tracker/signal/live_tap.dart';
 import 'package:eeg_tracker/signal/signal_feed.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -23,7 +24,7 @@ class TapBand implements Headband {
   final _range = StreamController<bool>.broadcast(sync: true);
   int _pack = 0;
 
-  void send([int n = 25]) => _signal.add([for (var i = 0; i < n; i++) (pack: _pack++ % 2048, o1: 1e-5, o2: 2e-5, t3: 0, t4: -1e-5)]);
+  void send([int n = 25]) => _signal.add([for (var i = 0; i < n; i++) Sample.four(pack: _pack++ % 2048, o1: 1e-5, o2: 2e-5, t3: 0, t4: -1e-5)]);
 
   @override
   String get name => 'BrainBit';
@@ -124,7 +125,7 @@ Map<String, Object?> _tapMessage(int first, {int n = 25, String run = '2026-11-2
   'kind': signalTapKind,
   'run': run,
   'batches': [
-    [first, DateTime(2026, 11, 20, 1).millisecondsSinceEpoch, [for (var i = 0; i < n; i++) (first + i) % 2048], [for (var i = 0; i < n * 4; i++) 1e-5]],
+    [first, DateTime(2026, 11, 20, 1).millisecondsSinceEpoch, [for (var i = 0; i < n; i++) (first + i) % 2048], [for (var i = 0; i < n * 4; i++) 1e-5], 4],
   ],
 };
 
@@ -348,7 +349,7 @@ void main() {
       var now = DateTime(2026, 11, 20, 1);
       final sent = <Object>[];
       final tap = NightTapSender(send: sent.add, clock: () => now);
-      final batch = [for (var i = 0; i < 10; i++) (pack: i, o1: 1e-5, o2: 0.0, t3: 0.0, t4: 0.0)];
+      final batch = [for (var i = 0; i < 10; i++) Sample.four(pack: i, o1: 1e-5, o2: 0.0, t3: 0.0, t4: 0.0)];
       tap.add('run', 0, now, batch);
       tap.flush();
       expect(sent, isEmpty); // no lease
@@ -389,13 +390,29 @@ void main() {
       final got = nightTapBatches({
         'kind': signalTapKind,
         'batches': [
-          [0, 1, [1, 2], [0.0, 0.0, 0.0]], // values do not fit
-          ['x', 1, [1], [0, 0, 0, 0]],
-          [5, 1, [1], [0, 0, 0, 1e-6]],
+          [0, 1, [1, 2], [0.0, 0.0, 0.0], 4], // values do not fit
+          ['x', 1, [1], [0, 0, 0, 0], 4],
+          [5, 1, [1], [0, 0, 0, 1e-6], 0], // no width
+          [5, 1, [1], [0, 0, 0, 1e-6]], // no width
+          [5, 1, [1], [0, 0, 0, 1e-6], 4],
         ],
       })!;
       expect(got, hasLength(1));
       expect(got.single.values[3], closeTo(1, 1e-6));
+    });
+
+    test('an 8-channel board\'s batches cross as eight values a sample (DECISIONS 630-639)', () {
+      final sent = <Object?>[];
+      final tap = NightTapSender(send: sent.add)..lease(on: true);
+      tap.add('run', 0, DateTime.now(), [for (var i = 0; i < 3; i++) Sample(i, [for (var c = 0; c < 8; c++) (c + 1) * 1e-6])]);
+      tap.flush();
+      final got = nightTapBatches(sent.single)!.single;
+      expect(got.channels, 8);
+      expect(got.length, 3);
+      expect(got.values.sublist(8, 16), [for (var c = 0; c < 8; c++) closeTo(c + 1, 1e-4)]);
+      final b = LiveBatch.fromSamples(DateTime.now(), [Sample(7, List.filled(16, 1e-6))]);
+      expect(b.channels, 16);
+      expect(b.values, everyElement(closeTo(1, 1e-4)));
     });
   });
 
@@ -408,7 +425,7 @@ void main() {
     final w = ChunkWriter.open(dir, DateTime(2026, 11, 20, 1));
     final seen = <(String, int, int)>[];
     ChunkWriter.onLive = (stem, first, _, samples) => seen.add((stem, first, samples.length));
-    final batch = [for (var i = 0; i < 5; i++) (pack: i, o1: 0.0, o2: 0.0, t3: 0.0, t4: 0.0)];
+    final batch = [for (var i = 0; i < 5; i++) Sample.four(pack: i, o1: 0.0, o2: 0.0, t3: 0.0, t4: 0.0)];
     w.addBatch(DateTime.now(), batch);
     w.addBatch(DateTime.now(), batch);
     expect(seen, [(w.stem, 0, 5), (w.stem, 5, 5)]);

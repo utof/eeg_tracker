@@ -236,7 +236,7 @@ class SignalFeed extends ChangeNotifier {
     final s = RecorderStatus.fromMap(data);
     if (s == null) return;
     final board = s.board;
-    if (board != null && board.names.length == 4 && !listEquals(board.names, device.montage.names)) {
+    if (board != null && board.names.isNotEmpty && !listEquals(board.names, device.montage.names)) {
       _useDevice(SignalDevice(montage: diyBoardMontage(board.names), measuresContact: false, diy: true));
     }
     if (s.contactOhms.isNotEmpty && !mapEquals(s.contactOhms, ohms)) {

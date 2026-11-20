@@ -267,3 +267,68 @@ def test_a_diy_raw_file_that_goes_missing_is_a_problem_named_for_its_diy_night(w
     assert code == 1
     assert f"missing: recordings-diy/{stamp(D2)}.f32 (night 2026-11-19-diy)" in text
     assert [n["date"] for n in load(with_diy)["nights"] if n["source"] == "diy"] == ["2026-11-16", "2026-11-19"]
+
+
+# ---- the recording header (docs/data-format.md): a raw file of its set; width and rate come from it first ----
+
+
+def write_header(folder: Path, s: str, names: tuple[str, ...], fs: int) -> Path:
+    import recording
+    return recording.write(folder / f"{s}.f32", recording.diy_board(names, fs, layout="test"))
+
+
+H1 = datetime(2026, 11, 21, 23, 0, 0)
+
+
+@pytest.fixture
+def with_headers(local: Path) -> Path:
+    """A 16-channel night at 500 Hz in recordings-diy/ whose header disagrees with its log line (the header wins),
+    an 8-channel night with a header in recordings/, and a header beside the phone's check-in recording."""
+    s = write_diy(local / "recordings-diy", H1, 30, channels=16, fs=500)
+    (local / "recordings-diy" / f"{s}.log").write_text("format .f32 records <I4f: board sequence number, then A B C D in volts; 250 Hz\n")
+    write_header(local / "recordings-diy", s, tuple(f"E{i}" for i in range(1, 17)), 500)
+    s = write_diy(local / "recordings", H1, 20, channels=8, fs=250, log=False)
+    write_header(local / "recordings", s, tuple(f"Ch{i}" for i in range(1, 9)), 250)
+    write_header(local / "phone" / "mornings", stamp(MORNING_B), ("O1", "O2", "T3", "T4"), 250)
+    return local
+
+
+def test_the_header_is_a_raw_file_of_its_night_and_gives_the_width_and_rate(with_headers: Path) -> None:
+    code, text = run(with_headers)
+    assert code == 0, text
+    rows = {n["id"]: n for n in load(with_headers)["nights"]}
+    diy, brain, phone = rows["2026-11-21-diy"], rows["2026-11-21"], rows["2026-11-17"]
+    assert (diy["hours_recorded"], diy["minutes_missing"]) == (0.5, 0.0)  # 68-byte records at 500 Hz, by the header
+    assert (brain["hours_recorded"], brain["minutes_missing"]) == (0.33, 0.0)  # 36-byte records in recordings/
+    for row, rel in ((diy, f"recordings-diy/{stamp(H1)}.header.json"), (brain, f"recordings/{stamp(H1)}.header.json"),
+                     (phone, f"phone/mornings/{stamp(MORNING_B)}.header.json")):
+        f = next(f for f in row["file_list"] if f["path"] == rel)
+        assert f["kind"] == "raw" and f["sha256"] == hashlib.sha256((with_headers / rel).read_bytes()).hexdigest()
+    assert f"recordings-diy/{stamp(H1)}.header.json" in (with_headers / "catalog" / "2026-11-21-diy.sha256").read_text()
+
+
+def test_a_header_that_goes_missing_or_changes_is_a_problem(with_headers: Path) -> None:
+    run(with_headers)
+    gone = with_headers / "recordings" / f"{stamp(H1)}.header.json"
+    body = gone.read_bytes()
+    gone.unlink()
+    changed = with_headers / "recordings-diy" / f"{stamp(H1)}.header.json"
+    changed.write_text(changed.read_text().replace('"test"', '"other"'))
+    code, text = run(with_headers)
+    assert code == 1
+    assert f"PROBLEM: missing: recordings/{stamp(H1)}.header.json (night 2026-11-21)" in text
+    assert f"PROBLEM: changed: recordings-diy/{stamp(H1)}.header.json" in text
+    gone.write_bytes(body)
+    code, text = run(with_headers)
+    assert f"back: recordings/{stamp(H1)}.header.json" in text
+
+
+def test_a_damaged_header_is_a_problem_on_every_run_and_its_width_is_not_guessed(with_headers: Path) -> None:
+    run(with_headers)
+    bad = with_headers / "recordings-diy" / f"{stamp(H1)}.header.json"
+    bad.write_text("{")
+    for _ in range(2):
+        code, text = run(with_headers)
+        assert code == 1 and f"PROBLEM: damaged: recordings-diy/{stamp(H1)}.header.json" in text
+    assert "2026-11-21-diy" not in {n["id"] for n in load(with_headers)["nights"]}  # no hours from a guessed width
+    assert f"recordings-diy/{stamp(H1)}.f32" in text  # its files are named among those in no night

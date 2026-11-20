@@ -93,30 +93,41 @@ NightSignals searchNight(
   }
 }
 
-/// Searches the night of [record] in a background isolate and keeps the result; null when its recordings are gone.
-Future<NightSignals?> searchAndKeep(String recordingsDir, LucidStore store, LucidNightRecord record) async {
+/// Searches the night of [record] (run it in a background isolate: it reads the whole night, about 190 MB for 10
+/// hours, packed recordings unpacked as they are read); null when its recordings are gone, or with [onlyIfScored]
+/// when the night has no scored report yet: a search made before the night was scored is done again only once its
+/// stages exist (DECISIONS 620-629; the page searched again at every open until then).
+NightSignals? searchLastNight(String recordingsDir, LucidNightRecord record, {bool onlyIfScored = false}) {
   final start = DateTime.fromMillisecondsSinceEpoch(record.startMs);
-  final night = nightsIn(Directory(recordingsDir)).where((n) => dateName(n.nightOf) == dateName(nightOf(start)));
-  if (night.isEmpty || night.first.recordings.isEmpty) return null;
-  final files = [for (final f in night.first.recordings) f.path];
-  final report = NightReportStore(nightsDirFor(recordingsDir)).read(night.first.name);
+  final name = dateName(nightOf(start));
+  final report = NightReportStore(nightsDirFor(recordingsDir)).read(name);
   final scored = report != null && report.scored;
-  final stages = scored ? report.stages : const <String>[];
-  final from = scored ? report.dataStart.millisecondsSinceEpoch ~/ 1000 : null;
+  if (onlyIfScored && !scored) return null;
+  final night = nightsIn(Directory(recordingsDir)).where((n) => n.name == name);
+  if (night.isEmpty || night.first.recordings.isEmpty) return null;
   final cal = calibratedSignals(Directory(recordingsDir).parent);
-  final cues = record.cues;
+  return searchNight(
+    night.first.recordings,
+    sweepUv: cal.sweepUv,
+    clench: cal.clench,
+    stages: scored ? report.stages : const <String>[],
+    stagesFromUnix: scored ? report.dataStart.millisecondsSinceEpoch ~/ 1000 : null,
+    cues: record.cues,
+  );
+}
+
+/// [searchLastNight] in a background isolate (nothing of it on the screen's thread), keeping the result.
+Future<NightSignals?> searchAndKeep(
+  String recordingsDir,
+  LucidStore store,
+  LucidNightRecord record, {
+  bool onlyIfScored = false,
+}) async {
   final out = await Isolate.run(
-    () => searchNight(
-      [for (final p in files) File(p)],
-      sweepUv: cal.sweepUv,
-      clench: cal.clench,
-      stages: stages,
-      stagesFromUnix: from,
-      cues: cues,
-    ),
+    () => searchLastNight(recordingsDir, record, onlyIfScored: onlyIfScored),
     debugName: 'lucid-signals',
   );
-  store.saveSignals(record.stamp, out);
+  if (out != null) store.saveSignals(record.stamp, out);
   return out;
 }
 

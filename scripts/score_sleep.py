@@ -1,9 +1,11 @@
-"""Score sleep in a BDF from to_bdf.py with AnySleep (all channels) and YASA (O1-T3), and draw a hypnogram.
+"""Score sleep in a BDF from to_bdf.py with AnySleep (O1 O2 T3 T4) and YASA (O1-T3), and draw a hypnogram.
 
 usage: score_sleep.py night.bdf [--anysleep _local/vendor/AnySleep] [--device cpu]
 
 Writes <night>.sleep.json (per 30 s epoch: both models' stages, AnySleep probabilities, gap flag; and a
 summary) and <night>.hypnogram.png. Epochs touching a BAD_gap / BAD_padding annotation are reported as "gap".
+The BDF may hold any channels: O1 O2 T3 T4 are found by name, else by 10-10 site (T7 for T3, T8 for T4); a night
+without them is refused in words and no other channel is scored in their place (docs/data-format.md).
 Neither model was validated on dry BrainBit electrodes (DECISIONS.md row 8): the result is a first guess.
 AnySleep code and weights: github.com/dslaborg/AnySleep (MIT), fetched by scripts/get_anysleep.sh.
 A night up to 14 h goes through AnySleep (PyTorch) in one pass; a longer one is scored as the phone scores every
@@ -18,6 +20,9 @@ from pathlib import Path
 
 import mne
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import recording  # noqa: E402  (channels by name or 10-10 site)
 
 ROOT = Path(__file__).resolve().parent.parent
 MODELS = ROOT / "app" / "assets" / "models"  # the phone's AnySleep runs (scripts/export_anysleep_onnx.py)
@@ -40,8 +45,24 @@ def gap_mask(raw: mne.io.BaseRaw, n_ep: int) -> np.ndarray:
 
 
 CHANNELS = ["O1", "O2", "T3", "T4"]
+WHO = "the sleep model"
 HIGH_PASS_HZ = 0.3
 MODEL_HZ = 128
+
+
+def sleep_channels(raw: mne.io.BaseRaw) -> mne.io.BaseRaw:
+    """The night with the model's O1 O2 T3 T4 under those names, found among its channels by name, else by 10-10
+    site (T7 for T3, T8 for T4; scripts/recording.py), wherever they are and whatever else it holds. A night that
+    lacks one is a recording.MissingChannels in words: no other channel is ever scored in its place. A night that
+    already names all four is returned as it is."""
+    names = list(raw.ch_names)
+    if all(c in names for c in CHANNELS):
+        return raw
+    found = [names[i] for i in recording.pick_names(names, CHANNELS, WHO)]
+    r = raw.copy().pick(found)
+    r.reorder_channels(found)
+    r.rename_channels(dict(zip(found, CHANNELS)))
+    return r
 
 
 def prepare(raw: mne.io.BaseRaw) -> np.ndarray:
@@ -51,7 +72,7 @@ def prepare(raw: mne.io.BaseRaw) -> np.ndarray:
     from scipy.signal import resample_poly
     # PSG amplifiers high-pass the signal; the BrainBit drifts by tens of mV, which would swamp the robust scaling.
     # The 0.3 Hz high-pass is our choice, not part of the AnySleep recipe.
-    r = raw.copy().pick(CHANNELS).filter(HIGH_PASS_HZ, None, verbose="error")
+    r = sleep_channels(raw).copy().pick(CHANNELS).filter(HIGH_PASS_HZ, None, verbose="error")
     f = Fraction(MODEL_HZ, round(r.info["sfreq"]))
     x = resample_poly(r.get_data(), f.numerator, f.denominator, axis=1)
     del r
@@ -159,7 +180,7 @@ def plot(path: Path, start, stage: list[str], other: list[str], gap: np.ndarray,
 def score(bdf: Path, repo: Path, device: str = "cpu", progress: Callable[[str], None] = print) -> dict:
     """Both models on one BDF from to_bdf.py; returns the content of <night>.sleep.json (see main)."""
     progress("Reading the night file")
-    raw = mne.io.read_raw_bdf(bdf, preload=True, verbose="error")
+    raw = sleep_channels(mne.io.read_raw_bdf(bdf, preload=True, verbose="error"))  # refuses a night without them
     n_ep = int(raw.n_times / raw.info["sfreq"] // EPOCH)
     if n_ep < 10:
         raise SystemExit("need at least 5 minutes")
@@ -191,7 +212,10 @@ def main() -> None:
     ap.add_argument("--anysleep", type=Path, default=Path("_local/vendor/AnySleep"))
     ap.add_argument("--device", default="cpu")
     a = ap.parse_args()
-    out = score(a.bdf, a.anysleep, a.device, progress=lambda _s: None)
+    try:
+        out = score(a.bdf, a.anysleep, a.device, progress=lambda _s: None)
+    except recording.RecordingError as e:
+        raise SystemExit(f"{a.bdf.name}: {e}") from e
     base = a.bdf.with_suffix("")
     save(out, base)
     print(json.dumps(out["summary"], indent=1))

@@ -60,7 +60,7 @@ class EyesBand implements Headband {
       demo.eyes = eyes();
       _signal.add([
         for (final r in demo.next(250))
-          (pack: pack++ % 2048, o1: r[0] * 1e-6, o2: r[1] * 1e-6, t3: r[2] * 1e-6, t4: r[3] * 1e-6),
+          Sample.four(pack: pack++ % 2048, o1: r[0] * 1e-6, o2: r[1] * 1e-6, t3: r[2] * 1e-6, t4: r[3] * 1e-6),
       ]);
     });
   }

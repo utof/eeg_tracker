@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../recorder/header.dart' show readHeader;
 import '../recorder/packed.dart' show readRaw;
 import '../sleep/report.dart' show isoLocal;
 import 'measures.dart';
@@ -99,7 +100,8 @@ CheckInPhases cutPhases(Map<String, Float64List> channels, Map<String, PhaseWind
 }
 
 /// A recorded check-in read from a recorder file set (`<stamp>.f32` and `.markers.jsonl`): its phases, ratings,
-/// markers and phase windows. Null when the file holds no usable check-in.
+/// markers and phase windows. Null when the file holds no usable check-in. The channels are picked by name from the
+/// file's header (header.dart): a recording without O1 O2 T3 T4 is refused in words, never read from other channels.
 ({
   CheckInPhases phases,
   Map<String, Object?>? ratings,
@@ -107,14 +109,17 @@ CheckInPhases cutPhases(Map<String, Float64List> channels, Map<String, PhaseWind
   double t,
 })?
 readCheckInRecording(File f32) {
+  final header = readHeader(f32);
+  final cols = header.pick(recordedChannels, who: 'The morning check-in');
+  final rb = header.recordBytes;
   final bytes = readRaw(f32); // plain, or packed after a day
-  final n = bytes.length ~/ 20;
+  final n = bytes.length ~/ rb;
   final data = ByteData.sublistView(bytes);
   final channels = {for (final ch in recordedChannels) ch: Float64List(n)};
   for (var i = 0; i < n; i++) {
-    for (var c = 0; c < 4; c++) {
+    for (var c = 0; c < recordedChannels.length; c++) {
       // float32 volts to float64 µV, as the laptop's load(): astype(float64) * 1e6
-      channels[recordedChannels[c]]![i] = data.getFloat32(i * 20 + 4 + 4 * c, Endian.little) * 1e6;
+      channels[recordedChannels[c]]![i] = data.getFloat32(i * rb + 4 + 4 * cols[c], Endian.little) * 1e6;
     }
   }
   final mf = File(f32.path.replaceFirst(RegExp(r'\.f32$'), '.markers.jsonl'));

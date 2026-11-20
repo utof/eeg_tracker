@@ -24,7 +24,7 @@ class HandBand implements Headband {
   final _resist = StreamController<Map<String, double>>.broadcast();
   final _range = StreamController<bool>.broadcast(sync: true);
 
-  void send() => _signal.add([(pack: 0, o1: 0, o2: 0, t3: 0, t4: 0)]);
+  void send() => _signal.add([Sample.four(pack: 0, o1: 0, o2: 0, t3: 0, t4: 0)]);
   void goOutOfRange() => _range.add(false);
 
   @override

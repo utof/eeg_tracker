@@ -145,7 +145,7 @@ def load_night(rec_dir: Path, night: str) -> tuple[float, np.ndarray, np.ndarray
     found = [n for n in night_files.nights(night_files.recordings(rec_dir)) if n.name == night]
     if not found:
         raise SystemExit(f"no night {night} in {rec_dir}")
-    start, uv, notes = to_bdf.join([r.path for r in found[0].recs])
+    start, uv, notes = to_bdf.join_sites([r.path for r in found[0].recs], ("O1", "O2", "T3", "T4"), "the live stager")
     missing = np.zeros(len(uv), bool)
     for onset, dur, text in notes:
         if text.startswith("BAD"):

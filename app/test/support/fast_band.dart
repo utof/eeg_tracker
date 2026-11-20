@@ -32,7 +32,7 @@ class FastBand implements Headband {
   /// A batch as it arrives at [now] (just after its last sample).
   List<Sample> batch() => [
     for (var k = 0; k < perBatch; k++, _i++)
-      (
+      Sample.four(
         pack: _pack++ % 2048,
         o1: (12000 + 20 * math.sin(_i * 0.25)) * 1e-6,
         o2: (-8000 + 15 * math.cos(_i * 0.1)) * 1e-6,

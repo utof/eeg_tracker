@@ -157,7 +157,7 @@ class _BrainBitBand implements Headband {
 
   @override
   Stream<List<Sample>> get signal => _sensor.signalDataStream.map(
-    (batch) => [for (final s in batch) (pack: s.packNum, o1: s.o1, o2: s.o2, t3: s.t3, t4: s.t4)],
+    (batch) => [for (final s in batch) Sample.four(pack: s.packNum, o1: s.o1, o2: s.o2, t3: s.t3, t4: s.t4)],
   );
 
   @override

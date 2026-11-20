@@ -77,7 +77,7 @@ class FastBand implements Headband {
       demo.alphaGain = clockS < fadeAtS ? 1 : 0.25;
       final batch = [
         for (final r in demo.next(perBatch))
-          (pack: _pack++ % 2048, o1: r[0] * 1e-6, o2: r[1] * 1e-6, t3: r[2] * 1e-6, t4: r[3] * 1e-6),
+          Sample.four(pack: _pack++ % 2048, o1: r[0] * 1e-6, o2: r[1] * 1e-6, t3: r[2] * 1e-6, t4: r[3] * 1e-6),
       ];
       clockS += perBatch / 250;
       sent += perBatch;
@@ -261,7 +261,7 @@ void main() {
       final band = FastBand();
       live.lightsOff(band.now().subtract(const Duration(minutes: 2)));
       live.add(band.now().add(const Duration(milliseconds: 500)), [
-        for (final r in band.demo.next(125)) (pack: 0, o1: r[0] * 1e-6, o2: r[1] * 1e-6, t3: r[2] * 1e-6, t4: r[3] * 1e-6),
+        for (final r in band.demo.next(125)) Sample.four(pack: 0, o1: r[0] * 1e-6, o2: r[1] * 1e-6, t3: r[2] * 1e-6, t4: r[3] * 1e-6),
       ], firstOfFile: true);
       expect(live.driftOff!.lightsOff, 0);
       expect(live.live!.state, DriftState.baseline);
