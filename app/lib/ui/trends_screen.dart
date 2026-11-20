@@ -2,6 +2,7 @@
 // practice reports and sharp-hours answers (rows 280-289) and lays them out with trends_view.dart. Opened from the night screen's Morning section and
 // from a check-in's result. The files are read and the page worked out in a background isolate (DECISIONS 620-629).
 import 'dart:async';
+import 'dart:io';
 import 'dart:isolate';
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:flutter/material.dart';
 import '../meditation/store.dart';
 import '../morning/store.dart';
 import '../phone.dart';
+import '../pulse/night.dart' show pulseDayNumbers;
 import '../training/control.dart' show SessionKind;
 import '../sharp/page.dart' show sharpTrendsLine;
 import '../sharp/store.dart';
@@ -68,7 +70,10 @@ typedef TrendsPage = ({
 /// work session, and the screen's thread froze while it did (DECISIONS 586, 620-629).
 TrendsPage loadTrendsPage(String recordingsDir, DateTime now) {
   final inputs = readTrendInputs(recordingsDir);
-  final dayNumbers = readOwnDayNumbers(recordingsDir);
+  final dayNumbers = {
+    ...readOwnDayNumbers(recordingsDir),
+    'pulse': pulseDayNumbers(Directory(recordingsDir).parent, inputs.nights), // DECISIONS 817
+  };
   final m = buildTrends(inputs, now, extra: dayNumbers);
   final line = experimentLine(currentExperiment(recordingsDir, now));
   UnusualCard? unusual;

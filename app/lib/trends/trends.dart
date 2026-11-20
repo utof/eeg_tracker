@@ -1,6 +1,7 @@
 // The trends page's content from the phone's own files (DECISIONS rows 120-129, 155, 287, 650-659): one number per
 // day per measure, from the sleep reports (files/nights; jaw muscle bursts from their extras; the sleep model's
-// stage minutes, wake-ups, falling asleep, efficiency and regularity in sleep_days.dart), the morning check-ins
+// stage minutes, wake-ups, falling asleep, efficiency and regularity in sleep_days.dart; pulse while asleep from the
+// pulse files, pulse/night.dart, given as an extra day number), the morning check-ins
 // (files/mornings, with the "How did you sleep?" tap), the sharp-hours log (files/sharp-hours), the work sessions
 // (files/work-sessions, rows 480-489) and the meditation and alpha-theta reports; each with yesterday's value
 // ("same as yesterday"), your usual and an arrow when the day is beyond your normal spread (usual.dart); the last 14
@@ -171,6 +172,17 @@ final List<MeasureSpec> measureSpecs = [
     up: 'more than usual',
     down: 'fewer than usual',
     note: 'An hour asleep. A trend to compare your nights, not a test for teeth grinding.',
+  ),
+  MeasureSpec(
+    id: 'pulse',
+    label: 'Pulse while asleep',
+    group: TrendGroup.sleep,
+    scale: Scale.beats,
+    format: (v) => '${v.round()}\u00a0a\u00a0minute',
+    up: 'higher than usual',
+    down: 'lower than usual',
+    note: 'An experiment: the pulse your heartbeat leaves in the headband\'s signal, where it shows, on nights with 5 '
+        'minutes of it or more. Not yet checked against a watch.',
   ),
   MeasureSpec(
     id: 'kss',

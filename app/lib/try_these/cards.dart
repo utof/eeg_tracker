@@ -298,6 +298,28 @@ const List<TryCard> tryCards = [
     auto: true,
   ),
   TryCard(
+    id: 'pulse',
+    group: TryGroup.anotherNight,
+    title: 'Pulse while asleep, against a watch',
+    what: 'The headband reads your pulse where your heartbeat shows in its signal; a watch worn the same night checks it.',
+    takes: 'A night with a watch on, then 10 minutes',
+    steps: [
+      'Wear a watch that records heart rate all night (a friend\'s will do) with the headband, and tap Start night.',
+      'In the morning, once the night is scored, open Sleep report: the red Pulse lane under the chart and the line Pulse while asleep.',
+      'Open the night in the Archive (More, Open the archive): the same Pulse lane under the timeline.',
+      'Export the watch\'s heart rate from its app (Health Connect, Mi Fitness, Samsung Health, Garmin or a CSV) and put the file on the laptop.',
+    ],
+    tell: [
+      'The Pulse while asleep line and the lowest 5 minutes.',
+      'The watch\'s own number for the night (sleeping or resting heart rate) and which app the export came from.',
+      'Anything odd: a pulse line where you were moving, or none all night.',
+    ],
+    opens: TryOpen.sleepReport,
+    readme: [TryRef('Pulse', 'a night with a watch on')],
+    evidence: 'pulse',
+    weakEvidence: true,
+  ),
+  TryCard(
     id: 'share',
     group: TryGroup.anotherNight,
     title: 'Share on Wi-Fi',

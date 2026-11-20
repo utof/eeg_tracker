@@ -692,6 +692,29 @@ A night the watcher started has a first line in its first run's `.log`: `started
 "Yes" ...`, and the minutes kept while asking are the night's first run, whose `.log` begins `auto-start: the headband
 was found on ...`.
 
+### Pulse (`pulse/`)
+
+The pulse pass (DECISIONS 810-819; the method: [detectors.md](detectors.md#pulse-heart-rate-from-the-headband-decisions-810-819))
+keeps one file per recording, `pulse/<id>.pulse.json` (`<id>`: the recording's first file set's stem, as the
+Archive's). The laptop's `scripts/compare_pulse.py --out FILE` writes the same fields (without `key`); the phone's
+arrive in `_local/phone/pulse/` with Export data. Written whole under a temporary name, then renamed. It stays when the
+raw signal leaves the phone: it is a result, like a sleep report (Storage counts it with the notes, always kept); a
+pass that could not run keeps only `format`, `version`, `detector`, `recording`, `why` and `key`.
+
+| Field | Content |
+|---|---|
+| `format`, `version`, `detector` | `eeg-tracker-pulse`, 1, the detector's version (`pulse-v1`); a file of another detector is made again while the raw signal is there |
+| `recording`, `start`, `start_ms` | the id; the joined signal's first sample (a whole second): local ISO time with offset, and unix ms |
+| `epoch_s`, `epochs` | 30; whole 30 s epochs from the first sample (a last part is not one) |
+| `channels`, `sample_rate` | every channel the header names (all of them are read), the rate |
+| `read`, `coverage`, `median_bpm` | epochs with a reading, their share, the readings' median a minute (`null` without one) |
+| `codes` | one letter per epoch: `r` a reading, `n` a reading with its neighbours; no reading: `g` over 1 s missing, `x` no usable channel, `m` moving, `s` steps, `u` unclear, `o` the odd one out |
+| `bpm`, `conf`, `channel` | per epoch: the pulse a minute (0.1), its confidence (0.01) and the index of the channel read; `null` without a reading |
+| `key` | what it was made from: the detector and every raw file's and index's name, size and modified time |
+
+A sleep report's night is read on its own clock: each reading goes to the report's 30 s epoch holding its middle. The
+Archive's list keeps a summary of every pulse file in `files/cache/pulse-index.json` (never exported).
+
 ### Your tags on a recording (`archive/`)
 
 The Archive (DECISIONS 700-709): one file per recording you tagged, `archive/<id>.tags.json`, where `<id>` is the

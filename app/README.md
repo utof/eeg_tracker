@@ -35,6 +35,7 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
 
 - [Sleep so far](#sleep-so-far): one look at the chart in the night (1 minute)
 - [Smart alarm](#smart-alarm): one morning
+- [Pulse](#pulse-heart-rate-from-the-headband-an-experiment): a night with a watch on, then 10 minutes (evidence weak)
 - [Share on Wi-Fi](#share-on-wi-fi-the-laptop-watches-and-copies-while-the-phone-records): connect the laptop by one scan, then the first night mirrored to it (the first night doubles as the phone test)
 
 **Daytime sessions**
@@ -596,6 +597,51 @@ prepare and 30 s for the model (two passes); a phone is likely 3-10 times slower
 3. Tell the assistant the two numbers, the noise share, and anything that looks wrong in **Hour by hour** (for
    example an hour you were awake and talking with no jaw bursts). The setup test's 5 clenches will check the jaw
    limits.
+
+## Pulse (heart rate from the headband; an experiment)
+
+The headband has no pulse sensor, but each heartbeat moves the head and the skin under the electrodes a little (the
+temple artery runs under T3 and T4; the back of the head presses on the pillow), and that leaves a slow wave at your
+heart rate in the signal. After a recording ends, the app looks for it every 30 seconds on every electrode the recording
+has (any number, any layout) and reads it where it shows: a red **Pulse** line in its own lane under the **Sleep
+report**'s chart and under the recording's timeline in the **Archive**, drawn only where there is a reading, with gaps
+everywhere else. The sleep report adds one line, "Pulse while asleep: about X/min (read in Y % of the night)", the
+lowest 5 minutes and an **i** (`docs/evidence/pulse.md`); **Trends** gets **Pulse while asleep** night by night against
+your usual (an arrow only from 14 nights, and only for a change of 5 a minute or more). It runs once per recording in
+the background (when the sleep report, the recording's page or the Archive opens), never while a night or a session
+records, and the result stays after the raw signal moves to the laptop (`files/pulse/<recording>.pulse.json`,
+`docs/data-format.md`).
+
+It is an experiment: no study has checked heart rate from EEG electrodes on a headband, and this method was tried on
+three of the owner's recordings only, with no watch to compare: it read the pulse in 29 % of the time asleep of the nap
+of 2026-11-20 (about 56 a minute), 22 % of the night of 2026-11-19 and 16 % of the night of 2026-11-17 (about 55 both),
+and never during the 2 hours of the walk of 2026-11-20. It says "no reading" while you move, walk or talk, in most
+deep sleep (the slow brain waves cover it), and whenever the rhythm looks like steps or is not clear. A pulse under 42 or
+over 120 a minute is outside what it looks for.
+
+On the laptop, `scripts/compare_pulse.py` runs the same detector (`analysis/pulse.py`, the phone's twin) on a night's
+BDF, a recording's `.f32` files or the phone's pulse file, and compares it with a watch's heart-rate export (Health
+Connect's "Export data", Mi Fitness's data copy, Samsung Health's "Download personal data", Garmin's FIT files through
+the FIT SDK's FitCSVTool, Apple Health's `export.xml`, Fitbit's Takeout files, or any CSV with a time and a bpm column):
+the bias, the 95 % limits of agreement, the mean difference and the share of half minutes within 5 a minute.
+
+```
+uv run --project analysis python scripts/compare_pulse.py _local/nights/2026-11-21.bdf \
+    --stages _local/nights/2026-11-21.sleep.json --reference _local/watch/heart_rate.csv
+```
+
+### Owner step: a night with a watch on (a night, then 10 minutes)
+
+1. Wear a watch that records heart rate through the night (a friend's will do) together with the headband; **Start
+   night** as usual.
+2. In the morning, once the night is scored, open **Sleep report**: the red **Pulse** lane under the chart and the line
+   "Pulse while asleep" (it appears a minute after the report).
+3. Open the night in the **Archive** (**More** → **Open the archive**): the same Pulse lane under the timeline.
+4. Export the watch's heart rate from its app (Health Connect, Mi Fitness, Samsung Health, Garmin, or a CSV) and put
+   the file in the laptop's `_local/` folder.
+5. Tell the assistant: the "Pulse while asleep" line and the lowest 5 minutes; the watch's own number for the night
+   (its sleeping or resting heart rate) and which app the export came from; anything odd (a pulse line where you were
+   moving, or none all night). The assistant runs `scripts/compare_pulse.py` with the export.
 
 ## Sleep so far
 

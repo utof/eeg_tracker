@@ -226,6 +226,46 @@ cd app && dart compile exe tool/live_drift.dart -o /tmp/live_drift && HANDS_FREE
 
 The night takes about 90 s and 1.8 GB on the laptop.
 
+## Pulse: heart rate from the headband (DECISIONS 810-819)
+
+Each heartbeat moves the head and the skin under the electrodes a little, which shows in the EEG as a slow wave at the
+heart rate with its harmonics (`analysis/pulse.py`, the phone's twin `app/lib/pulse/`). Per 30 s epoch, on every
+channel the header names: 50 and 60 Hz notches, 0.5-20 Hz band-pass (forward only, the detectors' convention); not
+read over 1 s missing (`g`), with no usable channel (`x`) or moving (`m`: the usable channels' median range over
+400 µV); per usable channel a Welch spectrum (8 s Hann segments every 4 s, 0.061 Hz bins) whitened by the mean of the
+15 bins around each bin, and the harmonic score of each rate 42-120 a minute (the mean whitened power at f0 .. 4 f0).
+The channel with the highest confidence (best score over the median score) is read, from 2.2 + 0.1 per doubling of the
+usable channels (2.4 with four), not at the range's edge; `s` when it looks like steps (power at half the rate from
+84 a minute, even harmonics stronger than odd at 45-72, strong 5th-8th harmonics), `u` when it may be twice a slower
+rhythm or is not clear. Then the neighbours: the odd one out (`o`, 12 or more from two or more agreeing readings
+within 1.5 minutes), and an unclear epoch with its own peak (confidence 1.8 or more) within 4 of the readings within
+1 minute is read with its neighbours (`n`).
+
+How the choices were made, on the owner's recordings with no reference heart rate (all planning values):
+
+- **Best channel, not the sum.** A chance rate was estimated by scoring each epoch against a mistuned family (each
+  harmonic moved 0.33-0.45 Hz off). At the same chance rate (0.5 % of epochs) the best channel read 13-20 % of the
+  readable epochs, the prototype's sum over channels 4-10 %. T4 carried most readings, then T3, O1, O2. The best of
+  more channels is high by chance more often, hence the threshold growing with the channel count.
+- **The neighbours.** Readings with their neighbours added 40-60 % more readings; on the mistuned family they added
+  0-0.3 % of unread epochs. Consecutive readings stayed within 5 a minute of each other in 94-100 % of pairs.
+- **Steps.** On the owner's walk of 2026-11-20 (251 epochs walking) the movement rule alone left no reading; without
+  it, about 160 epochs had a strong rhythm at 103-119 (the steps) or 53-58 (the stride), and the step checks turned
+  104 of them down, while they turn down 7 of about 280 strong rhythms in the three sleep recordings. Made-up steps at 90-130 a minute, too small for the
+  movement rule, are never read (analysis/tests/test_pulse.py).
+- **Mains hum** never reaches the spectrum (notched, then the 20 Hz low-pass); loud made-up hum on four channels gives
+  no reading and does not hide a pulse.
+
+| Recording | Epochs | Read | While asleep | W | N1 | N2 | N3 | REM |
+|---|---|---|---|---|---|---|---|---|
+| nap 2026-11-20 | 262 | 22 % | 29 %, 56; lowest 5 min 54 | 71 (7) | 53 (4) | 57 (23) | - (0 of 26) | 56 (24) |
+| night 2026-11-19 | 1113 | 19 % | 22 %, 55; lowest 5 min 50 | 61 (26) | 59 (11) | 55 (124) | - (0 of 139) | 54 (50) |
+| night 2026-11-17 | 1549 | 9 % | 16 %, 55; lowest 5 min 51 | 61 (21) | 55 (12) | 54 (68) | 62 (7) | 55 (34) |
+
+Medians a minute, with the readings in brackets (pulse-v1; the prototype of 2026-11-20 read 12 % and 3 % of the first
+two). Deep sleep is almost never read: its slow waves fill the same frequencies. Check against a watch:
+`scripts/compare_pulse.py` (app/README.md "Pulse").
+
 ## What still needs the owner
 
 - **The extended setup test** (`morning.html`, 2 min): 20 cued blinks set the blink depth, 10 glances give µV

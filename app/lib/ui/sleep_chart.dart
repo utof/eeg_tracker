@@ -2,13 +2,15 @@
 // track ground, hour rules like the watch strip's, missing data hatched amber (the strip's gap colour), and each
 // sleep period a faint band numbered as in the period list below the chart. Under it, when the report has the
 // detectors' extras, a Signal lane on the same clock: empty where the signal was clean, amber dots where the model
-// read through noise, solid amber where no electrode was usable (DECISIONS 141).
+// read through noise, solid amber where no electrode was usable (DECISIONS 141). Under that, when the night's pulse was
+// read, the Pulse lane: a red line where a reading exists, gaps elsewhere (pulse_lane.dart, DECISIONS 815).
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../detectors/detectors.dart' show EpochQuality;
 import '../sleep/periods.dart' show gapStage, unscoredStage;
+import 'pulse_lane.dart';
 import 'theme.dart';
 
 /// Top to bottom; light sleep is N1 and N2 together, as in the report.
@@ -30,6 +32,7 @@ class SleepChart extends StatelessWidget {
     required this.stages,
     this.periods = const [],
     this.quality,
+    this.pulse,
     this.label,
   });
 
@@ -43,6 +46,10 @@ class SleepChart extends StatelessWidget {
   /// The detectors' signal quality per epoch (same clock as [stages]); null: no Signal lane.
   final List<EpochQuality?>? quality;
 
+  /// The pulse a minute per epoch (same clock as [stages]), null where not read; null or without a reading: no Pulse
+  /// lane.
+  final List<double?>? pulse;
+
   /// What a screen reader says for the whole chart.
   final String? label;
 
@@ -50,6 +57,9 @@ class SleepChart extends StatelessWidget {
 
   /// The Signal lane's height and its gap to the stages.
   static const double signalHeight = 18, signalGap = 8;
+
+  /// The Pulse lane's height and its gap to the lane above.
+  static const double pulseHeight = 44, pulseGap = 8;
 
   @override
   Widget build(BuildContext context) {
@@ -67,11 +77,16 @@ class SleepChart extends StatelessWidget {
     final top = height(numberStyle) + 6;
     final bottom = height(tickStyle) + 6;
     final signal = quality == null ? 0.0 : signalGap + math.max(signalHeight, height(levelStyle) + 2);
+    final p = pulse;
+    final scaleStyle = text.labelSmall!.copyWith(color: Night.inkMuted, fontFeatures: tabular);
+    final pulseH = p == null || !p.any((b) => b != null)
+        ? 0.0
+        : pulseGap + math.max(pulseHeight, math.max(height(levelStyle) + 2, 2 * height(scaleStyle) + 4));
     return Semantics(
       label: label,
       excludeSemantics: true,
       child: SizedBox(
-        height: top + 4 * lane + signal + bottom,
+        height: top + 4 * lane + signal + pulseH + bottom,
         width: double.infinity,
         child: CustomPaint(
           painter: _ChartPainter(
@@ -79,8 +94,11 @@ class SleepChart extends StatelessWidget {
             stages: stages,
             periods: periods,
             quality: quality,
+            pulse: pulseH > 0 ? p : null,
             lane: lane,
             signal: signal,
+            pulseH: pulseH,
+            scaleStyle: scaleStyle,
             top: top,
             levelStyle: levelStyle,
             tickStyle: tickStyle,
@@ -99,8 +117,11 @@ class _ChartPainter extends CustomPainter {
     required this.stages,
     required this.periods,
     required this.quality,
+    required this.pulse,
     required this.lane,
     required this.signal,
+    required this.pulseH,
+    required this.scaleStyle,
     required this.top,
     required this.levelStyle,
     required this.tickStyle,
@@ -112,10 +133,15 @@ class _ChartPainter extends CustomPainter {
   final List<String> stages;
   final List<(int, int)> periods;
   final List<EpochQuality?>? quality;
+  final List<double?>? pulse;
   final double lane;
 
   /// Height of the Signal lane with its gap above (0: none).
   final double signal;
+
+  /// Height of the Pulse lane with its gap above (0: none).
+  final double pulseH;
+  final TextStyle scaleStyle;
   final double top;
   final TextStyle levelStyle;
   final TextStyle tickStyle;
@@ -129,7 +155,8 @@ class _ChartPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final labels = [for (final l in [...chartLevels, if (quality != null) signalLevel]) _text(l, levelStyle)];
-    final left = labels.map((t) => t.width).reduce(math.max) + 12;
+    final pulseLabel = pulse == null ? null : _text(pulseLaneWord, levelStyle);
+    final left = [...labels, ?pulseLabel].map((t) => t.width).reduce(math.max) + 12;
     final plot = Rect.fromLTWH(left, top, size.width - left, 4 * lane);
     final n = stages.length;
     if (n == 0 || plot.width <= 0) return;
@@ -213,6 +240,12 @@ class _ChartPainter extends CustomPainter {
       paintSignalLane(canvas, lanePlot, q, n);
       labels.last.paint(canvas, Offset(0, lanePlot.center.dy - labels.last.height / 2));
     }
+    final pl = pulse;
+    if (pl != null && pulseLabel != null) {
+      final r = Rect.fromLTRB(plot.left, plot.bottom + signal + SleepChart.pulseGap, plot.right, plot.bottom + signal + pulseH);
+      paintPulseLane(canvas, r, pl.length > n ? pl.sublist(0, n) : pl, x, scaleStyle: scaleStyle, scaler: scaler);
+      pulseLabel.paint(canvas, Offset(0, r.center.dy - pulseLabel.height / 2));
+    }
 
     // level words on the left, numbers over the bands, clock times under the chart
     for (var i = 0; i < chartLevels.length; i++) {
@@ -229,7 +262,7 @@ class _ChartPainter extends CustomPainter {
       final t = _text(words, tickStyle);
       final lx = (x(epoch) - t.width / 2).clamp(plot.left, size.width - t.width);
       if (lx < lastRight + 8) continue; // never let two times touch
-      t.paint(canvas, Offset(lx, plot.bottom + signal + 6));
+      t.paint(canvas, Offset(lx, plot.bottom + signal + pulseH + 6));
       lastRight = lx + t.width;
     }
   }
@@ -257,6 +290,8 @@ class _ChartPainter extends CustomPainter {
       old.start != start ||
       old.periods != periods ||
       old.quality != quality ||
+      old.pulse != pulse ||
+      old.pulseH != pulseH ||
       old.scaler != scaler ||
       old.lane != lane;
 }

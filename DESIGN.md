@@ -15,6 +15,7 @@ colors:
   on-live-fill: "#E8F3EC"
   caution: "#E0AE5C"
   problem: "#E57A63"
+  pulse: "#DB5C4D"
 typography:
   status:
     fontFamily: "Roboto"
@@ -78,6 +79,8 @@ Dark is not a style choice here; it comes from the scene. Source: `app/lib/ui/th
 - **Storage tones:** the Storage page's bar gives each kind of data a dim warm tone of its own (sand, sage, heather,
   slate, tan, mauve, parchment, olive, umber, smoke; `app/lib/ui/storage_bar.dart`), never the trio's green, amber or
   red, and each repeats as a 12 dp swatch beside its row's name: the colour never stands alone.
+- **Pulse red** (`pulse`, a little deeper than `problem`): only the pulse line, always in a lane worded "Pulse" and
+  with its legend swatch, so the red reads as the heart's line and never as a problem (the owner asked for a red line).
 
 ## Typography
 
@@ -195,7 +198,11 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   period log below it. No stage colours: the levels are words. When the report has the detectors' extras, a
   Signal lane runs under the levels on the same clock, worded "Signal" like them: the empty `track` where the
   signal was clean, `caution` amber dots where the model read through noise, solid amber where no electrode was
-  usable; both in the legend.
+  usable; both in the legend. When the night's pulse was read, a **Pulse lane** runs under them: 44 dp of `track`,
+  worded "Pulse", a 2 dp `pulse` red line through the readings (neighbours joined, a lone one a short dash, gaps where
+  there is none), the scale's two ends in muted tabular labelSmall at its right (whole fives, at least 20 apart); the
+  legend adds its swatch. Under the legend one line at bodyLarge, "Pulse while asleep: about 55/min (read in 22 % of
+  the night)" with its round **i**, the lowest 5 minutes, and a muted sentence that it is an experiment.
 - **Sleep periods:** ruled log entries: a numbered cell, the clock span, then label-left / minutes-right
   lines (Asleep, Deep, Dream, Light), wake-ups and missing minutes as plain sentences.
 - **Day entries (trends, check-in result):** label left, value right in tabular titleLarge, then yesterday's value
@@ -374,7 +381,9 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   is shown, with Zoom out, Zoom in and The whole recording as icon buttons; two fingers zoom, a sideways drag moves.
   A tap on a band opens its sheet (lane, word at titleLarge, span, where it comes from; Show the signal and Tag this
   span outlined); anywhere else opens the signal at that moment: the Signal tab's Raw stack or filtered traces fed from
-  the file, 5, 10 or 30 s as a segmented row, earlier and later outlined.
+  the file, 5, 10 or 30 s as a segmented row, earlier and later outlined. Under the lanes, when the recording's pulse
+  was read, the Pulse lane as in the sleep chart (two lanes tall, its scale following what is shown), and under the
+  muted pass line one muted line on the pulse with its **i**.
 - **Buttons:** one filled button per screen: Start night on the night screen (Lights off while a night records), Start on the meditation screen, and on
   each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before
   stopping, except in alpha-theta, where stopping must be instant. Session faces (dream catcher, sound for states)
