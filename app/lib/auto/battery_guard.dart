@@ -3,6 +3,7 @@
 // never refused (a short night beats none), only warned about. A daytime session (work, other) may run while the
 // headband keeps enough for tonight: with bedtime 4 hours away or more it may go down to the margin but ends 4 hours
 // before bedtime (time to charge); later it may use only what is above tonight's need (night hours x 10 % + 15 %).
+// A night is warned about only when the battery would not reach the usual wake-up (no margin there: it is a guess).
 // Under 40 minutes is not worth starting. Without a battery reading it is allowed, and the log says so.
 import 'bedtime.dart';
 import 'store.dart';
@@ -30,10 +31,13 @@ int nightNeedPct(UsualNight w) => (w.nightHours * BatteryRule.drainPctPerHour + 
 BatteryVerdict guardBattery(WearKind kind, int? batteryPct, DateTime now, UsualNight w) {
   if (batteryPct == null) return const BatteryVerdict(allowed: true, note: 'headband battery not known');
   if (kind == WearKind.night) {
-    final need = w.hoursToWake(now) * BatteryRule.drainPctPerHour + BatteryRule.marginPct;
-    if (batteryPct >= need) return const BatteryVerdict(allowed: true);
+    final toWake = w.hoursToWake(now);
+    if (batteryPct >= toWake * BatteryRule.drainPctPerHour) return const BatteryVerdict(allowed: true);
     final hours = (batteryPct / BatteryRule.drainPctPerHour).floor();
-    return BatteryVerdict(allowed: true, note: 'headband at $batteryPct %: about $hours h of the night');
+    return BatteryVerdict(
+      allowed: true,
+      note: 'headband at $batteryPct %: about $hours h, the night needs about ${toWake.round()} h',
+    );
   }
   final toBed = w.hoursToBed(now);
   final chargeH = BatteryRule.chargeTime.inMinutes / 60;

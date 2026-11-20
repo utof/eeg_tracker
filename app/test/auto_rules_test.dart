@@ -126,8 +126,10 @@ void main() {
     test('a night is never refused, only warned about', () {
       final low = guardBattery(WearKind.night, 30, DateTime(2026, 11, 20, 23, 0), w);
       expect(low.allowed, isTrue);
-      expect(low.note, contains('about 3 h'));
+      expect(low.note, 'headband at 30 %: about 3 h, the night needs about 8 h');
       expect(guardBattery(WearKind.night, 100, DateTime(2026, 11, 20, 23, 0), w).note, isNull);
+      expect(guardBattery(WearKind.night, 90, DateTime(2026, 11, 20, 23, 0), w).note, isNull, reason: '9 h for an 8-hour night');
+      expect(guardBattery(WearKind.night, 70, DateTime(2026, 11, 20, 23, 0), w).note, isNotNull);
     });
 
     test('daytime, bedtime 4 hours away or more: down to 15 %, ending 4 hours before bed', () {
