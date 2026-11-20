@@ -1,7 +1,8 @@
 // The trends page (ROADMAP row 10; DECISIONS rows 120-129): reads the phone's own sleep reports, check-ins,
 // practice reports and sharp-hours answers (rows 280-289) and lays them out with trends_view.dart. Opened from the night screen's Morning section and
-// from a check-in's result.
+// from a check-in's result. The files are read and the page worked out in a background isolate (DECISIONS 620-629).
 import 'dart:async';
+import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 
@@ -53,6 +54,39 @@ UnusualCard unusualToday(String recordingsDir, DateTime now) {
   );
 }
 
+/// What the Trends page shows, read and worked out together.
+typedef TrendsPage = ({
+  TrendsModel model,
+  String? experiment,
+  UnusualCard? unusual,
+  String? unusualError,
+  String? sharp,
+});
+
+/// Reads the app's folders beside [recordingsDir] and works the page out (the unusual card also gets the back-test
+/// lines it lacks). Run in a background isolate ([trendsInBackground]): it reads every report, check-in, practice and
+/// work session, and the screen's thread froze while it did (DECISIONS 586, 620-629).
+TrendsPage loadTrendsPage(String recordingsDir, DateTime now) {
+  final inputs = readTrendInputs(recordingsDir);
+  final dayNumbers = readOwnDayNumbers(recordingsDir);
+  final m = buildTrends(inputs, now, extra: dayNumbers);
+  final line = experimentLine(currentExperiment(recordingsDir, now));
+  UnusualCard? unusual;
+  String? unusualError;
+  try {
+    unusual = refreshUnusual(UnusualStore(unusualDirFor(recordingsDir)), dailySeries(inputs, extra: dayNumbers), now);
+  } catch (e) {
+    unusualError = '$e'; // the card is never worth breaking the trends
+  }
+  final sharp = SharpStore(sharpDirFor(recordingsDir));
+  final sharpLine = sharpTrendsLine(sharp.settings(), sharp.ratings(), sharp.reactions(), now);
+  return (model: m, experiment: line, unusual: unusual, unusualError: unusualError, sharp: sharpLine);
+}
+
+/// [loadTrendsPage] in a background isolate.
+Future<TrendsPage> trendsInBackground(String recordingsDir, DateTime now) =>
+    Isolate.run(() => loadTrendsPage(recordingsDir, now), debugName: 'trends');
+
 class TrendsScreen extends StatefulWidget {
   const TrendsScreen({super.key, this.recordingsDir});
 
@@ -78,28 +112,15 @@ class _TrendsScreenState extends State<TrendsScreen> {
     try {
       final dir = widget.recordingsDir ?? await Phone.recordingsDir();
       if (dir == null) throw StateError("the app's folder is not known");
-      final now = DateTime.now();
-      final inputs = readTrendInputs(dir);
-      final dayNumbers = readOwnDayNumbers(dir);
-      final m = buildTrends(inputs, now, extra: dayNumbers);
-      final line = experimentLine(currentExperiment(dir, now));
-      UnusualCard? unusual;
-      String? unusualError;
-      try {
-        unusual = refreshUnusual(_unusualStore(dir), dailySeries(inputs, extra: dayNumbers), now);
-      } catch (e) {
-        unusualError = '$e'; // the card is never worth breaking the trends
-      }
-      final sharp = SharpStore(sharpDirFor(dir));
-      final sharpLine = sharpTrendsLine(sharp.settings(), sharp.ratings(), sharp.reactions(), now);
+      final p = await trendsInBackground(dir, DateTime.now());
       if (!mounted) return;
       setState(() {
-        _model = m;
+        _model = p.model;
         _dir = dir;
-        _experiment = line;
-        _unusual = unusual;
-        _unusualError = unusualError;
-        _sharp = sharpLine;
+        _experiment = p.experiment;
+        _unusual = p.unusual;
+        _unusualError = p.unusualError;
+        _sharp = p.sharp;
       });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');

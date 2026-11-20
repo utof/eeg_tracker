@@ -4,6 +4,7 @@
 // report for the study reminders, every recording's index for the nights' list. Now: a handful at the first refresh,
 // none at the next while nothing changed, and the reports and recordings only in background isolates. The lines and
 // the moments armed are the same as before.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:eeg_tracker/cache/file_summaries.dart';
@@ -28,6 +29,12 @@ import 'package:eeg_tracker/ui/nap_view.dart' show endWords;
 import 'package:eeg_tracker/ui/night_lines.dart';
 import 'package:eeg_tracker/wearer/check.dart';
 import 'package:eeg_tracker/wearer/wearer.dart';
+import 'package:eeg_tracker/ui/theme.dart';
+import 'package:eeg_tracker/ui/trends_screen.dart';
+import 'package:eeg_tracker/ui/trends_view.dart';
+import 'package:eeg_tracker/work/days.dart';
+import 'package:eeg_tracker/work/store.dart' show workDirFor;
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'sharp_prompts_test.dart' show FakeSharpPhone;
@@ -141,6 +148,43 @@ void main() {
       final r = refreshWearer(rec, now);
       expect(r.answers['$kindNight:2026-11-12'], answerSomeoneElse);
       expect(counts.of('/files/nights/'), 1, reason: '$counts');
+    });
+  });
+
+  group('Trends', () {
+    testWidgets('opens without reading the history on the screen\'s thread', (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1080 / 393;
+      addTearDown(tester.view.reset);
+      final counts = countReads(addTearDown);
+      await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: TrendsScreen(recordingsDir: rec)));
+      expect(find.text('Reading your days…'), findsOneWidget, reason: 'the page is up while the isolate reads');
+      for (var i = 0; i < 300 && find.byType(TrendsView).evaluate().isEmpty; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump();
+      }
+      expect(find.byType(TrendsView), findsOneWidget);
+      for (final folder in ['/files/nights/', '/files/mornings/', '/work-sessions/', '/meditations/']) {
+        expect(counts.of(folder), 0, reason: '$folder: $counts');
+      }
+    });
+
+    test('the same page as on the screen\'s thread; the work sessions are read again only when one changed', () {
+      final kept = File('${root.path}/files/cache/work-days.json');
+      if (kept.existsSync()) kept.deleteSync(); // as on the first open after the update
+      final counts = countReads(addTearDown);
+      final first = loadTrendsPage(rec, now);
+      expect(counts.of('/work-sessions/'), 60);
+      counts.clear();
+      final again = loadTrendsPage(rec, now); // a new isolate at every open: nothing in memory
+      expect(counts.of('/work-sessions/'), 0, reason: 'the kept day numbers: $counts');
+      expect(counts.of('/cache/work-days.json'), 1);
+      expect(again.model.rows.length, first.model.rows.length);
+      expect(readWorkDayNumbers(rec)['worktime'], hasLength(60));
+      expect(readWorkDayNumbers(rec), workDayNumbers([
+        for (final f in Directory(workDirFor(rec).path).listSync().whereType<File>())
+          jsonDecode(File(f.path).readAsStringSync()),
+      ]));
     });
   });
 

@@ -1,6 +1,7 @@
 // The morning check-in (DECISIONS rows 120 and 125): the laptop page moved to the phone. Owns the headband while
 // it runs, from this screen, only between nights (as meditation, row 75). Layout in morning_view.dart.
 import 'dart:async';
+import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -32,6 +33,17 @@ String? checkedInTodayAt(List<MorningRecord> records, DateTime now) {
   if (todays.isEmpty) return null;
   final t = todays.first.start;
   return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+}
+
+/// [checkedInTodayAt] from the folder: only today's files are opened, and none again while they are unchanged
+/// (DECISIONS 620-629; the night screen asks at every start and return).
+String? checkedInTodayIn(MorningStore store, DateTime now) {
+  try {
+    final first = store.firstOfDay(dayKey(now));
+    return first == null ? null : checkedInTodayAt([first], now);
+  } catch (_) {
+    return null;
+  }
 }
 
 /// This check-in's numbers with yesterday and your usual: the trends' morning rows with this check-in standing
@@ -96,7 +108,7 @@ class _MorningScreenState extends State<MorningScreen> {
         _recordings = rec;
         final store = MorningStore(morningsDirFor(rec));
         _c.store = store;
-        _doneAt = checkedInTodayAt(store.list(), DateTime.now());
+        _doneAt = checkedInTodayIn(store, DateTime.now());
         _experiment = experimentLine(currentExperiment(rec, DateTime.now()));
       }
     } catch (_) {
@@ -122,12 +134,16 @@ class _MorningScreenState extends State<MorningScreen> {
     final rec = _recordings, res = _c.result;
     final done = res == null ? null : MorningRecord.fromJson(res);
     if (rec == null || done == null) return;
-    try {
-      _outcome = outcomeFor(done, readTrendInputs(rec));
-      _doneAt = checkedInTodayAt(_c.store?.list() ?? const [], DateTime.now());
-    } catch (_) {
-      _outcome = null;
-    }
+    final store = _c.store;
+    _doneAt = store == null ? null : checkedInTodayIn(store, DateTime.now());
+    // every report, check-in and practice: read in a background isolate (DECISIONS 620-629)
+    unawaited(
+      Isolate.run(() => outcomeFor(done, readTrendInputs(rec)), debugName: 'check-in outcome')
+          .then<MorningOutcome?>((o) => o, onError: (Object _) => null)
+          .then((o) {
+            if (mounted) setState(() => _outcome = o);
+          }),
+    );
     _wearerId = done.id;
     _checkWearer();
   }

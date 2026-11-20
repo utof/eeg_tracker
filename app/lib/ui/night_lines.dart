@@ -6,11 +6,10 @@ import '../dream/store.dart';
 import '../morning/store.dart';
 import '../nap/store.dart';
 import '../recorder/nights.dart' show nightLabel;
-import '../trends/days.dart' show dayKey;
 import 'dream_view.dart' show clock;
 import 'lucid_screen.dart' show lucidNightLine;
 import 'memory_cues_screen.dart' show memoryNightLine;
-import 'morning_screen.dart' show checkedInTodayAt;
+import 'morning_screen.dart' show checkedInTodayIn;
 import 'nap_view.dart' show endWords;
 
 /// The lines, null where there is nothing to say.
@@ -43,16 +42,6 @@ String? lastDreamLine(String recordingsDir, DateTime now) {
     if (s == null || now.difference(s.start) > const Duration(hours: 24)) return null;
     final n = s.answers;
     return 'Last session: ${n == 1 ? '1 answer' : '$n answers'}, ${nightLabel(s.start)} ${clock(s.start)}.';
-  } catch (_) {
-    return null;
-  }
-}
-
-/// When today's first check-in started (`07:40`), or null: only today's files are opened.
-String? checkedInTodayIn(MorningStore store, DateTime now) {
-  try {
-    final first = store.firstOfDay(dayKey(now));
-    return first == null ? null : checkedInTodayAt([first], now);
   } catch (_) {
     return null;
   }

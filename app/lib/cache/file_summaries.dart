@@ -163,6 +163,8 @@ class SummaryIndex {
       tmp.renameSync(file.path);
     } on FileSystemException {
       // the summaries are worked out again next time
+    } on JsonUnsupportedObjectError {
+      // a summary JSON cannot hold (not finite): kept in memory only
     }
   }
 
@@ -242,6 +244,8 @@ Object? folderValue(File cache, Directory dir, String suffix, {required int vers
     tmp.renameSync(cache.path);
   } on FileSystemException {
     // worked out again next time
+  } on JsonUnsupportedObjectError {
+    // a value JSON cannot hold (not finite): worked out again next time
   }
   return value;
 }
