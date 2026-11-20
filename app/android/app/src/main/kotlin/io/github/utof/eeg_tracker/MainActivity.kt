@@ -179,6 +179,7 @@ class MainActivity : FlutterActivity() {
         PairLinks.onArrived = null
         linkChannel = null
         autoChannel = null
+        AutoWatch.screenHolds = false // the Signal tab went with the screen
         SessionService.onStopTapped = null
         SessionService.onButtonTapped = null
         SessionService.onFocusChanged = null

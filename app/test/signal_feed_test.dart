@@ -91,6 +91,9 @@ class FakePhone {
   bool night = false;
   Readiness? missing;
   final List<bool> leases = [];
+
+  /// What the headband watcher was told (AutoWatch.kt), with the searches made by then.
+  final List<(bool, int)> holds = [];
   final StreamController<Object> recorder = StreamController<Object>.broadcast(sync: true);
   late final TapBand band = TapBand();
   late final CountingFinder finder = CountingFinder(band);
@@ -103,6 +106,7 @@ class FakePhone {
     device: () async => device,
     readiness: (_) async => missing,
     finderFor: (_) => finder,
+    holdHeadband: (on) async => holds.add((on, finder.finds)),
     timing: _quick,
     tickEvery: const Duration(milliseconds: 10),
   );
@@ -247,6 +251,58 @@ void main() {
     expect(p.band.calls.length, calls); // nothing more went to the headband
   });
 
+  test('the headband watcher keeps off while the view holds the headband: told before the search, until it lets go', () async {
+    // own connection: the watcher is told before the first search and again once the view let go
+    final p = FakePhone();
+    final f = SignalFeed(p.phone);
+    addTearDown(f.dispose);
+    await f.setActive(true);
+    expect(f.kind, FeedKind.own);
+    expect(p.holds, [(true, 0)]);
+    await f.setActive(false);
+    expect(p.holds, [(true, 0), (false, 1)]);
+
+    // a night starts: the view lets go and reads the night, and the watcher is told the view holds nothing
+    await f.setActive(true);
+    p.night = true;
+    await until(() => f.kind == FeedKind.night);
+    expect(p.holds, [(true, 0), (false, 1), (true, 1), (false, 2)]);
+    await f.setActive(false);
+    expect(p.holds, hasLength(4), reason: 'reading the night holds nothing of its own');
+
+    // a session holds the headband: the view reads along and tells the watcher nothing (the session is its own hold)
+    final q = FakePhone();
+    final session = BandLink(finder: CountingFinder(q.band), timing: _quick, onBatch: (_, _) {});
+    expect(await session.connect(), isTrue);
+    final g = SignalFeed(q.phone);
+    addTearDown(g.dispose);
+    await g.setActive(true);
+    expect(g.kind, FeedKind.session);
+    expect(q.holds, isEmpty);
+    await g.setActive(false);
+    await session.close();
+
+    // nothing found: given back at once
+    final none = FakePhone();
+    final h = SignalFeed(
+      SignalPhone(
+        nightRunning: () async => false,
+        leaseNight: (_) {},
+        fromRecorder: () => const Stream.empty(),
+        device: () async => SignalDevice(montage: brainBitMontage()),
+        readiness: (_) async => null,
+        finderFor: (_) => CountingFinder(null),
+        holdHeadband: (on) async => none.holds.add((on, 0)),
+        timing: _quick,
+        tickEvery: const Duration(milliseconds: 10),
+      ),
+    );
+    addTearDown(h.dispose);
+    await h.setActive(true);
+    expect(h.stage, SignalStage.notFound);
+    expect(none.holds, [(true, 0), (false, 0)]);
+  });
+
   test('not ready: Nearby devices, Bluetooth, Wi-Fi; nothing is searched', () async {
     for (final (missing, stage) in [
       (Readiness.nearby, SignalStage.noPermission),
@@ -258,6 +314,7 @@ void main() {
       await f.setActive(true);
       expect(f.stage, stage);
       expect(p.finder.finds, 0);
+      expect(p.holds, isEmpty, reason: 'nothing searched: the watcher is not kept off');
       f.dispose();
     }
   });

@@ -66,6 +66,7 @@ class SignalPhone {
     required this.readiness,
     required this.finderFor,
     this.disposeFinder,
+    this.holdHeadband,
     this.timing = const LinkTiming(),
     this.clock = DateTime.now,
     this.tickEvery = const Duration(seconds: 1),
@@ -89,6 +90,11 @@ class SignalPhone {
   /// The finder for a connection of the view's own (the BrainBit's switch, or the DIY board's listener).
   final HeadbandFinder Function(SignalDevice device) finderFor;
   final void Function(HeadbandFinder finder, {required bool anyLost})? disposeFinder;
+
+  /// Tells the headband watcher of automatic recording (lib/auto, DECISIONS 602) that the view's own connection holds
+  /// the headband ([on]: before its search; off once it let go), so no check of the watcher's starts meanwhile. Not for
+  /// the night's or a session's stream: those hold the headband themselves.
+  final Future<void> Function(bool on)? holdHeadband;
   final LinkTiming timing;
   final DateTime Function() clock;
 
@@ -139,6 +145,9 @@ class SignalFeed extends ChangeNotifier {
   bool _measuring = false;
   bool _switching = false;
   bool _disposed = false;
+
+  /// The headband watcher was told the view's own connection holds the headband.
+  bool _holding = false;
 
   bool get active => _active;
   Montage get montage => device.montage;
@@ -262,6 +271,8 @@ class SignalFeed extends ChangeNotifier {
       });
       return;
     }
+    await _hold(true); // before the search: the watcher starts no check of its own meanwhile
+    if (run != _run) return;
     final finder = _finder = phone.finderFor(device);
     final link = _link = BandLink(finder: finder, timing: phone.timing, onBatch: _onOwnBatch, clock: phone.clock);
     _set(SignalStage.searching);
@@ -376,6 +387,16 @@ class SignalFeed extends ChangeNotifier {
       } catch (_) {}
     }
     if (finder != null) phone.disposeFinder?.call(finder, anyLost: link?.leftLost ?? false);
+    await _hold(false);
+  }
+
+  /// Tells the headband watcher once per change; a failure (no channel) changes nothing here.
+  Future<void> _hold(bool on) async {
+    if (on == _holding) return;
+    _holding = on;
+    try {
+      await phone.holdHeadband?.call(on);
+    } catch (_) {}
   }
 
   Future<void> _stop(SignalStage next) async {

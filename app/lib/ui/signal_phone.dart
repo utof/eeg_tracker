@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
+import '../auto/channel.dart' show AutoChannel;
 import '../headband/diy/board.dart' show DiyFinder;
 import '../headband/finder.dart';
 import '../phone.dart';
@@ -27,6 +28,7 @@ SignalPhone phoneSignal() => SignalPhone(
   disposeFinder: (f, {required anyLost}) {
     if (f is BrainBitFinder) f.dispose(anyLost: anyLost);
   },
+  holdHeadband: AutoChannel.screenHolds,
 );
 
 /// The recorder's messages while someone listens (the night screen keeps its own callback).

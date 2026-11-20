@@ -20,6 +20,7 @@ import android.content.pm.PackageManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
+import android.util.Log
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 import org.json.JSONObject
@@ -46,6 +47,7 @@ import java.util.regex.Pattern
  */
 object AutoWatch {
     const val CHANNEL = "eeg_tracker/auto"
+    private const val TAG = "AutoWatch"
     private const val PREFS = "auto_watch"
     const val ACTION_TICK = "io.github.utof.eeg_tracker.auto.TICK"
     const val ACTION_ANSWER = "io.github.utof.eeg_tracker.auto.ANSWER"
@@ -91,6 +93,13 @@ object AutoWatch {
     @Volatile
     var workOpenedAt = 0L
 
+    /**
+     * The app's screen holds the headband with a connection that is neither a night nor a session (the Signal tab's
+     * own, DECISIONS 595); cleared when the screen's Activity goes.
+     */
+    @Volatile
+    var screenHolds = false
+
     /** When the screen last went off, as far as this process saw it (EegApp registers the receiver). */
     @Volatile
     private var screenOffAt = 0L
@@ -129,6 +138,10 @@ object AutoWatch {
                         result.success(null)
                     }
                     "release" -> AutoWatchService.release { result.success(null) }
+                    "screenHolds" -> {
+                        screenHolds = call.argument<Boolean>("on") == true
+                        result.success(null)
+                    }
                     "armBedtime" -> {
                         arm(app, (call.argument<List<Number>>("at") ?: emptyList()).map { it.toLong() })
                         result.success(null)
@@ -222,11 +235,16 @@ object AutoWatch {
         )
     }
 
-    /** The headband must not be touched: the night recorder, a sound or work session, or a session screen holds it. */
+    /**
+     * The headband must not be touched: the night recorder, a sound or work session, a session screen, or the Signal
+     * tab's own connection holds it. (Share on Wi-Fi's keep between nights is not a session; the night's sleep scoring
+     * reads files and never the headband.)
+     */
     fun busyReason(context: Context): String? = when {
         recorderRunning(context) -> "night recording"
         SessionService.sessionRunning -> "session"
         SharpPrompts.screenHeld -> "session on screen"
+        screenHolds -> "signal on screen"
         else -> null
     }
 
@@ -255,7 +273,11 @@ object AutoWatch {
     /** Starts a check for [reason] unless the headband is busy or every kind is off. [fake]: debug builds only. */
     fun requestCheck(context: Context, reason: String, force: Boolean = false, fake: String? = null) {
         if (!force && allOff(context)) return
-        if (busyReason(context) != null) return
+        val busy = busyReason(context)
+        if (busy != null) {
+            Log.i(TAG, "no check for $reason: $busy")
+            return
+        }
         val now = System.currentTimeMillis()
         prefs(context).edit().putLong(K_LAST_CHECK_AT, now).putString(K_LAST_TRIGGER, reason).apply()
         val trigger = mapOf<String, Any?>("reason" to reason, "force" to force, "fake" to fake)

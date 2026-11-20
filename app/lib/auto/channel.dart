@@ -93,6 +93,10 @@ abstract final class AutoChannel {
   /// Lets go of a headband the watcher holds (it may be asking): call before a start by hand.
   static Future<void> release() => _call<void>('release');
 
+  /// The app's screen holds the headband with a connection that is neither a night nor a session (the Signal tab's
+  /// own, DECISIONS 595): no check starts while [on] (AutoWatch.kt `busyReason`).
+  static Future<void> screenHolds(bool on) => _call<void>('screenHolds', {'on': on});
+
   /// Arms the bedtime checks ([at], the next 24 hours); none when every kind is "Do nothing".
   static Future<void> armBedtime(List<DateTime> at) =>
       _call<void>('armBedtime', {'at': [for (final t in at) t.millisecondsSinceEpoch]});
