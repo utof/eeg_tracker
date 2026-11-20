@@ -47,6 +47,7 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
 - [Sessions with the phone locked](#sessions-with-the-phone-locked): 15 minutes, then one bedtime
 - [Dream catcher](#dream-catcher): a 20-minute nap; then the answers as words
 - [Hands-free controls](#hands-free-controls-off-unless-you-switch-it-on): calibrate and try (about 10 minutes)
+- [Walking](#walking-steps-from-the-headband): a walk of 15 minutes or more with the phone's step counter on
 
 **Tries that take weeks**
 
@@ -1848,6 +1849,41 @@ it uses the same delete helper as the Storage page.
 4. Delete an old test recording you do not need: the Danger zone asks twice when it is the only copy.
 5. Tell the assistant: which bands were wrong and when; how long the lanes took for a night; anything you could not
    delete, and what it said.
+
+## Walking (steps from the headband)
+
+The headband has no motion sensor, but every step shakes it a little, and that leaves a rhythm in its signal. After a
+recording ends, the app looks for that rhythm (every electrode the recording has, any layout): **walking** wherever it
+holds for 30 seconds or more, its **pace** in steps a minute, **running** where the pace stays at 150 or more for a
+minute, the **stops** of a minute or more between, and **steps** as pace times time, counted only where the rhythm is
+clear. A walk also needs the headband to shake as much as in walking and a rhythm that is not a heartbeat's (the pulse
+leaves one too, strongest asleep). The Archive's timeline gets a **Walking** lane with the pace; **Trends** gets **Walking** (minutes) and **Steps
+(estimated)** per day with your usual, a round **i** for what the research says, and a line saying where the day's
+steps came from. It runs once per recording in the background (from the Archive, a recording's page or Trends), never
+while a night or a session records, and is kept even after the raw signal moves to the laptop.
+
+**The phone as the second opinion** (off until you switch it on): **Settings** → **Count steps with the phone while
+recording**. Android asks for "Physical activity"; then, while the headband records, the phone's own step counter is
+written into the recording's log once a minute (nothing leaves the phone). Wherever the phone counted steps in a minute,
+its steps are used and the minute says so; where it lay still (left on a desk), the headband's estimate fills in. It
+works best with the phone in a front trouser pocket. Once 10 minutes have been walked with both, the app checks the
+headband against the phone: its pace within 5 % in 8 of 10 minutes and the totals within 15 %, or its steps are left
+out and only the phone's count and the walking minutes show. Until then Trends says the steps are not yet checked.
+
+Slow strolls, short walks indoors, stairs, cycling and buses are not seen; a walk read at half or double the pace is
+the main way it can be wrong. On the laptop, `scripts/walks.py` makes the same walk files from the raw recordings, and
+`scripts/export_events.py --daily` sends each day's walking minutes and steps to utof_tracker
+([docs/utof-interface.md](../docs/utof-interface.md)).
+
+### Owner step: a walk with the headband and the phone (2 minutes to set up, then a walk of 15 minutes or more)
+
+1. **Settings** → switch on **Count steps with the phone while recording**; allow **Physical activity**.
+2. Headband on, **Start night** (it records in the day too); the phone in your front trouser pocket.
+3. Walk as you usually do for 15 minutes or more, with a stop or two; then **Stop**.
+4. Open **Trends** (Walking, Steps (estimated) and where they came from) and the recording in the **Archive** (the
+   Walking lane: tap a band for its pace and steps).
+5. Tell the assistant: roughly when you walked and stopped, and whether the lane matches; the steps Trends shows and
+   its source line; whether Android asked for Physical activity; anything odd.
 
 ## Export data (everything, every few days)
 

@@ -466,7 +466,7 @@ folder). It never changes or deletes anything in the app's folder, and never run
   `mornings/`, `meditations/`, `alpha-theta/` (sessions and `journal.json`), `replay-check/<kind>/` and
   `settings.json`, `experiments/<made at>/` (self-experiments, below), `wearer/` ("Was this you?", below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers and their `<stamp>-r<n>.text.json` words, below, `prompts/`), `sound-states/`, `hands-free/` (below), `unusual/` (below), `lucid/` (below), `try-these/` (below), `own-ble/`
   (`settings.json`: which headband connection is in use; `probe/<stamp>/`: the probe's result, docs/own-ble-driver.md),
-  `recordings-diy/` (the DIY board's nights, the format of "Raw recording (DIY board)"), `archive/` (your tags, below) and `diy-board/settings.json`
+  `recordings-diy/` (the DIY board's nights, the format of "Raw recording (DIY board)"), `archive/` (your tags, below), `walking/` and `steps/` (walk files and the step counter switch, below) and `diy-board/settings.json`
   (`useDiy`: which headband; `names`: 4, 6 or 8 names from CH1), and any folder
   a later feature adds. Left on the phone: `models/` (copies of the app's model assets), `export/` (the export's own
   index), `transfer/` (the laptop's acks and the Storage settings, below), half-written `*.tmp` files, the scorer's
@@ -770,6 +770,39 @@ Deleting by hand writes the same record as moving to the laptop: `<stamp>.remove
 `night`, `end_ms`, `files`: `name`, `bytes`, `sha256` or `null`, `phone_name`, `phone_bytes`), then removes the set's
 samples and index; its `.log`, `.header.json` and `.markers.jsonl` stay. "Everything" (the Danger zone) removes every
 file of the recording, its record included, the session files, the report and the tags.
+
+### Walking (`walking/`, `steps/`)
+
+The walking pass (DECISIONS 800-809; the method: [detectors.md](detectors.md#walking-pace-and-estimated-steps-decisions-800-809))
+keeps one file per recording, `walking/<id>.walk.json` (`<id>`: the recording's first file set's stem, as the
+Archive's). The laptop's `scripts/walks.py` writes the same file into `_local/walking/`; the phone's arrive in
+`_local/phone/walking/` with Export data. Written whole under a temporary name, then renamed. It stays when the raw
+signal leaves the phone: it is a result, like a sleep report; a pass that could not run keeps only `format`,
+`version`, `detector`, `recording`, `why` and `key`.
+
+| Field | Content |
+|---|---|
+| `format`, `version`, `detector` | `eeg-tracker-walking`, 1, the detector's version (`walk-v2`); a file of another detector is made again while the raw signal is there |
+| `recording`, `start`, `end` | the id; the joined signal's first sample (a whole second) and the last window's end, local ISO time with offset |
+| `channels`, `sample_rate` | every channel the header names (all of them are read), the rate |
+| `windows`, `read_windows` | 10 s windows every 5 s, and those read (not over 1 s missing, a usable channel) |
+| `phone_counter` | the step counter's last state line in the logs: `on`, `off`, `no permission`, `no sensor`; `null` without one (a recording from before the switch) |
+| `walking_min`, `running_min`, `headband_steps`, `pace`, `confidence` | the headband's totals: minutes of walking and running stretches, its steps, the median pace of their clear windows (steps a minute), `sure`/`likely`/`unsure` |
+| `steps`, `steps_phone`, `steps_headband` | the minutes' steps, and by where they came from |
+| `check` | `paired`, `right`, `headband_steps`, `phone_steps`: this recording's minutes for the check against the phone |
+| `walks` | stretches under 10 minutes apart: `start`, `end`, `walking_min`, `stopped_min`, `steps` (the headband's), `pace`, `stops`, `stretches` (`kind` `walking`/`running`/`stopped`, `start`, `end`, `min`, `steps`, `pace`, `score`, `confidence`) |
+| `minutes` | one row per clock minute with walking or phone steps: `[t, walk_s, run_s, hb_steps, hb_pace, phone, steps, source, walking_s]`: `t` unix seconds of the minute's start; the headband's walking and running seconds, steps and median pace (null without a clear window); the phone's steps (`null`: no counter that minute); the minute's steps and their `source` (`phone` where the phone counted any, else `headband`, else empty); its walking seconds (60 where the phone counted 60 or more) |
+| `key` | what it was made from: the detector and every raw file's, index's and log's name, size and modified time |
+
+**The phone's step counter in the recording's `.log`** (optional, Settings: "Count steps with the phone while
+recording", off until switched on; DECISIONS 800-809): at the start of each file set `phone step counter: on`
+(or `off`, `no permission`, `no sensor`), then once per clock minute while on `phone steps <N>`, N being Android's
+`TYPE_STEP_COUNTER` (steps since the phone started; a restart starts it from 0 again). The steps between two lines at
+most 3 minutes apart go to the minute holding the middle of that time. The switch is `steps/settings.json`
+(`{"on": true, "changed": "<ISO time>"}`; missing or damaged: off); the recorder's engine reads it at each file set's
+start.
+
+The Archive's list keeps a summary of every walk file in `files/cache/walking-index.json` (never exported).
 
 ### Try these (`try-these/`)
 
@@ -1332,13 +1365,14 @@ The numbers follow the phone's Trends rules (`app/lib/trends/`), so they match w
 |---|---|
 | `day` | `YYYY-MM-DD` |
 | `schema` | 1 (of this event) |
-| `measures` | the `eeg_measure_set` version the ids below mean (2) |
+| `measures` | the `eeg_measure_set` version the ids below mean (3) |
 | `complete` | `false` while the day is still going on when exported; a later event replaces it |
 | `numbers` | measure id -> value, to 2 decimals; only measures with a value that day (an absent id = no data, never 0) |
 | `counts` | what went into them: `nights`, `checkins`, `work_sessions`, `practice_sessions`, `sharp_ratings`, `sharp_tests` (absent = 0) |
 | `quality` | `night_noisy_share` (time asleep read as noisy or missing, over the day's scored nights, the left-out ones too), `checkin_clean_share` (the first check-in's back channels) |
 | `excluded` | `{what, id, why, ...}` per recording left out (utof-interface.md has the rules): `what` `night`, `check-in`, `work session`, `work`; `why` `someone else`, `unscored: under 5 minutes recorded`, `noisy` (+ `noisy_share`), `noisy: headband numbers left out` (+ `clean_share`), `under 30 readable minutes` (+ `minutes`) |
 | `sources` | `laptop` and/or `phone`: whose files gave numbers |
+| `walking` | only on a day with walking or steps (DECISIONS 800-809; added with measure set 3, schema still 1: an extra field readers may ignore): `minutes` (as `walk_min`), `steps` (as `walk_steps`), `steps_phone`, `steps_headband` (the headband's estimate, also when left out), `headband_counted` (false once the check failed), `source` (`phone`, `headband`, `phone and headband`), `check` (`status` `unchecked`/`passed`/`failed`, `paired`, `right`: over every minute so far), `detector` (the walk files' versions), `walks` (that day's walks, each once: `start`, `end`, `walking_min`, `stopped_min`, `stops`, `pace`, `recording`, `origin` `laptop`/`phone`, `headband_steps`, `steps_phone`, `steps_headband`, `steps` (counted), `stretches` as in the walk file) |
 | `replaces` | the `id` of the earlier event of the same day |
 
 ### `eeg_measure_set`
@@ -1348,8 +1382,8 @@ event that `replaces` the old one. `ts` is when it was first exported.
 
 | Field | Meaning |
 |---|---|
-| `version` | 2 (1 lacked `efficiency`, `regularity` and `slept`; DECISIONS row 658) |
-| `measures` | one per id: `id`, `label`, `unit`, `group` (`sleep morning day work practice`), `about` (`night before`, `morning`, `day before`, `day`), `source` (`headband`, `self-report`, `tap test`, `app`, `laptop`), `evidence_note` (`docs/evidence/<name>.md`), `evidence` (`strong some weak none`, `null` = not a headband measure), `status` (`seen together`), `rule` (how the day's number is made, one line) |
+| `version` | 3 (1 lacked `efficiency`, `regularity` and `slept`, DECISIONS row 658; 2 lacked `walk_min` and `walk_steps`, DECISIONS 800-809) |
+| `measures` | one per id: `id`, `label`, `unit`, `group` (`sleep morning day work practice activity`), `about` (`night before`, `morning`, `day before`, `day`), `source` (`headband`, `self-report`, `tap test`, `app`, `laptop`), `evidence_note` (`docs/evidence/<name>.md`), `evidence` (`strong some weak none`, `null` = not a headband measure), `status` (`seen together`), `rule` (how the day's number is made, one line) |
 | `day_rule`, `status_rule`, `grades` | the rules in words |
 
 ### `break_hint`

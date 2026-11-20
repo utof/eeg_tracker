@@ -227,6 +227,50 @@ cd app && dart compile exe tool/live_drift.dart -o /tmp/live_drift && HANDS_FREE
 
 The night takes about 90 s and 1.8 GB on the laptop.
 
+## Walking, pace and estimated steps (DECISIONS 800-809)
+
+The headband has no motion sensor, but every step shakes it a little, and that shows in the EEG as a rhythm at the
+step rate and its harmonics. One method, written twice: `analysis/walking.py` (the reference; the minute rules in
+`analysis/walk_minutes.py`, standard library only) and `app/lib/walking/` (the phone; `walking_cross_check_test.dart`
+checks it against the reference on made-up recordings of 4 and 8 channels at 250 and 500 a second, with a run, a hole
+and the phone's step counter, a small pulse and a large pulse-like rhythm). Detector version `walk-v2`.
+
+| Step | Rule (planning values) |
+|---|---|
+| Channels | every channel the recording's header names, any layout; one is left out of a window when its band-passed range is under 1 µV (flat) or it touches 390 mV (the rails) |
+| Filter | 0.7-20 Hz: two high-pass and two low-pass RBJ biquads (fourth-order Butterworth each way), forward only from the first value, like the other detectors |
+| Windows | 10 s every 5 s from the first sample; over 1 s of missing time: not read |
+| Spectrum | the mean removed, a Hann window, bins at most 0.0305 Hz wide (8192 points at 250 a second), each bin over the mean of the 41 bins around it (1.25 Hz, "whitened") |
+| Score | for each step rate 1.2-3.4 Hz (72-204 a minute, 0.02 Hz apart): W(f) + 0.5 W(2f), averaged over the channels; the best rate is the pace, its value over the median of all rates the score |
+| Not a pulse | the window must also show a walking-sized shake (the channels' median band-passed range at least 300 µV) and no family at a third and two thirds of its pace (the whitened power there, averaged, under 2.5) |
+| Walking | a window walks at a score of 4 or more, a pace of 90-200 a minute and not a pulse; a majority of 7 windows (35 s) smooths it; runs of 30 s or more are walking stretches |
+| Running | inside a stretch, a pace of 150 or more held for a minute (the same majority) |
+| Stops, walks | a gap of a minute or more between stretches is a stop (if the signal was read all through it); stretches under 15 minutes apart are one walk |
+| Steps | pace x 5 s for every window of a stretch whose own rhythm is clear; the others add nothing |
+| Confidence | a stretch's median score: sure from 6, likely from 5, else unsure |
+| Per minute | the headband's walking seconds, steps and pace per clock minute; the phone's step counter (its `.log` lines) per minute where it was on; the phone's steps win where it counted any, and each minute says which |
+| The check | minutes both walked the whole of (the headband all 60 s, the phone 60 steps or more): the headband's pace within 5 % of the phone's steps in 8 of 10 of them and the totals within 15 %, from 10 such minutes; failed: the headband's steps are left out of the totals and only walking minutes show |
+
+**The owner's walk of 2026-11-20** (the recording 17:50-22:07, awake all through by his word, outside about
+19:08-21:14 with bench stops; no phone steps yet): `scripts/walks.py` finds one walk 19:08-21:14 with 11 stops, 81.2
+minutes walking, 8,373 steps, a median pace of 114 a minute, confidence sure (scores 6-12 while walking, about 2 at
+rest), the longest stretch 15.2 minutes from 20:23, and no walking anywhere else in the 4.3 hours (eating at 22:03
+included). The first look's graph had 81 minutes, about 8,700 steps, 114 a minute and 15 minutes from 20:23. About 15 s
+on the laptop for 4 hours.
+
+**Sleep is no walk** (why `walk-v2`): `walk-v1` (no size or pulse check) called stretches of scored sleep walking, 37
+of 183 sleep epochs of the 11-20 nap and 2-5 on nights. The flagged windows read about 115 and 172 a minute in turn,
+with a small swing (60-450 µV): the 2nd and 3rd harmonics of a sleeping pulse near 57 a minute, whose own rate is
+under the score's lowest (72). The owner's walking windows had 420-1100 µV (5th to 90th percentile) and a weak family
+at a third of their pace. With the two checks, no sleep epoch is walking in the 11-20 nap and the nights of 11-17,
+11-18 and 11-19 (0 of 2,018; single windows still pass now and then, but never 30 s of them), and the walk keeps 99 % of
+its walking minutes (80.8 of 81.7 between 19:08 and 21:14). A "no sleep while walking" veto may rely on this; a
+headband of another make may shake less when walking: the 300 µV is the owner's BrainBit's.
+
+**What it cannot see** (the "i" note, `docs/evidence/walking.md`): slow strolling (under about 100 a minute), short
+walks indoors (under 30 s), stairs, cycling, a bus; and a whole walk read at half or double the pace (the stride) is
+the main way it can be wrong, which the phone's minutes catch.
+
 ## What still needs the owner
 
 - **The extended setup test** (`morning.html`, 2 min): 20 cued blinks set the blink depth, 10 glances give µV
@@ -247,6 +291,17 @@ uv run --project analysis python analysis/make_detector_fixture.py NIGHT.bdf RUN
 ```
 
 A night of 5.4 hours takes about 10 s on the laptop.
+
+Walking (a recording's walk file, the same as the phone's; `--all` does every recording in `_local/recordings/` without
+an up-to-date one; the fixture of the phone's cross-check):
+
+```
+uv run --project analysis python scripts/walks.py _local/recordings/2026-11-20-175021.f32 [--out _local/walking]
+uv run --project analysis python scripts/walks.py --all
+uv run --project analysis python analysis/make_walking_fixture.py
+uv run --project analysis python analysis/validate_walking.py sleep NIGHT.bdf NIGHT.sleep.json [NAP.bdf NAP.sleep.json ...]
+uv run --project analysis python analysis/validate_walking.py walk _local/recordings/2026-11-20-175021.f32 --from 19:08 --to 21:15
+```
 
 The night extras, phone code against the reference on a recorded night (same stages for both):
 

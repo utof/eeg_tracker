@@ -57,6 +57,10 @@ Each line says what it does. In brackets: how well the research backs it **for t
   does not spoil your trends. A weak check, tested only on made-up people. (weak)
 - **Hands-free controls**: a double jaw clench or a look left then right as a switch during sessions. Off by
   default. (some)
+- **Walking and steps**: after a recording, walking, its pace, running, stops and estimated steps from the rhythm your
+  steps leave in the headband's signal (any electrodes), as a Walking lane in the Archive and Walking and Steps
+  (estimated) in Trends; an optional switch writes the phone's own step counter into the recording once a minute,
+  which wins where it counted and checks the headband. (weak)
 - **Export data**: copies everything the app keeps to a folder you pick (with a checksum list) for the laptop.
 - **Share on Wi-Fi**: the laptop watches the phone's recording live and copies its files during the night. Off by
   default, home Wi-Fi only. **Connecting is one scan**: the laptop shows a QR code (`scripts/phone_link.py`), the
@@ -167,6 +171,9 @@ python3 scripts/export_events.py _local/recordings/*.morning.json             # 
 (every Trends number, sleep stages, what was left out and why), the nights and the check-ins into
 `_local/export/events/`; re-running adds only what changed. utof_tracker reads that folder itself. The contract:
 [docs/utof-interface.md](docs/utof-interface.md).
+Walking minutes and steps come with each day: from the phone's walk files, and from the laptop's own
+(`uv run --project analysis python scripts/walks.py --all` walks every recording in `_local/recordings/`;
+[docs/detectors.md](docs/detectors.md#walking-pace-and-estimated-steps-decisions-800-809)).
 
 Tests (no headband): `uv run --project analysis --with pytest pytest analysis/tests` (add `-m "not slow"` to skip
 the 2.5-minute fake-headband run) and `node --test tests/js/*.test.mjs`.

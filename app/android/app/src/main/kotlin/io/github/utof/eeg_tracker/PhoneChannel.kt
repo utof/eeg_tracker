@@ -123,6 +123,12 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
                 "inCall" -> result.success(inCall())
                 "wifiNets" -> result.success(wifiNets())
                 "storageSpace" -> result.success(storageSpace())
+                "stepCounterStart" -> result.success(StepCounter.start(context))
+                "stepCounterRead" -> result.success(StepCounter.read())
+                "stepCounterStop" -> {
+                    StepCounter.stop()
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {

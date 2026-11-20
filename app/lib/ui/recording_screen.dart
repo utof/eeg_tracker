@@ -15,6 +15,7 @@ import '../archive/items.dart';
 import '../archive/raw_remover.dart' show OnLaptop;
 import '../archive/seen.dart';
 import '../archive/tags.dart';
+import '../walking/pass.dart' show Walked, walkInBackground;
 import 'archive_screen.dart' show deleteInBackground, phoneArchiveBusy;
 import 'archive_sheets.dart';
 import 'raw_signal_screen.dart';
@@ -31,6 +32,7 @@ class RecordingScreen extends StatefulWidget {
     required this.all,
     this.detail,
     this.see,
+    this.walk,
     this.busy,
     this.delete,
   });
@@ -44,6 +46,7 @@ class RecordingScreen extends StatefulWidget {
   /// Tests: without isolates.
   final Future<RecordingDetail> Function(String filesPath, ArchiveItem item, List<SessionFile> sessions)? detail;
   final Future<Seen> Function(String filesPath, String id, List<String> paths)? see;
+  final Future<Walked> Function(String filesPath, String id, List<String> paths)? walk;
   final Future<ArchiveBusy> Function()? busy;
   final Future<DeleteOutcome> Function(String filesPath, ArchiveItem item, DeleteMode mode, List<ArchiveItem> all, ArchiveBusy busy)? delete;
 
@@ -77,6 +80,35 @@ class _RecordingScreenState extends State<RecordingScreen> {
       _passWhy = d.input.seenWhy;
     });
     if (!d.passKept && d.input.seenWhy == null && d.rawPaths.isNotEmpty) await _pass(d.rawPaths);
+    if (mounted && !d.walkKept && d.rawPaths.isNotEmpty) await _walk(d.rawPaths);
+  }
+
+  /// The walking pass (walking/pass.dart) when none is kept for the files as they are; never on the night still being
+  /// recorded.
+  Future<void> _walk(List<String> paths) async {
+    final b = await (widget.busy ?? phoneArchiveBusy)();
+    if (!mounted || (b.nightRecording && _isNewest())) return;
+    setState(() => _passing = true);
+    Walked w;
+    try {
+      w = await (widget.walk ?? walkInBackground)(widget.filesPath, _item.id, paths);
+    } catch (e) {
+      w = (walk: null, why: 'Could not read it: $e');
+    }
+    if (!mounted) return;
+    final i = _input!;
+    setState(() {
+      _passing = false;
+      _input = TimelineInput(
+        seen: i.seen,
+        seenWhy: i.seenWhy,
+        stages: i.stages,
+        work: i.work,
+        sessions: i.sessions,
+        tags: i.tags,
+        walk: w.walk ?? i.walk,
+      );
+    });
   }
 
   Future<void> _pass(List<String> paths) async {
@@ -98,7 +130,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
     setState(() {
       _passing = false;
       _passWhy = s.why;
-      _input = TimelineInput(seen: s.seen, seenWhy: s.why, stages: i.stages, work: i.work, sessions: i.sessions, tags: i.tags);
+      _input = TimelineInput(seen: s.seen, seenWhy: s.why, stages: i.stages, work: i.work, sessions: i.sessions, tags: i.tags, walk: i.walk);
     });
   }
 
@@ -184,7 +216,15 @@ class _RecordingScreenState extends State<RecordingScreen> {
       );
       final x = _input;
       if (x != null) {
-        _input = TimelineInput(seen: x.seen, seenWhy: x.seenWhy, stages: x.stages, work: x.work, sessions: x.sessions, tags: file?.tags ?? const []);
+        _input = TimelineInput(
+          seen: x.seen,
+          seenWhy: x.seenWhy,
+          stages: x.stages,
+          work: x.work,
+          sessions: x.sessions,
+          tags: file?.tags ?? const [],
+          walk: x.walk,
+        );
       }
     });
   }

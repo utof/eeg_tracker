@@ -131,6 +131,7 @@ void main() {
           'was-this-you',
           'sound-test',
           'memory-cues',
+          'walking',
         },
       );
       expect(tryCards.firstWhere((c) => c.id == 'sharp').weakEvidence, isFalse);

@@ -14,6 +14,7 @@ import '../archive/items.dart';
 import '../archive/page.dart';
 import '../archive/raw_remover.dart';
 import '../archive/seen.dart' as seen;
+import '../walking/pass.dart' as walking;
 import '../phone.dart';
 import '../session_keeper.dart' show PhoneSessionKeeper;
 import 'archive_sheets.dart';
@@ -51,12 +52,25 @@ Future<DeleteOutcome> deleteInBackground(String filesPath, ArchiveItem item, Del
     }, debugName: 'archive-delete');
 
 class ArchiveScreen extends StatefulWidget {
-  const ArchiveScreen({super.key, this.filesPath, this.load, this.see, this.busy, this.delete, this.now, this.onStorage});
+  const ArchiveScreen({
+    super.key,
+    this.filesPath,
+    this.load,
+    this.see,
+    this.walk,
+    this.busy,
+    this.delete,
+    this.now,
+    this.onStorage,
+  });
 
   /// Tests: the app's `files/`; null: the phone's.
   final String? filesPath;
   final Future<ArchivePage> Function(String filesPath)? load;
   final Future<seen.Seen> Function(String filesPath, String id, List<String> paths)? see;
+
+  /// Tests: the walking pass (walking/pass.dart) without an isolate.
+  final Future<walking.Walked> Function(String filesPath, String id, List<String> paths)? walk;
   final Future<ArchiveBusy> Function()? busy;
   final Future<DeleteOutcome> Function(String filesPath, ArchiveItem item, DeleteMode mode, List<ArchiveItem> all, ArchiveBusy busy)? delete;
   final DateTime Function()? now;
@@ -116,10 +130,11 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     }
   }
 
-  /// One recording's detectors' pass, then the next, while the page is in front and nothing records.
+  /// One recording's detectors' pass, then the next, while the page is in front and nothing records; then the walking
+  /// passes the same way (DECISIONS 800-809).
   Future<void> _seeNext() async {
     final page = _page, files = _files;
-    if (!_open || _seeing != null || page == null || files == null || page.toSee.isEmpty) return;
+    if (!_open || _seeing != null || page == null || files == null || (page.toSee.isEmpty && page.toWalk.isEmpty)) return;
     final b = await _busy();
     if (!mounted) return;
     final front = ModalRoute.of(context)?.isCurrent ?? true;
@@ -129,6 +144,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       _retry = Timer(const Duration(minutes: 1), () => unawaited(_seeNext()));
       return;
     }
+    if (page.toSee.isEmpty) return _walkNext(page, files);
     final id = page.toSee.first;
     final item = page.list.items.where((i) => i.id == id).firstOrNull;
     if (item == null) return;
@@ -148,9 +164,43 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       _seeing = null;
       _page = ArchivePage(
         p.list,
-        found: {...p.found, if (result.seen != null) id: seen.seenMinutes(result.seen!)},
+        found: {...p.found, if (result.seen != null) id: {...seen.seenMinutes(result.seen!), ...?p.found[id]}},
         why: {...p.why, if (result.why != null) id: result.why!},
         toSee: [for (final x in p.toSee) if (x != id) x],
+        toWalk: p.toWalk,
+      );
+    });
+    unawaited(_seeNext());
+  }
+
+  /// One recording's walking pass (the busy checks done), then the next.
+  Future<void> _walkNext(ArchivePage page, String files) async {
+    final id = page.toWalk.first;
+    final item = page.list.items.where((i) => i.id == id).firstOrNull;
+    if (item == null) return;
+    setState(() {
+      _passing = true;
+      _seeing = id;
+    });
+    walking.Walked result;
+    try {
+      result = await (widget.walk ?? walking.walkInBackground)(files, id, [
+        for (final f in item.rawFiles(Directory(files))) f.path,
+      ]);
+    } catch (e) {
+      result = (walk: null, why: 'Could not read it: $e');
+    }
+    if (!mounted) return;
+    final p = _page!;
+    final minutes = result.walk?.walkingMin ?? 0;
+    setState(() {
+      _seeing = null;
+      _page = ArchivePage(
+        p.list,
+        found: {...p.found, if (minutes > 0) id: {...?p.found[id], 'walking': minutes}},
+        why: p.why,
+        toSee: p.toSee,
+        toWalk: [for (final x in p.toWalk) if (x != id) x],
       );
     });
     unawaited(_seeNext());

@@ -10,22 +10,30 @@ last sleep period), a check-in's number is the first of the day that has it. Rea
   phone/sharp-hours/ratings.jsonl, reactions.jsonl, focus-*.jsonl (the laptop's focus sessions, scripts/aw_focus.py)
   phone/study-review/log.jsonl      phone/work-sessions/*.work.json
   phone/meditations/*.meditation.json, phone/alpha-theta/*.alphatheta.json
+  walking/*.walk.json                the laptop's walk files (scripts/walks.py)  phone/walking/*.walk.json  the phone's
 
 Left out, and said so in the day's `excluded` list: anything marked "someone else" (nights, check-ins, work
 sessions), nights scored from under 5 minutes, the sleep numbers of a night more than half of whose time asleep was
 noisy or missing, the headband numbers of a check-in with under half its signal clean, and the work numbers of a day
 with under 30 readable minutes. A day's time is the timestamp's own UTC offset (the phone's local time then).
+Walking (DECISIONS 800-809) uses the minute rules of analysis/walk_minutes.py (standard library only, shared with the
+detector's reference): every clock minute once, minutes inside a night someone else wore the headband for left out.
 """
 from __future__ import annotations
 
 import json
 import math
+import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "analysis"))
+import walk_minutes as wm  # noqa: E402  (standard library only)
+
 SCHEMA = 1  # of the eeg_day event (docs/utof-interface.md)
-MEASURES_VERSION = 2  # of the measure list below (2: sleep efficiency, sleep regularity, the sleep rating; DECISIONS 658)
+MEASURES_VERSION = 3  # of the measure list below (2: sleep efficiency, sleep regularity, the sleep rating,
+#                       DECISIONS 658; 3: walking and estimated steps, DECISIONS 800-809)
 DAY_START_HOUR = 4
 SOMEONE_ELSE = "someone else"
 NOISY_NIGHT_SHARE = 0.5  # planning value (DECISIONS 553): more of the time asleep noisy or missing than this
@@ -112,6 +120,13 @@ _M = [
      "meditation and alpha-theta minutes with a signal"),
     ("settled", "Settled in meditation", "%", "practice", "day", "headband", "meditation-feedback", "weak",
      "share of the day's meditation time read as settled"),
+    ("walk_min", "Walking", "min", "activity", "day", "headband", "walking", "weak",
+     "minutes of steady walking or running in the headband's step rhythm while it recorded (stretches of 30 s or "
+     "more), and minutes the phone's step counter counted 60 steps or more; slow strolls and short walks are missed"),
+    ("walk_steps", "Steps (estimated)", "count", "activity", "day", "headband", "walking", "weak",
+     "steps while the headband recorded: the phone's step counter where it counted, else estimated from the "
+     "headband's pace; the headband's estimate is left out once its pace failed the check against the phone "
+     "(eeg_day.walking says the source and the check)"),
 ]
 MEASURES = [dict(id=m[0], label=m[1], unit=m[2], group=m[3], about=m[4], source=m[5],
                  evidence_note=f"docs/evidence/{m[6]}.md", evidence=m[7], status="seen together", rule=m[8])
@@ -243,6 +258,7 @@ class Days:
         self.quality: dict[str, dict[str, float]] = defaultdict(dict)
         self.excluded: dict[str, list[dict]] = defaultdict(list)
         self.sources: dict[str, set] = defaultdict(set)
+        self.walking: dict[str, dict] = {}
 
     def add(self, day: str, mid: str, v: float) -> None:
         self.numbers[day][mid] = self.numbers[day].get(mid, 0.0) + v
@@ -546,10 +562,79 @@ def _practice(days: Days, local: Path) -> None:
         days.numbers[day]["settled"] = s / r * 100
 
 
+def read_walks(local: Path) -> list[dict]:
+    """The walk files (docs/data-format.md "Walking"): the laptop's (`walking/`, scripts/walks.py) and the phone's
+    (`phone/walking/`); each gets `_origin`. Files of another format or version, or with no minutes, are skipped."""
+    out = []
+    for origin, folder in (("laptop", local / "walking"), ("phone", local / "phone" / "walking")):
+        for f in sorted(folder.glob("*.walk.json")):
+            j = _json(f)
+            if isinstance(j, dict) and j.get("format") == wm.WALK_FORMAT and j.get("version") == wm.WALK_VERSION \
+                    and isinstance(j.get("minutes"), list) and isinstance(j.get("walks"), list):
+                out.append(dict(j, _origin=origin))
+    return out
+
+
+def _walk_entry(w: dict, file: dict, rows: list[wm.Minute]) -> dict | None:
+    """One walk for `eeg_day.walking.walks`: the file's walk with the steps counted in its minutes."""
+    a, b = parse_time(w.get("start")), parse_time(w.get("end"))
+    if a is None or b is None:
+        return None
+    inside = [m for m in rows if a.timestamp() - 60 < m.t < b.timestamp()]
+    phone = sum(m.steps for m in inside if m.source == "phone")
+    head = sum(m.steps for m in inside if m.source == "headband")
+    keys = ("start", "end", "walking_min", "stopped_min", "stops", "pace")
+    return dict({k: w.get(k) for k in keys}, recording=file.get("recording"), origin=file["_origin"],
+                headband_steps=w.get("steps"), steps_phone=round(phone), steps_headband=round(head),
+                stretches=[{k: s.get(k) for k in ("kind", "start", "end", "min", "steps", "pace", "confidence")}
+                           for s in w.get("stretches") or [] if isinstance(s, dict)])
+
+
+def _walking(days: Days, local: Path) -> None:
+    files = read_walks(local)
+    if not files:
+        return
+    not_mine = []
+    for r in read_reports(local):
+        if r["_wearer"] == SOMEONE_ELSE:
+            not_mine.append((parse_time(r["data_start"]).timestamp(), parse_time(r["data_end"]).timestamp()))
+    rows = wm.unique_minutes(files, not_mine)
+    wd = wm.walk_days(rows)
+    hidden = wd.check.status == "failed"
+    taken: list[tuple[float, float]] = []
+    walks: dict[str, list[dict]] = defaultdict(list)
+    for f in sorted(files, key=lambda w: (-int(w.get("windows") or 0), str(w.get("recording")))):
+        for w in f["walks"]:
+            e = _walk_entry(w, f, rows) if isinstance(w, dict) else None
+            if e is None:
+                continue
+            a, b = parse_time(e["start"]).timestamp(), parse_time(e["end"]).timestamp()
+            if any(x < b and a < y for x, y in taken) or any(x <= a < y for x, y in not_mine):
+                continue
+            taken.append((a, b))
+            e["steps"] = e["steps_phone"] + (0 if hidden else e["steps_headband"])
+            walks[wm.day_of(int(a))].append(e)
+    for d in sorted(set(wd.minutes) | set(wd.steps)):
+        if d in wd.minutes:
+            days.numbers[d]["walk_min"] = wd.minutes[d]
+        if d in wd.steps:
+            days.numbers[d]["walk_steps"] = wd.steps[d]
+        days.walking[d] = dict(
+            minutes=round(wd.minutes.get(d, 0.0), 1), steps=round(wd.steps.get(d, 0.0)),
+            steps_phone=round(wd.phone.get(d, 0.0)), steps_headband=round(wd.headband.get(d, 0.0)),
+            headband_counted=not hidden, source=wd.source(d),
+            check=dict(status=wd.check.status, paired=wd.check.paired, right=wd.check.right),
+            detector=sorted({str(f.get("detector")) for f in files}),
+            walks=sorted(walks.get(d, []), key=lambda e: e["start"]))
+        days.sources[d].update(f["_origin"] for f in files if any(wm.day_of(m[0]) == d for m in f["minutes"]
+                                                                   if isinstance(m, list) and m and
+                                                                   isinstance(m[0], int)))
+
+
 def summarise(local: Path) -> Days:
     """Every day eeg_tracker has anything for, from `local` (the `_local/` folder)."""
     days = Days()
-    for part in (_nights, _mornings, _sharp, _study, _work, _practice):
+    for part in (_nights, _mornings, _sharp, _study, _work, _practice, _walking):
         part(days, local)
     return days
 
@@ -573,5 +658,6 @@ def day_events(local: Path, now: datetime | None = None) -> list[dict]:
             quality=dict(sorted(days.quality.get(d, {}).items())),
             excluded=days.excluded.get(d, []),
             sources=sorted(days.sources.get(d, set())),
+            **({"walking": days.walking[d]} if d in days.walking else {}),
         ))
     return out

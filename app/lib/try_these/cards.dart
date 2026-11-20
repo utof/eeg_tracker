@@ -585,6 +585,28 @@ const List<TryCard> tryCards = [
     evidence: 'hands-free',
   ),
   TryCard(
+    id: 'walking',
+    group: TryGroup.sessions,
+    title: 'Walking and steps',
+    what: 'The headband finds your walks from the rhythm your steps leave in its signal; the phone\'s step counter checks it.',
+    takes: '2 minutes to set up, then a walk of 15 minutes or more',
+    steps: [
+      'Open Settings and switch on Count steps with the phone while recording; allow Physical activity.',
+      'Headband on, tap Start night (it records in the day too); the phone in your front trouser pocket.',
+      'Walk as you usually do for 15 minutes or more, with a stop or two; then tap Stop.',
+      'Open Trends (Walking, Steps) and the recording in the Archive (the Walking lane).',
+    ],
+    tell: [
+      'Roughly when you walked and stopped, and whether the Walking lane matches.',
+      'The steps Trends shows and where it says they came from.',
+      'Whether Android asked for Physical activity, and anything odd.',
+    ],
+    opens: TryOpen.settings,
+    readme: [TryRef('Walking', 'a walk with the headband and the phone')],
+    evidence: 'walking',
+    weakEvidence: true,
+  ),
+  TryCard(
     id: 'lucid',
     group: TryGroup.weeks,
     title: 'Lucid dream cues',
