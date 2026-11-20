@@ -3,7 +3,7 @@
 usage: python3 scripts/phone_link.py [--dest _local] [--every 2] [--no-pages] [--no-mirror]
        less common: [--address <this laptop's Wi-Fi address>] [--port 8771] [--pages-port 8770] [--qr web|app]
                     [--phone-at http://127.0.0.1:8765] [--name <shown on the phone>]
-       the tray's:  --keep   (a remembered phone, quietly: DECISIONS 677)
+       the tray's:  --keep   (a remembered phone, quietly: DECISIONS 677) [--no-after-pull]
 
 The owner's steps (app/README.md, "Share on Wi-Fi"): run this, point the phone's camera at the code it shows, tap the
 link, tap **Open EEG Tracker**, then **Connect**. Leave the window open. Next time: run it again; the phone finds
@@ -27,11 +27,14 @@ How it works (DECISIONS rows 530-539; docs/phone-link.md):
   on this laptop's page (`http://127.0.0.1:8771/?new=1`, what the tray's "Pair phone…" opens), no window; it waits
   for a home-network address when the laptop has none (Wi-Fi off), listens on the new one when it changes, and ends
   by itself when the pairing is forgotten (`link.json` deleted).
+- With `--keep`, the laptop's after-pull jobs (scripts/after_pull.py: pack old raw recordings, the daily export for
+  utof_tracker, the data book) start in the background after a copy that brought something new, at most once every
+  30 minutes, and once a day without one (DECISIONS 768); `--no-after-pull` leaves them out.
 - Nothing is reachable beyond this laptop and its local network: it listens on the Wi-Fi address and 127.0.0.1 only,
   and answers local-network addresses only (10.x, 172.16-31.x, 192.168.x, 169.254.x). Plain HTTP, like Share on
   Wi-Fi itself (home Wi-Fi only).
 
-Standard library only (with scripts/qr_code.py, pull_phone.py, page_server.py and import_phone.py).
+Standard library only (with scripts/qr_code.py, pull_phone.py, page_server.py, import_phone.py and after_pull.py).
 """
 from __future__ import annotations
 
@@ -44,6 +47,7 @@ from typing import Callable
 from urllib.parse import parse_qs, quote, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # find the other scripts even under `python3 -I`
+import after_pull  # noqa: E402
 import import_phone as ip  # noqa: E402
 import page_server  # noqa: E402
 import pull_phone as pp  # noqa: E402
@@ -484,11 +488,12 @@ class Say:
             self.out((datetime.now().strftime("%H:%M ") if stamp else "") + line)
 
 
-def mirror_pass(link: Link, dest: Path, say: Say, last: list[str | None], raw_only: bool = False) -> None:
-    """One pull_phone.py pass to wherever the phone is now; a problem is said once, not every pass."""
+def mirror_pass(link: Link, dest: Path, say: Say, last: list[str | None], raw_only: bool = False) -> pp.Pass | None:
+    """One pull_phone.py pass to wherever the phone is now; a problem is said once, not every pass. The pass, or None
+    when there is no phone or it did not answer."""
     t = link.target()
     if t is None:
-        return
+        return None
     host, port, token = t
     now = datetime.now().astimezone()
     try:
@@ -507,20 +512,30 @@ def mirror_pass(link: Link, dest: Path, say: Say, last: list[str | None], raw_on
         last[0] = None
         for line in pp.summary(rep, dest, now):
             say(line, stamp=False)
-        return
+        return rep
     if msg != last[0]:
         say(msg)
         last[0] = msg
+    return None
 
 
 def mirror_loop(link: Link, dest: Path, every_min: float, say: Say, stop: threading.Event,
-                raw_only: bool = False) -> None:
+                raw_only: bool = False, after: Callable[[bool], object] | None = None) -> None:
+    """A copy every `every_min` minutes (at once when the phone speaks); after each, `after(changed)` (the after-pull
+    jobs: changed = the pass brought something new)."""
     last: list[str | None] = [None]
     while not stop.is_set():
+        rep = None
         try:
-            mirror_pass(link, dest, say, last, raw_only)
+            rep = mirror_pass(link, dest, say, last, raw_only)
         except Exception as e:  # a bug in a pass must not end the mirror
             say(f"PROBLEM in the copy: {type(e).__name__}: {e}")
+        if after is not None:
+            try:
+                if after(bool(rep is not None and rep.changed)):
+                    say("After-pull jobs started (packing, the daily export, the data book; _local/after-pull.log).")
+            except Exception as e:  # nor a job that cannot start
+                say(f"PROBLEM starting the after-pull jobs: {type(e).__name__}: {e}")
         link.changed.wait(max(every_min, 0.1) * 60)
         link.changed.clear()
 
@@ -603,7 +618,8 @@ def keep(a: argparse.Namespace, out: Callable[[str], object], *, find: Callable[
     if not a.no_pages:
         start_pages(link, a.pages_port, a.recordings or a.dest / "recordings", say)
     if not a.no_mirror:
-        threading.Thread(target=mirror_loop, args=(link, a.dest, a.every, say, stop, a.raw_only), daemon=True,
+        after = None if a.no_after_pull else after_pull.Kicker(a.dest)
+        threading.Thread(target=mirror_loop, args=(link, a.dest, a.every, say, stop, a.raw_only, after), daemon=True,
                          name="mirror").start()
     t = link.target()
     if t is not None:
@@ -649,6 +665,8 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--recordings", type=Path, help="the page server's results folder (default: <dest>/recordings)")
     ap.add_argument("--keep", action="store_true",
                     help="the tray's way: a remembered phone, quietly, following this laptop's address, until forgotten")
+    ap.add_argument("--no-after-pull", action="store_true",
+                    help="with --keep: do not start the after-pull jobs (packing, the daily export, the data book)")
     return ap.parse_args(argv)
 
 
