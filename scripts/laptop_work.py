@@ -10,6 +10,9 @@ Tested in analysis/tests/test_laptop_work.py. What the owner sees: docs/laptop-t
   starts by itself and says so quietly, with a "Not work" button. Either way the session starts when that work began.
 - Breaks: 5 minutes or more away from the keyboard and mouse (ActivityWatch AFK) is a break; so is "On a break" until
   "Back" (or until you come back from 5+ minutes away). 30 minutes or more away ends the session (a setting).
+- Meetings (DECISIONS 660-669): while a call app holds the microphone (pactl) or a meeting window is in front, the
+  time away from the keyboard is meeting time, never a break or the end; no notification pops up until it ends; a
+  meeting can start a session under the auto-start setting.
 - Break hints: break_hints.py's own rules (decide, breaks_taken, the same history file), on the active time with the
   tapped breaks cut out, while a session runs.
 - Records: one JSON per session in _local/laptop/work/, the answers about detection in labels.jsonl beside them, and
@@ -17,7 +20,7 @@ Tested in analysis/tests/test_laptop_work.py. What the owner sees: docs/laptop-t
 """
 from __future__ import annotations
 
-import ipaddress, json, os, re, shutil, sys, urllib.error, urllib.request
+import ipaddress, json, os, re, shutil, subprocess, sys, urllib.error, urllib.request
 from bisect import bisect_left, bisect_right
 from collections import Counter
 from dataclasses import asdict, dataclass, field, fields, replace
@@ -353,6 +356,172 @@ def same_run(a: Run, b: Run) -> bool:
     return abs((a.start - b.start).total_seconds()) <= 60
 
 
+# ---------- meetings (pure, but for pactl; DECISIONS 660-669) ----------
+
+# a word of a sound stream's app name -> the call app (the words as aw_focus.family splits them)
+CALL_WORDS: dict[str, str] = {
+    "zoom": "zoom", "teams": "teams", "skype": "skype", "skypeforlinux": "skype", "telegram": "telegram",
+    "telegramdesktop": "telegram", "ayugram": "telegram", "ayugramdesktop": "telegram", "kotatogram": "telegram",
+    "discord": "discord", "vesktop": "discord", "webcord": "discord", "slack": "slack", "signal": "signal",
+    "element": "element", "webex": "webex", "whatsapp": "whatsapp", "jitsi": "jitsi", "mattermost": "mattermost",
+    "viber": "viber"}
+SPEAKER_CALL_APPS = frozenset({"zoom", "teams", "webex", "skype"})   # their sound out is a meeting (others: pings)
+BROWSER_WORDS = af.FAMILIES["browser"] | {"yandex", "msedge", "edge", "floorp", "thorium"}
+MEET_PAGES = ((re.compile(r"meet\.google\.com|google meet|^meet [-–—] [a-z]{3}-[a-z]{4}-[a-z]{3}"), "google meet"),
+              (re.compile(r"jitsi"), "jitsi"), (re.compile(r"zoom meeting|zoom webinar"), "zoom"),
+              (re.compile(r"whereby"), "whereby"), (re.compile(r"webex"), "webex"),
+              (re.compile(r"(meeting|call).*teams|teams.*(meeting|call)"), "teams"))
+MIC_JOIN_MIN = 3.0          # a call seen again within this long is the same meeting (a missed tick or two)
+BACKDATE_MAX_H = 3.0        # a call found now counts from the last keyboard or mouse use at most this far back
+
+
+def _words(s: str) -> list[str]:
+    return [w for w in re.split(r"[.\-_\s/]+", (s or "").lower()) if w]
+
+
+def pactl_streams(text: str) -> list[dict[str, str]]:
+    """`pactl list source-outputs` / `sink-inputs` (LC_ALL=C) as one dict of properties per stream, with `corked`."""
+    out: list[dict[str, str]] = []; cur: dict[str, str] | None = None
+    for line in text.splitlines():
+        if line and not line[0].isspace():
+            cur = {}; out.append(cur); continue
+        if cur is None:
+            continue
+        m = re.match(r'\s+([\w.\-]+) = "(.*)"\s*$', line)
+        if m:
+            cur[m[1]] = m[2]; continue
+        m = re.match(r"\s+Corked: (\w+)", line)
+        if m:
+            cur["corked"] = m[1]
+    return out
+
+
+def call_app(props: dict[str, str]) -> str | None:
+    """The call app a sound stream belongs to ("zoom", "telegram", "browser"), or None: the sound applet's
+    "Peak detect" meters, recorders, speech tools and anything else that is not a call."""
+    if "peak detect" in props.get("media.name", "").lower():
+        return None
+    words = _words(" ".join(props.get(k, "") for k in ("application.process.binary", "application.name",
+                                                        "application.id")))
+    app = next((CALL_WORDS[w] for w in words if w in CALL_WORDS), None)
+    if app is None and BROWSER_WORDS & set(words):
+        return "browser"          # a page holding the microphone: Meet, Jitsi, Teams or Zoom on the web
+    return app
+
+
+def meeting_from_pactl(mic: str, speaker: str = "") -> str | None:
+    """The call app in a meeting now: one holding a microphone stream (muted or not), or Zoom, Teams, Webex or Skype
+    playing sound (a meeting joined without a microphone); None."""
+    for p in pactl_streams(mic):
+        app = call_app(p)
+        if app is not None:
+            return app
+    for p in pactl_streams(speaker):
+        app = call_app(p)
+        if app in SPEAKER_CALL_APPS and p.get("corked") != "yes":
+            return app
+    return None
+
+
+def pactl_meeting(run: Callable[..., object] = subprocess.run) -> str | None:
+    """meeting_from_pactl on this laptop's PipeWire/PulseAudio streams now (read only; 3 s at most each; None when
+    pactl is missing or fails)."""
+    def get(kind: str) -> str:
+        try:
+            r = run(["pactl", "list", kind], capture_output=True, text=True, timeout=3,
+                    env={**os.environ, "LC_ALL": "C"})
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        return str(getattr(r, "stdout", "") or "") if getattr(r, "returncode", 1) == 0 else ""
+    return meeting_from_pactl(get("source-outputs"), get("sink-inputs"))
+
+
+def meeting_window(app: str, title: str) -> str | None:
+    """A meeting's own window in front: Zoom's or Webex's meeting window, a Teams meeting or call, a meeting page in a
+    browser. The title is read here, in memory, and never kept."""
+    words = set(_words(app)); t = (title or "").lower()
+    if "zoom" in words:
+        return "zoom" if ("meeting" in t or "webinar" in t) and "workplace" not in t else None
+    if "teams" in words:
+        return "teams" if "meeting" in t or "call" in t else None
+    if "webex" in words:
+        return "webex" if "meeting" in t else None
+    if words & BROWSER_WORDS:
+        return next((name for rx, name in MEET_PAGES if rx.search(t)), None)
+    return None
+
+
+@dataclass
+class Meeting:
+    start: datetime
+    end: datetime
+    app: str                 # zoom, teams, telegram, browser, google meet, ...: never a title
+    source: str              # mic (a call app's sound stream, seen each minute) | window (its window in front)
+
+    def to_json(self) -> dict:
+        return {"start": iso(self.start), "end": iso(self.end), "app": self.app, "source": self.source}
+
+
+def window_meetings(window: list[dict], join_min: float = MIC_JOIN_MIN) -> list[Meeting]:
+    """The stretches with a meeting window in front, joined across gaps under join_min."""
+    out: list[Meeting] = []
+    for e in sorted(window, key=lambda e: str(e.get("timestamp"))):
+        d = e.get("data") or {}
+        app = meeting_window(str(d.get("app") or ""), str(d.get("title") or ""))
+        if app is None:
+            continue
+        a, b = _span(e)
+        if out and out[-1].app == app and a - out[-1].end <= timedelta(minutes=join_min):
+            out[-1].end = max(out[-1].end, b)
+        else:
+            out.append(Meeting(a, b, app, "window"))
+    return out
+
+
+def add_meeting(meetings: list[Meeting], m: Meeting, join_min: float = MIC_JOIN_MIN) -> None:
+    """Into the kept meetings: joined with one of the same app and source it overlaps or nearly touches."""
+    for x in meetings:
+        if x.app == m.app and x.source == m.source and m.start - x.end <= timedelta(minutes=join_min) \
+                and x.start - m.end <= timedelta(minutes=join_min):
+            x.start, x.end = min(x.start, m.start), max(x.end, m.end)
+            return
+    meetings.append(m); meetings.sort(key=lambda x: x.start)
+
+
+def with_meetings(spans: list[tuple[datetime, datetime]], meetings: list[Meeting],
+                  gap_min: float) -> list[tuple[datetime, datetime]]:
+    """The keyboard-and-mouse spans with the meetings added as activity (joined across gaps under gap_min)."""
+    iv = sorted([*spans, *((m.start, m.end) for m in meetings)])
+    out: list[list[datetime]] = []
+    for a, b in iv:
+        if out and a - out[-1][1] < timedelta(minutes=gap_min):
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return [(a, b) for a, b in out]
+
+
+def meeting_minutes(meetings: list[Meeting], lo: datetime, hi: datetime) -> float:
+    """Minutes inside [lo, hi] in any meeting (overlaps counted once)."""
+    return active_minutes(with_meetings([], meetings, 0), lo, hi)
+
+
+def meeting_run(meetings: list[Meeting], app: str, now: datetime, gap_min: float) -> Run:
+    """The meeting going on now as a run for the auto-start setting: from when it began (meetings joined across
+    gaps under gap_min), every minute of it clear."""
+    start = now
+    for a, b in reversed(with_meetings([], meetings, gap_min)):
+        if a <= start <= b + timedelta(minutes=LIVE_LAG_MIN):
+            start = a
+    m = (now - start).total_seconds() / 60
+    return Run(start, now, work_min=m, away_min=0.0, clear_min=m, app=app, family="meeting", now_in=True)
+
+
+def for_minutes(m: float) -> str:
+    m = round(m)
+    return f"{m} min" if m < 60 else f"{m // 60}h{m % 60:02d}"
+
+
 # ---------- spans, breaks and the next hint (pure) ----------
 
 Span = tuple[datetime, datetime]
@@ -500,6 +669,19 @@ class Records:
             with open(self.folder / "labels.jsonl", "a", encoding="utf-8") as f:
                 f.write(json.dumps(line, ensure_ascii=False, separators=(",", ":")) + "\n")
 
+    def latest(self) -> tuple[str, dict] | None:
+        """The newest session file (by its start), or None."""
+        if self.folder is None:
+            return max(self.memory.items()) if self.memory else None
+        for f in sorted(self.folder.glob("*.work.json"), reverse=True) if self.folder.exists() else []:
+            try:
+                d = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(d, dict) and d.get("kind") == "laptop_work_session":
+                return f.name[:-len(".work.json")], d
+        return None
+
     def running(self) -> list[tuple[str, dict]]:
         """Files a crash or a power cut left `running`, oldest first."""
         out = []
@@ -553,6 +735,7 @@ class WorkSession:
     events: list[dict] = field(default_factory=list)
     end: datetime | None = None
     ended: str = "running"
+    meetings: list[Meeting] = field(default_factory=list)   # read back from its file (the tray keeps the live list)
 
     def open_break(self) -> Tapped | None:
         return self.tapped[-1] if self.tapped and self.tapped[-1].end is None else None
@@ -573,13 +756,18 @@ class WorkSession:
                 out.append({"start": iso(a), "end": iso(b), "source": "away"})
         return sorted(out, key=lambda x: x["start"] or "")
 
-    def to_json(self, spans: list[Span], now: datetime, break_min: float) -> dict:
+    def to_json(self, spans: list[Span], now: datetime, break_min: float,
+                meetings: list[Meeting] | None = None) -> dict:
         hi = self.end or now
+        mine = [Meeting(max(m.start, self.start), min(m.end, hi), m.app, m.source) for m in meetings or []
+                if m.end > self.start and m.start < hi]
         return {"version": VERSION, "kind": "laptop_work_session", "app": "eeg_tracker tray",
                 "start": iso(self.start), "end": iso(hi), "ended": self.ended, "started_by": self.started_by,
                 "detected": self.detected,
                 "active_min": round(active_minutes(cut(spans, self.holes(now)), self.start, hi), 1),
+                "meeting_min": round(meeting_minutes(mine, self.start, hi), 1),
                 "hints": [h.to_json() for h in self.hints], "breaks": self.breaks(spans, now, break_min),
+                "meetings": [m.to_json() for m in mine],
                 "labels": self.labels, "events": self.events, "settings": self.settings, "written": iso(now)}
 
 
@@ -605,6 +793,10 @@ def session_from(stamp: str, d: dict) -> WorkSession | None:
         for b in d.get("breaks") or []:
             if b.get("source") == "tapped":
                 s.tapped.append(Tapped(_t(b["start"]) or start, _t(b.get("end"))))
+        for m in d.get("meetings") or []:
+            a, b = _t(m["start"]), _t(m["end"])
+            if a is not None and b is not None and b >= a:
+                s.meetings.append(Meeting(a, b, str(m["app"]), str(m["source"])))
         return s
     except (KeyError, TypeError, ValueError):
         return None
@@ -688,16 +880,18 @@ def _phone_target(local: Path) -> tuple[str, int, str] | None:
     return addr, port, token
 
 
-def phone_work_signal(local: Path, working: bool, *, timeout: float = 3.0) -> str:
+def phone_work_signal(local: Path, working: bool, *, meeting: bool | None = None, timeout: float = 3.0) -> str:
     """Tells the paired phone that a work session started ([working]) or ended here: Share on Wi-Fi's POST /work,
     with the token phone_link.py keeps. Automatic recording on the phone takes "working" from it (DECISIONS 603) and
     may check whether the headband is on. One word for the log ("sent", "not paired", "refused (503)": a night
-    records, or sharing is off, "not reachable"); the token is never in it. Never raises; no proxy (local network)."""
+    records, or sharing is off, "not reachable"); the token is never in it. Never raises; no proxy (local network).
+    [meeting]: whether the session is in a meeting now (DECISIONS 666; the phone ignores it until it labels talking
+    minutes with it)."""
     t = _phone_target(local)
     if t is None:
         return "not paired"
     host, port, token = t
-    req = urllib.request.Request(f"http://{host}:{port}/work", data=json.dumps({"working": working}).encode(),
+    req = urllib.request.Request(f"http://{host}:{port}/work", data=json.dumps({"working": working, **({} if meeting is None else {"meeting": meeting})}).encode(),
                                  method="POST", headers={"Authorization": f"Bearer {token}",
                                                          "Content-Type": "application/json"})
     try:
@@ -753,7 +947,7 @@ class WorkTray:
     def __init__(self, source: Source, notifier: Notifier, records: Records, hints: HintLog,
                  store: SettingsStore | None = None, local: Path = LOCAL,
                  autostart: Path | None = None, phone: Callable[[], str | None] | None = None,
-                 work_signal: Callable[[bool], None] | None = None):
+                 work_signal: Callable[[bool], None] | None = None, mic: Callable[[], str | None] | None = None):
         self.source, self.notifier, self.records, self.hints = source, notifier, records, hints
         self.store = store or SettingsStore(None); self.local = local
         self.s = self.store.load()
@@ -767,6 +961,10 @@ class WorkTray:
         self.aw_error: str | None = None; self.phone_text: str | None = None
         self.ticks = 0; self.log: list[str] = []      # what happened, for --dry-run and the tests
         self.clock: Callable[[], datetime] = lambda: datetime.now().astimezone()   # for the notifications' answers
+        self.mic = mic                          # the call app holding the microphone now (pactl_meeting), or None
+        self.mic_now: str | None = None; self.meeting_now: str | None = None
+        self.meetings: list[Meeting] = []; self.meet_scan: datetime | None = None
+        self.held: dict[str, tuple] = {}        # notifications kept back during a meeting, shown when it ends
 
     # --- reading
     def tick(self, now: datetime) -> None:
@@ -781,6 +979,8 @@ class WorkTray:
         thread, then apply() in the main loop). Raises af.NoActivityWatch."""
         if self.phone is not None:
             self.phone_text = self.phone()
+        if self.mic is not None:
+            self.mic_now = self.mic()
         self.source.read(now)
 
     def apply(self, now: datetime) -> None:
@@ -788,7 +988,13 @@ class WorkTray:
         self.aw_error = None; self.ticks += 1
         if self.store.changed():
             self.s = self.store.load()
-        self.spans = bh.active_spans(self.source.afk(now), bh.Config().merge_gap_min)
+        gap = bh.Config().merge_gap_min
+        raw = bh.active_spans(self.source.afk(now), gap)
+        new = self._track_meetings(now, raw)
+        self.spans = with_meetings(raw, self.meetings, gap)
+        old, self.meeting_now = self.meeting_now, new
+        if new != old:
+            self._meeting_changed(now, old, new)
         if self.session is not None:
             self._in_session(now)
         if self.session is None:
@@ -796,6 +1002,83 @@ class WorkTray:
 
     def _cfg(self) -> bh.Config:
         return self.s.hint_config()
+
+    # --- meetings
+    def _track_meetings(self, now: datetime, raw: list[Span]) -> str | None:
+        """Adds what the window bucket and the microphone say to self.meetings; the call app in a meeting now."""
+        lo = now - timedelta(hours=6) if self.meet_scan is None else self.meet_scan - timedelta(minutes=10)
+        win = self.source.window_since(lo, now); self.meet_scan = now
+        for m in window_meetings(win):
+            add_meeting(self.meetings, m)
+        if self.mic_now is not None:
+            self._mic_seen(now, raw, self.mic_now)
+        keep = now - timedelta(hours=12)
+        if self.session is not None:
+            keep = min(keep, self.session.start)
+        self.meetings = [m for m in self.meetings if m.end > keep]
+        in_front = None
+        if win:
+            a, b = _span(win[-1]); d = win[-1].get("data") or {}
+            if now - b <= timedelta(minutes=LIVE_LAG_MIN):
+                in_front = meeting_window(str(d.get("app") or ""), str(d.get("title") or ""))
+        return self.mic_now or in_front
+
+    def _mic_seen(self, now: datetime, raw: list[Span], app: str) -> None:
+        last = next((m for m in reversed(self.meetings) if m.source == "mic"), None)
+        if last is not None and last.app == app and now - last.end <= timedelta(minutes=MIC_JOIN_MIN):
+            last.end = max(last.end, now); return
+        # A call found now counts from the last keyboard or mouse use (or the meeting before) when nothing was
+        # touched since: joining a call takes a click, so a stretch without input that runs into a call was in it.
+        start = now
+        before = [b for a, b in raw if a <= now] + [m.end for m in self.meetings if m.end <= now]
+        if before and now - max(before) <= timedelta(hours=BACKDATE_MAX_H):
+            start = min(now, max(before))
+        add_meeting(self.meetings, Meeting(start, now, app, "mic"))
+
+    def _meeting_changed(self, now: datetime, old: str | None, new: str | None) -> None:
+        s = self.session
+        if new is not None:
+            start = meeting_run(self.meetings, new, now, bh.Config().merge_gap_min).start
+            text = f"in a meeting ({new}) since {hm(start)}"
+        else:
+            text = f"meeting ({old}) ended"
+        self.log.append(f"{hm(now)} {text}")
+        if s is not None:
+            s.note(now, text); self.last_saved = None
+        if new is None:
+            held, self.held = self.held, {}
+            for key, args in held.items():
+                self.notifier.show(key, *args)
+
+    def _notify(self, key: str, title: str, body: str, actions: list[tuple[str, str]],
+                answer: Callable[[str], None], low: bool = False) -> None:
+        """A notification now, or when the meeting ends: nothing pops up during a meeting."""
+        if self.meeting_now is not None:
+            self.held[key] = (title, body, actions, answer, low)
+        else:
+            self.notifier.show(key, title, body, actions, answer, low=low)
+
+    def _close(self, key: str) -> None:
+        self.held.pop(key, None); self.notifier.close(key)
+
+    def _take_up_after_meeting(self, now: datetime) -> bool:
+        """The newest session ended as `away` while the time away was this meeting (the stretch going on now began
+        before that end): it is taken up again, the same file."""
+        got = self.records.latest()
+        if got is None or got[1].get("ended") != "away":
+            return False
+        end = _t(got[1].get("end")); st = stretch_start(self.spans, now)
+        if end is None or st is None or st > end or now - end > timedelta(hours=BACKDATE_MAX_H):
+            return False
+        s = session_from(*got)
+        if s is None:
+            return False
+        for m in s.meetings:
+            add_meeting(self.meetings, m)
+        s.note(now, f"taken up again: the time away was a meeting ({self.meeting_now})")
+        self.session = s; self.log.append(f"{hm(now)} session from {hm(s.start)} taken up again (a meeting)")
+        self.save(now); self._tell_phone(now, True)
+        return True
 
     def _spans_cut(self, now: datetime) -> list[Span]:
         return cut(self.spans, self.session.holes(now)) if self.session else self.spans
@@ -819,7 +1102,7 @@ class WorkTray:
                 if mine.event == h.id:
                     mine.taken = True
             self.last_saved = None
-        if s.open_break() is None:
+        if s.open_break() is None and self.meeting_now is None:     # never during a meeting: after it
             d = bh.decide(now, spans, self.hints.history(), cfg)
             if d.show:
                 self._show_hint(now, d)
@@ -841,12 +1124,15 @@ class WorkTray:
         h = Hint(now, "snooze" if d.reason == "snooze over" else "stretch", d.active_min, d.threshold_min, rec.id,
                  "notification" if self.s.notifications else "tray")
         s.hints.append(h); s.note(now, "hint"); self.log.append(f"{hm(now)} hint ({round(d.active_min)} min)")
+        st = bh.session(self._spans_cut(now), now, self._cfg())[0]
+        mm = meeting_minutes(self.meetings, st, now) if st is not None else 0.0
+        text = (f"You've been at it for {round(d.active_min)} min." if mm < 1 else
+                f"You've been at it for {for_minutes(d.active_min)}, {round(mm)} min of it in a meeting.")
         if self.s.notifications:
-            self.notifier.show("hint", "A short break?",
-                               f"You've been at it for {round(d.active_min)} min. A few minutes away from the screen?",
-                               [("snooze", "Snooze 20 min"), ("break", "On a break"), ("ok", "OK")],
-                               lambda ans, s=s, h=h: self.answer_hint(ans, self.clock(), s, h),
-                               low=True)
+            self._notify("hint", "A short break?", f"{text} A few minutes away from the screen?",
+                         [("snooze", "Snooze 20 min"), ("break", "On a break"), ("ok", "OK")],
+                         lambda ans, s=s, h=h: self.answer_hint(ans, self.clock(), s, h),
+                         low=True)
         self.save(now)
 
     def pending_hint(self, now: datetime) -> Hint | None:
@@ -869,33 +1155,40 @@ class WorkTray:
 
     # --- detection while no session runs
     def _detect(self, now: datetime) -> None:
+        if self.meeting_now is not None and self._take_up_after_meeting(now):
+            return
         start = stretch_start(self.spans, now)
         self.window = [] if start is None else self.source.window_since(start, now)
-        run = current_run(self.window, self.spans, now, self.s); self.run = run
+        run = current_run(self.window, self.spans, now, self.s)
+        if self.meeting_now is not None and (run is None or not run.now_in):
+            run = meeting_run(self.meetings, self.meeting_now, now, bh.Config().merge_gap_min)
+        self.run = run
         p = self.pending
         if p is not None and (start is None or start > p.start + timedelta(minutes=1)
                               or (run is not None and not same_run(run, p))):
-            self._label(now, "ask", "none", p, None); self.pending = None; self.notifier.close("ask")
+            self._label(now, "ask", "none", p, None); self.pending = None; self._close("ask")
         v = verdict(run, self.s)
         if v is None or run is None or self._blocked(run, now):
             return
         if v == "ask" and self.pending is None:
             self.pending = run; self.log.append(f"{hm(now)} asked (in work apps {round(run.work_min)} min)")
             if self.s.notifications:
-                self.notifier.show("ask", "Started working?",
-                                   f"You've been in {run.app} and other work apps for {round(run.work_min)} min "
-                                   f"since {hm(run.start)}. Start a work session?",
-                                   [("yes", "Yes"), ("no", "Not work")],
-                                   lambda ans, r=run: self.answer_question(ans == "yes", self.clock(), r))
+                text = (f"In a meeting ({run.app}) since {hm(run.start)}. Start a work session from then?"
+                        if run.family == "meeting" else
+                        f"You've been in {run.app} and other work apps for {round(run.work_min)} min "
+                        f"since {hm(run.start)}. Start a work session?")
+                self._notify("ask", "Started working?", text, [("yes", "Yes"), ("no", "Not work")],
+                             lambda ans, r=run: self.answer_question(ans == "yes", self.clock(), r))
         elif v == "auto":
             self.start(now, "auto", run)
             if self.s.notifications:
-                self.notifier.show("auto", "Work session started",
-                                   f"{round(run.clear_min)} min in {run.app} and other work apps, so a work session "
-                                   f"runs from {hm(run.start)}. Not work? Tap Not work.",
-                                   [("notwork", "Not work"), ("ok", "OK")],
-                                   lambda ans, s=self.session: self._auto_answer(ans, self.clock(), s),
-                                   low=True)
+                text = (f"A meeting ({run.app}) since {hm(run.start)}, so a work session runs from then. Not work? "
+                        "Tap Not work." if run.family == "meeting" else
+                        f"{round(run.clear_min)} min in {run.app} and other work apps, so a work session "
+                        f"runs from {hm(run.start)}. Not work? Tap Not work.")
+                self._notify("auto", "Work session started", text, [("notwork", "Not work"), ("ok", "OK")],
+                             lambda ans, s=self.session: self._auto_answer(ans, self.clock(), s),
+                             low=True)
 
     def _blocked(self, run: Run, now: datetime) -> bool:
         if self.quiet_until is not None and now < self.quiet_until:
@@ -928,7 +1221,7 @@ class WorkTray:
         if self.session is not None:
             return
         if self.pending is not None and by == "manual":     # Start pressed while being asked: the question is over
-            self._label(now, "ask", "none", self.pending, None); self.notifier.close("ask")
+            self._label(now, "ask", "none", self.pending, None); self._close("ask")
         start = run.start if run else now
         if self.last_end is not None and start < self.last_end:
             start = self.last_end
@@ -970,7 +1263,7 @@ class WorkTray:
         if isinstance(self.source, ActivityWatch):
             self.source.afk_from = None
         for k in ("hint", "auto"):
-            self.notifier.close(k)
+            self._close(k)
         if ended in ("stopped", "not_work"):
             self.blocked_before = now
 
@@ -980,7 +1273,7 @@ class WorkTray:
             return
         h = self.pending_hint(now)
         if h is not None:
-            h.answer, h.answered_at = "onBreak", now; self.notifier.close("hint")
+            h.answer, h.answered_at = "onBreak", now; self._close("hint")
         s.tapped.append(Tapped(now)); s.note(now, "on a break"); self.save(now)
 
     def back(self, now: datetime) -> None:
@@ -1003,7 +1296,7 @@ class WorkTray:
         h.answer, h.answered_at = HINT_ANSWERS[ans], now
         self.hints.write("snoozed" if ans == "snooze" else "dismissed", h.active_min, h.threshold_min,
                          hint=h.event, now=now)
-        self.notifier.close("hint"); self.save(now)
+        self._close("hint"); self.save(now)
 
     def snooze(self, now: datetime) -> None:
         h = self._snoozable(now)
@@ -1014,7 +1307,7 @@ class WorkTray:
         p = self.pending
         if p is None or (run is not None and not same_run(run, p)) or self.session is not None:
             return
-        self.notifier.close("ask")
+        self._close("ask")
         if yes:
             self.start(now, "asked", p); self._label(now, "ask", "yes", p, self.session); self.save(now)
         else:
@@ -1050,7 +1343,7 @@ class WorkTray:
         if self.s.auto_start != "ask" and self.pending is not None:
             self._label(now, "ask", "none", self.pending, None); self.pending = None
         if self.pending is None or not self.s.notifications:
-            self.notifier.close("ask")
+            self._close("ask")
 
     def set_autostart(self, on: bool, text: str) -> None:
         if self.autostart is not None:
@@ -1061,7 +1354,8 @@ class WorkTray:
         s = self.session
         if s is None:
             return
-        self.records.save(s.stamp, s.to_json(self.spans, now, self._cfg().break_min)); self.last_saved = now
+        self.records.save(s.stamp, s.to_json(self.spans, now, self._cfg().break_min, self.meetings))
+        self.last_saved = now
 
     def resume(self, now: datetime) -> None:
         """At start: a session file left `running` (a crash, a restart) is taken up again if it was written in the
@@ -1073,6 +1367,8 @@ class WorkTray:
             fresh = written is not None and now - written <= timedelta(minutes=RESUME_WITHIN_MIN)
             if s is not None and fresh and i == len(left) - 1 and self.session is None:
                 self.session = s; s.note(now, "taken up again after a restart")
+                for m in s.meetings:
+                    add_meeting(self.meetings, m)
                 self.log.append(f"{hm(now)} session from {hm(s.start)} taken up again")
                 continue
             d = {**d, "ended": "lost", "end": d.get("written") or d.get("end")}
@@ -1094,7 +1390,8 @@ class WorkTray:
                 lines.append("Not in a work session")
             r = self.run
             if r is not None and r.now_in and not self.aw_error:
-                lines.append(f"In work apps for {round(r.work_min)} min (most: {r.app})")
+                lines.append(f"In a meeting ({r.app}) for {round(r.work_min)} min" if r.family == "meeting" else
+                             f"In work apps for {round(r.work_min)} min (most: {r.app})")
             lines.append(MODE_LINES[self.s.auto_start].format(ask=self.s.ask_after_min, auto=self.s.auto_after_min))
         if self.phone_text:
             lines.append(self.phone_text)
@@ -1120,13 +1417,18 @@ class WorkTray:
             icon = "break"
         else:
             lines.append(f"Working since {hm(s.start)} ({dur(now - s.start)})")
+        if self.meeting_now is not None:
+            m0 = meeting_run(self.meetings, self.meeting_now, now, bh.Config().merge_gap_min).start
+            lines.append(f"In a meeting ({self.meeting_now}) since {hm(m0)}")
         h = self.pending_hint(now)
         if h is not None:
             icon = "attention"; show.add("dismiss")
             lines.append(f"Break hint: {round(h.active_min)} min at it. A few minutes away?")
         if self._snoozable(now) is not None:
             show.add("snooze")
-        if st is not None:
+        if self.meeting_now is not None:
+            lines.append("Break hints wait until the meeting ends")
+        elif st is not None:
             lines.append(self._hint_line(now, spans, active))
         return icon
 

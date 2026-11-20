@@ -6,7 +6,8 @@ usage: python3 scripts/tray.py              the icon in the panel (the system py
                                             would have done; writes nothing
 
 The logic is in scripts/laptop_work.py (tested in analysis/tests/test_laptop_work.py); this file is only the icon, its
-menu and the desktop notifications (tested with fake GTK in analysis/tests/test_tray.py). DECISIONS 570-579.
+menu and the desktop notifications (tested with fake GTK in analysis/tests/test_tray.py). DECISIONS 570-579; meetings
+(a call app holding the microphone, or a meeting window in front, is work, never a break): 660-669.
 Settings: ~/.config/eeg_tracker/tray.json; records: <repo>/_local/laptop/work/. Nothing leaves the laptop.
 """
 from __future__ import annotations
@@ -277,11 +278,14 @@ def single_instance() -> object | None:
     return f
 
 
-def tell_phone(local: Path, working: bool, send: Callable[..., str] = lw.phone_work_signal) -> threading.Thread:
-    """The paired phone hears that a work session started or ended (Share on Wi-Fi's POST /work, DECISIONS 603), in a
-    thread of its own so the menu never waits for the network; the answer goes to the tray's output."""
+def tell_phone(local: Path, working: bool, send: Callable[..., str] = lw.phone_work_signal,
+               meeting: bool | None = None) -> threading.Thread:
+    """The paired phone hears that a work session started or ended (Share on Wi-Fi's POST /work, DECISIONS 603), and
+    whether it is in a meeting (DECISIONS 666), in a thread of its own so the menu never waits for the network; the
+    answer goes to the tray's output."""
     def run() -> None:
-        print(f"phone: work {'started' if working else 'ended'}: {send(local, working)}", flush=True)
+        said = send(local, working) if meeting is None else send(local, working, meeting=meeting)
+        print(f"phone: work {'started' if working else 'ended'}: {said}", flush=True)
     t = threading.Thread(target=run, name="tell-phone", daemon=True)
     t.start()
     return t
@@ -301,7 +305,9 @@ def run_tray(a: argparse.Namespace) -> int:
     hints = lw.FileHintLog(a.export)
     ctl = lw.WorkTray(lw.ActivityWatch(a.host), DbusNotifier(Gio, GLib), lw.Records(a.local / "laptop" / "work"),
                       hints, store, a.local, lw.autostart_path(), lambda: lw.phone_line(a.local),
-                      work_signal=lambda working: tell_phone(a.local, working))
+                      work_signal=lambda working: tell_phone(a.local, working,
+                                                             meeting=working and ctl.meeting_now is not None),
+                      mic=lw.pactl_meeting)
     for p in store.problems:
         print("settings:", p, flush=True)
     ctl.resume(datetime.now().astimezone())
@@ -324,16 +330,17 @@ def once(a: argparse.Namespace, out: Callable[[str], object] = print) -> int:
     store = lw.SettingsStore(a.config); s = store.load()
     ctl = lw.WorkTray(lw.ActivityWatch(a.host), lw.QueueNotifier({}), lw.Records(None),
                       lw.MemoryHintLog(lw.read_only_history(a.export)), lw.SettingsStore(None), a.local, None,
-                      lambda: lw.phone_line(a.local))
+                      lambda: lw.phone_line(a.local), mic=lw.pactl_meeting)
     ctl.s = s; now = datetime.now().astimezone()
     ctl.tick(now)
     if ctl.aw_error:
         out(f"tray --once: {ctl.aw_error}"); return 1
     v = ctl.view(now); r = ctl.run
-    out(f"now {now:%H:%M}, auto-start {s.auto_start}, icon {v.icon}")
+    out(f"now {now:%H:%M}, auto-start {s.auto_start}, icon {v.icon}, "
+        + (f"in a meeting ({ctl.meeting_now})" if ctl.meeting_now else "not in a meeting"))
     out("\n".join("  " + x for x in v.lines))
     if r is not None:
-        out(f"current run: {r.family}, {r.work_min:.1f} min in work apps since {lw.hm(r.start)}, {r.away_min:.1f} min "
+        out(f"current run: {r.family}, {r.work_min:.1f} min {'in it' if r.family == 'meeting' else 'in work apps'} since {lw.hm(r.start)}, {r.away_min:.1f} min "
             f"elsewhere, clear {r.clear_min:.1f} min, in it now: {r.now_in}; verdict: {lw.verdict(r, s) or 'nothing yet'}")
     out(f"menu offers: {', '.join(sorted(v.show))}")
     return 0

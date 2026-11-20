@@ -754,7 +754,7 @@ wrong proof or a client outside the local network. `_local/phone/link.json` (mod
 ## The laptop's work sessions (`_local/laptop/work/`)
 
 Written by the laptop tray (`scripts/tray.py`, `scripts/laptop_work.py`; [laptop-tray.md](laptop-tray.md), DECISIONS
-570-579) from ActivityWatch, with no headband. Beside the phone's files, not among them: `_local/phone/` is the
+570-579, meetings 660-669) from ActivityWatch, with no headband. Beside the phone's files, not among them: `_local/phone/` is the
 phone's mirror, and these files have no EEG. Times are local ISO times with their UTC offset, to the second. No window
 title is ever written; app names are.
 
@@ -768,12 +768,14 @@ at the end.
 | `start`, `end` | the session's span; while it runs `end` is the last moment written |
 | `ended` | `running` (still going, or the tray died; a file left `running` is taken up again by a tray started within 10 minutes, else marked `lost` at its last write), `stopped` (Stop), `away` (away longer than the setting: `end` is when you left), `not_work` (relabelled "Not work"), `quit` (the tray was quit or the laptop logged out), `lost` |
 | `started_by` | `manual` (Start), `asked` (Yes to "Started working?"), `auto` (started by itself) |
-| `detected` | for `asked` and `auto`: `at` (when it was noticed), `run_start` (when the work began: the session's `start`), `work_min` (clock minutes in work apps less the switches), `away_min` (active minutes in other apps inside it), `clear_min` (the work minutes at its end with at most `auto_max_away_min` elsewhere), `app` (the app that held most of it), `family` (`code` or `write`, aw_focus.py's families); `null` for `manual` |
-| `active_min` | minutes with keyboard or mouse use inside the session (ActivityWatch's AFK watcher, gaps under 3 minutes counted), tapped breaks left out |
+| `detected` | for `asked` and `auto`: `at` (when it was noticed), `run_start` (when the work began: the session's `start`), `work_min` (clock minutes in work apps less the switches), `away_min` (active minutes in other apps inside it), `clear_min` (the work minutes at its end with at most `auto_max_away_min` elsewhere), `app` (the app that held most of it), `family` (`code` or `write`, aw_focus.py's families, or `meeting`: started from a meeting, `app` the call app and every minute of it clear); `null` for `manual` |
+| `active_min` | minutes with keyboard or mouse use or in a meeting inside the session (ActivityWatch's AFK watcher, gaps under 3 minutes counted), tapped breaks left out |
+| `meeting_min` | minutes inside the session in a meeting (overlaps counted once; DECISIONS 660-669) |
+| `meetings` | `start`, `end` (inside the session), `app` (the call app: `zoom`, `teams`, `telegram`, `browser`, `google meet`, ...; never a title), `source`: `mic` (a call app's sound stream, seen each minute; the first sight counts from the last keyboard or mouse use) or `window` (its meeting window in front). Meeting time is never a break |
 | `hints` | `at`, `reason` (`stretch`: the active-time threshold; `snooze`: the one a snooze brought back), `active_min`, `threshold_min`, `via` (`notification`, or `tray` with notifications off), `answer` (`snoozed`, `onBreak`, `notNow` = OK, or `null`; the phone's names), `answered_at`, `taken` (a break of 5 minutes or more began within 30 minutes), `event` (the id of its `break_hint` event below) |
 | `breaks` | `start`, `end` (`null` while it goes on), `source`: `tapped` (On a break; it ends at Back or when you come back from 5+ minutes away) or `away` (5 minutes or more without keyboard or mouse, not inside a tapped one). The time away that ended a session is after its `end`, not one of its breaks |
 | `labels` | the owner's answers about this session: `at`, `label` (`work` or `not_work`), `question` (`ask` or `auto`), `answer` (`yes`, `no`, `not_work`) |
-| `events` | `at`, `event`: `started (...)`, `on a break`, `back`, `back (returned)`, `hint`, `ended (...)`, `taken up again after a restart` |
+| `events` | `at`, `event`: `started (...)`, `on a break`, `back`, `back (returned)`, `hint`, `ended (...)`, `taken up again after a restart`, `in a meeting (zoom) since HH:MM`, `meeting (zoom) ended`, `taken up again: the time away was a meeting (zoom)` |
 | `settings` | the tray's settings when the session started (below) |
 | `written` | when the file was written |
 

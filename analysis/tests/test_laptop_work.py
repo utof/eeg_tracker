@@ -364,7 +364,8 @@ def test_the_session_file(tmp_path):
     assert path.name == f"{at(9).astimezone():%Y-%m-%d-%H%M%S}.work.json"
     f = json.loads(text)
     assert set(f) == {"version", "kind", "app", "start", "end", "ended", "started_by", "detected", "active_min",
-                      "hints", "breaks", "labels", "events", "settings", "written"}
+                      "meeting_min", "hints", "breaks", "meetings", "labels", "events", "settings", "written"}
+    assert f["meetings"] == [] and f["meeting_min"] == 0                # (no meeting in it: DECISIONS 660-669)
     assert f["kind"] == "laptop_work_session" and f["version"] == 1 and f["ended"] == "stopped"
     assert all(datetime.fromisoformat(x).utcoffset() is not None for x in (f["start"], f["end"], f["written"]))
     assert set(f["hints"][0]) == {"at", "reason", "active_min", "threshold_min", "via", "answer", "answered_at",

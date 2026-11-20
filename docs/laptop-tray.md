@@ -37,7 +37,7 @@ The icon changes with the state (shape and colour; the menu always says it in wo
 Clicking it opens the menu:
 
 - **Status lines** at the top: "Working since 10:12 (0:42)", "Next break hint about 11:05", or "On a break since
-  10:51", or "Not in a work session" and how long you have been in work apps. A line about the phone appears once a
+  10:51", "In a meeting (zoom) since 11:02", or "Not in a work session" and how long you have been in work apps. A line about the phone appears once a
   phone has been paired.
 - **Start work session / Stop work session.**
 - **On a break / Back from the break.**
@@ -80,7 +80,32 @@ is ignored (its default is used) and the tray says so when started from a termin
 - A session started by a "Yes" or by itself begins **when that work began**, not when it was noticed.
 - **Breaks**: 5 minutes or more away from the keyboard and mouse is a break by itself; **On a break** starts one at
   once, and it ends at **Back**, or by itself when you come back after 5 or more minutes away. Away **30 minutes or
-  more** ends the session at the moment you left (a setting).
+  more** ends the session at the moment you left (a setting). Time in a meeting is never a break (below).
+
+## Meetings
+
+In a call you listen and talk but do not type, so the keyboard and mouse alone would call it a break. The tray counts
+you **in a meeting** while:
+
+- a call app holds the microphone (muted or not): Zoom, Teams, Skype, Telegram (and AyuGram), Discord, Slack, Signal,
+  Element, Webex, WhatsApp, Jitsi, Mattermost, Viber, or a browser (Google Meet, Jitsi, Teams or Zoom on the web). It
+  asks PipeWire once a minute (`pactl`, read only); other programs that listen (the sound applet's level meter, a
+  recorder) do not count. Zoom, Teams, Webex or Skype playing sound counts too (joined without a microphone);
+- or a meeting's own window is in front: Zoom's meeting window, a Teams meeting or call, a Google Meet or Jitsi page.
+
+Then:
+
+- the minutes without keyboard or mouse are **meeting time**: no break, the session does not end, and they count as
+  time at it. The menu says "In a meeting (zoom) since 14:02". A break after the call is still a break.
+- **Nothing pops up during a meeting.** A break hint that falls due waits until the meeting ends and then says it:
+  "You've been at it for 1h40, 40 min of it in a meeting. A few minutes away from the screen?". "Started working?" and
+  "Work session started" wait too (the menu has them at once).
+- **A meeting can start a session**, by the same setting as work apps: Ask me first asks after 5 minutes in it,
+  Automatic when sure starts one after 12, from when the meeting began; Off does nothing.
+- **A meeting it saw late is fixed by itself.** When it first sees a call, the time since you last touched the
+  keyboard or mouse counts as that call (joining one takes a click). A meeting window that was in front earlier counts
+  as well. So a "break" that was a meeting turns back into meeting time on the next minute's look, and a session ended
+  as "away" during a meeting is taken up again (the same file).
 
 ## Break hints
 
@@ -110,9 +135,12 @@ written.
 **Pair phone…** runs `scripts/phone_link.py` in a terminal window (the QR code to scan with the phone; see
 [phone-link.md](phone-link.md)), copying the phone's files into the tray's own `_local`. While that window already
 runs, the item opens its page `http://127.0.0.1:8771/` with the code, bigger, instead of starting a second copy. It is
-greyed out only without a terminal program. After pairing, a status line says whether the phone is connected. When a work session starts or ends here, the tray tells the paired phone (Share on Wi-Fi's `POST /work`, between nights), so the phone's automatic recording can check whether the headband is on and take it as work ("When I put the headband on" in the app). Showing the phone's own work-session drowsiness in this menu is prepared but not connected yet.
+greyed out only without a terminal program. After pairing, a status line says whether the phone is connected. When a work session starts or ends here, the tray tells the paired phone (Share on Wi-Fi's `POST /work`, between nights), so the phone's automatic recording can check whether the headband is on and take it as work ("When I put the headband on" in the app). It also says whether you are in a meeting (`"meeting": true`); the phone does not use that yet. Showing the phone's own work-session drowsiness in this menu is prepared but not connected yet.
 
 ## Not done yet
+
+- The phone does not use the `meeting` field yet: its Work session could label talking minutes as a meeting instead
+  of noise (DECISIONS 666).
 
 - The phone's drowsiness (when you wear the headband in the phone's Work session) in this menu.
 - No "how sharp do you feel" tap here (the phone has one).
