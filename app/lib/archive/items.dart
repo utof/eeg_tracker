@@ -53,7 +53,7 @@ const Duration joinGap = Duration(minutes: 15);
 const Duration maxRecording = Duration(hours: 24);
 
 /// Version of the kept summaries (a change drops them).
-const int _setsVersion = 2;
+const int _setsVersion = 3;
 const int _sessionsVersion = 2;
 
 enum ArchiveKind {
@@ -524,12 +524,16 @@ final RegExp _continued = RegExp(r'reconnected \([^)]*\) after a drop \(.*?\); p
   bool has(String s) => head.contains(s);
   final continues = _continued.hasMatch(head) || has('service restarted by Android');
   if (folderDefault != 'night') return (writer: folderDefault, continues: continues, auto: null);
-  if (has('nap coach session')) return (writer: 'nap', continues: false, auto: null);
-  if (has('sound for states session')) return (writer: 'sound', continues: false, auto: null);
-  if (has('dream catcher session')) return (writer: 'dream', continues: false, auto: null);
-  if (has('hands-free calibration')) return (writer: 'handsfree', continues: false, auto: null);
-  if (has('work session')) return (writer: 'work', continues: continues, auto: null);
-  if (has('auto-start: the headband was found on')) return (writer: 'preroll', continues: false, auto: 'yes');
+  // a session's set names itself on its first line (`<time> nap coach session; headband ...`)
+  final nl = head.indexOf('\n');
+  final first = nl < 0 ? head : head.substring(0, nl);
+  bool opens(String s) => first.contains(' $s');
+  if (opens('nap coach session')) return (writer: 'nap', continues: false, auto: null);
+  if (opens('sound for states session')) return (writer: 'sound', continues: false, auto: null);
+  if (opens('dream catcher session')) return (writer: 'dream', continues: false, auto: null);
+  if (opens('hands-free calibration')) return (writer: 'handsfree', continues: false, auto: null);
+  if (opens('auto-start: the headband was found on')) return (writer: 'preroll', continues: false, auto: 'yes');
+  if (opens('work session')) return (writer: 'work', continues: continues, auto: null);
   final auto = has('started automatically:') ? 'automatic' : (has('started after "Yes"') ? 'yes' : null);
   return (writer: 'night', continues: continues, auto: auto);
 }

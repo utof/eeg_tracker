@@ -388,7 +388,7 @@ folder). It never changes or deletes anything in the app's folder, and never run
   `mornings/`, `meditations/`, `alpha-theta/` (sessions and `journal.json`), `replay-check/<kind>/` and
   `settings.json`, `experiments/<made at>/` (self-experiments, below), `wearer/` ("Was this you?", below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers and their `<stamp>-r<n>.text.json` words, below, `prompts/`), `sound-states/`, `hands-free/` (below), `unusual/` (below), `lucid/` (below), `try-these/` (below), `own-ble/`
   (`settings.json`: which headband connection is in use; `probe/<stamp>/`: the probe's result, docs/own-ble-driver.md),
-  `recordings-diy/` (the DIY board's nights, the format of "Raw recording (DIY board)") and `diy-board/settings.json`
+  `recordings-diy/` (the DIY board's nights, the format of "Raw recording (DIY board)"), `archive/` (your tags, below) and `diy-board/settings.json`
   (`useDiy`: which headband; `names`: 4, 6 or 8 names from CH1), and any folder
   a later feature adds. Left on the phone: `models/` (copies of the app's model assets), `export/` (the export's own
   index), half-written `*.tmp` files, the scorer's `*.scoring` markers, and the two files Android and a plugin keep
@@ -663,6 +663,31 @@ cut off by a crash is skipped. Nothing here holds EEG (the minutes kept while th
 A night the watcher started has a first line in its first run's `.log`: `started automatically: ...` or `started after
 "Yes" ...`, and the minutes kept while asking are the night's first run, whose `.log` begins `auto-start: the headband
 was found on ...`.
+
+### Your tags on a recording (`archive/`)
+
+The Archive (DECISIONS 700-709): one file per recording you tagged, `archive/<id>.tags.json`, where `<id>` is the
+recording's first file set's stem (`2026-11-18-231200`; a session without raw signal: its file's stamp). Written whole
+under a temporary name, then renamed; removed when no tag is left; a damaged file is left as it is and read as no tags.
+
+| Field | Content |
+|---|---|
+| `version`, `id` | 1, the recording's id (the file's name) |
+| `tags` | `start`, `end` (local ISO time with offset), `label` (a word: `sleep`, `work`, `walk`, `meeting`, `meditation`, `rest`, or typed, up to 40 characters; the preset words in lower case), `made` (when you tagged it) |
+
+A recording is the raw file sets of one folder joined by the recorder's own reconnects or a start under 15 minutes after
+the last data, with the sets one sleep report scored together; the tags' times are clock times, so they still place
+correctly if that grouping changes. What the Archive keeps for itself stays in `files/cache/` (never exported): each
+file set's summary (`archive-sets.json`), each session file's and report's (`archive-<folder>.json`,
+`archive-reports.json`) and the detectors' pass per recording (`archive-seen/<id>.json`: per 30 s epoch from the first
+sample, `quality` `g d m`, `eyes` `c o -`, `level` `a g d -`, `jaw` bursts and `move` seconds, with the size and
+modified time of every raw file it read, and its minutes per activity; `archive-seen-index.json`).
+
+Deleting by hand writes the same record as moving to the laptop: `<stamp>.removed.json` beside the set
+(`format` `eeg-tracker-removed`, `version` 1, `removed`, `removed_ms`, `on_laptop`, `laptop`, `why` `deleted by hand`,
+`night`, `end_ms`, `files`: `name`, `bytes`, `sha256` or `null`, `phone_name`, `phone_bytes`), then removes the set's
+samples and index; its `.log`, `.header.json` and `.markers.jsonl` stay. "Everything" (the Danger zone) removes every
+file of the recording, its record included, the session files, the report and the tags.
 
 ### Try these (`try-these/`)
 

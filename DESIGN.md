@@ -317,6 +317,33 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   `track` still to come; the fill changes in 260 ms. Each stop's number cell (36 dp, growing with the text up to 130 %) repeats its mark with the number in
   tabular titleMedium (ground ink on `saved`). A stop the app ticked itself says so in words ("Seen by the app"), never
   by colour.
+- **Archive** (More's first section; DECISIONS 700-709): a deck log by day. On top the storage bar: one 12 dp bar
+  split by the space each kind of recording takes (Nights `saved`, Sessions `ink`, Work `ink-muted`, Check-ins a
+  darker brown, Other `rule`), its legend under it as 48 dp rows of a 12 dp tone cell, the word and the size; a tap
+  shows only that kind (the others fade, a "Showing ... only · Show all" text button). Then a muted sentence (how many,
+  how much, the passes still to run). Each day a hairline and its name (Today, Yesterday, `Wed 18 Nov`) with the count
+  and size right in muted tabular figures and a menu (Remove what the laptop holds; Delete this day…, in `problem`
+  red). Each recording a ruled log row: its clock span left and length right in tabular titleMedium, then "Night · You:
+  Start night" in body ink, "Tags: sleep · walk" in ink, "Found: asleep 6 h 12 · talking 9 min" muted, and where it
+  is muted ("410 MB · only on this phone", "· checked copy on the laptop"), a chevron at the right. No card, no
+  colour for who started it: the words say it.
+- **A recording** (from the Archive): the length as a readout with its clock span and day under it, then label-left /
+  value-right rows (Started, Its tag with "yours" or "the watcher's guess", Channels, On this phone, Laptop, Export
+  data); Timeline; Found (a 48 dp row per lane with its total, opening its stretches; one muted paragraph on how good
+  they are); Your tags (rows with the span and an edit mark, Add a tag outlined); Files (rows); On the laptop (Remove
+  from this phone, outlined, only with the laptop's checked copy); then the **Danger zone**: a hairline, a `problem`
+  red warning icon with the words, one muted sentence, and Delete… outlined in red. Its first dialog says in red when
+  it is the only copy and offers the raw recording only or Everything as radio rows; the second ("Delete for good?")
+  has the page's only red fill, Delete, beside Keep it.
+- **Activity lanes** (a recording's timeline): the sleep chart's `track` lanes, 26 dp, one per activity, each worded at
+  its left in muted body (Sleep, Eyes closed, Drowsy, Talking, Moving, Signal, Work, Meeting, Sessions, Your tags), so a
+  tone always repeats a word; bands in `saved` (found), `saved` at 45 % (weaker: getting drowsy, noisy, a break),
+  `caution` amber (no signal, as the strip's gaps) and `ink` (your tags), 3 dp corners, the band's word inside in
+  `ground` when it fits; hour rules in `ground` and tabular clock ticks under the lanes. A muted line above says what
+  is shown, with Zoom out, Zoom in and The whole recording as icon buttons; two fingers zoom, a sideways drag moves.
+  A tap on a band opens its sheet (lane, word at titleLarge, span, where it comes from; Show the signal and Tag this
+  span outlined); anywhere else opens the signal at that moment: the Signal tab's Raw stack or filtered traces fed from
+  the file, 5, 10 or 30 s as a segmented row, earlier and later outlined.
 - **Buttons:** one filled button per screen: Start night on the night screen (Lights off while a night records), Start on the meditation screen, and on
   each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before
   stopping, except in alpha-theta, where stopping must be instant. Session faces (dream catcher, sound for states)
