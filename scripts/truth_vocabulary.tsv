@@ -1,0 +1,57 @@
+field	id	kind	unit	also	description
+kind	state				what the body or mind was in, over a span
+kind	activity				what you were doing, over a span
+kind	posture				how the body was held, over a span
+kind	event				something done at a moment or over a few minutes (start = end for a moment)
+kind	device				what the recording device was doing, over a span or at a moment
+kind	rating				a number on a scale you gave; value and unit required
+kind	measurement				a number a device or a person measured; value and unit required
+kind	correction				takes back the row named in supersedes, with nothing in its place
+label	asleep	state		sleep slept sleeping	asleep, in any sleep stage, the whole span
+label	awake	state		wake	awake the whole span
+label	nap	state		napping	a daytime sleep: mostly asleep, not every minute
+label	in_bed	state		bed	in bed to sleep, asleep or not (lights off to getting up)
+label	eyes_closed	state		eyes-closed	eyes closed while awake
+label	headache	state			a headache
+label	ill	state		sick	ill (a cold, a fever)
+label	walking	activity		walk	walking
+label	running	activity		run jogging	running or jogging
+label	stairs	activity			going up or down stairs
+label	cycling	activity		bike cycle	riding a bicycle
+label	vehicle	activity		car bus train metro	riding in a car, bus, train or metro
+label	eating	activity		eat meal	eating (chewing)
+label	talking	activity		talk	talking
+label	meeting	activity			in a meeting or a call
+label	focused_work	activity		focus	focused work
+label	working	activity		work	working at a desk or a laptop, focused or not
+label	exercise	activity		workout gym	exercise other than walking, running or cycling
+label	meditating	activity		meditation	meditating
+label	sound_session	activity		sound	listening to one of eeg_tracker's sound sessions
+label	resting	activity		rest	resting without trying to sleep
+label	drinking_coffee	event	cups	coffee	drinking coffee; value: cups
+label	drinking_alcohol	event	drinks	alcohol	drinking alcohol; value: drinks
+label	sitting	posture		sit	sitting
+label	standing	posture		stand	standing
+label	lying	posture		lying-down	lying down
+label	headband_off	device			the headband was off the head
+label	headband_adjusted	device			the headband was touched, moved or put back on the head
+label	kss	rating	1-9	sleepiness	Karolinska sleepiness scale: 1 extremely alert to 9 fighting sleep
+label	mood	rating	1-5		mood: 1 very low to 5 very good
+label	tension	rating	1-5		tension: 1 calm to 5 very tense
+label	sleep_quality	rating	1-5		how did you sleep: 1 very badly to 5 very well
+label	sharp	rating	1-5		how sharp you felt: 1 foggy to 5 very sharp
+label	pulse	measurement	bpm	heart-rate hr	pulse in beats a minute
+label	steps	measurement	steps		steps counted over the span
+label	withdrawn	correction			the row named in supersedes was wrong; nothing replaces it
+source	owner_chat				you said it in a chat; the assistant wrote the row
+source	owner_note				you wrote the row yourself
+source	owner_app_tag				an Archive tag you marked "This is what I was doing"
+source	owner_checkin				a check-in answer
+source	owner_mark_button				a mark button you pressed at the moment
+source	owner_tray				an answer to the laptop tray
+source	device_watch				a watch or a fitness band
+source	device_phone				the phone's own sensors (step counter, activity recognition)
+source	device_laptop				the laptop (ActivityWatch, the tray)
+source	observer				another person who saw it
+confidence	certain				the label holds for the whole span, the times to about a minute
+confidence	likely				the label holds, but the times are rough or not every minute fits

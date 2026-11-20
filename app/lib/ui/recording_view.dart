@@ -142,6 +142,15 @@ class RecordingView extends StatelessWidget {
                   child: Row(
                     children: [
                       Expanded(child: OwnText(child: Text(t.label, style: text.bodyLarge))),
+                      if (t.truth) ...[
+                        const Icon(
+                          Icons.check_circle_outline,
+                          size: 20,
+                          color: Night.inkMuted,
+                          semanticLabel: 'what I was doing',
+                        ),
+                        const SizedBox(width: 8),
+                      ],
                       Text(spanText(t.start, t.end), style: text.titleMedium?.copyWith(fontFeatures: tabular)),
                       const SizedBox(width: 8),
                       const Icon(Icons.edit_outlined, size: 20, color: Night.inkMuted),

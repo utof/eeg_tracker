@@ -15,7 +15,9 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 | The phone over Wi-Fi | `GET /files`, `GET /files/<path>` on the phone; mirrored into `_local/recordings/` and `_local/phone/`, with `_local/phone/pull-state.json` and `pulls.jsonl` | the phone app's Share on Wi-Fi (`app/lib/share/`); read by `scripts/pull_phone.py` |
 | The laptop's work sessions | `_local/laptop/work/<stamp>.work.json`, `labels.jsonl` (below) | the laptop tray (`scripts/tray.py`, `scripts/laptop_work.py`) from ActivityWatch |
 | Catalog of nights | `_local/catalog/catalog.json`, `<date>.sha256`, `catalog.txt`, `history.log` | `scripts/catalog.py` (below) |
-| The data book | `_local/data/nights.tsv`, `sessions.tsv`, `days.tsv`, `epochs.tsv.gz`, `labels.tsv`, `book.json`, `README.md` | `scripts/data_book.py`, after each copy from the phone through `scripts/after_pull.py` (below) |
+| The data book | `_local/data/nights.tsv`, `sessions.tsv`, `days.tsv`, `epochs.tsv.gz`, `labels.tsv`, `truth.tsv`, `book.json`, `README.md` | `scripts/data_book.py`, after each copy from the phone through `scripts/after_pull.py` (below) |
+| Truth labels | `_local/analyses/truth-labels.tsv` (the hand file), `_local/truth/*.tsv`, the Archive's tags marked "This is what I was doing"; the vocabulary `scripts/truth_vocabulary.tsv` | the assistant from chat, the owner by hand or on the phone; checked by `scripts/truth.py` (below) |
+| Detectors against the truth | `_local/data/validation.tsv`, `validation.md` | `scripts/validate_detectors.py`, after each data book build (below) |
 | Raw recordings packed after a day | `<stamp>.f32.xz` on the laptop, `<stamp>.f32.gz` on the phone, in place of `<stamp>.f32`; `_local/packing.jsonl`, `files/packing.jsonl` | `scripts/pack_old.py` (daily), the phone app between nights (`app/lib/recorder/packed.dart`); below |
 | Events for other apps | `<root>/events/<dev>/eeg-YYYY-MM.jsonl`, `<root>/events/<dev>/breaks-YYYY-MM.jsonl` | `scripts/export_events.py`, `scripts/break_hints.py` and the laptop tray |
 
@@ -753,7 +755,7 @@ under a temporary name, then renamed; removed when no tag is left; a damaged fil
 | Field | Content |
 |---|---|
 | `version`, `id` | 1, the recording's id (the file's name) |
-| `tags` | `start`, `end` (local ISO time with offset), `label` (a word: `sleep`, `work`, `walk`, `meeting`, `meditation`, `rest`, or typed, up to 40 characters; the preset words in lower case), `made` (when you tagged it) |
+| `tags` | `start`, `end` (local ISO time with offset), `label` (a word: `sleep`, `work`, `walk`, `meeting`, `meditation`, `rest`, or typed, up to 40 characters; the preset words in lower case), `made` (when you tagged it), `truth` (`true` when you ticked "This is what I was doing": the laptop takes the tag as a truth label, DECISIONS 824; left out otherwise) |
 
 A recording is the raw file sets of one folder joined by the recorder's own reconnects or a start under 15 minutes after
 the last data, with the sets one sleep report scored together; the tags' times are clock times, so they still place
@@ -917,7 +919,7 @@ line per ack (`acked`, `phone`, `files`) and the catalog's night rows `moved_fro
 
 ## The data book (`_local/data/`)
 
-`scripts/data_book.py` (DECISIONS 760-769) turns everything eeg_tracker measured on the laptop into five tidy tables, so
+`scripts/data_book.py` (DECISIONS 760-769) turns everything eeg_tracker measured on the laptop into six tidy tables, so
 hundreds of days can be read in one place and every number traced to the files it came from. It reads `_local/` and
 writes only into `_local/data/` (or `--out`); nothing reads the book back as input, and it can always be built again
 from `_local/` (`uv run --project analysis python scripts/data_book.py`; `--full` works out everything again). The
@@ -943,11 +945,14 @@ Rules, for every table:
   named after the channel (`O1_alpha_pct`, `E5_quality`, `Fz_beta_pct`), and `channels` says the layout of each row
   (`name:site`, or `name:(x,y,z)` for an electrode placed by hand). The same name in two layouts is the same column.
 - **Never edited by hand, nothing deleted.** The tables are rebuilt whole each run, except `labels.tsv`, to which rows
-  are only ever added. Raw data in `_local/` is never touched.
+  are only ever added. Raw data in `_local/` is never touched. A truth label goes into its source (the hand file,
+  below), never into `truth.tsv`.
 
 Also in the folder: `README.md` (what is there, how to rebuild it), `book.json` (`format` `eeg-tracker-data-book`,
 `version` 1, `built`, `seconds`, `local`, `signal_version`, `measures_version`, the `models` the nights name, `rows`
-per table, `recordings` and `worked_out` this run, `labels_added`, `labels_removed`, `epoch_columns`, `problems`),
+per table, `recordings` and `worked_out` this run, `labels_added`, `labels_removed`, `truth_from` (truth rows from
+the `hand` file, other `files` and the `archive`), `truth_rejected` (truth rows left out, each `origin:line id: why`),
+`epoch_columns`, `problems`),
 `.cache/` (the 30 s rows per recording, file hashes kept by size and modified time, the logs' numbers per night; safe
 to delete: the next run makes them again, slower) and `.lock` (one run at a time).
 
@@ -1091,12 +1096,113 @@ an electrode. utof_tracker's labels are not here (its opt-in feed comes later).
 | `replaces` | for `removed`: the label taken back |
 | `added` | when the data book first saw it |
 
+### `truth.tsv` (truth labels, DECISIONS 820-829)
+
+What really happened, so the detectors can be scored against it: "awake from 17:50 to 22:07", "walking 19:08-21:14",
+a watch's pulse at 21:30. Rebuilt whole each run by `scripts/truth.py` (standard library) from three sources, which
+keep the history; `truth.tsv` adds three columns and drops the rows that break the schema (listed in `book.json`'s
+`truth_rejected` and in `validation.md`):
+
+- **the hand file** `_local/analyses/truth-labels.tsv`: rows the assistant writes from what the owner says in chat
+  (`owner_chat`), or the owner by hand (`owner_note`); only ever added to;
+- **`_local/truth/*.tsv`**: any other file in the same columns, for example a watch's pulse readings converted to one
+  row each (`measurement` `pulse`, `value` in `bpm`, `source` `device_watch`, `start` = `end` for a reading);
+- **the Archive's tags marked "This is what I was doing"** (`phone/archive/*.tags.json`, `truth` true, above): one row
+  each with `source` `owner_app_tag`, `confidence` `certain`, the typed word in `owner_words`, its id the tag's
+  `labels.tsv` id (`archive:` and 16 hex). The word is matched to a label by its id or one of the vocabulary's `also`
+  words (`walk` is `walking`, `sleep` is `asleep`, `rest` is `resting`, `work` is `working`); another word is left out
+  with a reason (add it to `also`).
+
+Check a file before relying on it: `python3 scripts/truth.py check` (the hand file and `_local/truth/`, or the files
+named; exit 1 on any bad row), `python3 scripts/truth.py vocabulary` prints the words.
+
+| Column | Meaning |
+|---|---|
+| `label_id` | a stable id, unique over every source: letters, digits, `. _ : -`, up to 80 (`tl-20261120-001` in the hand file) |
+| `start`, `end` | ISO 8601 with the UTC offset (`2026-11-20T17:50:21+03:00`); a time without an offset is refused; `end` = `start` for a moment |
+| `recording` | the recording it happened in (a file set's stem or a night's id); empty when it spans several or none. Labels are tied to clock time, never to a channel or a layout |
+| `kind` | the label's kind in the vocabulary: `state`, `activity`, `posture`, `event`, `device`, `rating`, `measurement`, `correction` |
+| `label` | a label id from `scripts/truth_vocabulary.tsv` (below) |
+| `value`, `unit` | a number and the label's own unit: required for `rating` (a whole number on its scale, `kss` `1-9`) and `measurement` (`pulse` `bpm`, `steps` `steps`); allowed for `drinking_coffee` (`cups`) and `drinking_alcohol` (`drinks`); empty for every other label |
+| `source` | who or what said it: `owner_chat`, `owner_note`, `owner_app_tag`, `owner_checkin`, `owner_mark_button`, `owner_tray`, `device_watch`, `device_phone`, `device_laptop`, `observer` |
+| `confidence` | `certain` (the label holds for the whole span, the times to about a minute) or `likely` (rough times, or not every minute fits) |
+| `created` | when the row was made, ISO with offset |
+| `supersedes` | the `label_id` this row corrects (from any source): rows are never edited, a correction is a new row; `withdrawn` (kind `correction`) takes a row back with nothing in its place |
+| `owner_words` | free text: what the owner said or typed, verbatim (`I was sleeping for 1 or 2 hours`) |
+| `context` | free text: whoever recorded the row describes it (`walk outside with bench stops; phone in front right pocket`) |
+| `origin` | `truth.tsv` only: the source file from `_local/` |
+| `active` | `truth.tsv` only: 1 when no later row supersedes it (the one to use), else 0 |
+| `superseded_by` | `truth.tsv` only: the row that supersedes it (two corrections of one row: the first made) |
+
+The hand file and `_local/truth/*.tsv` have the first fourteen columns (any order). Free text is never required and
+never a key; programs filter on the typed columns. **Quoting:** a cell holding a tab, a newline or a double quote is
+wrapped in double quotes and its double quotes doubled (Python's `csv` minimal quoting, which `pandas.read_csv(path,
+sep="\t")` reads by default); a cell that starts with a double quote must be quoted the same way. A row with the wrong
+number of cells, an unknown label, kind, source or confidence, a time without an offset, an end before its start, a
+value outside its scale or in another unit, a repeated id, a `supersedes` naming no known id, or a chain of
+corrections that loops is left out with its reason. To read the active labels:
+
+    t = pandas.read_csv("_local/data/truth.tsv", sep="\t", parse_dates=["start", "end", "created"])
+    t = t[t.active == 1]
+
+**The vocabulary** (`scripts/truth_vocabulary.tsv`, one table: `field` `kind`, `label`, `source` or `confidence`; `id`,
+the label's `kind` and `unit`, `also` (space-separated words that name it), `description`). 36 labels: `state` asleep,
+awake, nap, in_bed, eyes_closed, headache, ill; `activity` walking, running, stairs, cycling, vehicle, eating, talking,
+meeting, focused_work, working, exercise, meditating, sound_session, resting; `event` drinking_coffee, drinking_alcohol;
+`posture` sitting, standing, lying; `device` headband_off, headband_adjusted; `rating` kss, mood, tension,
+sleep_quality, sharp; `measurement` pulse, steps; `correction` withdrawn. A new label is a new row there (never a
+renamed one: ids are stable).
+
+### `validation.tsv` and `validation.md` (the detectors against the truth, DECISIONS 826-828)
+
+`scripts/validate_detectors.py` runs after each data book build and rebuilds both whole from `truth.tsv`,
+`epochs.tsv.gz`, the sleep reports (and the `sleep.json` beside a laptop report) and the phone's work sessions. Each
+detector answers per 30 s epoch yes, no or "not read"; for each truth label it expects yes, no, mostly yes (`mostly`:
+only the share is given) or nothing. An epoch counts for a truth row when its middle lies inside the row's span (a
+moment: the epoch holding it). Only active truth rows count. Where two sources of one detector version cover the same
+minutes (a nap scored twice by hand), the first in the book's counting order is used.
+
+| Detector | Yes means | Read from | Truth: yes / mostly / no |
+|---|---|---|---|
+| `anysleep`, `yasa`, `drift_off` | asleep (N1 N2 N3 R; drift-off: "probably asleep") | every scored report's stages; the laptop's `sleep.json` `yasa`; the report's `drift_off.epochs` | asleep / nap / awake, walking, running, stairs, cycling, exercise, eating, drinking_coffee, drinking_alcohol, talking, meeting, focused_work, working, standing |
+| `talking` | 2 or more jaw bursts in 30 s (the Archive's rule) | `epochs.tsv.gz` `jaw` | talking, eating / meeting / meditating |
+| `moving` | 3 or more seconds of movement in 30 s (the Archive's rule) | `epochs.tsv.gz` `movement_s` | walking, running, stairs, exercise / - / meditating |
+| `no_signal` | quality `m` | `epochs.tsv.gz` `quality` | headband_off / - / - |
+| `eyes_closed` | eyes closed | the phone's work sessions' epochs | eyes_closed / meditating / focused_work, working, meeting, walking, running, cycling |
+
+One row per detector version and truth row it overlaps (`scope` `label`), and per detector version and label over all
+its rows (`scope` `all`):
+
+| Column | Meaning |
+|---|---|
+| `detector`, `detector_version`, `yes_means` | the detector, the version that made the answers (the sleep model, the signal pass and the rule, the work session app), what its yes means |
+| `label`, `truth_expects` | the truth label and what the detector should say during it: `yes`, `no`, `mostly`, or `value` (a measurer) |
+| `scope`, `label_id`, `periods` | `label` (one truth row, its id) or `all` (every row of that label; `periods` of them) |
+| `start`, `end`, `recording`, `truth_source`, `truth_confidence` | the truth row's (for `all`: the first start and the last end) |
+| `sources` | the detector's files the epochs came from |
+| `epochs` | epochs compared (read by the detector) |
+| `truth_min` | the truth span's minutes |
+| `yes_min`, `no_min`, `not_read_min` | the detector's answers inside the span |
+| `agreement_pct` | the share of compared epochs where it said what the truth expects (`mostly`: the share of yes) |
+| `false_pos_min`, `false_neg_min` | minutes of yes where the truth says no, of no where it says yes (0 when the truth cannot make that error; empty for `mostly`) |
+| `values`, `mean_abs_error`, `mean_error`, `unit` | a measurer (a pulse against a watch's): the detector's values averaged, the error detector minus truth, in the label's unit |
+| `validation_version` | the rules above (`validate-v1`) |
+
+`validation.md` says the same in words: a sentence per detector and label, the totals, each truth row, and what could
+not be compared (truth rows no detector covers, detectors with no truth in their time, rows left out of `truth.tsv`).
+
+The extension point (`DETECTORS`, `MEASURERS` in the script): a new detector gives its answers per epoch (`Output`; a
+detector that gives stretches, such as walking, through `from_spans`) and names the truth labels it expects yes and
+no for; a measurer (the pulse detector) gives `(time, value)` pairs and is scored against `measurement` rows of its
+label within `within_s` seconds.
+
 ### After each copy from the phone (`scripts/after_pull.py`)
 
 `scripts/phone_link.py --keep` (how the laptop tray keeps the phone linked) starts `scripts/after_pull.py` in the
 background after a copy that brought something new, at most once every 30 minutes, and once a day without one. It runs
-`pack_old.py`, `export_events.py --daily` (the `eeg_day` events utof_tracker imports) and the data book, one after the
-other; a failed step does not stop the next. Each step's exit status, time and last lines go to `_local/after-pull.log`;
+`pack_old.py`, `export_events.py --daily` (the `eeg_day` events utof_tracker imports), the data book and
+`validate_detectors.py` (the detectors against the truth labels, below), one after the other; a failed step does not
+stop the next. Each step's exit status, time and last lines go to `_local/after-pull.log`;
 `_local/after-pull.json` keeps `started`, `finished` and each step's `exit`, `seconds`, `at` and `last` line. One run at
 a time (`_local/after-pull.lock`).
 

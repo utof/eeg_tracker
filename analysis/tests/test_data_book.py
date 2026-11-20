@@ -380,3 +380,30 @@ def test_a_flat_channel_is_bad_and_a_gap_is_missing() -> None:
     sig = es.run(x, miss, h)
     assert sig.channel_quality == ["gbg", "mmm"] and sig.quality == ["d", "m"] and not sig.detectors
     assert np.isnan(sig.bands["delta"][0, 1]) and not np.isnan(sig.bands["delta"][0, 0])
+
+
+def test_two_reports_kept_by_hand_the_earlier_counts_and_a_renamed_sleep_json_is_found(local: Path) -> None:
+    """DECISIONS 829: two laptop reports kept in analyses/ for one night (a nap, then an awake evening scored for the
+    truth labels): the earlier start counts, so the 30 s rows keep every sample; a report's sleep.json kept under the
+    report's own name (`<stem>.sleep.json`) gives its stages though the report names `<night>.sleep.json`."""
+    hand = local / "analyses"
+    hand.mkdir()
+    names = [rem_check._CHAR[c] for c in STAGES]  # noqa: SLF001
+    for stem, minutes in (("2026-11-16-a-evening", 20), ("2026-11-16-b-nap", 0)):
+        rep = phone_report()
+        del rep["stages"], rep["probs"]
+        rep.update(source="laptop", sleep_json="2026-11-16.sleep.json", data_start=at(NIGHT + timedelta(minutes=minutes)))
+        (hand / f"{stem}.report.json").write_text(json.dumps(rep))
+    (hand / "2026-11-16-b-nap.sleep.json").write_text(json.dumps(dict(start=NIGHT.isoformat(), epoch_s=30, epochs=[
+        dict(t=(NIGHT + timedelta(seconds=30 * i)).isoformat(), anysleep=s, yasa="W", p=[0.2] * 5)
+        for i, s in enumerate(names)])))
+    reps = db.read_reports(local, db.Hashes(local, local / "h.json"))["2026-11-16"]
+    assert [r.rel for r in reps] == ["analyses/2026-11-16-b-nap.report.json", "analyses/2026-11-16-a-evening.report.json",
+                                     "phone/nights/2026-11-16.report.json"]
+    assert db.sleep_json_of(reps[0], local) == "analyses/2026-11-16-b-nap.sleep.json"
+    assert db.sleep_json_of(reps[1], local) is None
+    out, _ = build(local)
+    counting = [n for n in read(out / "nights.tsv") if n["night"] == "2026-11-16" and n["counts"] == "1"]
+    assert [n["report_file"] for n in counting] == ["analyses/2026-11-16-b-nap.report.json"]
+    rows = [r for r in read(out / "epochs.tsv.gz") if r["recording"] == "2026-11-16"]
+    assert rows[0]["start"] == at(NIGHT) and [r["stage"] for r in rows[: len(names)]] == names
