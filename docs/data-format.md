@@ -742,12 +742,16 @@ original's SHA-256).
 
 ## The phone over Wi-Fi (Share on Wi-Fi)
 
-With **Share on Wi-Fi** on (DECISIONS rows 220-229), the phone app answers on port 8765, to local-network clients
-that send its code (`Authorization: Bearer <code>`, `X-EEG-Token`, or `?token=`):
+With **Share on Wi-Fi** on (DECISIONS rows 220-229, 750-759), the phone app answers on port 8765 to local-network
+clients that send its code in `Authorization: Bearer <code>` (never `?token=` or another header), and to the paired
+laptop's signed requests (`X-Eeg-Time`, `X-Eeg-Nonce`, `X-Eeg-Home`, `X-Eeg-Sign`; each answer carries
+`X-Eeg-Reply`: `docs/phone-link.md` "Signed requests"). A paired phone answers only on its home Wi-Fi or one allowed
+for 12 hours, else 403 `not sharing on this Wi-Fi` (the cable always works). 401 `token missing or wrong`,
+`not paired`, `signature`, `replayed` or `clock`; 429 after ten wrong tries in a minute from one address:
 
 - The laptop recorder's live routes with the same JSON: `GET /state`, `GET /stream` (server-sent events: a hello,
-  batches `{"i", "t", "uv"}`, markers), `POST /marker` (a line `{"t", "i", "text"}` in the run's `.markers.jsonl`;
-  503 while nothing records). `i` counts samples within the run being recorded. `status` is `recording`,
+  batches `{"i", "t", "uv"}`, markers), `POST /marker` (signed by the paired laptop only, else 403: a line
+  `{"t", "i", "text"}` in the run's `.markers.jsonl`; 503 while nothing records). `i` counts samples within the run being recorded. `status` is `recording`,
   `reconnecting`, `checking contact`, `stopping`, `not recording`, or `session` (a meditation, check-in, dream
   catcher or sound session is recording). The field lists both recorders are tested against:
   `app/test/fixtures/share_api.json`. The phone's `/state` has one more key, `session` (DECISIONS 671): null, or
@@ -756,8 +760,8 @@ that send its code (`Authorization: Bearer <code>`, `X-EEG-Token`, or `?token=`)
   "lost" | "off", "on_break": bool, "hint": null | {"reason": "stretch" | "drowsy" | "eyes_closed" | "snooze", "at"},
   "age": <seconds since the headband's last data, by the phone's clock, or null>}` (the laptop tray's ring and
   headband line; `status` alone does not say which session records).
-- `POST /work` with `{"working": true}` or `{"working": false}`, optionally with `"meeting": true|false`: the paired
-  laptop's tray says a work session started or ended there, and whether it is in a meeting (`scripts/laptop_work.py`;
+- `POST /work` (signed by the paired laptop only, else 403) with `{"working": true}` or `{"working": false}`,
+  optionally with `"meeting": true|false`: the paired laptop's tray says a work session started or ended there, and whether it is in a meeting (`scripts/laptop_work.py`;
   automatic recording, DECISIONS 603; meetings 666 and 685: sent at the session's start and end and at each
   meeting's start and end inside it): 202, kept in `auto-start/laptop.json`; a word that only changes the meeting
   asks for no headband check; the phone's work session labels its meeting minutes by it. 400 for any other body; 503
@@ -768,13 +772,22 @@ that send its code (`Authorization: Bearer <code>`, `X-EEG-Token`, or `?token=`)
   being written: `"sha256": null, "growing": true`.
   `?sha=0` lists without working out missing SHA-256 values.
 - `GET /files/<path>`: the file, with HTTP `Range: bytes=<from>-<to>` (206 and `Content-Range`; 416 with
-  `Content-Range: bytes */<size>` when it starts past the end), `X-Modified-Ms`, and HEAD. Read-only.
-- `POST /ack` (DECISIONS 690-699, `docs/phone-link.md` "Acknowledged receipt"): the paired laptop says it holds checked
-  copies: `{"v": 1, "files": [{"path", "sha256"}]}` (a packed `.f32.gz` by its `original`'s SHA-256), header
-  `X-Eeg-Ack` = hex HMAC-SHA256 of `eeg-tracker ack v1|` + the body under the pairing's key; at most 256 KB.
-  200 `{"v": 1, "acked": [paths], "refused": [{"path", "why"}]}`; 403 `not paired` or `wrong proof`; 413 too big.
-  An empty `files` list asks only whether acks are taken. `GET /files` then lists each acked file with
-  `"acked": true` (the phone holds the ack and the file still holds those bytes).
+  `Content-Range: bytes */<size>` when it starts past the end; as shelf_static 1.2.0, a suffix that selects nothing,
+  `bytes=-0`, is ignored, and a number too big for an int is never a 500: a start that big is 416, an end or a
+  suffix that big reaches the end of the file), `X-Modified-Ms`, and HEAD.
+  Read-only. 409 `being re-checked` while the phone waits for the laptop's proof before deleting it (below).
+- `POST /ack` (DECISIONS 690-699, `docs/phone-link.md` "Acknowledged receipt"; signed by the paired laptop only): it
+  says it holds checked copies: `{"v": 1, "files": [{"path", "sha256"}]}` (a packed `.f32.gz` by its `original`'s
+  SHA-256); at most 256 KB. 200 `{"v": 1, "acked": [paths], "refused": [{"path", "why"}]}`; 413 too big. An empty
+  `files` list asks only whether acks are taken. `GET /files` then lists each acked file with `"acked": true`.
+- `GET /recheck` and `POST /recheck` (DECISIONS 756; signed only): the questions before the phone deletes acked raw
+  files, `{"v": 1, "asks": [{"path", "nonce", "ranges": [[start, length], ...], "bytes", "sha256"}]}`, and the
+  laptop's answers, `{"v": 1, "proofs": [{"path", "nonce", "mac"} | {"path", "nonce", "missing": true}]}` with `mac` =
+  hex HMAC-SHA256 under the key of `eeg-tracker recheck v1|<sha256 of path>|<nonce>|<bytes>|<start>+<length>,...|`
+  followed by those bytes of the laptop's own copy (a packed one unpacked) -> `{"v": 1, "proven": [paths], "failed":
+  [{"path", "why"}]}` (`different bytes`, `the laptop does not hold it`, `not on the phone as acked`, `not asked`).
+- `GET /who` (signed only): `{"app": "eeg-tracker", "v": 2, "here": "home" | "here" | "waiting" | "open"}`, how the
+  laptop finds the phone at a new address and learns whether it shares there.
 
 `scripts/pull_phone.py` mirrors these into the layout of `scripts/import_phone.py` (raw nights into
 `_local/recordings/`, the rest into `_local/phone/`). A recording's `<stamp>.header.json` travels with its `.f32` into
@@ -787,13 +800,15 @@ the phone's file ended when it was listed; readers should ignore an incomplete l
 recording that is still running. A packed `.f32.gz` is fetched whole, never in pieces, and lands as the plain `.f32`
 (unless the laptop holds that `.f32`, plain or packed: then nothing is fetched).
 
-**Pairing** (`scripts/phone_link.py`, DECISIONS rows 530-539, `docs/phone-link.md`): the laptop answers on port 8771
-`POST /link/hello` (`{"v": 1, "via": "code" | "key", "nonce"}` -> `{"v": 1, "nonce", "proof", "name"}`) and
-`POST /link/finish` (`{"v": 1, "via", "nonce", "proof", "port", "token"}` -> `{"v": 1, "name"}`, plus `"key"` after
-a pairing by code); 410 for a code that expired or was used, 404 `not paired` for a key it does not have, 403 for a
-wrong proof or a client outside the local network. `_local/phone/link.json` (mode 600): `version` 1, `laptop_key`,
-`paired` and `told` (ISO times), `phone` (`address`, `port`, `token`). On the phone the paired laptop is the field
-`laptop` (`host`, `port`, `key`, `name`, `paired_at_ms`) of the Share on Wi-Fi setting in the app's private settings.
+**Pairing** (`scripts/phone_link.py`, DECISIONS rows 530-539 and 753, `docs/phone-link.md`): while it shows a code
+the laptop answers on port 8771 `POST /link/hello` (`{"v": 2, "nonce"}` -> `{"v": 2, "nonce", "proof", "name"}`) and
+`POST /link/finish` (`{"v": 2, "nonce", "proof", "port"}` -> `{"v": 2, "name", "confirm"}`); both sides derive the
+key, which is never sent. 400 `old app` for a first-version hello, 410 for a code that expired or was used, 403 for
+a wrong proof, a second try or a client outside the local network. `_local/phone/link.json` (mode 600): `version` 2,
+`key`, `paired` (ISO time), `home` (`<router address> <router hardware address>`, or null), `phone` (`address`,
+`port`); no token. A `version` 1 file is not used (re-pair once). On the phone the paired laptop is the field
+`laptop` (`v` 2, `host`, `port`, `key`, `name`, `paired_at_ms`) of the Share on Wi-Fi setting in the app's private
+settings, beside `here_until_ms` and `here_net` (Share here for 12 hours).
 
 ### Raw files that left the phone (`<stamp>.removed.json`, `transfer/`)
 
@@ -817,8 +832,12 @@ and shared like any file:
 The phone's nights list (`recorder/nights.dart`) chains such a set by `end_ms`, lists it as removed, and the sleep
 scoring never scores that night again. Export data's manifest marks such files `removed` (the `why`) besides
 `on_phone: false`. `files/transfer/` holds `acks.json` (the laptop's acks: plain path -> `sha256`, `bytes`,
-`modified_ms`, `acked_ms`, the first time those bytes were acked) and `storage.json` (`keep_days`: category -> days
-after the ack, 0 never, missing 3); it is never exported or shared. On the laptop `_local/phone/acks.jsonl` has one
+`modified_ms`, `acked_ms`, the first time those bytes were acked), `storage.json` (`keep_days`: category -> days
+after the ack, 0 never, missing 3), `recheck.json` (`format` `eeg-tracker-recheck`: the open questions before
+deleting, plain path -> `nonce`, `ranges`, `bytes`, `sha256`, `asked_ms`), `proofs.json` (`format`
+`eeg-tracker-proofs`: plain path -> `nonce`, `ok`, `why`, `at_ms`; a file goes only with `ok` for its current
+question less than 15 minutes old) and `copied.json` (when the laptop last copied and by which way, for the Share
+sheet); it is never exported or shared. On the laptop `_local/phone/acks.jsonl` has one
 line per ack (`acked`, `phone`, `files`) and the catalog's night rows `moved_from_phone`.
 
 ## The catalog of nights (`_local/catalog/`)

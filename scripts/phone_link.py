@@ -6,30 +6,36 @@ usage: python3 scripts/phone_link.py [--dest _local] [--every 2] [--no-pages] [-
        the tray's:  --keep   (a remembered phone, quietly: DECISIONS 677)
 
 The owner's steps (app/README.md, "Share on Wi-Fi"): run this, point the phone's camera at the code it shows, tap the
-link, tap **Open EEG Tracker**, then **Connect**. Leave the window open. Next time: run it again; the phone finds
-this laptop by itself whenever Share on Wi-Fi is on.
+link, tap **Open EEG Tracker**, then **Connect**. Leave the window open. Next time: run it again (or let the tray run
+it); it finds the phone by itself whenever Share on Wi-Fi is on.
 
-How it works (DECISIONS rows 530-539; docs/phone-link.md):
-- The code holds `http://<this laptop's Wi-Fi address>:8771/p?s=<one-time code>`: any camera opens it in the browser,
-  whose page opens the app (`eegtracker://pair?...`). `--qr app` puts the app link in the code itself instead.
+How it works (DECISIONS rows 530-539, 750-759; docs/phone-link.md):
+- The code holds `http://<this laptop's Wi-Fi address>:8771/p#s=<one-time code>`: any camera opens it in the
+  browser, which never sends what follows `#`; the page's script opens the app (`eegtracker://pair?...`) with it.
+  `--qr app` puts the app link in the code itself instead.
 - On Connect the app checks that this laptop knows the one-time code (an HMAC over its random nonce, so the code is
-  never sent back), proves it knows it too, and only then sends its Share on Wi-Fi port and token. The one-time code
-  works once, for 5 minutes; a new one is shown while no phone answers (Enter shows a new one at any time).
-- The laptop takes the phone's address from the connection itself, not from what the phone thinks it has.
-- Both sides remember each other: `<dest>/phone/link.json` here (the phone's address, port and token, and a key of
-  their own; file mode 600), the app's private settings on the phone. Whenever Share on Wi-Fi starts, and every 5
-  minutes while it is on, the phone tells this laptop where it is now, by the same proof with that key, so a new
-  address is picked up by itself.
+  never sent back) and proves it knows it too; then both work out the same key from the code and the two nonces
+  (phone_auth.derive_key). Neither the code, the key nor the phone's token crosses the Wi-Fi. The one-time code works
+  once, for 5 minutes; a new one is shown while no phone answers (Enter shows a new one at any time). Only while a
+  code is shown does this listen on the Wi-Fi address; otherwise on 127.0.0.1 only.
+- The laptop takes the phone's address from the connection itself, not from what the phone thinks it has, and
+  records its home network (its router's address and hardware address: home_id).
+- Both sides remember each other: `<dest>/phone/link.json` here (version 2: the key, the phone's address and port,
+  home; no token; file mode 600), the app's private settings on the phone. Every request to the phone is signed with
+  the key, says whether this laptop is at home now, and the phone's answer must prove the key (phone_auth). At home,
+  when the phone stops answering at its address, this looks round the local /24 for it at most every 10 minutes. A
+  version 1 file (the first pairing, whose key had crossed the Wi-Fi) is not used: pair once more.
 - Then it does what scripts/pull_phone.py does (a copy every --every minutes, raw nights first; the same files and
   rules, and the acks of what this laptop holds, under the pairing's key: DECISIONS 690-699) and serves the live
   pages like scripts/page_server.py at http://localhost:8770/ (on this laptop only).
-- `--keep` is how the laptop tray runs it whenever a phone is paired (DECISIONS 677): no code unless one is asked for
-  on this laptop's page (`http://127.0.0.1:8771/?new=1`, what the tray's "Pair phone…" opens), no window; it waits
-  for a home-network address when the laptop has none (Wi-Fi off), listens on the new one when it changes, and ends
-  by itself when the pairing is forgotten (`link.json` deleted).
-- Nothing is reachable beyond this laptop and its local network: it listens on the Wi-Fi address and 127.0.0.1 only,
-  and answers local-network addresses only (10.x, 172.16-31.x, 192.168.x, 169.254.x). Plain HTTP, like Share on
-  Wi-Fi itself (home Wi-Fi only).
+- `--keep` is how the laptop tray runs it whenever a phone is paired (DECISIONS 677): no window and no code unless
+  one is asked for on this laptop (`POST http://127.0.0.1:8771/new`: the page's button, or the tray's "Pair phone…",
+  which then opens the page); while that code is shown it also listens on the laptop's Wi-Fi address (none when the
+  laptop has no home-network address). It ends by itself when the pairing is forgotten (`link.json` deleted).
+- Nothing is reachable beyond this laptop and its local network: it listens on 127.0.0.1 (and on the Wi-Fi address
+  while a code is shown), answers local-network addresses only (10.x, 172.16-31.x, 192.168.x, 169.254.x) and checks
+  `Host` and `Origin` (scripts/local_http.py). Plain HTTP, like Share on Wi-Fi itself: a paired phone shares only on
+  the home Wi-Fi or one allowed for 12 hours on the phone.
 
 Standard library only (with scripts/qr_code.py, pull_phone.py, page_server.py and import_phone.py).
 """

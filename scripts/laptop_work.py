@@ -1125,8 +1125,8 @@ def phone_view(last: PhoneLook | None, ok: PhoneLook | None, misses: int) -> Pho
 
 
 class LinkKeeper:
-    """phone_link.py --keep, run by the tray whenever a phone is paired (DECISIONS 677): the files copied and the
-    phone's announcements heard without a window. Started again when it ended (at most once a minute, then less
+    """phone_link.py --keep, run by the tray whenever a phone is paired (DECISIONS 677): the files copied and, at
+    home, the phone found again at a new address, without a window. Started again when it ended (at most once a minute, then less
     often after quick ends); none is started while another copy answers on this laptop (a "Pair phone…" window, or
     one an earlier tray left); its own copy is stopped at Forget and Quit. Its output goes to
     `<local>/phone/link-keep.log` (file names; never an address, a key or a code: DECISIONS 757)."""
@@ -1190,8 +1190,8 @@ class LinkKeeper:
 
 
 def forget_phone(local: Path) -> bool:
-    """The tray's "Forget the phone": link.json goes (phone_link.py --keep then ends by itself; the phone hears "not
-    paired" at its next announcement). True when there was one."""
+    """The tray's "Forget the phone": link.json goes (phone_link.py --keep then ends by itself; this laptop
+    signs nothing more, and the phone's Forget this laptop is the other half). True when there was one."""
     try:
         (local / "phone" / "link.json").unlink()
         return True

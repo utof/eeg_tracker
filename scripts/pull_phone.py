@@ -1,9 +1,12 @@
 """Mirror the phone app's files onto the laptop over Wi-Fi while it records: new files, and the new end of growing ones.
 
-usage: pull_phone.py http://<phone-ip>:8765 --token <t> [--every 2] [--once] [--dest _local] [--raw-only] [--no-ack]
+usage: pull_phone.py [http://<phone-ip>:8765] [--every 2] [--once] [--dest _local] [--raw-only] [--no-ack]
+       with EEG_PHONE_TOKEN=<t> (or --token <t>) for a phone not paired with this laptop
 
 On the phone: switch "Share on Wi-Fi" on (main screen, Your data; app/README.md). It shows the address and the
-token. The token may also come from the EEG_PHONE_TOKEN environment variable (keeps it out of the shell history).
+token. Give the token in EEG_PHONE_TOKEN (the command line is readable by other users' `ps`). Without an address and
+token it uses the phone paired with this laptop (`<dest>/phone/link.json`, scripts/phone_link.py): every request is
+then signed with the pairing's key and the phone's answers must prove it (DECISIONS 751); the token is not used.
 
 Every --every minutes (default 2) this asks the phone for its list (GET /files: path, bytes, SHA-256, modified time;
 the list Export data's manifest holds) and fetches what the laptop lacks, into the layout of scripts/import_phone.py:
@@ -33,10 +36,12 @@ the list Export data's manifest holds) and fetches what the laptop lacks, into t
 - Acknowledged receipt (DECISIONS 690-699): when this laptop is paired with the phone (`<dest>/phone/link.json`, made
   by scripts/phone_link.py, holds the pairing's key; `--no-ack` turns it off), it hashes each copy the phone lists as
   finished and not yet acked again from its own disk (a packed `.f32.xz` unpacked; at most 4 GB a pass, oldest first)
-  and, where it equals the phone's SHA-256 (a packed `.f32.gz`'s `original`), tells the phone so: `POST /ack` with the
-  paths and hashes and an HMAC of the body under the key. The phone keeps the acks; its Storage page deletes old raw
-  recordings from the phone only once they are acked (3 days after, by default), never anything else. This script
-  never deletes anything: `<dest>/phone/acks.jsonl` gets a line per ack. A raw set that left the phone leaves its
+  and, where it equals the phone's SHA-256 (a packed `.f32.gz`'s `original`), tells the phone so: a signed
+  `POST /ack` with the paths and hashes. The phone keeps the acks; its Storage page deletes old raw recordings from
+  the phone only once they are acked (3 days after, by default), never anything else, and only after this laptop
+  proved again that it holds them: each pass answers the phone's questions (`GET /recheck`: random byte ranges and a
+  nonce) with an HMAC over those bytes of this laptop's own copy (`POST /recheck`; DECISIONS 756), or says it does
+  not hold the file. This script never deletes anything: `<dest>/phone/acks.jsonl` gets a line per ack. A raw set that left the phone leaves its
   `<stamp>.removed.json`, fetched like any file; a record whose files this laptop does not hold is a PROBLEM.
 
 A phone that does not answer (asleep, out of Wi-Fi, sharing off) is tried again at the next pass. Exit status with

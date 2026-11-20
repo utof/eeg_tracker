@@ -1,6 +1,6 @@
 """An always-on front for the recorder's pages, so they stay up while the recorder reconnects.
 
-usage: python3 scripts/page_server.py [--port 8770] [--recorder http://127.0.0.1:8765] [--token <t>]
+usage: [EEG_PHONE_TOKEN=<t>] python3 scripts/page_server.py [--port 8770] [--recorder http://127.0.0.1:8765]
 
 On this laptop only: it listens on 127.0.0.1 (open http://localhost:8770/), answers only requests that name it in
 `Host` and carry no other site's `Origin` (scripts/local_http.py, DECISIONS 750).
@@ -15,9 +15,11 @@ night_files.py, like the recorder does, so the Sleep page works while the headba
 when the recorder has no page server at all. Standard library only.
 
 The recorder may be the phone app: switch "Share on Wi-Fi" on there (app/README.md) and pass its address and token,
-`--recorder http://<phone-ip>:8765 --token <t>`. The token goes along with every request passed on (it never
-reaches the browser), and the pages work on the phone's recording unchanged. The token may also come from the
-EEG_PHONE_TOKEN environment variable, which keeps it out of the shell history.
+`EEG_PHONE_TOKEN=<t> python3 scripts/page_server.py --recorder http://<phone-ip>:8765` (the environment keeps the
+token off the command line, where other users' `ps` can read it; `--token <t>` still works). The token goes along
+with every request passed on in the Authorization header (it never reaches the browser), and the pages work on the
+phone's recording unchanged. For the paired phone, scripts/phone_link.py serves these pages itself and signs each
+request with the pairing's key instead (DECISIONS 751); markers need that pairing (DECISIONS 755).
 """
 import argparse, http.client, json, os, sys
 from http.server import BaseHTTPRequestHandler
