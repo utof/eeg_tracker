@@ -219,7 +219,8 @@ void main() {
           Scaffold(backgroundColor: Night.surfaceHigh, body: ShareSheet(model: model, onNewToken: () {})),
           'share_sheet_$name$tag',
           scale: scale,
-          height: 1500, // the whole sheet, with "nothing is lost" (DECISIONS 614), at 130 % text too
+          height: 1800, // the whole sheet, with "nothing is lost" (DECISIONS 614), at 130 % text too (with the paired
+          // laptop's sentences of DECISIONS 678 and 690-699 it outgrew 1500)
         );
         expect(find.text('kq7m2xwp9dfh'), findsOneWidget);
         expect(find.text(address == null ? 'not found' : '192.168.1.23:8765'), findsOneWidget);
