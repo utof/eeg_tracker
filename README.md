@@ -113,6 +113,13 @@ Each line says what it does. In brackets: how well the research backs it **for t
   `_local/analyses/truth-labels.tsv` (`python3 scripts/truth.py check`) and the Archive's tags marked "This is what I
   was doing", into `_local/data/truth.tsv`; `scripts/validate_detectors.py` writes `validation.tsv` and `validation.md`
   (agreement, false minutes per detector and label). ([docs/data-format.md](docs/data-format.md), "`truth.tsv`")
+- Quick checks (the phone app; DECISIONS 860-869): soon after the app thinks you slept or walked it asks "Did you
+  walk 19:08-21:14?", several at once, Yes / No / Not sure, on a card (Night, Archive) and in a notification whose
+  buttons answer without opening the app. Until answered a detector's output is an estimate; a Yes is a truth label, a
+  No a label that it did not happen (`present` 0), Not sure nothing; never asked twice. The laptop takes the answers
+  into `truth.tsv`, lists every estimate in `estimates.tsv` and scores the detectors against a No too. The reusable
+  parts are the package `packages/shared_labels/` (vocabulary, model, queue, the question card), for utof_tracker too.
+  ([docs/data-format.md](docs/data-format.md), "The confirmation questions"; `docs/evidence/confirm-questions.md`)
 - **Every day's numbers for utof_tracker** (`python3 scripts/export_events.py --daily`): one event per day with what
   the phone's Trends page shows, for the owner's life tracker. ([docs/utof-interface.md](docs/utof-interface.md))
 - **The same scoring and detectors in Python**: the phone's rules were written and checked there first (`analysis/`).
