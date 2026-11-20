@@ -1,6 +1,7 @@
 // One recording of the Archive (DECISIONS 700-709; DESIGN.md "Archive"): what it is and who started it, its timeline of
 // activity lanes, what was found (a row per lane, opening its stretches), your tags, its files and where they are, then
-// Remove from this phone (with the laptop's checked copy) and the Danger zone. Rendered from a plain model.
+// Remove from this phone (with the laptop's checked copy) and the Danger zone. Rendered from a plain model. The
+// recording's pulse (DECISIONS 815) is the timeline's Pulse lane, with one line and its "i" under it.
 import 'package:flutter/material.dart';
 
 import '../archive/bands.dart';
@@ -8,17 +9,31 @@ import '../archive/items.dart';
 import '../archive/raw_remover.dart' show OnLaptop;
 import '../archive/tags.dart';
 import '../logs/own_text.dart';
+import '../pulse/pass.dart' show PulseResult;
 import '../recorder/nights.dart' show nightLabel;
 import 'archive_timeline.dart';
 import 'archive_view.dart' show sizeWords, lengthText, spanText;
 import 'evidence_sheet.dart' show showEvidence;
 import 'form_parts.dart' show Para;
 import 'parts.dart';
+import 'pulse_lane.dart';
 import 'theme.dart';
 
 class RecordingViewModel {
-  const RecordingViewModel({required this.item, this.timeline, this.passRunning = false, this.passWhy, this.loading = false});
+  const RecordingViewModel({
+    required this.item,
+    this.timeline,
+    this.passRunning = false,
+    this.passWhy,
+    this.loading = false,
+    this.pulse,
+    this.pulseWhy,
+  });
   final ArchiveItem item;
+
+  /// The recording's pulse file (null: none yet) and why the pulse pass could not run.
+  final PulseResult? pulse;
+  final String? pulseWhy;
 
   /// Null while its files are read.
   final Timeline? timeline;
@@ -51,6 +66,18 @@ const String howGood =
     'an estimate (the phone\'s own step counter checks it when you switch that on). Your tags are the check: tag what '
     'you did.';
 
+/// The recording's pulse in one line, or why there is none; null when nothing is known yet.
+String? pulseWords(RecordingViewModel m) {
+  final p = m.pulse;
+  if (p == null) return m.pulseWhy == null ? null : 'Pulse: not read. ${m.pulseWhy}';
+  final med = p.medianBpm;
+  final share = '${(p.coverage * 100).round()}\u00a0%';
+  return med == null
+      ? 'Pulse: not found in the signal (an experiment; it shows in some recordings only).'
+      : 'Pulse: about ${med.round()} a minute where it could be read ($share of the recording). An experiment, not yet '
+            'checked against a watch.';
+}
+
 class RecordingView extends StatelessWidget {
   const RecordingView({
     super.key,
@@ -63,9 +90,13 @@ class RecordingView extends StatelessWidget {
     this.onRemove,
     this.onDanger,
     this.onSignal,
+    this.onPulseInfo,
   });
 
   final RecordingViewModel model;
+
+  /// The pulse's "i".
+  final VoidCallback? onPulseInfo;
   final ValueChanged<Band>? onBand;
   final ValueChanged<DateTime>? onTime;
   final ValueChanged<Lane>? onLane;
@@ -113,9 +144,21 @@ class RecordingView extends StatelessWidget {
               style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.35),
             ),
             const SizedBox(height: 8),
-            TimelineView(timeline: tl, onBand: onBand, onTime: i.hasRaw ? onTime : null),
+            TimelineView(
+              timeline: tl,
+              onBand: onBand,
+              onTime: i.hasRaw ? onTime : null,
+              pulse: m.pulse == null ? null : PulseTrack(start: m.pulse!.start, bpm: m.pulse!.bpm, epochS: m.pulse!.epochS),
+            ),
             const SizedBox(height: 8),
             Text(_passLine(m), style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.35)),
+            if (pulseWords(m) case final w?)
+              Row(
+                children: [
+                  Expanded(child: Text(w, style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.35))),
+                  IconButton(onPressed: onPulseInfo, tooltip: 'About the pulse', icon: const Icon(Icons.info_outline)),
+                ],
+              ),
             if (i.hasRaw && onSignal != null) ...[
               const SizedBox(height: 8),
               Align(

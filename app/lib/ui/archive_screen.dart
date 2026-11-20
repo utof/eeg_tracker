@@ -1,7 +1,8 @@
 // The Archive page (owner, 2026-11-20; DECISIONS 700-709): opened from More. The list is read in a background isolate
 // (archive/page.dart, kept per file like the nights' list), and while the page is open the recordings without activity
 // tags get their detectors' pass, one at a time, newest first, each in a background isolate; it waits while a night, a
-// session or the sleep scoring runs. A day's menu removes what the laptop holds, or deletes the day (the Danger zone).
+// session or the sleep scoring runs; then the pulse pass the same way (pulse/pass.dart, DECISIONS 815). A day's menu
+// removes what the laptop holds, or deletes the day (the Danger zone).
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
@@ -15,6 +16,7 @@ import '../archive/page.dart';
 import '../archive/raw_remover.dart';
 import '../archive/seen.dart' as seen;
 import '../walking/pass.dart' as walking;
+import '../pulse/pass.dart' as pulses;
 import '../phone.dart';
 import '../session_keeper.dart' show PhoneSessionKeeper;
 import 'archive_sheets.dart';
@@ -58,6 +60,7 @@ class ArchiveScreen extends StatefulWidget {
     this.load,
     this.see,
     this.walk,
+    this.pulse,
     this.busy,
     this.delete,
     this.now,
@@ -71,6 +74,8 @@ class ArchiveScreen extends StatefulWidget {
 
   /// Tests: the walking pass (walking/pass.dart) without an isolate.
   final Future<walking.Walked> Function(String filesPath, String id, List<String> paths)? walk;
+  /// Tests: the pulse pass without an isolate.
+  final Future<pulses.Pulsed> Function(String filesPath, String id, List<String> paths)? pulse;
   final Future<ArchiveBusy> Function()? busy;
   final Future<DeleteOutcome> Function(String filesPath, ArchiveItem item, DeleteMode mode, List<ArchiveItem> all, ArchiveBusy busy)? delete;
   final DateTime Function()? now;
@@ -131,10 +136,11 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   }
 
   /// One recording's detectors' pass, then the next, while the page is in front and nothing records; then the walking
-  /// passes the same way (DECISIONS 800-809).
+  /// passes the same way (DECISIONS 800-809), then the pulse passes (DECISIONS 810-819).
   Future<void> _seeNext() async {
     final page = _page, files = _files;
-    if (!_open || _seeing != null || page == null || files == null || (page.toSee.isEmpty && page.toWalk.isEmpty)) return;
+    if (!_open || _seeing != null || page == null || files == null) return;
+    if (page.toSee.isEmpty && page.toWalk.isEmpty && page.toPulse.isEmpty) return;
     final b = await _busy();
     if (!mounted) return;
     final front = ModalRoute.of(context)?.isCurrent ?? true;
@@ -144,7 +150,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       _retry = Timer(const Duration(minutes: 1), () => unawaited(_seeNext()));
       return;
     }
-    if (page.toSee.isEmpty) return _walkNext(page, files);
+    if (page.toSee.isEmpty) return page.toWalk.isNotEmpty ? _walkNext(page, files) : _pulseNext(page, files);
     final id = page.toSee.first;
     final item = page.list.items.where((i) => i.id == id).firstOrNull;
     if (item == null) return;
@@ -168,6 +174,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
         why: {...p.why, if (result.why != null) id: result.why!},
         toSee: [for (final x in p.toSee) if (x != id) x],
         toWalk: p.toWalk,
+        toPulse: p.toPulse,
       );
     });
     unawaited(_seeNext());
@@ -201,6 +208,37 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
         why: p.why,
         toSee: p.toSee,
         toWalk: [for (final x in p.toWalk) if (x != id) x],
+        toPulse: p.toPulse,
+      );
+    });
+    unawaited(_seeNext());
+  }
+
+  /// One recording's pulse pass (the busy checks done), then the next.
+  Future<void> _pulseNext(ArchivePage page, String files) async {
+    final id = page.toPulse.first;
+    final item = page.list.items.where((i) => i.id == id).firstOrNull;
+    if (item == null) return;
+    setState(() {
+      _passing = true;
+      _seeing = id;
+    });
+    try {
+      await (widget.pulse ?? pulses.pulseInBackground)(files, id, [for (final f in item.rawFiles(Directory(files))) f.path]);
+    } catch (_) {
+      // tried again the next time the page opens
+    }
+    if (!mounted) return;
+    final p = _page!;
+    setState(() {
+      _seeing = null;
+      _page = ArchivePage(
+        p.list,
+        found: p.found,
+        why: p.why,
+        toSee: p.toSee,
+        toWalk: p.toWalk,
+        toPulse: [for (final x in p.toPulse) if (x != id) x],
       );
     });
     unawaited(_seeNext());

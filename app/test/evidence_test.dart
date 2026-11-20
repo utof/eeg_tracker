@@ -30,6 +30,7 @@ void main() {
       'auto-start',
       'share-on-wifi',
       'walking',
+      'pulse',
     ]) {
       final md = await rootBundle.loadString('assets/evidence/$name.md');
       expect(md, startsWith('# '), reason: name);

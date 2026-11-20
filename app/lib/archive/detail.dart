@@ -6,6 +6,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import '../pulse/pass.dart' show PulseResult, keptPulse, readPulse;
 import '../recorder/header.dart' show RecordingHeader, tryHeader;
 import '../recorder/packed.dart' show openRaw;
 import '../sleep/night_signal.dart' show Run, runsOf;
@@ -80,8 +81,21 @@ WalkResult? readWalk(Directory filesDir, String id) {
 }
 
 class RecordingDetail {
-  const RecordingDetail({required this.input, required this.rawPaths, required this.passKept, this.walkKept = true});
+  const RecordingDetail({
+    required this.input,
+    required this.rawPaths,
+    required this.passKept,
+    this.walkKept = true,
+    this.pulse,
+    this.pulseKept = true,
+  });
   final TimelineInput input;
+
+  /// The recording's pulse file as it is (pulse/pass.dart; kept also after its raw signal left the phone); null: none.
+  final PulseResult? pulse;
+
+  /// The pulse pass is kept for these files and this detector (or there is nothing to pass over).
+  final bool pulseKept;
 
   /// The `.f32` files with samples on the phone (plain names), for the pass and the raw view.
   final List<String> rawPaths;
@@ -119,6 +133,8 @@ RecordingDetail loadDetail(Directory filesDir, ArchiveItem item, List<SessionFil
     rawPaths: [for (final f in raw) f.path],
     passKept: raw.isEmpty || kept != null,
     walkKept: raw.isEmpty || keptWalk(filesDir, item.id, raw) != null,
+    pulse: readPulse(filesDir, item.id),
+    pulseKept: raw.isEmpty || keptPulse(filesDir, item.id, raw) != null,
   );
 }
 

@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import '../meditation/store.dart';
 import '../morning/store.dart';
 import '../phone.dart';
+import '../pulse/night.dart' show pulseDayNumbers;
 import '../training/control.dart' show SessionKind;
 import '../sharp/page.dart' show sharpTrendsLine;
 import '../sharp/store.dart';
@@ -100,7 +101,10 @@ typedef TrendsPage = ({
 /// work session, and the screen's thread froze while it did (DECISIONS 586, 620-629).
 TrendsPage loadTrendsPage(String recordingsDir, DateTime now) {
   final inputs = readTrendInputs(recordingsDir);
-  final dayNumbers = readOwnDayNumbers(recordingsDir);
+  final dayNumbers = {
+    ...readOwnDayNumbers(recordingsDir),
+    'pulse': pulseDayNumbers(Directory(recordingsDir).parent, inputs.nights), // DECISIONS 817
+  };
   final walk = readWalkDays(recordingsDir, notMine: someoneElseSpans(recordingsDir));
   final m = buildTrends(
     inputs,

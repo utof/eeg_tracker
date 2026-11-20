@@ -55,6 +55,10 @@ Each line says what it does. In brackets: how well the research backs it **for t
   end, marked "tested" apart from "seen together". (some)
 - **"Was this you?"**: a soft question when someone else seems to have worn the headband, so a borrowed headband
   does not spoil your trends. A weak check, tested only on made-up people. (weak)
+- **Pulse (experiment)**: after a recording, the pulse your heartbeat leaves in the headband's signal (any
+  electrodes), as a red Pulse lane under the sleep report's chart and the Archive's timeline where it could be read,
+  "Pulse while asleep: about X/min" in the sleep report and in Trends; `scripts/compare_pulse.py` checks it against a
+  watch's export. (weak)
 - **Hands-free controls**: a double jaw clench or a look left then right as a switch during sessions. Off by
   default. (some)
 - **Walking and steps**: after a recording, walking, its pace, running, stops and estimated steps from the rhythm your
