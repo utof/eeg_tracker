@@ -1,0 +1,5 @@
+{"v":1,"span":"2026-11-21-110200-1","kind":"juggling","start":"2026-11-21T11:05:00+03:00","end":"2026-11-21T11:20:00+03:00","source":"owner_button","ended_by":"owner","made":"2026-11-21T11:20:00+03:00"}
+{"v":2,"span":"2026-11-21-110200-2","kind":"work","start":"2026-11-21T12:00:00+03:00","end":null,"source":"owner_button","made":"2026-11-21T12:00:00+03:00"}
+[1,2,3]
+{"v":1,"span":"2026-11-21-110200-3","kind":"work","source":"owner_button","made":"2026-11-21T12:00:00+03:00"}
+not json at all

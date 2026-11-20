@@ -1,0 +1,52 @@
+{
+ "spans": [
+  {
+   "span": "2026-11-21-110200-1",
+   "kind": "work",
+   "label": "working",
+   "start_unix": 1795248300,
+   "end_unix": 1795267800,
+   "source": "owner_button",
+   "started_recording": false,
+   "ended_by": "owner",
+   "session": "work-sessions/2026-11-21-110500.work.json",
+   "paused": [
+    [
+     1795255200,
+     1795257300
+    ]
+   ],
+   "estimate": null
+  },
+  {
+   "span": "2026-11-21-110200-2",
+   "kind": "nap",
+   "label": "in_bed",
+   "start_unix": 1795255200,
+   "end_unix": 1795257300,
+   "source": "owner_button",
+   "started_recording": false,
+   "ended_by": "activity",
+   "session": null,
+   "paused": [],
+   "estimate": null
+  },
+  {
+   "span": "2026-11-21-110200-3",
+   "kind": "sleep",
+   "label": "in_bed",
+   "start_unix": 1795294200,
+   "end_unix": 1795320600,
+   "source": "owner_confirmed",
+   "started_recording": false,
+   "ended_by": "owner",
+   "session": null,
+   "paused": [],
+   "estimate": "est:0123456789abcdef"
+  }
+ ],
+ "reviewed": null,
+ "sets": [],
+ "hides": [],
+ "skipped": 0
+}

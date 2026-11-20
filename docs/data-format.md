@@ -113,6 +113,7 @@ says what its `.f32` holds, so a record can carry any number of channels (DECISI
 | `reference`, `ground` | `{"name", "where", "site"}` (`where` in words, `site` a 10-10 name or `null`), or `null` when not known. BrainBit: `Ref`, `forehead`, `Fpz`; the DIY board: `Ref` on an earlobe (`A1`) and `Bias` on the other (`A2`), a plan |
 | `made_by` | the program that wrote it (optional) |
 | `session` | what kind of session wrote the file set when it is not sleep (optional): `work` for the phone's work session's raw EEG (DECISIONS 683), never part of a night; absent (every night, nap and file before it), `night` or `nap`: sleep |
+| `recording` | the id of the recording the file set belongs to (optional, phone, since Record first, DECISIONS 882): the stem of that recording's first file set (`2026-11-21-110200`). A set with it belongs to that recording and to no other: the Archive's 15-minute rule and the nights' 3-hour rule apply only to sets without it; what was sleep in it is said by its spans (`spans/`) |
 
 Required: `format`, `version`, `channels`, `sample_rate`, `unit`, `record`, `counter`; a missing `reference` or `ground`
 reads as `null`. A `site` is text of up to 16 characters (the writers fill it only for 10-10 names and A1 A2 M1 M2); an
@@ -793,6 +794,56 @@ Deleting by hand writes the same record as moving to the laptop: `<stamp>.remove
 `night`, `end_ms`, `files`: `name`, `bytes`, `sha256` or `null`, `phone_name`, `phone_bytes`), then removes the set's
 samples and index; its `.log`, `.header.json` and `.markers.jsonl` stay. "Everything" (the Danger zone) removes every
 file of the recording, its record included, the session files, the report and the tags.
+
+### What you were doing in a recording (`spans/`)
+
+Record first (DECISIONS 880-899, spec `docs/specs/2026-11-21-record-first-design.md`): one **recording** is everything
+between Record (or Sleep) and Stop, one or more file sets whose headers carry its id (`recording`, the first set's
+stem). What you did in it is kept as **spans**: `spans/<recording id>.spans.jsonl`, one JSON object per line, add-only.
+A span is written when it opens and again whenever it changes: **the last line with a given `span` id is the span**;
+spans are listed in the order they first appear. A line is on storage before the tap that made it is answered. A line
+that is not a JSON object, has a `v` other than 1, or is neither a span nor a `reviewed` line is skipped (a kill in
+the middle of a write leaves a half last line: skipped too).
+
+| Field | Content |
+|---|---|
+| `v` | 1 |
+| `span` | `<recording id>-<n>`, n from 1 in the recording |
+| `kind` | `sleep`, `nap`, `work`, `meditate`, `alpha_theta`, `sound`, `dream_catcher`, `check_in`, `calibration`; a reader keeps a kind it does not know |
+| `label` | the shared vocabulary's label for it (`scripts/truth_vocabulary.tsv`): `sleep`, `nap` -> `in_bed`; `work` -> `working`; `meditate` -> `meditating`; `alpha_theta` -> `neurofeedback`; `sound` -> `sound_session`; `dream_catcher` -> `resting`; absent for the others |
+| `start`, `end` | local ISO time with the UTC offset; `end` is `null` while the span is open |
+| `source` | `owner_button` (you pressed it), `owner_confirmed` (the app found it, you said yes), `auto_start` (the headband watcher) |
+| `started_recording` | `true` when this span's button also started the recording |
+| `ended_by` | `owner`, `activity` (a timed session's end), `other_activity`, `recording_stopped`, `headband_off`, `phone_restart`; absent while open |
+| `session` | the activity's own file, relative to `files/`, or absent |
+| `paused` | `[start, end]` pairs: the span stayed open while its activity was paused (`end` `null` while paused) |
+| `estimate` | the confirm-questions estimate this span confirms (`owner_confirmed` only) |
+| `made` | when this line was written |
+
+A span needs `span`, `kind`, a `start` that parses and a `source`; `end` must be `null`, absent or a time.
+
+**Sleep spans** are those of kind `sleep` or `nap`: sleep reports come only from them (DECISIONS 886). A recording
+with `recording` in its headers and no sleep span is never a night.
+
+**Old recordings** (no `recording` in the header, no spans file) are never rewritten: they read as before, one night
+per chain of file sets. The Archive's **Not sleep** writes one line for such a recording:
+
+```json
+{"v": 1, "reviewed": "no_sleep", "sets": ["2026-11-20-221706"], "hides": ["2026-11-20"], "made": "2026-11-21T09:00:00+03:00"}
+```
+
+`sets`: the file sets (stems) that are no sleep, so they join no night; `hides`: the nights (evening dates) whose
+report is hidden when no other recording is left in them (the phone moves it to `nights/not-sleep/`, never deletes it;
+the laptop leaves that night out). A later line `{"v": 1, "reviewed": "sleep", ...}` takes it back. The last
+`reviewed` line counts.
+
+- **Writers**: the recorder while the recording runs, the screen once it has stopped (`app/lib/spans/span_log.dart`
+  `SpanLog`, which refuses the screen while the recorder's saved state says the recording is active). Each span start
+  and end is also one line in the open file set's `.log` and `.markers.jsonl` (`span: sleep start`).
+- **Readers**: `app/lib/spans/span.dart` (`readSpans`) and its twin `scripts/spans.py` (`read`), both checked against
+  the golden files `tests/contract/spans/*.spans.jsonl` and their `*.expected.json` (times as unix seconds).
+- **To the laptop**: `spans/` is a folder of `files/`, so Export data and Share on Wi-Fi take it as it is
+  (`_local/phone/spans/`).
 
 ### Walking (`walking/`, `steps/`)
 
