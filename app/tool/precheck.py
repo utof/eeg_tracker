@@ -3,7 +3,7 @@
 "Pre-install check"; DECISIONS 733).
 
     python3 app/tool/precheck.py --old LAST_ON_PHONE.apk --new CANDIDATE.apk \\
-        [--replay REPLAY_BUILD.apk] [--nights DIR] [--reports DIR] [--out DIR] [--adb-port N] [--keep]
+        [--replay REPLAY_BUILD.apk] [--nights DIR] [--reports DIR] [--out DIR] [--adb-port N] [--adb-connect HOST:PORT] [--keep]
 
 It makes a new AVD under /var/tmp with 2 cores (the phone's arm64 APK runs there through Android's ARM translation,
 which crashes ONNX Runtime with 4 cores), boots it headless, and checks what reached the owner's phone on 2026-11-19/20:
@@ -26,6 +26,10 @@ Prints a plain PASS / FAIL / SKIP list; exit status 1 when anything failed. Abou
 Only its own things: a private adb server on port 5041 (--adb-port; ADB_LIBUSB=0 ADB_USB=0) and the emulator's own serial on
 every adb call, never another device or the default adb server; the emulator and that server are stopped by PID
 and the AVD deleted at the end (--keep leaves the AVD and the seed copies). Run it in the heavy build slot.
+
+--adb-connect HOST:PORT: do not make or start an emulator here; use the one already reachable at that adb address (a
+tunnel to an emulator on another machine, started and stopped by whoever owns it: a fresh one, with 2 cores and the
+Europe/Moscow time zone as above). The private adb server connects to it and is stopped at the end; the emulator is not.
 """
 
 from __future__ import annotations
@@ -136,15 +140,18 @@ def free_port_pair() -> int:
 
 
 class Emulator:
-    def __init__(self, work: Path, keep: bool):
+    def __init__(self, work: Path, keep: bool, connect: str | None = None):
         self.work = work
         self.keep = keep
+        self.connect = connect  # HOST:PORT of an emulator somebody else runs (--adb-connect)
         self.avd_home = work / "avd"
         self.name = "eeg_precheck"
         self.proc: subprocess.Popen[bytes] | None = None
         self.server: subprocess.Popen[bytes] | None = None
 
     def create(self) -> None:
+        if self.connect:
+            return
         self.avd_home.mkdir(parents=True, exist_ok=True)
         env = {**ENV, "ANDROID_AVD_HOME": str(self.avd_home)}
         subprocess.run(
@@ -172,6 +179,9 @@ class Emulator:
             if time.time() - t0 > 30 or self.server.poll() is not None:
                 raise RuntimeError(f"our adb server did not start on port {ADB_PORT} (see adb-server.log)")
             time.sleep(1)
+        if self.connect:
+            self._attach()
+            return
         port = free_port_pair()
         SERIAL = f"emulator-{port}"
         env = {**ENV, "ANDROID_AVD_HOME": str(self.avd_home)}
@@ -211,7 +221,40 @@ class Emulator:
         sh("logcat -G 16M; logcat -c", check=False)
         say(f"booted in {time.time() - t0:.0f} s")
 
+    def _attach(self) -> None:
+        """The emulator at [connect]: connect our server to it, wait for the boot, root, the same settings as a local one."""
+        global SERIAL
+        SERIAL = str(self.connect)
+        t0 = time.time()
+        while run([ADB, *SERVER, "-s", SERIAL, "get-state"], timeout=20, check=False).stdout.strip() != "device":
+            run([ADB, *SERVER, "connect", SERIAL], timeout=30, check=False)
+            if time.time() - t0 > 120:
+                raise RuntimeError(f"adb could not connect to {SERIAL}")
+            time.sleep(2)
+        say(f"emulator {SERIAL} (somebody else's, over adb TCP)")
+        run([ADB, *SERVER, "-s", SERIAL, "wait-for-device"], timeout=600)
+        while sh("getprop sys.boot_completed", check=False).strip() != "1":
+            if time.time() - t0 > 600:
+                raise RuntimeError("the emulator did not boot")
+            time.sleep(3)
+        adb("root", check=False)  # adbd restarts as root: the TCP link goes with it
+        time.sleep(3)
+        for _ in range(30):
+            run([ADB, *SERVER, "connect", SERIAL], timeout=30, check=False)
+            if run([ADB, *SERVER, "-s", SERIAL, "shell", "echo up"], timeout=30, check=False).stdout.strip() == "up":
+                break
+            time.sleep(2)
+        while sh("getprop sys.boot_completed", check=False).strip() != "1":
+            time.sleep(2)
+        for k in ("window_animation_scale", "transition_animation_scale", "animator_duration_scale"):
+            sh(f"settings put global {k} 0", check=False)
+        sh("svc power stayon true; input keyevent KEYCODE_WAKEUP; wm dismiss-keyguard", check=False)
+        sh("logcat -G 16M; logcat -c", check=False)
+        say(f"attached in {time.time() - t0:.0f} s")
+
     def stop(self) -> None:
+        if self.connect:
+            run([ADB, *SERVER, "disconnect", str(self.connect)], timeout=15, check=False)
         if self.proc is not None and self.proc.poll() is None:
             if SERIAL and self.server is not None and self.server.poll() is None:
                 run([ADB, *SERVER, "-s", SERIAL, "emu", "kill"], timeout=30, check=False)
@@ -229,7 +272,7 @@ class Emulator:
                 self.server.wait(timeout=15)
             except subprocess.TimeoutExpired:
                 self.server.kill()
-        if not self.keep:
+        if not self.keep and not self.connect:
             shutil.rmtree(self.avd_home, ignore_errors=True)
 
 
@@ -756,6 +799,8 @@ def main() -> int:
     p.add_argument("--only", default="abcd", help="which checks, e.g. 'bd'")
     p.add_argument("--keep", action="store_true", help="keep the AVD and the copies (the emulator still stops)")
     p.add_argument("--adb-port", type=int, default=ADB_PORT, help="our private adb server's port (default 5041)")
+    p.add_argument("--adb-connect", metavar="HOST:PORT", help="use the emulator already reachable at this adb address "
+                   "(a tunnel to another machine's) instead of making one here")
     a = p.parse_args()
     use_adb_port(a.adb_port)
     for apk in (a.old, a.new, *([a.replay] if a.replay else [])):
@@ -771,7 +816,7 @@ def main() -> int:
     t0 = time.time()
     started_ms = int(t0 * 1000)
     results: list[Result] = []
-    em = Emulator(work, a.keep)
+    em = Emulator(work, a.keep, a.adb_connect)
     talking_job = None
     if "c" in a.only and a.replay and not list((stage / "scenarios" / "talking-work").glob("*.f32")):
         stage.mkdir(parents=True, exist_ok=True)  # made while the emulator boots

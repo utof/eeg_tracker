@@ -250,6 +250,10 @@ AVD, the emulator and its adb server at the end. It prints PASS / FAIL / SKIP:
 
 Logs and details go to `/var/tmp/eeg-precheck-<time>/out/` (`--out`). About 12 minutes, 30 with (c) on the 2-core AVD.
 
+`--adb-connect HOST:PORT` skips the AVD and the emulator here and uses one that is already reachable at that adb address (a
+tunnel to an emulator on another machine, DECISIONS 870); the private adb server connects to it and is stopped at the end,
+the emulator is left to whoever started it. It must be a fresh 2-core API 36 x86_64 one in the Europe/Moscow time zone.
+
 ## Replay headband (test and replay builds only)
 
 `lib/headband/replay.dart` plays a recording in the app's own format (`.f32` plain or packed, `.idx`, the header) into
