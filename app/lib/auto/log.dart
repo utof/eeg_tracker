@@ -13,8 +13,13 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../logs/log.dart' show AppLog;
+import '../logs/metrics.dart' show Metrics;
+import '../logs/usage.dart' show Usage;
 import '../sleep/report.dart' show isoLocal;
 import 'store.dart';
+
+final AppLog _appLog = AppLog('auto');
 
 class AutoLog {
   AutoLog(this.dir);
@@ -22,8 +27,10 @@ class AutoLog {
 
   File get _file => File('${dir.path}/log.jsonl');
 
-  /// Never throws: a line that cannot be written (storage full) is lost, the watch goes on.
+  /// Never throws: a line that cannot be written (storage full) is lost, the watch goes on. Also in the app log, and
+  /// a question and its answer in the usage log (lib/logs, DECISIONS 718).
   void add(DateTime at, String event, [Map<String, Object?> fields = const {}]) {
+    _mirror(event, fields);
     try {
       dir.createSync(recursive: true);
       _file.writeAsStringSync(
@@ -31,6 +38,28 @@ class AutoLog {
         mode: FileMode.append,
         flush: true,
       );
+    } catch (_) {}
+  }
+
+  static void _mirror(String event, Map<String, Object?> fields) {
+    try {
+      _appLog.info(event, fields);
+      final kind = fields['kind'] is String ? fields['kind']! as String : null;
+      if (event == 'question') Usage.hint('auto-start', 'shown', data: {'guess': ?kind});
+      if (event == 'answer') {
+        final a = '${fields['answer']}';
+        final s = fields['after_s'];
+        Usage.hint(
+          'auto-start',
+          a == 'none' ? 'ignored' : 'answered',
+          answer: a == 'none' ? null : a,
+          after: s is num ? Duration(milliseconds: (s * 1000).round()) : null,
+          data: {'guess': ?kind},
+        );
+      }
+      if (event == 'check' && fields['ohms'] is Map) {
+        Metrics.write({'kind': 'contact', 'source': 'auto', 'ohms': fields['ohms']});
+      }
     } catch (_) {}
   }
 

@@ -9,6 +9,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../dream/band_link.dart';
+import '../logs/metrics.dart' show Metrics;
 import '../recorder/chunk_writer.dart' show Sample;
 import '../recorder/headband.dart' show HeadbandFinder;
 import '../recorder/status.dart' show RecorderStatus;
@@ -289,6 +290,7 @@ class SignalFeed extends ChangeNotifier {
         final read = await link.contact();
         if (run != _run) return;
         ohms = read;
+        if (read.isNotEmpty) Metrics.write({'kind': 'contact', 'source': 'signal', 'ohms': read}); // contact over the day
         ohmsAt = phone.clock();
         ohmsFrom = read.isEmpty ? ContactFrom.none : ContactFrom.now;
       }
@@ -365,6 +367,7 @@ class SignalFeed extends ChangeNotifier {
       if (run != _run) return;
       if (read != null) {
         ohms = read;
+        if (read.isNotEmpty) Metrics.write({'kind': 'contact', 'source': 'signal', 'ohms': read});
         ohmsAt = phone.clock();
         ohmsFrom = read.isEmpty ? ContactFrom.none : ContactFrom.now;
       }

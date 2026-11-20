@@ -27,7 +27,11 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
+import '../logs/activity.dart' show Activity;
+import '../logs/log.dart' show AppLog;
 import 'nights.dart' show stemTime;
+
+final AppLog _appLog = AppLog('packing');
 
 const String rawSuffix = '.f32';
 const String packedSuffix = '.gz';
@@ -606,10 +610,15 @@ Future<PackRun> packOldRecordings(
   DateTime Function() clock = DateTime.now,
 }) async {
   final run = PackRun();
+  var marked = false;
   try {
     if (await busy()) return run;
     removePackingLeftovers(filesDir);
     final todo = packCandidates(filesDir, clock());
+    if (todo.isNotEmpty) {
+      Activity.begin('packing'); // the battery samples (lib/logs, DECISIONS 715)
+      marked = true;
+    }
     for (var k = 0; k < todo.length; k++) {
       if (await busy()) {
         run.left = todo.length - k;
@@ -624,6 +633,15 @@ Future<PackRun> packOldRecordings(
     if (run.packed.isNotEmpty || run.failed.isNotEmpty) _log(filesDir, run, clock());
   } on Object catch (e) {
     run.failed.add((File(filesDir.path), '$e'));
+  } finally {
+    if (marked) {
+      Activity.end('packing');
+      _appLog.info('packed ${run.packed.length} recordings, ${run.failed.length} failed, ${run.left} left', {
+        'bytes': run.bytes,
+        'packed_bytes': run.packedBytes,
+        if (run.failed.isNotEmpty) 'problems': [for (final (_, why) in run.failed) why],
+      });
+    }
   }
   return run;
 }

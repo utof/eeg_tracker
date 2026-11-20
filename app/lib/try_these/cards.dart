@@ -36,6 +36,7 @@ enum TryOpen {
   study,
   memory,
   ownBle,
+  battery,
 }
 
 /// The button's words for each screen.
@@ -60,6 +61,7 @@ const Map<TryOpen, String> tryOpenLabels = {
   TryOpen.study: 'Open Study reminders',
   TryOpen.memory: 'Open Memory cues',
   TryOpen.ownBle: 'Open Headband connection',
+  TryOpen.battery: 'Open Battery',
 };
 
 /// Where a card comes from in app/README.md: a `## ` section (its title without the part in brackets) and, when it
@@ -292,6 +294,26 @@ const List<TryCard> tryCards = [
     ],
     opens: TryOpen.nightScreen,
     readme: [TryRef('Share on Wi-Fi', 'connect the laptop by one scan, then a night')],
+  ),
+  TryCard(
+    id: 'logs',
+    group: TryGroup.anotherNight,
+    title: 'Logs, usage and battery',
+    what: 'Three pages under More: what the app did, how you use it, and what costs the phone\'s and the headband\'s battery.',
+    takes: '5 minutes, after a day and a night of normal use',
+    steps: [
+      'Use the app as usual for a day and a night; nothing to switch on.',
+      'Open More, Battery: read What costs the most and the headband\'s line for the night.',
+      'Open How I use the app: look at Screens, Most tapped and Not opened.',
+      'Open App log and tap Problems; if anything is there, tap Share the log and send it to the assistant.',
+    ],
+    tell: [
+      'Which feature costs the most, and does that match how the battery feels?',
+      'Anything in Not opened you want gone, or something you open often that should be easier to reach?',
+      'Any screen marked stutters, and any error in the log?',
+    ],
+    opens: TryOpen.battery,
+    readme: [TryRef('Logs, usage and battery', 'a day and a night with the records on, then a look')],
   ),
   TryCard(
     id: 'auto-start',

@@ -29,6 +29,8 @@ import 'dart:math';
 import '../alarm/live_alarm.dart';
 import '../alarm/rule.dart';
 import '../cues/night_cues.dart';
+import '../logs/log.dart' show AppLog;
+import '../logs/metrics.dart' show Metrics;
 import '../sleep/night_scorer.dart';
 import 'battery.dart';
 import 'chunk_writer.dart';
@@ -128,6 +130,9 @@ class SdkStuck implements Exception {
 }
 
 enum _End { stopped, lost, stalled, failed, stuck }
+
+/// The recorder's lines in the app log (lib/logs, DECISIONS 718): drops, reconnects and their times, the notes.
+final AppLog _log = AppLog('recorder');
 
 class NightRecorder {
   NightRecorder({
@@ -600,6 +605,7 @@ class NightRecorder {
       final other = band is OtherBoard ? band as OtherBoard : null;
       final battery = other == null ? await _battery(band) : null;
       final rssi = band.rssi;
+      _log.info('connected ${band.name}', {'battery': battery, 'rssi': rssi, 'run': _night.runs});
       w.log(
         other == null
             ? 'connected ${band.name} ${band.address} serial ${band.serial} battery $battery% '
@@ -672,6 +678,12 @@ class NightRecorder {
       'reconnected (${v.how}, try ${v.tryNo}) after a drop (${d.why}); previous run ${d.stem ?? 'unknown'}, '
       'last data ${last == null ? 'unknown' : logTime(DateTime.fromMillisecondsSinceEpoch(last))}$gap',
     );
+    _log.info('headband back after a drop (${d.why})', {
+      'how': v.how,
+      'try': v.tryNo,
+      'why': d.why,
+      if (last != null) 'reconnect_ms': _now().millisecondsSinceEpoch - last,
+    });
   }
 
   void _onRows(ChunkWriter w, List<Sample> rows) {
@@ -1175,6 +1187,7 @@ class NightRecorder {
       w.log('contact check: no resistance data arrived');
     } else {
       w.log('contact ohms ${ohmsLine(ohms)}');
+      Metrics.write({'kind': 'contact', 'source': 'night', 'ohms': ohms});
       _set(_status.copyWith(contactOhms: ohms));
     }
     await _save();
@@ -1335,6 +1348,7 @@ class NightRecorder {
       'drop ($why); last data ${last == null ? 'none' : logTime(DateTime.fromMillisecondsSinceEpoch(last))}; reconnecting',
     );
     _drop = (lastDataMs: last, stem: w.stem, why: why);
+    _log.warn('headband link dropped: $why', data: {'stem': w.stem, 'last_data_ms': last});
   }
 
   /// A line for the night's log from outside the loop (Share on Wi-Fi going on or off): into the open run's
@@ -1344,6 +1358,7 @@ class NightRecorder {
   /// A line for the night's log between runs, with its own time: into the last closed run's `.log`, or,
   /// before tonight has one, kept for the next run's `.log`.
   void _note(String message) {
+    _log.info(message);
     final t = _now();
     final log = _lastLog;
     if (log != null) {

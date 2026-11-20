@@ -8,6 +8,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../logs/activity.dart' show Activity;
+import '../logs/log.dart' show AppLog;
 import '../sleep/report.dart';
 import '../sleep/scorer.dart';
 
@@ -16,6 +18,8 @@ bool nightScoringBusy = false;
 
 /// How long after the app opens (or comes back) a go starts.
 const Duration scoringSettle = Duration(seconds: 45);
+
+final AppLog _log = AppLog('scoring');
 
 class SleepScoring extends ChangeNotifier {
   SleepScoring(
@@ -110,6 +114,7 @@ class SleepScoring extends ChangeNotifier {
 
   Future<void> _all() async {
     nightScoringBusy = true;
+    Activity.begin('scoring'); // the battery samples (lib/logs, DECISIONS 715)
     try {
       _reports = null;
       blocked = scorer.blocked();
@@ -118,8 +123,11 @@ class SleepScoring extends ChangeNotifier {
         night = n.name;
         step = 'Starting';
         notifyListeners();
+        final took = Stopwatch()..start();
         try {
           await scorer.score(n, progress: _say, between: _between);
+          // a pause or a failure goes to the log through debugPrint below
+          _log.info('scored ${n.name} in ${took.elapsed.inSeconds} s', {'night': n.name, 'ms': took.elapsedMilliseconds});
           _reports = null;
         } on ScoringPaused catch (e) {
           debugPrint('sleep scoring of ${n.name}: $e'); // its progress is kept: it goes on from there next time
@@ -131,6 +139,7 @@ class SleepScoring extends ChangeNotifier {
     } catch (e) {
       debugPrint('sleep scoring stopped: $e');
     } finally {
+      Activity.end('scoring');
       night = null;
       step = null;
       try {

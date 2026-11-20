@@ -4,6 +4,8 @@
 // first tab and the app opens on it, with Start night pinned as before; system Back on another tab returns to Night.
 import 'package:flutter/material.dart';
 
+import '../logs/usage.dart' show Usage;
+
 enum HomeTab {
   night('Night', 'EEG Tracker', Icons.bedtime_outlined, Icons.bedtime),
   sessions('Sessions', 'Sessions', Icons.self_improvement, Icons.self_improvement),
@@ -64,6 +66,7 @@ class HomeTabsState extends State<HomeTabs> {
   void go(HomeTab t) {
     if (t == _tab) return;
     setState(() => _tab = t);
+    Usage.tab(t.label, current: ModalRoute.isCurrentOf(context) ?? true); // the usage log (DECISIONS 713)
     widget.onTab?.call(t);
   }
 

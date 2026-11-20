@@ -12,6 +12,7 @@ import 'night_strip.dart';
 import 'own_ble_screen.dart' show OwnBleEntry;
 import 'parts.dart';
 import 'phone_checks.dart';
+import 'records_parts.dart' show RecordsLinks;
 import 'share_sheet.dart';
 import 'sleep_report_view.dart' show durationParts, nightTitle;
 import 'sleep_so_far_view.dart' show SoFarSection;
@@ -322,6 +323,8 @@ class NightView extends StatelessWidget {
             _Storage(onStorage: onStorage),
           ],
           if (tab == HomeTab.more) ...[const SectionHeading('Settings'), _More(onSettings: onSettings, onLicences: onLicences)],
+          // the app's log, how it is used and what costs battery (lib/logs, DECISIONS 712-716)
+          if (tab == HomeTab.more) ...[const SectionHeading('How the app runs'), const RecordsLinks()],
           const TabStart(HomeTab.sessions),
           if (tab == HomeTab.sessions && m.running) _Busy(),
           // The headband connects to one thing at a time, so meditation waits for the night to end.

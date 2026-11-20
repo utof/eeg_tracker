@@ -24,6 +24,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.Process
 import android.os.StatFs
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import com.pravera.flutter_foreground_task.service.RestartReceiver
@@ -100,6 +101,7 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
                 "recordingsDir" -> result.success(recordingsDir())
                 "snapshot" -> result.success(snapshot())
                 "battery" -> result.success(battery())
+                "processAge" -> result.success(processAgeMs())
                 "openSettings" -> result.success(openSettings(call.argument<String>("page") ?: "appDetails"))
                 "exitReasons" -> result.success(exitReasons(call.argument<Number>("sinceMs")?.toLong() ?: 0L))
                 "wifiLock" -> {
@@ -355,10 +357,12 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
     }
 
     /**
-     * The phone battery for the night's `.log`, read once a minute by the recorder. Two cheap reads of
-     * BatteryManager plus the sticky ACTION_BATTERY_CHANGED intent (no receiver is registered, so nothing
-     * is held or woken). A property the phone does not support comes back as Integer.MIN_VALUE and is sent
-     * as null. CURRENT_NOW has a different sign on different phones; the app only logs it.
+     * The phone battery for the night's `.log`, read once a minute by the recorder, and for the battery samples of
+     * the Battery page (lib/logs/metrics.dart, DECISIONS 715). Two cheap reads of BatteryManager plus the sticky
+     * ACTION_BATTERY_CHANGED intent (no receiver is registered, so nothing is held or woken). A property the phone
+     * does not support comes back as Integer.MIN_VALUE and is sent as null. CURRENT_NOW has a different sign on
+     * different phones; the app only logs it. Also the screen (interactive or not), Doze, the voltage and this
+     * process's CPU time in ms (Process.getElapsedCpuTime: every thread of every engine of the app).
      */
     private fun battery(): Map<String, Any?> {
         val bm = context.getSystemService(BatteryManager::class.java)
@@ -379,14 +383,23 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
             }
             val tenths = sticky.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
             if (tenths != Int.MIN_VALUE) m["tempC"] = tenths / 10.0
+            val mv = sticky.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1)
+            if (mv > 0) m["voltageMv"] = mv
             if (m["percent"] == null) {
                 val level = sticky.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
                 val scale = sticky.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
                 if (level >= 0 && scale > 0) m["percent"] = level * 100 / scale
             }
         }
+        val pm = context.getSystemService(PowerManager::class.java)
+        m["screenOn"] = pm?.isInteractive
+        m["idle"] = pm?.isDeviceIdleMode
+        m["cpuMs"] = Process.getElapsedCpuTime()
         return m
     }
+
+    /** How long ago Android started this process, in ms (the app's start-up time, lib/logs/engine.dart). */
+    private fun processAgeMs(): Long = SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime()
 
     private fun notificationsEnabled(): Boolean {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return true

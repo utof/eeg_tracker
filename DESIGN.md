@@ -156,6 +156,21 @@ slider per kind (3 days, 1 week, 1 month, Never; the chosen word in ink); the Da
 `problem` red, its heading in red, its own rows and an outlined red button that asks twice. **Clear selected · size**
 is pinned, filled, 64 dp.
 
+The three record pages under More ("How the app runs": a muted sentence, then App log, How I use the app and Battery
+as log rows with a title, a muted line and a chevron; DECISIONS 712-716) are reading pages without a pinned action,
+except the App log's Copy (outlined) and Share the log (filled) at 2 : 3. App log: the count of lines, errors and
+warnings at titleLarge, a muted sentence of what is kept, the app's choice row (All / Problems / Errors), a filter chip
+per part of the app with its count (the Unusual card's chips), then the lines under day rules: time in tabular
+bodyMedium ink-muted, the level as a word (warning `caution`, error `problem`, info ink-muted), the part, the message
+in bodyLarge; tapped, its facts and stack as selectable muted text. How I use the app: the switch row (title, what it
+records in a muted sentence), the period as the choice row (Today / 7 days / 30 days), then label-left / value-right
+sections (Time in the app, Screens with a consumer bar each, Features that ran, Most tapped, Not opened as one muted
+sentence, Scrolling and swiping, Hints and questions, Smoothness with "stutters" as an amber word, Start-up, Storage),
+Delete as a text button at the end. Battery: the measured hours at titleLarge, the honest note (the whole phone is in
+every number), the Measure battery switch row, What costs the most (rows with mAh/h in tabular titleMedium, the
+plain sentences under them, a consumer bar each), Each combination measured, The phone, The headband (its battery per
+recording, link drops, Contact over the day in 3-hour rows), How it is measured; Delete as a text button at the end.
+
 ## Elevation & Depth
 
 One ply. No cards, no shadows, no glow; hairline rules group content. Dialogs and snackbars use
@@ -330,6 +345,8 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   `track` still to come; the fill changes in 260 ms. Each stop's number cell (36 dp, growing with the text up to 130 %) repeats its mark with the number in
   tabular titleMedium (ground ink on `saved`). A stop the app ticked itself says so in words ("Seen by the app"), never
   by colour.
+- **Consumer bar** (Battery, How I use the app): the band strip's 8 dp bar, its share of the page's largest value in
+  `saved` on `track`, under its row; the row's words and number say the same, so the bar is never read alone.
 - **Buttons:** one filled button per screen: Start night on the night screen (Lights off while a night records), Start on the meditation screen, and on
   each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before
   stopping, except in alpha-theta, where stopping must be instant. Session faces (dream catcher, sound for states)

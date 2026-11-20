@@ -7,10 +7,13 @@ import 'dart:async';
 
 import 'package:neurosdk2/neurosdk2.dart';
 
+import '../logs/log.dart' show AppLog;
 import 'chunk_writer.dart';
 import 'headband.dart';
 
 export '../headband/finder.dart' show BrainBitFinder;
+
+final AppLog _bleLog = AppLog('ble');
 
 const List<FSensorFamily> _families = [FSensorFamily.leBrainBit, FSensorFamily.leBrainBitBlack];
 
@@ -57,6 +60,7 @@ class SdkFinder implements HeadbandFinder {
       return null;
     }
     final info = seen.values.reduce((a, b) => a.rssi >= b.rssi ? a : b);
+    _bleLog.info('found ${info.name}', {'rssi': info.rssi, 'seen': seen.length}); // the app log (DECISIONS 718)
     onFound?.call(info.name, info.rssi);
     final band = await _create(scanner, info, rssi: info.rssi, newScanner: true);
     _keep(scanner, info);

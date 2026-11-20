@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 import 'export/exporter.dart';
+import 'logs/activity.dart' show Activity;
 import 'recorder/battery.dart';
 import 'recorder/headband.dart';
 import 'recorder/wifi_watch.dart' show WifiState;
@@ -117,12 +118,21 @@ class Phone {
   static Future<PhoneBattery?> battery() async =>
       PhoneBattery.fromMap(await _channel.invokeMapMethod<Object?, Object?>('battery'));
 
+  /// The same reading as sent, with the screen, Doze, the voltage and the process's CPU time: the battery samples of
+  /// the Battery page (lib/logs/metrics.dart). Works from every engine.
+  static Future<Map<Object?, Object?>?> powerMap() => _channel.invokeMapMethod<Object?, Object?>('battery');
+
+  /// How long ago Android started this process, in ms (the start-up time).
+  static Future<int?> processAge() async => (await _channel.invokeMethod<num>('processAge'))?.toInt();
+
   /// Share on Wi-Fi (and the DIY board's datagrams): [who] asks for (or lets go of) the process's one Wi-Fi lock,
   /// held while anyone asks (PhoneChannel.kt): `screen` for the app's own server between nights, `recorder` for the
   /// recorder's service during a night, so a hand-over at a night's start or Stop never drops it. Works from both
   /// engines.
-  static Future<void> wifiLock({required bool on, required String who}) =>
-      _channel.invokeMethod<void>('wifiLock', {'on': on, 'who': who});
+  static Future<void> wifiLock({required bool on, required String who}) {
+    Activity.set('wifi-lock', on: on); // the battery samples (lib/logs, DECISIONS 715)
+    return _channel.invokeMethod<void>('wifiLock', {'on': on, 'who': who});
+  }
 
   /// The phone's Wi-Fi now for the night's log (lib/recorder/wifi_watch.dart): on it or not, link speed, signal, band,
   /// the default route, the screen, Doze and the Wi-Fi lock; never the network's name. Works from both engines.

@@ -38,6 +38,12 @@ dependencies:
   # android/build.gradle.kts packages sherpa's copy as libsherpa-ortx.so and both load side by side.
   # Pinned: scripts/dream_text_check.py checks the same version on the laptop.
   sherpa_onnx: 2.0.1
+  # The app's own log (lib/logs/, DECISIONS 710): the Dart team's levelled, named loggers (BSD-3-Clause). Already in
+  # the app through flutter_soloud, whose warnings land in the same log; nothing new is compiled in.
+  logging: ^1.3.0
+  # The log page's Share: Android's share sheet with the log files attached (BSD-3-Clause, Flutter Community; its own
+  # FileProvider). DECISIONS 712.
+  share_plus: ^13.3.1
 
 dev_dependencies:
   flutter_test:

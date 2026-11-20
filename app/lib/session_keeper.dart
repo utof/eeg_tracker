@@ -8,6 +8,12 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
+import 'logs/activity.dart' show Activity;
+import 'logs/log.dart' show AppLog;
+
+final AppLog _sessionLog = AppLog('sessions');
+final AppLog _soundLog = AppLog('sound');
+
 /// Android's audio focus, as a session sees it.
 enum FocusChange {
   /// Another app's sound took over for good (music, a video): no "back" may come.
@@ -120,6 +126,7 @@ class PhoneSessionKeeper implements SessionKeeper {
       if (call.method == 'stopTapped') _holder?.onStop?.call();
       if (call.method == 'buttonTapped') _holder?.onButton?.call();
       final focus = call.method == 'focus' ? _focusWords[call.arguments] : null;
+      if (focus != null) _soundLog.info('the sound: ${focus.name}', {'session': _marked}); // a call took it, ...
       if (focus != null) _holder?.onFocus?.call(focus);
     });
   }
@@ -153,8 +160,26 @@ class PhoneSessionKeeper implements SessionKeeper {
     }
   }
 
+  /// The session marked in the battery samples and the usage log (`session:<title>`, lib/logs/activity.dart).
+  static String? _marked;
+
+  static void _mark(KeepSpec? spec) {
+    final f = spec == null ? null : 'session:${spec.title}';
+    if (f != _marked) {
+      if (_marked != null) Activity.end(_marked!);
+      if (f != null) Activity.begin(f);
+      _sessionLog.info(f == null ? 'session let go' : 'session held: ${spec!.title}', {
+        if (spec != null) 'headband': spec.headband,
+        if (spec != null) 'microphone': spec.microphone,
+      });
+      _marked = f;
+    }
+    Activity.set('headband', on: spec?.headband ?? false);
+  }
+
   @override
   Future<bool> hold(KeepSpec spec) {
+    _mark(spec);
     _listen();
     _holder = this;
     return _next(() => _hold(spec));
@@ -163,6 +188,7 @@ class PhoneSessionKeeper implements SessionKeeper {
   @override
   Future<void> release() {
     if (!identical(_holder, this)) return Future<void>.value();
+    _mark(null);
     _holder = null;
     return _next(() async {
       if (_holder != null) return; // another session took over meanwhile

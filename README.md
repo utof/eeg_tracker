@@ -66,6 +66,11 @@ Each line says what it does. In brackets: how well the research backs it **for t
 - **The DIY board (test)**: records the self-built ADS1299 board over Wi-Fi. The board is not assembled yet, so this
   has only met a fake board and shows its test signal, not EEG.
 - **Try these**: one page that walks the owner through each feature's first try, in order, and ticks some by itself.
+- **Logs, usage and battery** (More): the app's own log of every part (errors with their screen, the headband's drops
+  and reconnects, scoring times, what the laptop copied), how you use the app (screens, taps, features, hints; a
+  switch, only inside the app, never sent anywhere) and what costs battery, feature by feature, in plain sentences,
+  with the headband's own battery. All in the app's private folder; Export data takes it to the laptop
+  ([docs/app-logging.md](docs/app-logging.md)).
 - **Signal tab and the bottom bar** (Night, Sessions, Signal, Trends, More): a 3D head you can turn with each
   electrode's contact, live traces per electrode in µV, and the raw data; it reads the night's or a session's stream,
   never a second connection.

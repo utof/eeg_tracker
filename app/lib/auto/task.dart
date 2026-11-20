@@ -11,6 +11,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart' show ServiceRequestFailure;
 
+import '../logs/activity.dart' show Activity;
+import '../logs/engine.dart' show EngineRecords;
 import '../phone.dart';
 import '../recorder/brainbit.dart';
 import '../recorder/chunk_writer.dart' show Sample;
@@ -27,6 +29,8 @@ const MethodChannel _task = MethodChannel('eeg_tracker/auto_task');
 /// main reaches, or the build leaves it out).
 Future<void> runAutoWatch() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // this engine's log and battery samples while it checks (lib/logs, DECISIONS 715)
+  EngineRecords.start(engine: 'auto', recordingsDir: Phone.recordingsDir, power: Phone.powerMap);
   initRecorderService(); // the night recorder's options, in case this engine starts it
   await AutoTask().run();
 }
@@ -53,7 +57,8 @@ class AutoTask {
     do {
       for (var t = await _take(); t != null; t = await _take()) {
         try {
-          await watch.handle(t);
+          final trigger = t;
+          await Activity.during('auto-check', () => watch.handle(trigger));
         } catch (e) {
           watch.log.add(DateTime.now(), 'skipped', {'trigger': t.reason, 'why': 'error: $e'});
         }
