@@ -43,7 +43,7 @@ List<Object?> shareIsolateArgs(
   filesDir,
   c.token,
   c.port,
-  c.offAtMs,
+  c.endsAtMs ?? -1, // -1: no end while a laptop is paired (DECISIONS 675)
   wifi.nets,
   wifi.note,
   c.laptop?.toJson(), // the paired laptop, told where this phone is (link.dart)
@@ -52,7 +52,8 @@ List<Object?> shareIsolateArgs(
 
 /// The server isolate. Messages in: `['b', stem, first, t, Float32List]` a batch, `['s', map]` the status,
 /// `['m', id, t, i]` a marker's answer (t null = not recording), `['w', nets, note]` Android's answer about the
-/// Wi-Fi address again, `['x']` stop. Messages out: `['port', SendPort]`, `['up', addresses, port, why]` (why: empty,
+/// Wi-Fi address again, `['n']` a network came or went (tell the paired laptop now), `['k', map or null]` the daytime
+/// session for /state, `['x']` stop. Messages out: `['port', SendPort]`, `['up', addresses, port, why]` (why: empty,
 /// or what each source returned when no Wi-Fi address was found), `['marker', id, text]`, `['copying', n]` file
 /// requests being answered, `['work', working, meeting]` the laptop's work signal, `['error', text]` an error that did not
 /// stop it, `['log', line]` (the paired laptop), `['down', why]`.
@@ -158,8 +159,11 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
     server.lan = chosen.nets;
     final now = '${server.addresses.join(',')} ${chosen.why}';
     if (now == shown) return;
+    final first = shown.isEmpty;
     shown = now;
     toHost.send(['up', server.addresses, server.boundPort, chosen.why]);
+    // the Wi-Fi came back or changed: the paired laptop hears where this phone is now (DECISIONS 676)
+    if (!first && server.addresses.isNotEmpty) announcer?.soon();
   }
 
   // One look at a time; a request during one (Android's new answer) runs one more after it.
@@ -196,6 +200,10 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
       case 'w':
         android = (nets: [for (final n in m[1] as List) n as String], note: m[2] as String);
         unawaited(look());
+      case 'n': // Android says a network came or went (DECISIONS 676): the laptop hears from this phone now
+        announcer?.soon();
+      case 'k': // the daytime session that holds the headband, for /state (DECISIONS 671)
+        server.setSession(m[1] as Map<Object?, Object?>?);
       case 'x':
         unawaited(end('stopped'));
     }
@@ -232,8 +240,11 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
       onLine: (line) => toHost.send(['log', 'sharing on Wi-Fi: $line']),
     )..start();
   }
-  final left = (args[4]! as int) - DateTime.now().millisecondsSinceEpoch;
-  offTimer = Timer(Duration(milliseconds: left < 0 ? 0 : left), () => unawaited(end('time is up')));
+  final offAt = args[4]! as int;
+  if (offAt >= 0) {
+    final left = offAt - DateTime.now().millisecondsSinceEpoch;
+    offTimer = Timer(Duration(milliseconds: left < 0 ? 0 : left), () => unawaited(end('time is up')));
+  }
   await look();
   if (closing) return;
   addressTimer = Timer.periodic(_addressCheck, (_) => unawaited(look()));
@@ -358,6 +369,36 @@ class ShareHost {
     }
   }
 
+  /// The daytime session that holds the headband (`WorkController.shareState`), or null: /state's `session`
+  /// (DECISIONS 671). Kept, so a server that starts later gets it too.
+  void setSession(Map<String, Object?>? session) {
+    _session = session;
+    try {
+      _port?.send(['k', session]);
+    } catch (e) {
+      _end('sharing on Wi-Fi stopped: $e');
+    }
+  }
+
+  Map<String, Object?>? _session;
+
+  /// Android says a network came or went (`Phone.networkChanges`, DECISIONS 676): the Wi-Fi address is asked again
+  /// and the paired laptop is told where this phone is now, not at the next 5 minutes.
+  Future<void> networkChanged() async {
+    if (_ended) return;
+    if (wifi != null) await _sendWifi();
+    await tellLaptop();
+  }
+
+  /// The paired laptop is told where this phone is now (one handshake; DECISIONS 676, 678): after a network change,
+  /// when a session starts, when the app comes back to the front.
+  Future<void> tellLaptop() async {
+    if (_ended) return;
+    try {
+      _port?.send(['n']);
+    } catch (_) {}
+  }
+
   /// The recorder's status (`RecorderStatus.toMap`), about once a second.
   void setLive(Map<Object?, Object?> live) {
     _live = live;
@@ -406,6 +447,8 @@ class ShareHost {
           }
           final live = _live;
           if (live != null) _port!.send(['s', live]);
+          final session = _session;
+          if (session != null) _port!.send(['k', session]);
         case 'up':
           final addresses = [for (final a in m[1] as List) a as String];
           final first = !_status.up, moved = addresses.join(',') != _status.addresses.join(',');

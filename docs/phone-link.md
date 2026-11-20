@@ -1,10 +1,11 @@
 # Connecting the phone to the laptop by one scan
 
-`python3 scripts/phone_link.py` on the laptop, the phone's camera on the square code it shows, **Open EEG Tracker**,
-**Connect**. After that the laptop copies the phone's files and shows its live pages by itself, and the phone finds
-the laptop again by itself whenever **Share on Wi-Fi** is on. The owner's steps are in `app/README.md`
-("Share on Wi-Fi"); the choices and their alternatives in DECISIONS rows 530-539. This page says what crosses the
-network and why it is safe enough for a home Wi-Fi.
+**Pair phone…** in the laptop tray's menu (or `python3 scripts/phone_link.py`), the phone's camera on the square
+code it shows, **Open EEG Tracker**, **Connect**. That is the only scan: the pairing lasts (DECISIONS 675-677). The
+tray keeps the laptop's side running whenever a phone is paired, the phone keeps Share on Wi-Fi on while a laptop is
+paired, and each finds the other again by itself after a Wi-Fi drop, a restart or a new code. The owner's steps are
+in `app/README.md` ("Share on Wi-Fi"); the choices and their alternatives in DECISIONS rows 530-539 and 675-677. This
+page says what crosses the network and why it is safe enough for a home Wi-Fi.
 
 ## What happens
 
@@ -24,10 +25,28 @@ network and why it is safe enough for a home Wi-Fi.
 5. The app switches Share on Wi-Fi on (if it was off) and remembers the laptop: address, port, key, name. The
    laptop remembers the phone in `_local/phone/link.json` (mode 600): the address it saw the requests come from, the
    port, the token and the key.
-6. From then on, whenever Share on Wi-Fi starts and every 5 minutes while it is on, the phone repeats the same two
-   steps with `"via":"key"` and the key instead of the code. The laptop takes the phone's address from that
-   connection, so a new address from the router is picked up within 5 minutes, and a new token after **New code**
-   at once.
+6. From then on, whenever Share on Wi-Fi starts, every 5 minutes while it is on, and as soon as the phone's Wi-Fi
+   comes back or changes (Android's network callback, and the server's own look at its address every minute), the
+   phone repeats the same two steps with `"via":"key"` and the key instead of the code. The laptop takes the phone's
+   address from that connection, so a new address from the router is picked up at once, and a new token after
+   **New code** too.
+
+## Pairing that lasts (DECISIONS 675-677)
+
+- **The phone**: while a laptop is paired, Share on Wi-Fi has no end time (not 12 hours, not 15 minutes after a
+  night's Stop). It ends only when you switch it off or tap **Forget this laptop**. There is no notification for it
+  (DECISIONS 678): between nights the phone answers while the app is open or a session runs, and during a night; in
+  the background Android may freeze the app, so the laptop copies what it missed at the next app open, session or
+  night (the phone tells the laptop where it is at each). Nothing is lost: the phone keeps every file. **New code** changes the token, not the pairing: the key stays, and
+  the phone tells the laptop the new token itself.
+- **The laptop**: the tray runs `phone_link.py --keep` whenever `_local/phone/link.json` holds a phone and no other
+  copy answers on 127.0.0.1:8771 (a **Pair phone…** window, for instance). No window and no code; it listens on
+  127.0.0.1 at once and on the laptop's home-network address once it has one (Wi-Fi off: it waits; back, or a new
+  address: it listens there within 30 seconds). It copies the files and serves the live pages as before, writes
+  what it says to `_local/phone/link-keep.log` (addresses and file names, never the token), is started again when
+  it ends, and stops with the tray. **Pair phone…** then opens its page with a fresh code, for a new phone.
+- **Forget the phone…** in the tray's menu deletes `link.json`; the kept link ends by itself, and the phone hears
+  "no longer knows this phone" at its next announcement.
 
 ## Who can do what
 
@@ -43,14 +62,19 @@ network and why it is safe enough for a home Wi-Fi.
   (`http://127.0.0.1:8771/`) and the live pages (`http://localhost:8770/`) answer this laptop only.
 - **Not encrypted**: plain HTTP, like Share on Wi-Fi itself (DECISIONS row 225). The proofs keep the code and the
   key off the wire, but the token and the data cross the Wi-Fi as they always did. Home Wi-Fi only.
-- **Forgetting**: **Forget this laptop** on the phone's Share sheet stops the phone telling it anything; **New code**
-  on the sheet shuts out the token the laptop holds. Deleting `_local/phone/link.json` makes the laptop forget the
-  phone. Pairing again replaces the key on both sides.
+- **Forgetting**: **Forget this laptop** on the phone's Share sheet stops the phone telling it anything (and brings
+  back sharing's end time); **New code** on the sheet changes the token, which a paired laptop is told by the key, so
+  to shut a laptop out tap **Forget this laptop** first. **Forget the phone…** in the tray (or deleting
+  `_local/phone/link.json`) makes the laptop forget the phone. Pairing again replaces the key on both sides.
 
 ## Known limits
 
 - A VPN on the phone that sends local traffic into its tunnel stops the phone's two requests; the laptop's copies,
   which go the other way, may still work. Turn the VPN off for the scan, or let it bypass the local network.
-- The phone and the laptop must be on the same network, and the laptop must keep its address (a router hands out the
-  same one for days as a rule). If the laptop's address changes, scan again.
+- The phone and the laptop must be on the same network. If the **laptop's** address changes (a router hands out the
+  same one for days as a rule), the phone's announcements go to the old one: the laptop still reaches the phone at
+  its known address, so copying and the tray's headband line go on, but a new phone address or token after that
+  needs one new scan.
+- Between nights the laptop reaches the phone only while the app runs (row 678), so the tray's headband line shows
+  "not reachable" while the app sleeps in the background with no session.
 - One phone per laptop: a new pairing replaces the old one.

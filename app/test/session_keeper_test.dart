@@ -117,42 +117,6 @@ void main() {
     await k.release();
   });
 
-  test('a background keep (Share on Wi-Fi) holds while no session does; a session borrows it and gives it back', () async {
-    var stops = 0, sessionStops = 0;
-    const share = KeepSpec(title: 'Sharing on Wi-Fi', text: 'until 10:05', focus: false);
-    expect(await PhoneSessionKeeper.keepInBackground(share, onStop: () => stops++), isTrue);
-    expect(PhoneSessionKeeper.held, isFalse, reason: 'not a session: the night scoring does not stop for it');
-    expect(calls.single.method, 'hold');
-    expect((calls.single.arguments as Map)['title'], 'Sharing on Wi-Fi');
-    // Android is told it is not a session: the headband watcher and the sharp-hours questions do not wait for it
-    // (AutoWatch.kt, SharpPrompts.kt `SessionService.sessionRunning`)
-    expect((calls.single.arguments as Map)['background'], isTrue);
-    await PhoneSessionKeeper.keepInBackground(share, onStop: () => stops++); // the minute's sync: no second call
-    expect(calls, hasLength(1));
-    await tapStop();
-    expect(stops, 1);
-
-    final session = PhoneSessionKeeper()..onStop = () => sessionStops++;
-    await session.hold(const KeepSpec(title: 'Meditation', headband: true));
-    expect(PhoneSessionKeeper.held, isTrue);
-    expect((calls.last.arguments as Map).containsKey('background'), isFalse, reason: 'a session is a session');
-    await tapStop();
-    expect((stops, sessionStops), (1, 1));
-    await session.release(); // the meditation ends: the notification goes back to sharing, the app keeps running
-    expect(calls.map((c) => c.method), ['hold', 'hold', 'hold']);
-    expect((calls.last.arguments as Map)['title'], 'Sharing on Wi-Fi');
-    expect((calls.last.arguments as Map)['background'], isTrue);
-    expect(PhoneSessionKeeper.held, isFalse);
-
-    expect(await PhoneSessionKeeper.keepInBackground(null), isFalse); // sharing off
-    expect(calls.last.method, 'release');
-    final n = calls.length;
-    await PhoneSessionKeeper.keepInBackground(null);
-    expect(calls, hasLength(n));
-    await tapStop(); // nothing holds: nothing happens
-    expect((stops, sessionStops), (1, 1));
-  });
-
   test('the screen kept on for sharing or an export is not a session screen; a session screen is', () async {
     // MainActivity.kt takes a screen kept on as a session on screen (no sharp-hours question, no headband check by
     // the watcher), except when it is said not to be one

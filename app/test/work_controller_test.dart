@@ -186,6 +186,7 @@ void main() {
     Future<MediaVolume?> Function()? mediaVolume,
     bool Function()? laptopMeeting,
     bool raw = false,
+    void Function(Map<String, Object?>? state)? onShare,
   }) => WorkController(
     finder: OneFinder(band),
     sound: sound,
@@ -194,6 +195,7 @@ void main() {
     mediaVolume: mediaVolume,
     laptopMeeting: laptopMeeting,
     recordingsDir: raw ? Directory('${tmp.path}/recordings') : null,
+    onShare: onShare,
     store: WorkStore(Directory('${tmp.path}/work-sessions')),
     timing: const WorkTiming(link: fastLink, tick: Duration(milliseconds: 4), noDataAfter: Duration(seconds: 3)),
     clock: band.now,
@@ -234,6 +236,44 @@ void main() {
     expect(saved.drowsyMin, greaterThan(2));
     expect(c.last!['epochs'], isNotEmpty);
     c.dispose();
+  });
+
+  test("the summary for the laptop tray (DECISIONS 671): calibrating, the level and signal, a hint, a break, none after Stop", () async {
+    final band = WorkBand(start: DateTime(2026, 11, 19, 10).millisecondsSinceEpoch / 1000);
+    final sent = <Map<String, Object?>?>[];
+    final c = make(band, onShare: sent.add);
+    await c.start();
+    expect(sent.last, containsPair('kind', 'work'));
+    expect(sent.last, containsPair('stage', 'calibrating'));
+    expect(sent.last!['since'], endsWith('Z'), reason: 'UTC, so the laptop reads the right hour');
+    expect(DateTime.parse(sent.last!['since']! as String), c.startedAt!.toUtc());
+    await until(() => c.level == DrowsyLevel.alert);
+    expect(sent.last, containsPair('stage', 'running'));
+    expect(sent.last, containsPair('level', 'alert'));
+    expect(sent.last, containsPair('signal', 'good'));
+    expect(sent.last, containsPair('on_break', false));
+    expect(sent.last!['hint'], isNull);
+    // the newest data as of the last send, which is at most 5 s (shareEvery) and a tick old
+    expect((sent.last!['data_at']! as num) * 1e6, closeTo(band.now().microsecondsSinceEpoch, 7e6));
+    // between changes it goes out every 5 s of the session's clock, not every tick
+    final n = sent.length, at = band.clockS;
+    await until(() => band.clockS > at + 20);
+    expect(sent.length - n, inInclusiveRange(2, 6));
+    band.mode = Mode.drowsy;
+    await until(() => c.hint != null);
+    expect(sent.last!['hint'], containsPair('reason', 'drowsy'));
+    expect(sent.last, containsPair('level', isNot('alert')));
+    c.takeBreak();
+    expect(sent.last, containsPair('on_break', true));
+    expect(sent.last!['hint'], isNull);
+    band.mode = Mode.off;
+    await until(() => c.signal == WorkSignal.off || c.signal == WorkSignal.lost);
+    await until(() => sent.last!['signal'] == 'off' || sent.last!['signal'] == 'lost');
+    await c.stop();
+    expect(sent.last, isNull);
+    final after = sent.length;
+    c.dispose();
+    expect(sent.length, after, reason: 'nothing more once it said none');
   });
 
   test("every saved epoch carries its own time under `at`, and theta stays under `t`", () async {

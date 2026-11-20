@@ -32,6 +32,7 @@ class MainActivity : FlutterActivity() {
         PhoneChannel.register(messenger, applicationContext)
         AlarmChannel.register(messenger, applicationContext)
         AudioRoute.register(messenger, applicationContext) // where the sound goes (feedback sessions warn on Bluetooth)
+        NetworkWatch.register(messenger, applicationContext) // Share on Wi-Fi tells the paired laptop at once (DECISIONS 676)
         AutoWatch.takeIntent(applicationContext, intent)
         autoChannel = AutoWatch.register(messenger, applicationContext, this)
         // Export needs this Activity for the system folder picker, so it lives here, not in PhoneChannel.

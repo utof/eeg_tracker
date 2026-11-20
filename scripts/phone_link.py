@@ -3,6 +3,7 @@
 usage: python3 scripts/phone_link.py [--dest _local] [--every 2] [--no-pages] [--no-mirror]
        less common: [--address <this laptop's Wi-Fi address>] [--port 8771] [--pages-port 8770] [--qr web|app]
                     [--phone-at http://127.0.0.1:8765] [--name <shown on the phone>]
+       the tray's:  --keep   (a remembered phone, quietly: DECISIONS 677)
 
 The owner's steps (app/README.md, "Share on Wi-Fi"): run this, point the phone's camera at the code it shows, tap the
 link, tap **Open EEG Tracker**, then **Connect**. Leave the window open. Next time: run it again; the phone finds
@@ -21,6 +22,10 @@ How it works (DECISIONS rows 530-539; docs/phone-link.md):
   address is picked up by itself.
 - Then it does what scripts/pull_phone.py does (a copy every --every minutes, raw nights first; the same files and
   rules) and serves the live pages like scripts/page_server.py at http://localhost:8770/ (on this laptop only).
+- `--keep` is how the laptop tray runs it whenever a phone is paired (DECISIONS 677): no code unless one is asked for
+  on this laptop's page (`http://127.0.0.1:8771/?new=1`, what the tray's "Pair phone…" opens), no window; it waits
+  for a home-network address when the laptop has none (Wi-Fi off), listens on the new one when it changes, and ends
+  by itself when the pairing is forgotten (`link.json` deleted).
 - Nothing is reachable beyond this laptop and its local network: it listens on the Wi-Fi address and 127.0.0.1 only,
   and answers local-network addresses only (10.x, 172.16-31.x, 192.168.x, 169.254.x). Plain HTTP, like Share on
   Wi-Fi itself (home Wi-Fi only).
@@ -249,6 +254,15 @@ class Link:
             f(phone, via, moved)
         return 200, answer
 
+    def forget(self) -> None:
+        """The pairing file was deleted (the tray's "Forget the phone"): the phone and the key go from memory too, so
+        nothing is copied any more and the phone's next announcement hears "not paired"."""
+        with self.lock:
+            self.phone = None
+            self.key = None
+            self._paired = None
+        self.changed.set()
+
     # --- where the phone is
     def target(self) -> tuple[str, int, str] | None:
         """(host, port, token) to reach the phone's Share on Wi-Fi; None before any pairing."""
@@ -350,10 +364,11 @@ def local_page(link: Link) -> bytes:
         parts.append("<p>Open the phone's camera, point it at the code, tap the link, then <b>Open EEG Tracker</b>, "
                      "then <b>Connect</b>.</p>")
         parts.append(f'<div class="qr">{qr_code.svg(qr_code.encode(link.web_link(code)), scale=10)}</div>')
-        parts.append('<p class="small">The code works once, for 5 minutes. Then press Enter in the laptop window '
-                     "for a new one.</p>")
+        parts.append('<p class="small">The code works once, for 5 minutes. Then <a href="/?new=1" '
+                     'style="color:#e9e4d8">show a new one</a>.</p>')
     else:
-        parts.append('<p class="small">No code right now: press Enter in the laptop window for a new one.</p>')
+        parts.append('<p class="small">No code right now: <a href="/?new=1" style="color:#e9e4d8">show one</a> '
+                     "(only to pair a phone for the first time, or another phone).</p>")
     return _page("EEG Tracker: connect", "".join(parts), refresh=3)
 
 
@@ -395,6 +410,13 @@ def make_handler(link: Link, client_of: Callable[[BaseHTTPRequestHandler], str] 
                 self._send(200, landing_page(link, parse_qs(u.query).get("s", [""])[0]), "text/html; charset=utf-8")
             elif u.path == "/noapp":
                 self._send(200, noapp_page(), "text/html; charset=utf-8")
+            elif u.path == "/" and is_loopback(c) and parse_qs(u.query).get("new") == ["1"]:
+                if not link.code_valid():  # the tray's "Pair phone…" (DECISIONS 677): a code, then the plain page
+                    link.new_code()
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
             elif u.path == "/" and is_loopback(c):  # the code itself: never to another device
                 self._send(200, local_page(link), "text/html; charset=utf-8")
             elif u.path == "/status" and is_loopback(c):
@@ -532,11 +554,84 @@ def show_code(link: Link, say: Say, qr: str, color: bool) -> None:
         f"laptop's browser. The same as a link: {text}", stamp=False)
 
 
+KEEP_LOOK_S = 30.0  # --keep: how often this laptop's home-network address is looked at again
+
+
+def keep(a: argparse.Namespace, out: Callable[[str], object], *, find: Callable[[], str | None] = lan_address,
+         stop: threading.Event | None = None, look_s: float = KEEP_LOOK_S) -> int:
+    """--keep, the laptop tray's way (DECISIONS 677): a remembered phone, kept with no window and no code. The pages
+    and the copy as usual; this laptop's own port on 127.0.0.1 at once and on its home-network address once it has
+    one (Wi-Fi off: it waits), again on a new address when it changes or comes back; it ends when `link.json` is
+    deleted (the tray's "Forget the phone"). 3: no phone is paired; 2: the port is taken."""
+    name = re.sub(r"[^\w .-]", "", a.name or socket.gethostname())[:40] or "laptop"
+    store = a.dest / "phone" / "link.json"
+    link = Link(store, name=name, host="127.0.0.1", port=a.port, phone_at=a.phone_at)
+    if link.target() is None:
+        out("No phone is paired here: run phone_link.py without --keep to pair one.")
+        return 3
+    loop = serve(link, ["127.0.0.1"], a.port)
+    if not loop:
+        out(f"Port {a.port} is taken: is phone_link.py already running?")
+        return 2
+    say = Say(out)
+    stop = stop or threading.Event()
+    wifi: list[ThreadingHTTPServer] = []
+    bound: list[str | None] = [None]   # the address the phone can reach now, or None while there is none
+
+    def listen_on(addr: str) -> None:
+        for srv in wifi:
+            srv.shutdown(); srv.server_close()
+        wifi[:] = [] if addr == "127.0.0.1" else serve(link, [addr], a.port)   # loopback is served already
+        link.host = addr
+        bound[0] = addr if wifi or addr == "127.0.0.1" else None
+        say(f"Listening for the phone at {addr}." if bound[0] else f"Could not listen at {addr}: trying again.")
+
+    def look() -> None:
+        addr = a.address or find()
+        if not addr or not allowed_client(addr):
+            if bound[0] is not None:
+                say("No home-network address now (Wi-Fi off?): the phone is copied from again when it is back.")
+            bound[0] = None  # listened on again when it comes back, even at the same address
+            return
+        if addr != bound[0]:
+            listen_on(addr)
+
+    look()
+    if bound[0] is None:
+        say("No home-network address yet (Wi-Fi off?): waiting for one.")
+    if not a.no_pages:
+        start_pages(link, a.pages_port, a.recordings or a.dest / "recordings", say)
+    if not a.no_mirror:
+        threading.Thread(target=mirror_loop, args=(link, a.dest, a.every, say, stop, a.raw_only), daemon=True,
+                         name="mirror").start()
+    t = link.target()
+    if t is not None:
+        say(f"Remembered phone at {t[0]}: copying whenever it answers.")
+    next_look = time.monotonic() + look_s
+    try:
+        while not stop.wait(0.5):
+            if not store.exists():
+                link.forget()
+                say("The phone was forgotten here: stopping.")
+                return 0
+            if link.code is not None and not link.code_valid():
+                link.code = None
+            if time.monotonic() >= next_look:
+                next_look = time.monotonic() + look_s
+                look()
+        return 0
+    finally:
+        stop.set()
+        link.changed.set()
+        for srv in loop + wifi:
+            srv.shutdown(); srv.server_close()
+
+
 def _print(line: str) -> None:
     print(line, flush=True)  # also when the output goes to a file (the assistant runs it in the background)
 
 
-def main(argv: list[str] | None = None, out: Callable[[str], object] = _print) -> int:
+def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--dest", type=Path, default=ip.DEFAULT_DEST, help="where to copy (default: <repo>/_local)")
     ap.add_argument("--every", type=float, default=2, help="minutes between copies (default 2)")
@@ -551,7 +646,15 @@ def main(argv: list[str] | None = None, out: Callable[[str], object] = _print) -
     ap.add_argument("--phone-at", help="reach the phone here instead (adb forward: http://127.0.0.1:8765)")
     ap.add_argument("--name", help="this laptop's name on the phone (default: the computer's name)")
     ap.add_argument("--recordings", type=Path, help="the page server's results folder (default: <dest>/recordings)")
-    a = ap.parse_args(argv)
+    ap.add_argument("--keep", action="store_true",
+                    help="the tray's way: a remembered phone, quietly, following this laptop's address, until forgotten")
+    return ap.parse_args(argv)
+
+
+def main(argv: list[str] | None = None, out: Callable[[str], object] = _print) -> int:
+    a = parse(argv)
+    if a.keep:
+        return keep(a, out)
 
     address = a.address or lan_address()
     if not address or not allowed_client(address):

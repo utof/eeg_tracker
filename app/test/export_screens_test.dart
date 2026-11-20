@@ -228,8 +228,9 @@ void main() {
         expect(find.text('adb forward tcp:8765 tcp:8765'), address == null ? findsOneWidget : findsNothing);
         expect(find.textContaining('A USB cable works without it'), address == null ? findsOneWidget : findsNothing);
         expect(find.textContaining('scripts/pull_phone.py http://${address ?? '127.0.0.1'}:8765 --token kq7m2xwp9dfh'), findsOneWidget);
-        // between nights a notification keeps the app answering in the background (DECISIONS row 589)
-        expect(find.textContaining('"Sharing on Wi-Fi" notification'), name == 'app' ? findsOneWidget : findsNothing);
+        // between nights it answers while the app is open; no notification keeps it running (DECISIONS 678 replaces 589)
+        expect(find.textContaining('Between nights it answers while this app is open'), name == 'app' ? findsOneWidget : findsNothing);
+        expect(find.textContaining('notification'), findsNothing, reason: 'no notification for sharing (DECISIONS 678)');
         // the laptop losing the phone loses nothing (the owner's night of 2026-11-20, DECISIONS 614)
         expect(find.textContaining('If the laptop cannot reach the phone, nothing is lost'), findsOneWidget);
       });

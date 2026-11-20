@@ -13,6 +13,7 @@ import '../auto/work_start.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
 import '../session_keeper.dart';
+import '../share/shared_session.dart';
 import '../sound/audio_route.dart' show phoneInCall, phoneMediaVolume;
 import '../sound/soloud_work_sound.dart';
 import '../wearer/wearer.dart';
@@ -45,6 +46,7 @@ class _WorkScreenState extends State<WorkScreen> {
     inCall: phoneInCall,
     mediaVolume: phoneMediaVolume,
     laptopMeeting: laptopMeetingNow,
+    onShare: (s) => sharedSession.value = s, // the paired laptop's tray sees the session (DECISIONS 671)
   );
   bool _nightRunning = false, _eyesClosedFirst = false, _screenOn = false;
   List<WorkSummary> _sessions = const [];

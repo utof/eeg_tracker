@@ -34,16 +34,34 @@ The icon changes with the state (shape and colour; the menu always says it in wo
 | grey ring | not in a work session |
 | amber circle with **!** | it is waiting for you: "Started working?" or a break hint |
 
+A **ring around the icon** says what the paired phone and its headband are doing (DECISIONS 672), whatever the icon
+inside:
+
+| Ring | Means |
+|---|---|
+| green | the headband records on the phone now (a Work session with a usable signal, a night, or another session) and its newest data is under 30 s old: wearing it is not for nothing |
+| amber | the phone answers, but the headband is not recording, not on the head, has lost its signal, or its data is older than 30 s |
+| grey dashed | a phone is paired but does not answer (Share on Wi-Fi off? another network? or the app asleep: between nights it answers only while open or holding a session, DECISIONS 678) or refuses this laptop's token |
+| none | no phone is paired (the menu's first line says so) |
+
 Clicking it opens the menu:
 
-- **Status lines** at the top: "Working since 10:12 (0:42)", "Next break hint about 11:05", or "On a break since
-  10:51", "In a meeting (zoom) since 11:02", or "Not in a work session" and how long you have been in work apps. A line about the phone appears once a
-  phone has been paired.
+- **Phone not paired: Pair phone…** first, while no phone is paired (one click: the QR code).
+- **Status lines**: "Working since 10:12 (0:42)", "Next break hint about 11:05 (by time: 42 min since the last
+  break)", or "On a break since 10:51", "In a meeting (zoom) since 11:02", or "Not in a work session" and how long
+  you have been in work apps.
+- **The phone's lines** once one is paired: "Phone: paired, reachable" (with "· copying its files" while the link
+  copies), or "Phone: not reachable (app asleep, or Share on Wi-Fi off?)"; then the headband: "Headband: recording on the phone
+  (work session since 12:26, signal good, alert)", "Headband: connected, not on the head (…)", "Headband: no data
+  for 2 min (…)", "Headband: recording a night on the phone, 6h10 so far", "Headband: not recording on the phone",
+  or "Headband: —"; and a break line from the phone when there is one: "Break hint on the phone since 12:50
+  (drowsiness)", "Drowsiness is rising: a break soon may help", "Drowsiness says: time for a break".
 - **Start work session / Stop work session.**
 - **On a break / Back from the break.**
 - **Snooze the hint 20 min**, **OK, no break now** (while a hint is waiting).
 - **Yes, a work session / Not work** (while it asks), or **Not work** to undo a session it started by itself.
-- **Settings** (below), **Open data folder**, **Pair phone…**, **Quit** (ends a running session first).
+- **Settings** (below), **Open data folder**, **Pair phone…**, **Forget the phone…** (while one is paired; asks
+  once more), **Quit** (ends a running session first).
 
 ## Settings
 
@@ -133,15 +151,33 @@ written.
 ## The phone
 
 **Pair phone…** runs `scripts/phone_link.py` in a terminal window (the QR code to scan with the phone; see
-[phone-link.md](phone-link.md)), copying the phone's files into the tray's own `_local`. While that window already
-runs, the item opens its page `http://127.0.0.1:8771/` with the code, bigger, instead of starting a second copy. It is
-greyed out only without a terminal program. After pairing, a status line says whether the phone is connected. When a work session starts or ends here, the tray tells the paired phone (Share on Wi-Fi's `POST /work`, between nights), so the phone's automatic recording can check whether the headband is on and take it as work ("When I put the headband on" in the app). It also says whether you are in a meeting (`"meeting": true`); the phone does not use that yet. Showing the phone's own work-session drowsiness in this menu is prepared but not connected yet.
+[phone-link.md](phone-link.md)), copying the phone's files into the tray's own `_local`. While a copy already runs
+(that window, or the one the tray keeps), the item opens its page `http://127.0.0.1:8771/?new=1` with a fresh code,
+bigger, instead of starting a second copy. It is greyed out only without a terminal program. Pairing is needed once:
+
+- **The tray keeps the link running** (DECISIONS 677): whenever `_local/phone/link.json` holds a phone, it runs
+  `phone_link.py --keep` with no window (copying the files and hearing where the phone is), starts it again if it
+  ends, and stops it at Quit. A Wi-Fi drop on either side needs no new scan. Its output: `_local/phone/link-keep.log`.
+- **It looks at the phone** every 45 seconds, only while one is paired, in the background (2 seconds at most; the
+  menu never waits): the phone's Share on Wi-Fi `/state` with the token from `link.json` in a header, never written
+  anywhere. One look without an answer keeps the last one (a Wi-Fi blip); two in a row is "not reachable".
+- **At the start**, if a phone was paired before and does not answer now, one notification says so (only with
+  notifications on; never during a meeting). Afterwards only the ring and the menu change.
+- **Forget the phone…** → **Yes, forget it** deletes `link.json` and stops the kept link; the menu then offers
+  Pair phone… first again.
+- When a work session starts or ends here, the tray tells the paired phone (Share on Wi-Fi's `POST /work`, between
+  nights), so the phone's automatic recording can check whether the headband is on and take it as work ("When I put
+  the headband on" in the app). It also says whether you are in a meeting (`"meeting": true`); the phone does not use
+  that yet.
+- The phone's own Work-session drowsiness shows in the headband line; the tray gives no hint of its own from it (the
+  phone chimes its own; DECISIONS 678).
 
 ## Not done yet
 
 - The phone does not use the `meeting` field yet: its Work session could label talking minutes as a meeting instead
   of noise (DECISIONS 666).
 
-- The phone's drowsiness (when you wear the headband in the phone's Work session) in this menu.
+- A laptop hint from the phone's drowsiness (the phone hints itself; DECISIONS 678).
+- The ring has not been seen in the owner's panel yet (the running tray needs a restart).
 - No "how sharp do you feel" tap here (the phone has one).
 - Only tested on this laptop's Cinnamon panel; other desktops need an AppIndicator / StatusNotifier panel.

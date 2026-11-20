@@ -479,21 +479,11 @@ def test_autostart_path_follows_xdg(monkeypatch, tmp_path):
 
 # ---------- the phone hook ----------
 
-def test_phone_line_and_pair_command(tmp_path):
-    assert lw.phone_line(tmp_path, lambda: None) is None
-    (tmp_path / "phone").mkdir()
-    (tmp_path / "phone" / "link.json").write_text(json.dumps({"version": 1, "phone": None}))
-    assert lw.phone_line(tmp_path, lambda: None) is None
-    (tmp_path / "phone" / "link.json").write_text(json.dumps(
-        {"version": 1, "paired": "x", "phone": {"address": "192.168.1.5", "port": 8765, "token": "abcdefgh"}}))
-    assert lw.phone_line(tmp_path, lambda: None) == "Phone: paired (the link is not running)"
-    assert lw.phone_line(tmp_path, lambda: {"connected": True}) == "Phone: connected, copying its files"
-    assert lw.phone_line(tmp_path, lambda: {"connected": False}) == "Phone: paired, not answering now"
+def test_pair_command(tmp_path):
     assert lw.pair_command(tmp_path, probe=lambda: None) is None      # no scripts/phone_link.py here
     (tmp_path / "scripts").mkdir(); (tmp_path / "scripts" / "phone_link.py").write_text("")
     cmd = lw.pair_command(tmp_path, "/usr/bin/python3", probe=lambda: None)
     assert cmd is None or cmd[-2:] == ["/usr/bin/python3", str(tmp_path / "scripts" / "phone_link.py")]
-    assert lw.phone_work_level(tmp_path) is None
 
 
 def test_pair_phone_runs_the_merged_phone_link(tmp_path):
@@ -510,7 +500,7 @@ def test_pair_phone_runs_the_merged_phone_link(tmp_path):
         "/usr/bin/gnome-terminal", "--", "py", str(script)]
     assert lw.pair_command(probe=lambda: None, which=lambda _: None) is None   # no terminal program
     running = lw.pair_command(local=tmp_path, probe=lambda: {"connected": False}, which=lambda _: None)
-    assert running == ["xdg-open", "http://127.0.0.1:8771/"]
+    assert running == ["xdg-open", "http://127.0.0.1:8771/?new=1"]   # its page makes a code for it (DECISIONS 677)
     import phone_link
     assert lw.PAIR_PAGE == f"http://127.0.0.1:{phone_link.PORT}/"
     assert 'add_argument("--dest"' in script.read_text(encoding="utf-8")
@@ -573,10 +563,3 @@ def test_the_work_signal_goes_to_the_paired_phone_with_its_token(tmp_path):
     (tmp_path / "phone" / "link.json").write_text(json.dumps(
         {"version": 1, "phone": {"address": "8.8.8.8", "port": 8765, "token": "abcdefgh1234"}}))
     assert lw.phone_work_signal(tmp_path, True) == "not paired"   # only a local-network phone is ever called
-
-
-def test_the_phone_line_shows_in_the_menu(tmp_path):
-    tray = lw.WorkTray(lw.Replay([], []), FakeNotifier(), lw.Records(None), lw.MemoryHintLog(),
-                       phone=lambda: "Phone: connected, copying its files")
-    tray.tick(at(9))
-    assert tray.view(at(9)).lines[-1] == "Phone: connected, copying its files"

@@ -9,7 +9,8 @@ import 'link.dart';
 /// The laptop recorder's port (scripts/record_night.py --port), so the laptop commands look the same.
 const int sharePort = 8765;
 
-/// Sharing turns itself off this long after it was switched on.
+/// Sharing turns itself off this long after it was switched on, unless a laptop is paired (DECISIONS 675): then it
+/// stays on until the owner turns it off or forgets the laptop.
 const Duration shareMaxOn = Duration(hours: 12);
 
 /// After Stop it stays on this long, so the laptop gets the end of the night, then turns itself off. Also how
@@ -49,8 +50,14 @@ class ShareConfig {
   /// The laptop this phone is paired with (link.dart, DECISIONS rows 530-539): told where the phone is while on.
   final PairedLaptop? laptop;
 
-  /// On, with a token, and not past its time.
-  bool activeAt(int nowMs) => on && token.length >= tokenLength && nowMs < offAtMs;
+  /// A laptop is paired: sharing has no end time (DECISIONS 675).
+  bool get paired => laptop != null;
+
+  /// On, with a token, and not past its time; while a laptop is paired there is no time (DECISIONS 675).
+  bool activeAt(int nowMs) => on && token.length >= tokenLength && (paired || nowMs < offAtMs);
+
+  /// When the server turns itself off (unix ms); null while a laptop is paired.
+  int? get endsAtMs => paired ? null : offAtMs;
 
   ShareConfig switchedOn(int nowMs, {Random? random}) => ShareConfig(
     on: true,
@@ -76,11 +83,11 @@ class ShareConfig {
   ShareConfig withLaptop(PairedLaptop? to) =>
       ShareConfig(on: on, token: token, port: port, offAtMs: offAtMs, awakeUntilMs: awakeUntilMs, laptop: to);
 
-  /// Stop was pressed: on for [shareAfterStop] more at most.
+  /// Stop was pressed: on for [shareAfterStop] more at most (while a laptop is paired it stays on: DECISIONS 675).
   ShareConfig afterStop(int nowMs) {
     if (!on) return this;
     final end = nowMs + shareAfterStop.inMilliseconds;
-    return ShareConfig(on: true, token: token, port: port, offAtMs: min(offAtMs, end), awakeUntilMs: end, laptop: laptop);
+    return ShareConfig(on: true, token: token, port: port, offAtMs: paired ? offAtMs : min(offAtMs, end), awakeUntilMs: end, laptop: laptop);
   }
 
   Map<String, Object?> toJson() => {

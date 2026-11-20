@@ -109,6 +109,7 @@ class WorkController extends ChangeNotifier {
     this.mediaVolume,
     this.laptopMeeting,
     this.recordingsDir,
+    this.onShare,
     Duration Function()? monotonic,
   }) : sound = sound ?? SilentWorkSound(),
        keeper = keeper ?? FakeSessionKeeper(grant: false),
@@ -142,6 +143,10 @@ class WorkController extends ChangeNotifier {
 
   /// A quiet line when the chime may not be heard (the media volume off or low); null when nothing needs saying.
   String? volumeNote;
+
+  /// Gets [shareState] whenever it changes, and at least every [shareEvery] while a session runs (null once it
+  /// ended): Share on Wi-Fi's /state tells the paired laptop's tray (DECISIONS 671). Null: nobody listens.
+  final void Function(Map<String, Object?>? state)? onShare;
 
   WorkStage stage = WorkStage.setup;
   String message = '';
@@ -978,7 +983,65 @@ class WorkController extends ChangeNotifier {
   }
 
   void _notify() {
+    _share();
     if (!_disposed) notifyListeners();
+  }
+
+  /// What Share on Wi-Fi's /state says about this session for the paired laptop's tray (DECISIONS 671): from the
+  /// contact check on until Stop; null otherwise. `data_at` is the headband's last data (unix seconds, this phone's
+  /// clock): the server turns it into `age`. Times in UTC.
+  Map<String, Object?>? shareState() {
+    final at = startedAt;
+    if (at == null || _ended || !active || stage == WorkStage.ending) return null;
+    final h = hint, data = _lastData;
+    return {
+      'kind': 'work',
+      'since': at.toUtc().toIso8601String(),
+      'stage': switch (stage) {
+        WorkStage.running => 'running',
+        WorkStage.eyesClosed => 'eyes_closed',
+        _ => 'calibrating',
+      },
+      'level': levelKey(level),
+      'signal': switch (signal) {
+        WorkSignal.good => 'good',
+        WorkSignal.noisy => 'noisy',
+        WorkSignal.noEyes => 'no_eyes',
+        WorkSignal.lost => 'lost',
+        WorkSignal.off => 'off',
+      },
+      'on_break': onBreak,
+      'hint': h == null
+          ? null
+          : {
+              'reason': switch (h.reason) {
+                HintReason.stretch => 'stretch',
+                HintReason.drowsy => 'drowsy',
+                HintReason.eyesClosed => 'eyes_closed',
+                HintReason.snooze => 'snooze',
+              },
+              'at': h.at.toUtc().toIso8601String(),
+            },
+      'data_at': data == null ? null : data.microsecondsSinceEpoch / 1e6,
+    };
+  }
+
+  String? _sharedKey;
+  DateTime? _sharedAt;
+
+  /// Sends [shareState] when anything but `data_at` changed, or [shareEvery] after the last send.
+  void _share() {
+    final send = onShare;
+    if (send == null) return;
+    final s = shareState();
+    final key = s == null ? '' : ({...s}..remove('data_at')).toString();
+    final now = _now(), last = _sharedAt;
+    if (key == _sharedKey && (s == null || (last != null && now.difference(last) < shareEvery))) return;
+    _sharedKey = key;
+    _sharedAt = now;
+    try {
+      send(s);
+    } catch (_) {}
   }
 
   @override
@@ -986,9 +1049,13 @@ class WorkController extends ChangeNotifier {
     _disposed = true;
     if (!_ended && active) unawaited(stop());
     _ticker?.cancel();
+    _share();
     super.dispose();
   }
 }
+
+/// The work session's /state summary goes out at least this often while it runs (its `data_at` moves on).
+const Duration shareEvery = Duration(seconds: 5);
 
 String _minutes(double m) {
   final total = m.floor();

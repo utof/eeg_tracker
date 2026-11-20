@@ -17,10 +17,13 @@ Tested in analysis/tests/test_laptop_work.py. What the owner sees: docs/laptop-t
   tapped breaks cut out, while a session runs.
 - Records: one JSON per session in _local/laptop/work/, the answers about detection in labels.jsonl beside them, and
   each hint as a break_hint event in break_hints.py's file (so the 4-a-day cap and the back-off are shared).
+- The paired phone (DECISIONS 670-679): its /state looked at every 45 s while one is paired (a ring around the icon:
+  the headband records on the phone, or not, or the phone does not answer; the menu's phone lines), and its link
+  (phone_link.py --keep) kept running so a pairing lasts.
 """
 from __future__ import annotations
 
-import ipaddress, json, os, re, shutil, subprocess, sys, urllib.error, urllib.request
+import ipaddress, json, os, re, shutil, subprocess, sys, threading, urllib.error, urllib.request
 from bisect import bisect_left, bisect_right
 from collections import Counter
 from dataclasses import asdict, dataclass, field, fields, replace
@@ -802,7 +805,7 @@ def session_from(stamp: str, d: dict) -> WorkSession | None:
         return None
 
 
-# ---------- the phone link (a hook: feat/qr-pairing's scripts/phone_link.py) ----------
+# ---------- the phone link (scripts/phone_link.py: pairing, and the work signal) ----------
 
 def link_status_probe(url: str = "http://127.0.0.1:8771/status") -> dict | None:
     """phone_link.py's own status, on this laptop only; None when it is not running."""
@@ -820,36 +823,21 @@ PAIR_PAGE = "http://127.0.0.1:8771/"  # phone_link.py's own page on this laptop:
 def pair_command(repo: Path = REPO, python: str = sys.executable, *, local: Path | None = None,
                  probe: Callable[[], dict | None] | None = None,
                  which: Callable[[str], str | None] = shutil.which) -> list[str] | None:
-    """The command "Pair phone…" runs. While phone_link.py already runs (its status answers on this laptop): its page
-    with the code, in the browser. Else phone_link.py in a terminal window (it shows the QR code and wants Enter for a
+    """The command "Pair phone…" runs. While phone_link.py already runs (its status answers on this laptop; the tray
+    runs it with --keep while a phone is paired): its page, with a new code made for it (`?new=1`), in the browser. Else phone_link.py in a terminal window (it shows the QR code and wants Enter for a
     new one), copying the phone's files into [local] (the tray's `_local`). None while the script is not in this
     checkout, or there is no terminal program."""
     script = repo / "scripts" / "phone_link.py"
     if not script.exists():
         return None
     if (probe or link_status_probe)() is not None:
-        return ["xdg-open", PAIR_PAGE]
+        return ["xdg-open", PAIR_PAGE + "?new=1"]
     args = [python, str(script)] + (["--dest", str(local)] if local is not None else [])
     term = which("x-terminal-emulator")
     if term is not None:
         return [term, "-e", *args]  # Debian's rule: -e takes the command and its arguments
     term = which("gnome-terminal")
     return None if term is None else [term, "--", *args]
-
-
-def phone_line(local: Path, probe: Callable[[], dict | None] = link_status_probe) -> str | None:
-    """One status line about the phone from <local>/phone/link.json (written by phone_link.py) and its running
-    status; None when no phone was ever paired. The token in the file is never read out."""
-    try:
-        raw = json.loads((local / "phone" / "link.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(raw, dict) or not raw.get("phone"):
-        return None
-    st = probe()
-    if st is None:
-        return "Phone: paired (the link is not running)"
-    return "Phone: connected, copying its files" if st.get("connected") else "Phone: paired, not answering now"
 
 
 _PHONE_NETS = tuple(ipaddress.ip_network(n) for n in (
@@ -903,11 +891,267 @@ def phone_work_signal(local: Path, working: bool, *, meeting: bool | None = None
         return "not reachable"
 
 
-def phone_work_level(local: Path) -> str | None:
-    """Hook, not wired yet: while the phone runs its own Work session with the headband, the tray could show its
-    drowsiness level (alert / getting drowsy / drowsy) from the phone's Share on Wi-Fi API. The phone's /state has no
-    work fields yet (app/test/fixtures/share_api.json), so this says nothing; the integration pass adds the call."""
-    return None
+# ---------- the paired phone and its headband (DECISIONS 670-679) ----------
+
+PHONE_POLL_S = 45.0        # the paired phone's /state is asked this often; never while no phone is paired
+PHONE_TIMEOUT_S = 2.0      # one look waits at most this long (tray.py looks in a thread: the menu never waits)
+PHONE_MISSES = 2           # failed looks in a row before "not reachable" (one Wi-Fi blip keeps the last answer)
+FRESH_S = 30.0             # the headband's newest data at most this old, by the phone's clock: in use now
+STATE_MAX_BYTES = 262_144  # a /state with 4 s of 4 channels is about 30 KB
+RINGS = ("none", "dashed", "amber", "green")
+
+
+@dataclass(frozen=True)
+class PhoneLook:
+    """One look at the paired phone's Share on Wi-Fi. `unpaired`: no phone in link.json (nothing was asked); `ok`
+    with its /state; `refused`: it answered with an error (`code` 401: a token it no longer takes; None: not as the
+    app answers); `unreachable`: no answer (Share on Wi-Fi off, another network, the phone asleep)."""
+    at: datetime
+    result: str
+    address: str | None = None
+    state: dict | None = None
+    code: int | None = None
+    copying: bool = False      # phone_link.py on this laptop copies its files now
+
+
+def phone_state(address: str, port: int, token: str, timeout: float = PHONE_TIMEOUT_S) -> tuple[str, dict | None,
+                                                                                               int | None]:
+    """GET /state from the phone's Share on Wi-Fi with the token from link.json (in a header: never in the URL, a log
+    line or an error); no proxy (local network only). ("ok", state, None), ("refused", None, code) or
+    ("unreachable", None, None); never raises."""
+    req = urllib.request.Request(f"http://{address}:{port}/state", headers={"Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=timeout) as r:
+            body = r.read(STATE_MAX_BYTES + 1)
+    except urllib.error.HTTPError as e:
+        return "refused", None, e.code
+    except (urllib.error.URLError, OSError, ValueError):
+        return "unreachable", None, None
+    try:
+        d = json.loads(body) if len(body) <= STATE_MAX_BYTES else None
+    except ValueError:
+        d = None
+    return ("ok", d, None) if isinstance(d, dict) and isinstance(d.get("status"), str) else ("refused", None, None)
+
+
+def look_at_phone(local: Path, now: datetime, ask: Callable[..., tuple[str, dict | None, int | None]] = phone_state,
+                  probe: Callable[[], dict | None] = link_status_probe) -> PhoneLook:
+    """The slow part, for a thread: link.json read (no network at all while no phone is paired), then /state."""
+    t = _phone_target(local)
+    if t is None:
+        return PhoneLook(now, "unpaired")
+    result, state, code = ask(*t)
+    copying = False
+    if result == "ok":
+        st = probe()
+        copying = bool(st and st.get("connected"))
+    return PhoneLook(now, result, t[0], state, code, copying)
+
+
+def _num(v: object) -> float | None:
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) < 1e12 else None
+
+
+def _aware(v: object) -> datetime | None:
+    t = _t(v)
+    return None if t is None else (t if t.tzinfo is not None else t.astimezone())
+
+
+def _ago(s: float | None) -> str:
+    if s is None:
+        return "a while"
+    return f"{round(s)} s" if s < 90 else for_minutes(s / 60)
+
+
+WORK_STAGES = ("eyes_closed", "calibrating", "running")
+WORK_LEVELS = {"alert": "alert", "getting_drowsy": "getting drowsy", "drowsy": "drowsy", "unknown": "not sure"}
+WORK_SIGNALS = {"good": "signal good", "noisy": "signal noisy", "no_eyes": "an electrode has no contact",
+                "lost": "signal lost", "off": "not on the head"}
+HINT_WHY = {"drowsy": "drowsiness", "eyes_closed": "eyes closed a while", "stretch": "time", "snooze": "time, snoozed"}
+
+
+def work_session(state: dict) -> dict | None:
+    """The phone's Work session from /state's `session` (DECISIONS 671), checked field by field (untrusted input:
+    anything unknown reads as missing); None when there is none."""
+    s = state.get("session")
+    if not isinstance(s, dict) or s.get("kind") != "work":
+        return None
+    h = s.get("hint")
+    hint = None
+    if isinstance(h, dict) and h.get("reason") in HINT_WHY and _aware(h.get("at")) is not None:
+        hint = (str(h["reason"]), _aware(h["at"]))
+    return {"since": _aware(s.get("since")),
+            "stage": s.get("stage") if s.get("stage") in WORK_STAGES else "calibrating",
+            "level": s.get("level") if s.get("level") in WORK_LEVELS else "unknown",
+            "signal": s.get("signal") if s.get("signal") in WORK_SIGNALS else "lost",
+            "on_break": s.get("on_break") is True, "hint": hint, "age": _num(s.get("age"))}
+
+
+def phone_work_level(state: dict | None) -> str | None:
+    """The phone's Work-session drowsiness while it reads one with the headband on: alert, getting_drowsy, drowsy or
+    unknown (the phone is not sure); None without a running, fresh session."""
+    w = work_session(state) if isinstance(state, dict) else None
+    if w is None or w["stage"] != "running" or w["on_break"] or w["signal"] in ("lost", "off"):
+        return None
+    return w["level"] if w["age"] is not None and w["age"] <= FRESH_S else None
+
+
+@dataclass(frozen=True)
+class Band:
+    """What the phone's /state says about the headband: the icon's ring (green: in use and its data fresh; amber:
+    not recording, stale, or no signal), the menu line, and a line about a break from the phone (or None)."""
+    ring: str
+    line: str
+    brk: str | None = None
+
+
+def _work_band(w: dict) -> Band:
+    since = f"work session since {hm(w['since'])}" if w["since"] is not None else "a work session"
+    sig, age = w["signal"], w["age"]
+    brk = None
+    if w["hint"] is not None:
+        brk = f"Break hint on the phone since {hm(w['hint'][1])} ({HINT_WHY[w['hint'][0]]})"
+    elif w["stage"] == "running" and not w["on_break"] and sig not in ("lost", "off"):
+        brk = {"drowsy": "Drowsiness says: time for a break",
+               "getting_drowsy": "Drowsiness is rising: a break soon may help"}.get(w["level"])
+    if w["on_break"]:
+        on = sig in ("good", "noisy", "no_eyes") and age is not None and age <= FRESH_S
+        return Band("green" if on else "amber", f"Headband: on a break ({since} on the phone)")
+    if sig == "lost":
+        return Band("amber", f"Headband: signal lost, reconnecting ({since} on the phone)")
+    if age is None or age > FRESH_S:
+        return Band("amber", f"Headband: no data for {_ago(age)} ({since} on the phone)")
+    if sig == "off":
+        return Band("amber", f"Headband: connected, not on the head ({since} on the phone)")
+    reads = {"eyes_closed": "eyes-closed minute", "calibrating": "calibrating"}.get(w["stage"]) \
+        or WORK_LEVELS[w["level"]]
+    return Band("green", f"Headband: recording on the phone ({since}, {WORK_SIGNALS[sig]}, {reads})", brk)
+
+
+def band_of(state: dict) -> Band:
+    """The headband from the phone's /state: a Work session (its own summary), a night (`status`, `age`, `minutes`),
+    another daytime session that records (`session` status), or nothing."""
+    w = work_session(state)
+    if w is not None:
+        return _work_band(w)
+    status, age, minutes = state.get("status"), _num(state.get("age")), _num(state.get("minutes"))
+    fresh = age is not None and age <= FRESH_S
+    if status == "recording":
+        so_far = f", {for_minutes(minutes)} so far" if minutes else ""
+        return (Band("green", f"Headband: recording a night on the phone{so_far}") if fresh else
+                Band("amber", f"Headband: a night records, but no data for {_ago(age)}"))
+    if status == "reconnecting":
+        return Band("amber", "Headband: a night records, reconnecting to the headband")
+    if status == "checking contact":
+        return Band("amber", "Headband: a night is starting (checking contact)")
+    if status == "stopping":
+        return Band("amber", "Headband: the night's recording is stopping")
+    if status == "session" and fresh:
+        return Band("green", "Headband: recording on the phone (a session)")
+    return Band("amber", "Headband: not recording on the phone")
+
+
+@dataclass(frozen=True)
+class PhoneView:
+    kind: str                    # off (no phone watch) | unpaired | checking | unreachable | refused | reachable
+    ring: str                    # none | dashed | amber | green (RINGS)
+    lines: tuple[str, ...] = ()
+
+
+def phone_view(last: PhoneLook | None, ok: PhoneLook | None, misses: int) -> PhoneView:
+    """The menu's phone lines and the icon's ring from the latest look and the last answered one: one failed look
+    after an answer keeps that answer (a Wi-Fi blip); [PHONE_MISSES] in a row, or none answered, is the failure."""
+    if last is None:
+        return PhoneView("checking", "none", ())
+    if last.result == "unpaired":
+        return PhoneView("unpaired", "none", ())
+    if last.result != "ok" and (ok is None or misses >= PHONE_MISSES):
+        if last.result == "unreachable":
+            return PhoneView("unreachable", "dashed", ("Phone: not reachable (app asleep, or Share on Wi-Fi off?)", "Headband: —"))
+        why = {401: "does not take this laptop's token any more (Pair phone… again)",
+               403: "answers, but not to this network (a VPN on the phone?)"}.get(
+            last.code or 0, f"answers, but not as the app does ({last.code or 'not the app'})")
+        return PhoneView("refused", "dashed", (f"Phone: {why}", "Headband: —"))
+    if ok is None or ok.state is None:
+        return PhoneView("checking", "none", ("Phone: paired, checking…",))
+    band = band_of(ok.state)
+    head = "Phone: paired, reachable" + (" · copying its files" if ok.copying else "")
+    return PhoneView("reachable", band.ring, (head, band.line) + ((band.brk,) if band.brk else ()))
+
+
+class LinkKeeper:
+    """phone_link.py --keep, run by the tray whenever a phone is paired (DECISIONS 677): the files copied and the
+    phone's announcements heard without a window. Started again when it ended (at most once a minute, then less
+    often after quick ends); none is started while another copy answers on this laptop (a "Pair phone…" window, or
+    one an earlier tray left); its own copy is stopped at Forget and Quit. Its output goes to
+    `<local>/phone/link-keep.log` (addresses and file names; never the token)."""
+
+    def __init__(self, local: Path, *, python: str = sys.executable, script: Path | None = None,
+                 probe: Callable[[], dict | None] = link_status_probe,
+                 popen: Callable[..., subprocess.Popen] = subprocess.Popen, retry_s: float = 60.0):
+        self.local, self.python, self.probe, self.popen, self.retry_s = local, python, probe, popen, retry_s
+        self.script = script or REPO / "scripts" / "phone_link.py"
+        self.proc: subprocess.Popen | None = None
+        self.started: datetime | None = None
+        self.wait_s = retry_s
+        self.lock = threading.Lock()
+
+    def tick(self, now: datetime) -> str:
+        """Keeps it running while a phone is paired: off | running | other | waiting | started | failed."""
+        with self.lock:
+            if _phone_target(self.local) is None:
+                self._stop()
+                return "off"
+            if self.proc is not None and self.proc.poll() is None:
+                return "running"
+            if self.proc is not None:            # it ended: a quick end waits longer before the next try
+                quick = self.started is not None and now - self.started < timedelta(seconds=self.retry_s)
+                self.wait_s = min(self.wait_s * 2, 600.0) if quick else self.retry_s
+                self.proc = None
+            if not self.script.exists():
+                return "failed"
+            if self.probe() is not None:
+                return "other"
+            if self.started is not None and now - self.started < timedelta(seconds=self.wait_s):
+                return "waiting"
+            log = self.local / "phone" / "link-keep.log"
+            try:
+                log.parent.mkdir(parents=True, exist_ok=True)
+                if log.exists() and log.stat().st_size > 1_000_000:
+                    log.replace(log.with_suffix(".log.1"))
+                with open(log, "a", encoding="utf-8") as out:
+                    self.proc = self.popen([self.python, str(self.script), "--keep", "--dest", str(self.local)],
+                                           stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
+                                           start_new_session=True)
+            except OSError:
+                self.started = now
+                return "failed"
+            self.started = now
+            return "started"
+
+    def _stop(self) -> None:
+        p, self.proc = self.proc, None
+        if p is None or p.poll() is not None:
+            return
+        p.terminate()
+        try:
+            p.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            p.kill()
+
+    def stop(self) -> None:
+        with self.lock:
+            self._stop()
+
+
+def forget_phone(local: Path) -> bool:
+    """The tray's "Forget the phone": link.json goes (phone_link.py --keep then ends by itself; the phone hears "not
+    paired" at its next announcement). True when there was one."""
+    try:
+        (local / "phone" / "link.json").unlink()
+        return True
+    except FileNotFoundError:
+        return False
 
 
 # ---------- the controller ----------
@@ -925,6 +1169,9 @@ class View:
     show: frozenset[str]           # the actions the menu offers now
     settings: Settings
     autostart: bool
+    ring: str = "none"             # the phone and headband around the icon: none | dashed | amber | green
+    phone: tuple[str, ...] = ()    # the phone's lines, after the status lines
+    phone_kind: str = "off"        # PhoneView.kind: unpaired puts "Pair phone…" first; paired ones offer Forget
 
 
 def hm(t: datetime) -> str:
@@ -946,19 +1193,24 @@ class WorkTray:
 
     def __init__(self, source: Source, notifier: Notifier, records: Records, hints: HintLog,
                  store: SettingsStore | None = None, local: Path = LOCAL,
-                 autostart: Path | None = None, phone: Callable[[], str | None] | None = None,
-                 work_signal: Callable[[bool], None] | None = None, mic: Callable[[], str | None] | None = None):
+                 autostart: Path | None = None, phone: Callable[[datetime], PhoneLook] | None = None,
+                 work_signal: Callable[[bool], None] | None = None, mic: Callable[[], str | None] | None = None,
+                 keeper: LinkKeeper | None = None):
         self.source, self.notifier, self.records, self.hints = source, notifier, records, hints
         self.store = store or SettingsStore(None); self.local = local
         self.s = self.store.load()
-        self.autostart = autostart; self.phone = phone
+        self.autostart = autostart
+        self.phone = phone                      # one look at the paired phone (look_at_phone), slow: for a thread
+        self.keeper = keeper                    # phone_link.py --keep while a phone is paired (DECISIONS 677)
+        self.phone_last: PhoneLook | None = None; self.phone_ok: PhoneLook | None = None
+        self.phone_misses = 0; self.phone_told = False
         self.work_signal = work_signal          # tells the paired phone a session started (True) or ended (False)
         self.session: WorkSession | None = None
         self.spans: list[Span] = []; self.window: list[dict] = []
         self.run: Run | None = None; self.pending: Run | None = None
         self.blocked_before: datetime | None = None; self.quiet_until: datetime | None = None
         self.last_end: datetime | None = None; self.last_saved: datetime | None = None
-        self.aw_error: str | None = None; self.phone_text: str | None = None
+        self.aw_error: str | None = None
         self.ticks = 0; self.log: list[str] = []      # what happened, for --dry-run and the tests
         self.clock: Callable[[], datetime] = lambda: datetime.now().astimezone()   # for the notifications' answers
         self.mic = mic                          # the call app holding the microphone now (pactl_meeting), or None
@@ -968,6 +1220,8 @@ class WorkTray:
 
     # --- reading
     def tick(self, now: datetime) -> None:
+        if self.phone_due(now):
+            self.phone_seen(self.phone_fetch(now), now)
         try:
             self.fetch(now)
         except af.NoActivityWatch as e:
@@ -975,10 +1229,8 @@ class WorkTray:
         self.apply(now)
 
     def fetch(self, now: datetime) -> None:
-        """The slow part, with no decisions: ActivityWatch and the phone link's status (scripts/tray.py runs this in a
-        thread, then apply() in the main loop). Raises af.NoActivityWatch."""
-        if self.phone is not None:
-            self.phone_text = self.phone()
+        """The slow part, with no decisions: ActivityWatch and the microphone (scripts/tray.py runs this in a thread,
+        then apply() in the main loop). Raises af.NoActivityWatch."""
         if self.mic is not None:
             self.mic_now = self.mic()
         self.source.read(now)
@@ -1002,6 +1254,56 @@ class WorkTray:
 
     def _cfg(self) -> bh.Config:
         return self.s.hint_config()
+
+    # --- the paired phone (DECISIONS 670-679)
+    def phone_due(self, now: datetime) -> bool:
+        last = self.phone_last
+        return self.phone is not None and (last is None or now - last.at >= timedelta(seconds=PHONE_POLL_S - 1))
+
+    def phone_fetch(self, now: datetime) -> PhoneLook | None:
+        """The slow part, for a thread: the phone link kept running, then one look at the phone."""
+        if self.keeper is not None:
+            self.keeper.tick(now)
+        return self.phone(now) if self.phone is not None else None
+
+    def phone_seen(self, look: PhoneLook | None, now: datetime) -> None:
+        """A look's answer, in the main loop. The first one after the start says once when a phone paired before does
+        not answer now (a notification, when they are on: Share on Wi-Fi is off after an app update, as on
+        2026-11-20)."""
+        if look is None:
+            return
+        self.phone_last = look
+        if look.result == "ok":
+            self.phone_ok = look; self.phone_misses = 0; self._close("phone")
+        elif look.result == "unpaired":
+            self.phone_ok = None; self.phone_misses = 0
+        else:
+            self.phone_misses += 1
+        first, self.phone_told = not self.phone_told, True
+        if first and look.result in ("unreachable", "refused"):
+            self.log.append(f"{hm(now)} the paired phone does not answer ({look.result})")
+            if self.s.notifications:
+                body = (f"Paired with the phone at {look.address}, but it does not answer: the app asleep (open it, or "
+                        "start a session) or Share on Wi-Fi off. Until then the tray cannot see whether the headband "
+                        "records."
+                        if look.result == "unreachable" else
+                        f"The phone at {look.address} does not take this laptop's token any more. Pair phone… in "
+                        "the tray's menu pairs them again.")
+                self._notify("phone", "Phone not reachable", body, [], lambda _k: None, low=True)
+
+    def phone_now(self) -> PhoneView:
+        if self.phone is None:
+            return PhoneView("off", "none")
+        return phone_view(self.phone_last, self.phone_ok, self.phone_misses)
+
+    def forget_phone(self, now: datetime) -> None:
+        """The menu's "Forget the phone": the link kept running is stopped, link.json goes."""
+        if self.keeper is not None:
+            self.keeper.stop()
+        if forget_phone(self.local):
+            self.log.append(f"{hm(now)} the phone was forgotten")
+        self.phone_last = PhoneLook(now, "unpaired"); self.phone_ok = None; self.phone_misses = 0
+        self._close("phone")
 
     # --- meetings
     def _track_meetings(self, now: datetime, raw: list[Span]) -> str | None:
@@ -1339,6 +1641,8 @@ class WorkTray:
         if self.pending is not None:
             self._label(now, "ask", "none", self.pending, None); self.pending = None
         self.stop(now, ended="quit")
+        if self.keeper is not None:       # the phone link it ran goes with it (a new tray starts it again)
+            self.keeper.stop()
 
     # --- settings
     def set_setting(self, now: datetime, **kw: object) -> None:
@@ -1396,10 +1700,13 @@ class WorkTray:
                 lines.append(f"In a meeting ({r.app}) for {round(r.work_min)} min" if r.family == "meeting" else
                              f"In work apps for {round(r.work_min)} min (most: {r.app})")
             lines.append(MODE_LINES[self.s.auto_start].format(ask=self.s.ask_after_min, auto=self.s.auto_after_min))
-        if self.phone_text:
-            lines.append(self.phone_text)
         on = autostart_on(self.autostart) if self.autostart is not None else False
-        return View(icon, tuple(lines), frozenset(show), self.s, on)
+        pv = self.phone_now()
+        if pv.kind in ("unpaired", "off"):
+            show.add("pair")
+        else:
+            show |= {"pair", "forget"}
+        return View(icon, tuple(lines), frozenset(show), self.s, on, pv.ring, pv.lines, pv.kind)
 
     def _session_view(self, now: datetime, lines: list[str], show: set[str]) -> str:
         s = self.session; assert s is not None
@@ -1443,7 +1750,7 @@ class WorkTray:
         t = next_hint_at(now, spans, self.hints.history(), cfg)
         if t is None:
             return "No more break hints today"
-        return f"Next break hint about {hm(t)} ({round(active)} min since the last break)"
+        return f"Next break hint about {hm(t)} (by time: {round(active)} min since the last break)"
 
 
 # ---------- replaying a day (--dry-run) ----------

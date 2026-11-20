@@ -384,3 +384,104 @@ def test_lan_address_is_private_or_none() -> None:
 
 def test_pull_phone_is_what_the_mirror_runs() -> None:
     assert pl.pp is pp  # one copy rule for the laptop: pull_phone.py's
+
+
+# ---------- --keep: the tray runs it while a phone is paired (DECISIONS 677) ----------
+
+def _free_port() -> int:
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _paired(dest: Path, clock: Clock) -> str:
+    """A phone paired earlier: link.json with its key, as the pairing left it."""
+    link = pl.Link(dest / "phone" / "link.json", name="my-laptop", host="127.0.0.1", clock=clock)
+    s = Server(link, client="192.168.1.23")
+    try:
+        _, answer = phone_handshake(s, "code", link.new_code())
+    finally:
+        s.close()
+    return answer["key"]
+
+
+def _get(url: str) -> tuple[int, str]:
+    try:
+        with urllib.request.urlopen(url, timeout=3) as r:
+            return r.status, r.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()
+
+
+def _until(ok, seconds: float = 5.0) -> None:
+    import time
+
+    def check() -> bool:
+        try:
+            return bool(ok())
+        except OSError:   # not listening there (yet)
+            return False
+    end = time.monotonic() + seconds
+    while not check() and time.monotonic() < end:
+        time.sleep(0.02)
+    assert check()
+
+
+def test_keep_needs_a_paired_phone(tmp_path: Path) -> None:
+    out: list[str] = []
+    a = pl.parse(["--keep", "--dest", str(tmp_path), "--port", str(_free_port()), "--no-pages", "--no-mirror"])
+    assert pl.keep(a, out.append) == 3 and "without --keep" in out[0]
+
+
+def test_keep_runs_quietly_follows_the_laptops_address_and_ends_when_forgotten(tmp_path: Path, clock: Clock) -> None:
+    """No window and no code until this laptop asks for one; the laptop's address can go (Wi-Fi off) and come back,
+    or change, and the phone's announcement still reaches it; deleting link.json ends it."""
+    key = _paired(tmp_path, clock)
+    port = _free_port()
+    wifi: list[str | None] = ["127.0.0.2"]   # this laptop's home-network address now (127.0.0.x stand in)
+
+    def find() -> str | None:
+        return wifi[0]
+
+    a = pl.parse(["--keep", "--dest", str(tmp_path), "--port", str(port), "--no-pages", "--no-mirror"])
+    out: list[str] = []
+    stop = threading.Event()
+    done: list[int] = []
+    t = threading.Thread(target=lambda: done.append(pl.keep(a, out.append, find=find, stop=stop, look_s=0.15)),
+                         daemon=True)
+    t.start()
+    try:
+        _until(lambda: _get(f"http://127.0.0.1:{port}/status")[0] == 200)
+        status = json.loads(_get(f"http://127.0.0.1:{port}/status")[1])
+        assert status["code_valid"] is False and status["phone"] == "192.168.1.23:8765"
+        assert "No code right now" in _get(f"http://127.0.0.1:{port}/")[1]
+        # "Pair phone…" in the tray opens /?new=1: a code, then the plain page (a reload does not make another)
+        code, page = _get(f"http://127.0.0.1:{port}/?new=1")
+        assert code == 200 and "<svg" in page and json.loads(_get(f"http://127.0.0.1:{port}/status")[1])["code_valid"]
+
+        class At(Server):
+            def __init__(self, host: str) -> None:  # the phone's announcement to wherever the laptop listens now
+                self.client, self.base = "192.168.1.23", f"http://{host}:{port}"
+
+        _until(lambda: _get(f"http://127.0.0.2:{port}/noapp")[0] == 200)   # on the address, not just loopback
+        assert phone_handshake(At("127.0.0.2"), "key", key, token="newtoken2345")[0] == 200
+        wifi[0] = None                                                        # Wi-Fi off a moment
+        _until(lambda: any("No home-network address now" in x for x in out))
+        wifi[0] = "127.0.0.2"                                                 # back at the same address
+        _until(lambda: sum("Listening for the phone at 127.0.0.2" in x for x in out) == 2)
+        assert phone_handshake(At("127.0.0.2"), "key", key, token="newtoken2345")[0] == 200
+        wifi[0] = "127.0.0.3"                                                 # the router gave it a new one
+        _until(lambda: _get(f"http://127.0.0.3:{port}/noapp")[0] == 200)
+        assert phone_handshake(At("127.0.0.3"), "key", key, token="newtoken6789")[0] == 200
+        saved = json.loads((tmp_path / "phone" / "link.json").read_text())
+        assert saved["phone"]["token"] == "newtoken6789"   # a new code on the phone needs no new scan
+        assert not any(key in x or "newtoken" in x for x in out)
+        (tmp_path / "phone" / "link.json").unlink()        # the tray's "Forget the phone"
+        _until(lambda: bool(done), 5)
+        assert done == [0] and "forgotten" in out[-1]
+        with pytest.raises(OSError):
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/status", timeout=1)
+    finally:
+        stop.set()
+        t.join(5)

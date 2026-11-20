@@ -2,7 +2,8 @@
 // same JSON (scripts/recorder_hub.py), so scripts/page_server.py --recorder http://<phone>:8765 --token <t> shows
 // the laptop's pages on the phone's recording, and it lists and serves the app's files read-only:
 //
-//   GET  /state          status, battery, minutes, age, contact, the last 4 s of data
+//   GET  /state          status, battery, minutes, age, contact, the last 4 s of data, and `session`: the daytime
+//                        session that holds the headband (a Work session's level and signal, DECISIONS 671) or null
 //   GET  /stream         server-sent events: a hello, every batch {"i","t","uv"}, every marker
 //   POST /marker         a text marker into the run's .markers.jsonl (503 while nothing records)
 //   POST /contact        503: the phone checks contact once, at the start of the night (row 52)
@@ -221,6 +222,23 @@ class ShareServer {
     return fs is int && fs > 0 ? fs : _fs;
   }
 
+  /// The daytime session that holds the headband, for /state's `session` (DECISIONS 671): its screen's own summary
+  /// (`WorkController.shareState`), or null when none runs.
+  void setSession(Map<Object?, Object?>? session) => _session = session;
+  Map<Object?, Object?>? _session;
+
+  /// /state's `session`: the known fields only, and `age`, the seconds since the headband's last data by this
+  /// phone's clock, so the laptop sees a session whose data stopped (or whose screen froze) as stale.
+  Map<String, Object?>? _sessionState() {
+    final s = _session;
+    if (s == null || s['kind'] is! String) return null;
+    final dataAt = s['data_at'];
+    return {
+      for (final k in const ['kind', 'since', 'stage', 'level', 'signal', 'on_break', 'hint']) k: s[k],
+      'age': dataAt is num ? _round(_seconds() - dataAt, 1) : null,
+    };
+  }
+
   void setLive(Map<Object?, Object?> live) {
     _live = live;
     final c = live['contact'];
@@ -283,6 +301,7 @@ class ShareServer {
       },
       'contact_t': _contactT,
       'data': data,
+      'session': _sessionState(),
     };
   }
 

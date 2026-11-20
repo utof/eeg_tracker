@@ -211,20 +211,17 @@ void main() {
     late Directory files;
     late ShareConfig saved;
     late FakeWifiLock lock;
-    late List<String> keeps;
     late ShareControl screen;
 
     setUp(() {
       files = Directory.systemTemp.createTempSync('night_wifi_test');
       saved = const ShareConfig();
       lock = FakeWifiLock();
-      keeps = [];
       screen = ShareControl(
         load: () async => saved,
         save: (x) async => saved = x,
         sendToRecorder: (_) {},
         keepScreenOn: (_) async {},
-        keepAlive: (on, _) async => keeps.add(on ? 'keep on' : 'keep off'),
         wifiLock: lock.holder('screen'),
         host: (dir, onChange, wifiLock) =>
             ShareHost(filesDir: dir, onLog: (_) {}, onChange: onChange, entry: fakeServer, wifiLock: wifiLock),
@@ -285,15 +282,14 @@ void main() {
     });
 
     test('a night the headband watcher starts: the recorder takes it while the screen still serves; the screen lets go '
-        'with its keep at its next sync', () async {
+        'at its next sync', () async {
       // The watcher starts the recorder from its own engine (lib/auto/task.dart): the screen hears of the night only
-      // at its once-a-minute sync, and meanwhile its server, its "Sharing on Wi-Fi" keep and its lock stay (the
-      // recorder's server waits for the port, isolate.dart). The screen's lock follows its keep (DECISIONS 589, 612).
+      // at its once-a-minute sync, and meanwhile its server and its lock stay (the recorder's server waits for the
+      // port, isolate.dart). The screen's lock follows its server (DECISIONS 612; no keep since row 678).
       await screen.sync(night: false, filesDir: files.path);
       await screen.setOn(true);
       await settle();
       expect(lock.holders, {'screen'});
-      expect(keeps, ['keep on']);
 
       final night = recorderHost();
       await night.start(saved);
@@ -303,20 +299,17 @@ void main() {
       await screen.sync(night: true, filesDir: files.path);
       await settle();
       expect(lock.holders, {'recorder'});
-      expect(keeps, ['keep on', 'keep off']);
 
-      // Stop (from the night's notification): the screen serves again with its keep and its lock
+      // Stop (from the night's notification): the screen serves again with its lock
       await screen.sync(night: false, filesDir: files.path);
       await night.stop();
       await settle();
       expect(lock.holders, {'screen'});
-      expect(keeps, ['keep on', 'keep off', 'keep on']);
 
-      // the keep's own Stop switches sharing off: the keep and the lock end together
+      // sharing switched off: the lock ends with the server
       await screen.setOn(false);
       await settle();
       expect(lock.held, isFalse);
-      expect(keeps.last, 'keep off');
     });
 
     test('the recorder switching sharing off and on during the night lets go and takes it again', () async {

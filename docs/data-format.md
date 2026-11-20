@@ -724,7 +724,12 @@ that send its code (`Authorization: Bearer <code>`, `X-EEG-Token`, or `?token=`)
   503 while nothing records). `i` counts samples within the run being recorded. `status` is `recording`,
   `reconnecting`, `checking contact`, `stopping`, `not recording`, or `session` (a meditation, check-in, dream
   catcher or sound session is recording). The field lists both recorders are tested against:
-  `app/test/fixtures/share_api.json`.
+  `app/test/fixtures/share_api.json`. The phone's `/state` has one more key, `session` (DECISIONS 671): null, or
+  while a Work session runs `{"kind": "work", "since": <start, UTC ISO>, "stage": "eyes_closed" | "calibrating" |
+  "running", "level": "alert" | "getting_drowsy" | "drowsy" | "unknown", "signal": "good" | "noisy" | "no_eyes" |
+  "lost" | "off", "on_break": bool, "hint": null | {"reason": "stretch" | "drowsy" | "eyes_closed" | "snooze", "at"},
+  "age": <seconds since the headband's last data, by the phone's clock, or null>}` (the laptop tray's ring and
+  headband line; `status` alone does not say which session records).
 - `POST /work` with `{"working": true}` or `{"working": false}`, optionally with `"meeting": true|false`: the paired
   laptop's tray says a work session started or ended there, and whether it is in a meeting (`scripts/laptop_work.py`;
   automatic recording, DECISIONS 603; meetings 666 and 685: sent at the session's start and end and at each

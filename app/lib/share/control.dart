@@ -1,9 +1,10 @@
 // Share on Wi-Fi from the screen's side (DECISIONS rows 220-229): the switch, who serves, and when it ends.
 //
 // During a night the recorder's service serves (it keeps running with the screen off) and tells the screen where;
-// between nights the app serves the files itself, keeps the screen on for the first 15 minutes, and keeps itself
-// running with a notification while sharing is on ([keepAlive], DECISIONS row 589), so Android does not freeze it in
-// the background: a frozen app's port still takes connections and never answers. Only one of the two holds the port:
+// between nights the app serves the files itself while it runs (open, or holding a session such as a Work session)
+// and keeps the screen on for the first 15 minutes. No notification keeps it running for sharing (the owner,
+// 2026-11-20; DECISIONS 678 replaces row 589): in the background Android may freeze it, and the paired laptop copies
+// what it missed when the app is opened again or records. Only one of the two holds the port:
 // the app lets go before a night starts and takes over after Stop. Whoever serves holds the phone's Wi-Fi lock
 // ([wifiLock], DECISIONS row 612) under its own name, so the hand-over never drops it.
 import 'dart:async';
@@ -15,10 +16,7 @@ import '../phone.dart';
 import 'isolate.dart';
 import 'link.dart';
 import 'protocol.dart';
-
-/// The notification's words while the app keeps itself running to share between nights.
-String shareKeepText(int offAtMs) =>
-    'Your laptop can copy the files until ${clockText(DateTime.fromMillisecondsSinceEpoch(offAtMs))}. Stop turns it off.';
+import 'shared_session.dart';
 
 /// What the main screen's "Your data" section shows.
 typedef ShareLine = ({bool on, String text, bool warn, String? address});
@@ -36,12 +34,38 @@ class ShareControl extends ChangeNotifier {
     required this.save,
     required this.sendToRecorder,
     required this.keepScreenOn,
-    this.keepAlive,
     this.wifiLock,
     ShareHostMaker? host,
     DateTime Function()? clock,
+    ValueListenable<Map<String, Object?>?>? session,
+    Stream<void>? networkChanges,
   }) : _makeHost = host ?? _appHost,
-       _now = clock ?? DateTime.now;
+       _now = clock ?? DateTime.now,
+       _session = session ?? sharedSession {
+    _session.addListener(_sessionChanged);
+    _network = networkChanges?.listen((_) => unawaited(_host?.networkChanged()), onError: (Object _) {});
+  }
+
+  /// The daytime session that holds the headband (lib/share/shared_session.dart), for /state (DECISIONS 671).
+  final ValueListenable<Map<String, Object?>?> _session;
+
+  /// Android's network changes (NetworkWatch): the paired laptop is told where this phone is at once (DECISIONS 676).
+  StreamSubscription<void>? _network;
+
+  Map<String, Object?>? _sessionWas;
+
+  /// The session's summary to the server; a session that starts also tells the paired laptop where this phone is
+  /// (DECISIONS 678: between nights the app may have been frozen until now).
+  void _sessionChanged() {
+    final now = _session.value, was = _sessionWas;
+    _sessionWas = now;
+    _host?.setSession(now);
+    if (was == null && now != null) unawaited(_host?.tellLaptop());
+  }
+
+  /// The app came to the front again (it may have been frozen in the background): the paired laptop hears where this
+  /// phone is now, so it copies what it missed (DECISIONS 678).
+  void resumed() => unawaited(_host?.tellLaptop());
 
   final Future<ShareConfig> Function() load;
   final Future<void> Function(ShareConfig config) save;
@@ -49,10 +73,6 @@ class ShareControl extends ChangeNotifier {
   /// Sends the setting to the recorder's service while a night runs.
   final void Function(Map<String, Object?> message) sendToRecorder;
   final Future<void> Function(bool on) keepScreenOn;
-
-  /// Keeps the app running in the background while it serves between nights (a notification until [offAtMs]); false
-  /// lets go. Null in tests that do not look at it.
-  final Future<void> Function(bool on, int offAtMs)? keepAlive;
 
   /// Keeps the phone's Wi-Fi awake while the app's own server runs between nights, also with the screen off and
   /// during a session (`Phone.wifiLock` as `screen`); null in tests that do not look at it.
@@ -77,7 +97,6 @@ class ShareControl extends ChangeNotifier {
   ShareHost? _host;
   bool _night = false;
   bool _awake = false;
-  int? _aliveUntil;
   String? _filesDir;
   Future<void> _queue = Future.value();
 
@@ -115,7 +134,6 @@ class ShareControl extends ChangeNotifier {
       await _serveFromApp();
     }
     await _keepAwake(_config.activeAt(now) && !night && now < _config.awakeUntilMs, front: front);
-    await _keepAlive(_config.activeAt(now) && !night);
     notifyListeners();
   });
 
@@ -181,7 +199,6 @@ class ShareControl extends ChangeNotifier {
   Future<void> beforeNight() => _serial(() async {
     _night = true;
     await _stopHost();
-    await _keepAlive(false); // the recorder's service keeps the app running now
     _status = shareDown;
     notifyListeners();
   });
@@ -209,18 +226,7 @@ class ShareControl extends ChangeNotifier {
       final now = _now().millisecondsSinceEpoch;
       await _keepAwake(_config.activeAt(now) && now < _config.awakeUntilMs, front: true);
     }
-    await _keepAlive(_config.activeAt(_now().millisecondsSinceEpoch) && !_night);
     notifyListeners();
-  }
-
-  /// Keeps the app running while it serves between nights; once per change.
-  Future<void> _keepAlive(bool want) async {
-    final until = want ? _config.offAtMs : null;
-    if (until == _aliveUntil) return;
-    _aliveUntil = until;
-    try {
-      await keepAlive?.call(until != null, until ?? 0);
-    } catch (_) {}
   }
 
   Future<void> _serveFromApp() async {
@@ -238,6 +244,7 @@ class ShareControl extends ChangeNotifier {
       notifyListeners();
     }, wifiLock);
     host.setLive(const {});
+    host.setSession(_session.value);
     await host.start(_config);
   }
 
@@ -263,11 +270,18 @@ class ShareControl extends ChangeNotifier {
       return (on: false, text: 'Lets your laptop watch the signal and copy the files over your home Wi-Fi.', warn: false, address: null);
     }
     final at = shareAddress(_status);
-    final until = clockText(DateTime.fromMillisecondsSinceEpoch(_config.offAtMs));
+    final laptop = _config.laptop;
+    final until = laptop != null
+        ? 'paired with ${laptop.name}' // no end time while paired (DECISIONS 675)
+        : 'until ${clockText(DateTime.fromMillisecondsSinceEpoch(_config.offAtMs))}';
     if (at != null) {
       return (
         on: true,
-        text: _night ? 'On at $at until $until.' : 'On at $at until $until. Keep this app open while the laptop copies.',
+        text: laptop != null
+            ? (_night ? 'On at $at, $until.' : 'On at $at, $until. The laptop copies while this app is open or records.')
+            : _night
+            ? 'On at $at $until.'
+            : 'On at $at $until. Keep this app open while the laptop copies.',
         warn: false,
         address: at,
       );
@@ -291,8 +305,9 @@ class ShareControl extends ChangeNotifier {
 
   @override
   void dispose() {
+    _session.removeListener(_sessionChanged);
+    unawaited(_network?.cancel());
     unawaited(_stopHost());
-    if (_aliveUntil != null) unawaited(keepAlive?.call(false, 0).catchError((Object _) {}));
     super.dispose();
   }
 }
