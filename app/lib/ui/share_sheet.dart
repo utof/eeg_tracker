@@ -136,7 +136,8 @@ class ShareSheet extends StatelessWidget {
                       'without it (below).'
                 : m.night
                 ? 'It keeps answering with the screen off while the night records, and for 15 minutes after Stop.'
-                : 'Between nights it answers only while this app is open on the screen.',
+                : 'Between nights it keeps answering in the background too, with a "Sharing on Wi-Fi" notification '
+                      '(its Stop turns sharing off).',
             style: address == null ? muted?.copyWith(color: Night.caution) : muted,
           ),
           if (address != null) ...[

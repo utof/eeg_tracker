@@ -1673,8 +1673,9 @@ Good to know:
 
 - The code stays the same until you tap **New code**; after a new one the phone tells the paired laptop by itself.
   For the commands by hand, set it once to keep it out of the shell history: `export EEG_PHONE_TOKEN=<code>`.
-- Between nights the phone answers only while the app is open on the screen (Android freezes a closed app); the app
-  keeps the screen on for the first 15 minutes. During a night it answers with the screen off.
+- Between nights the phone keeps answering in the background, with a "Sharing on Wi-Fi" notification that stops
+  Android freezing the app (row 589); its Stop turns sharing off. The app keeps the screen on for the first 15 minutes.
+  During a night it answers with the screen off.
 - During a night the laptop's **Re-check contact** button does nothing: the phone checks contact once, at the start
   (DECISIONS row 52). The Sleep page and the morning result are the laptop's own jobs and use the laptop's files,
   which `pull_phone.py` keeps filled.

@@ -228,6 +228,8 @@ void main() {
         expect(find.text('adb forward tcp:8765 tcp:8765'), address == null ? findsOneWidget : findsNothing);
         expect(find.textContaining('A USB cable works without it'), address == null ? findsOneWidget : findsNothing);
         expect(find.textContaining('scripts/pull_phone.py http://${address ?? '127.0.0.1'}:8765 --token kq7m2xwp9dfh'), findsOneWidget);
+        // between nights a notification keeps the app answering in the background (DECISIONS row 589)
+        expect(find.textContaining('"Sharing on Wi-Fi" notification'), name == 'app' ? findsOneWidget : findsNothing);
       });
     }
   }
