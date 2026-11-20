@@ -10,11 +10,14 @@ import '../wearer/check.dart' show nightSignal, wearerAnswerIn;
 import 'drift.dart';
 import 'extras.dart';
 import 'periods.dart';
+import 'rem_check.dart';
 
 /// Of the report file. 2: adds `extras` (jaw, movement and signal quality from the shared detectors). Since
 /// 2026-11-19 also `drift_off` (drift.dart) and `wearer_signal` ("Was this you?", wearer/check.dart), added without a
-/// new version; and `wearer`, the owner's answer, which a rebuilt report keeps. On the phone a report of an older
-/// version is kept as it is and offers "Score again" (DECISIONS row 580; the laptop rebuilds it).
+/// new version; and `wearer`, the owner's answer, which a rebuilt report keeps. Since 2026-11-20 also `probs` (the
+/// model's per-epoch probabilities) and `rem_check` (the dream sleep check, rem_check.dart), without a new version.
+/// On the phone a report of an older version is kept as it is and offers "Score again" (DECISIONS row 580; the
+/// laptop rebuilds it).
 const int reportVersion = 2;
 const String reportNote = 'first guess; the scorer is not yet validated on this headband';
 
@@ -109,6 +112,24 @@ class SleepReport {
   /// older reports, unscored nights or when the detector failed (`drift_off_error` says why).
   DriftResult? get driftOff => DriftResult.read(json['drift_off']);
 
+  /// The dream sleep check (rem_check.dart): the report's own `rem_check`, or for a report from before it the
+  /// stage-only check from [stages] and [periods] (its `eye` null: "score the night again"); null when unscored.
+  Map<String, Object?>? get remCheckNumbers {
+    final own = json['rem_check'];
+    if (own is Map<String, dynamic> && own['version'] == remCheckVersion) return own;
+    if (!scored) return null;
+    final st = stages;
+    int at(DateTime t) => (t.difference(dataStart).inMilliseconds / 30000).round();
+    return remCheck(
+      stages: st,
+      periods: [for (final p in periods) (at(p.start), at(p.end) - 1)],
+      probs: decodeProbs(json['probs']),
+    );
+  }
+
+  /// The model's per-epoch probabilities in permille (W N1 N2 N3 R), or null in a report from before 2026-11-20.
+  List<List<int>>? get probabilities => decodeProbs(json['probs']);
+
   /// The owner's answer to "Was this you?" (`me` or `someone else`), or null (wearer/wearer.dart).
   String? get wearerAnswer => wearerAnswerIn(json);
 
@@ -138,8 +159,10 @@ class SleepReport {
 }
 
 /// Builds the report from the stages of a scored night. [start] is the first epoch's start; [lengthSeconds] the
-/// joined night (gaps and padding included); [inputs] the `.f32` names and sizes read. [seen]: what the detectors
-/// saw over the same samples, for `extras` and `drift_off`; [extrasError]: why that pass failed.
+/// joined night (gaps and padding included); [inputs] the `.f32` names and sizes read. [probabilities]: the model's
+/// mean probabilities, epochs x 5 (W N1 N2 N3 R), for `probs` and the dream sleep check. [seen]: what the detectors
+/// saw over the same samples, for `extras`, `drift_off` and the check's eye movements; [extrasError]: why that pass
+/// failed.
 Map<String, dynamic> buildReport({
   required String nightOf,
   required DateTime built,
@@ -150,6 +173,7 @@ Map<String, dynamic> buildReport({
   required String model,
   List<String>? stages,
   List<double>? confidence,
+  List<double>? probabilities,
   NightSeen? seen,
   String? extrasError,
 }) {
@@ -194,6 +218,8 @@ Map<String, dynamic> buildReport({
         'drift_off': null,
         'drift_off_error': null,
         'wearer_signal': null,
+        'probs': null,
+        'rem_check': null,
       });
   }
   // the laptop takes the confidence from probabilities rounded to 3 decimals (sleep.json)
@@ -256,6 +282,16 @@ Map<String, dynamic> buildReport({
     }
   }
   final gaps = stages.where((s) => s == gapStage).length;
+  final probs = probabilities == null || probabilities.length != stages.length * 5 ? null : encodeProbs(probabilities);
+  final eye = seen == null
+      ? EyeSeen.not(extrasError == null ? 'not measured' : 'not measured: the signal pass failed (see extras_error)')
+      : seen.eye ?? const EyeSeen.not('not measured');
+  final check = remCheck(
+    stages: stages,
+    periods: [for (final p in found.periods) (p.first, p.last)],
+    probs: probs == null ? null : decodeProbs(probs),
+    eye: eye,
+  );
   return rep
     ..addAll({
       'periods': periods,
@@ -281,6 +317,8 @@ Map<String, dynamic> buildReport({
       'drift_off': drift,
       'drift_off_error': driftWhyNot,
       'wearer_signal': wearer,
+      'probs': probs,
+      'rem_check': check,
     });
 }
 
@@ -366,8 +404,9 @@ bool isStale(Map<String, int> files, SleepReport? report, {int newDataMinutes = 
 }
 
 /// Whether [report] came from an older scorer than [model] (the phone's): another report version, made before
-/// `drift_off` existed, or a scored night by another model.
+/// `drift_off` or the dream sleep check (`rem_check`) existed, or a scored night by another model.
 bool scoredByOlder(SleepReport report, {required String model}) =>
     report.json['version'] != reportVersion ||
     !report.json.containsKey('drift_off') ||
+    !report.json.containsKey('rem_check') ||
     (report.scored && report.json['model'] != model);

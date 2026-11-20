@@ -279,7 +279,7 @@ void main() {
       });
       expect(isStale(const {'a.f32': 1000}, rep2), isFalse);
       expect(scoredByOlder(rep2, model: phoneModelId), isTrue);
-      final now = SleepReport({...rep2.json, 'drift_off': null});
+      final now = SleepReport({...rep2.json, 'drift_off': null, 'rem_check': null});
       expect(isStale(const {'a.f32': 1000}, now), isFalse);
       expect(scoredByOlder(now, model: phoneModelId), isFalse);
     });

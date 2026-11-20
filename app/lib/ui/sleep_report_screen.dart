@@ -91,6 +91,7 @@ class _SleepReportScreenState extends State<SleepReportScreen> {
         onInfo: () => showEvidence(context, 'sleep-scoring'),
         onExtrasInfo: () => showEvidence(context, 'jaw-and-blinks'),
         onDriftInfo: () => showEvidence(context, 'dream-catcher'),
+        onDreamInfo: () => showEvidence(context, 'sleep-scoring'),
         alarm: report == null || !report.scored ? null : _alarm(report),
         onAlarmInfo: () => showEvidence(context, 'smart-alarm'),
         onOpenNight: (SleepReport r) => Navigator.of(context).push(

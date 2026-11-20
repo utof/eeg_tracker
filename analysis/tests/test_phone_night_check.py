@@ -696,3 +696,62 @@ def test_a_damaged_header_is_said_and_nothing_is_guessed(tmp_path: Path, capsys:
                                            (2**32 - 1, 0, ("ok", 0)), (2**32 - 2, 1, ("lost", 2))])
 def test_a_board_sequence_number_has_no_2048_wrap(prev: int, cur: int, want: tuple[str, int]) -> None:
     assert pnc.jump(prev, cur, "board sequence number") == want
+
+
+# ---- the dream sleep check (DECISIONS 740-749) ----
+
+def _with_stages(folder: Path, runs: list[Path], stages: str, **more: object) -> dict:
+    """The fake phone report with stages, a period over every asleep epoch and `data_start` where the night joins."""
+    import json
+
+    import rem_check as rc
+    import to_bdf
+    start, _, _ = to_bdf.join(runs)
+    t0 = start.astimezone()
+    first = next(i for i, c in enumerate(stages) if c in "123R")
+    last = max(i for i, c in enumerate(stages) if c in "123R")
+    f = folder / f"{NIGHT}.report.json"
+    rep = json.loads(f.read_text())
+    rep.update(stages=stages, data_start=t0.isoformat(timespec="seconds"),
+               periods=[{"start": (t0 + timedelta(seconds=30 * first)).isoformat(timespec="seconds"),
+                         "end": (t0 + timedelta(seconds=30 * last + 30)).isoformat(timespec="seconds")}], **more)
+    assert rc.periods_of(rep) == [(first, last)]
+    f.write_text(json.dumps(rep))
+    return rep
+
+
+STAGES = "WW" + "2" * 10 + "R" * 6 + "22"  # 10 minutes: 8 asleep, 3 of them dream sleep
+
+
+def test_the_dream_sleep_check_in_the_phones_words(tmp_path: Path) -> None:
+    pytest.importorskip("numpy")
+    import rem_check as rc
+    p = write_run(tmp_path / "recordings", PhoneRun(T, seconds=600, night_end=True, hum_t3=False, flat_t4=False))
+    write_report(tmp_path / "phone" / "nights", NIGHT, [p])
+    st = rc.stages_of(STAGES)
+    own = rc.night_check(st, [(2, 19)], [[0, 0, 0, 0, 700]] * 20, rc.eye_measured("T3-T4", [1] * 12 + [6] * 6 + [1] * 2))
+    _with_stages(tmp_path / "phone" / "nights", [p], STAGES, rem_check=own)
+    s = pnc.check(tmp_path, NIGHT)
+    assert s["report"]["rem"] == own and not s["report"]["rem_eye_here"]  # the report's own: nothing measured here
+    text = pnc.render(s)
+    for line in rc.check_lines(own):
+        assert f"  {line}" in text
+    assert "Dream sleep 3 min (33 %). Usual for adults is 20-25 %; this night is above it." in text
+    assert "eye movements (T3-T4): 9.0 min of sleep measured; share in REM 0.75 (REM is 0.333 of it)" in text
+
+
+def test_an_older_report_gets_its_eye_movements_measured_from_the_recordings(tmp_path: Path) -> None:
+    pytest.importorskip("numpy")
+    p = write_run(tmp_path / "recordings", PhoneRun(T, seconds=600, night_end=True, hum_t3=False, flat_t4=False))
+    write_report(tmp_path / "phone" / "nights", NIGHT, [p])
+    _with_stages(tmp_path / "phone" / "nights", [p], STAGES)
+    s = pnc.check(tmp_path, NIGHT)
+    r = s["report"]
+    assert r["rem_eye_here"] and r["rem"]["eye"]["pair"] == "T3-T4" and len(r["rem"]["eye"]["epochs"]) == 20
+    assert r["rem"]["rem_min"] == 3.0 and r["rem"]["rem_prob_min"] is None
+    text = pnc.render(s)
+    assert "Dream sleep check (eye movements measured here from the recordings; the report predates them)" in text
+    assert "This report is older than the check" not in text
+    assert "the scorer's likelihood is not in this report" in text
+    s = pnc.check(tmp_path, NIGHT, signal=False)  # --no-signal: the stage-only check, and why
+    assert s["report"]["rem"]["eye"] is None and "--no-signal" in s["report"]["rem_why"]

@@ -214,6 +214,9 @@ new samples exist; files of the same name made by hand are first renamed `<date>
 | `extras_error` | why the detectors' pass failed, else `null` |
 | `drift_off` | when you fell asleep after lights off, by the drift-off detector and by the sleep model (below); `null` when unscored or when the detector did not run. Added 2026-11-19 without a new `version`: a version-2 report without this key was written before it and is rebuilt once |
 | `drift_off_error` | why the drift-off detector did not run (the detectors' pass failed, or the detector itself), else `null` |
+| `stages` | one character per 30 s from `data_start`: `W 1 2 3 R` by AnySleep, `-` where over 5 s of the epoch was missing (the phone's from the start; the laptop's since 2026-11-20, `""` when unscored) |
+| `probs` | AnySleep's mean probabilities per 30 s epoch, the same epochs as `stages` (below); `null` when unscored. Added 2026-11-20 without a new `version` |
+| `rem_check` | the dream sleep check (below); `null` when unscored. Added 2026-11-20 without a new `version`: a version-2 report without this key was written before it; the laptop rebuilds it once, the phone keeps it and offers "Score again" |
 
 A sleep period is a stretch of asleep epochs (N1 N2 N3 R by AnySleep) that no 60+ minutes of wake or missing data
 interrupt; a stretch with under 10 minutes asleep is scorer noise and only counts in `stray_sleep_min`. Each period
@@ -239,6 +242,53 @@ and numbers. Readers should check `extras` is an object before using it (older r
 | `hours` | per clock hour: `start` (ISO with offset; the first hour starts at `data_start`, the others on the hour), `from_s` (seconds from `data_start`), `min`, `asleep_min`, then the fields of `night`. The first and last hours are partial |
 
 A burst or a movement counts in the epoch where it starts; one starting after the last whole epoch is left out.
+
+### `probs` (the sleep model's probabilities, DECISIONS 741)
+
+Written by `analysis/rem_check.py` (`encode_probs`) on the laptop and `app/lib/sleep/rem_check.dart` on the phone, the
+same bytes from the same numbers.
+
+| Field | Meaning |
+|---|---|
+| `order` | `"W N1 N2 N3 R"`: the order of the five values of each epoch |
+| `per` | 1000: each value is a probability in permille (0-1000, rounded halves up), the precision of `<night>.sleep.json` |
+| `data` | base64 of little-endian uint16, epoch-major: epoch 0's five values, then epoch 1's, ... (10 bytes an epoch; about 15 KB for a 10-hour night) |
+
+To read it: `struct.unpack(f"<{len(b) // 2}H", base64.b64decode(data))`, five at a time, divided by 1000. A reader
+should check `order` and `per` and that every value is at most 1000 (`decode_probs` returns `null` otherwise).
+
+### `rem_check` (the dream sleep check, DECISIONS 740-749)
+
+Measurement only: it never changes a stage. Written by `analysis/rem_check.py` (`night_check`) on the laptop and
+`app/lib/sleep/rem_check.dart` on the phone with the same rules and numbers; the night report shows it in words
+(`check_lines`, the same sentences on the phone and in `scripts/phone_night_check.py`). Only epochs inside the sleep
+periods count, as the report's totals count them; every number is rounded with integer arithmetic, halves up.
+
+| Field | Meaning |
+|---|---|
+| `version`, `rules`, `validated` | 1 (of this object), the rules in words, `false` |
+| `asleep_min`, `rem_min` | minutes asleep (N1 N2 N3 R) and in dream sleep (R) inside the periods (`total.asleep_min`, `total.dream_min`) |
+| `rem_share` | `rem_min` over `asleep_min`, to 3 decimals; `null` with no sleep |
+| `first_rem_min` | minutes from the first period's first asleep epoch to the first R epoch inside a period; `null` when none |
+| `thirds_rem_min` | R minutes in the first, middle and last third of the epochs from the first period's start to the last period's end (third t: epochs `i0 + t * n // 3` up to `i0 + (t + 1) * n // 3`); `null` with no sleep |
+| `rem_prob_min` | the model's p(R) added up over the epochs inside the periods that are not `-`, in minutes (permille from `probs`, to 0.1 min); `null` without `probs` |
+| `eye` | side-to-side eye movements (below); `null` only in the stage-only check a reader makes for a report from before 2026-11-20 |
+
+`eye` when measured: `pair` (the two channels by name, `"T3-T4"` on the BrainBit), `why` `null`, `epochs` (one
+character per 30 s from `data_start`: the eye-movement seconds of that epoch, `0`-`9` then `a`-`u` for 10-30, `-` not
+measured), `measured_min` (asleep minutes inside the periods with a measured epoch), `in_rem_share` (the share of their
+eye-movement seconds in R epochs), `rem_epoch_share` (the share of those epochs that are R, to compare with), `rem_per_min`
+and `other_per_min` (eye-movement seconds a minute in R and in N1-N3; `null` with none), `dense_share` (per asleep
+stage with measured epochs, the share with at least 4 eye-movement seconds). When not measured: `pair` `null` and
+`why` (`not available on this layout (no left-right pair of electrodes near the eyes)`, or `not measured: ...`).
+
+The detector (DECISIONS 742-743): the pair is the first of F7-F8, F9-F10, AF7-AF8, FT9-FT10, FT7-FT8, T9-T10, T7-T8
+(T3-T4) the recording's header holds (by name or 10-10 site), else two electrodes with no 10-10 site whose directions
+in the header sit near the outer eye corners as mirror images. Both channels are filtered forward from their first
+value (2nd-order Butterworth high-pass 0.5 Hz and low-pass 5 Hz); an eye-movement second is a whole second (from the
+first sample) in which left minus right swings more than 40 µV peak to peak while the two are correlated below -0.3
+and no sample is missing. An epoch is not measured when either channel high-passed at 0.3 Hz goes past 1,500 µV in it
+or fewer than 27 of its seconds are free of missing samples. Planning values, not validated against eye electrodes.
 
 ### `drift_off` (falling asleep, DECISIONS 180-184)
 
@@ -272,7 +322,8 @@ two-pass-64min+8min` since 2026-11-19, `... pieces-1h+15min` before; a scored re
 scored again once); there is no picture, BDF or second model, so `hypnogram`, `sleep_json`, `bdf`, `cross_check`
 and each period's `agreement` are `null`; `epoch_s` is 30 and `stages` holds one character per 30 s from
 `data_start` (`W 1 2 3 R`, `-` where over 5 s of the epoch was missing), like the `hypnogram` of
-`eeg_sleep_night`. `extras` and `extras_error` are as above (the phone runs the detectors beside the sleep model;
+`eeg_sleep_night`. `probs` and `rem_check` are as above (the phone measures the eye movements in the detectors'
+pass; a pass that fails leaves `rem_check.eye` with its `why`). `extras` and `extras_error` are as above (the phone runs the detectors beside the sleep model;
 a pass that fails leaves `extras` `null` and the night still scored), and so are `drift_off` and `drift_off_error`. The phone
 adds `wearer_signal` and, once the owner answers "Was this you?", `wearer` (both below, "Was this you?"). While a night is being scored a `<date>.scoring`
 file sits beside it; if it is still there when
