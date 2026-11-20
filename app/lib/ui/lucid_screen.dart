@@ -14,8 +14,14 @@ import '../lucid/practice.dart';
 import '../lucid/store.dart';
 import '../phone.dart';
 import '../recorder/recorder_service.dart' show loadNight;
+import '../session_keeper.dart' show PhoneSessionKeeper;
+import 'dream_screen.dart' show dreamSessionRunning;
 import 'evidence_sheet.dart';
 import 'lucid_view.dart';
+import 'nap_screen.dart' show napSessionRunning;
+import 'sleep_scoring.dart' show nightScoringBusy;
+import 'states_screen.dart' show soundSessionRunning;
+import 'work_screen.dart' show workSessionRunning;
 
 /// A night's morning questions may be answered until this long after the night's start.
 const Duration answerWithin = Duration(hours: 30);
@@ -152,8 +158,26 @@ String? lucidNightLine(String recordingsDir, {DateTime? now}) {
   }
 }
 
+/// Searches last night for dream signals and keeps the result (lucid/morning.dart searchAndKeep).
+typedef LucidSearch =
+    Future<NightSignals?> Function(String recordingsDir, LucidStore store, LucidNightRecord record, {bool onlyIfScored});
+
+/// A session records or last night is being scored: the search over the whole night waits (it would compete with
+/// them for the phone; DECISIONS 583, 620-629).
+bool get _othersBusy =>
+    nightScoringBusy ||
+    dreamSessionRunning ||
+    soundSessionRunning ||
+    napSessionRunning ||
+    workSessionRunning ||
+    PhoneSessionKeeper.held;
+
 class LucidScreen extends StatefulWidget {
-  const LucidScreen({super.key});
+  const LucidScreen({super.key, this.recordingsDir, this.search});
+
+  /// Tests: the app's recordings folder and the search; null: the phone's, searchAndKeep.
+  final String? recordingsDir;
+  final LucidSearch? search;
 
   @override
   State<LucidScreen> createState() => _LucidScreenState();
@@ -176,7 +200,7 @@ class _LucidScreenState extends State<LucidScreen> {
 
   Future<void> _prepare() async {
     try {
-      _rec = await Phone.recordingsDir();
+      _rec = widget.recordingsDir ?? await Phone.recordingsDir();
       if (_rec != null) _store = LucidStore(lucidDirFor(_rec!));
       _running = await FlutterForegroundTask.isRunningService;
       if (_running) _runningStart = (await loadNight()).startMs;
@@ -204,18 +228,21 @@ class _LucidScreenState extends State<LucidScreen> {
     });
   }
 
-  /// Last night's search for dream signals, when it has none yet or its stages came later.
+  /// Last night's search for dream signals, when it has none yet, or again once the night is scored when the first
+  /// search came before its stages (the search then reads the night only when its report is scored: until that it is
+  /// not read again at every open). Never while a night records, a session runs or last night is being scored.
   void _searchIfDue() {
     final st = _store, rec = _rec, last = _model?.last;
-    if (st == null || rec == null || last == null || _running) return;
+    if (st == null || rec == null || last == null || _running || _othersBusy) return;
     final have = last.signals;
     if (have != null && have.staged) return;
     final stamp = last.record.stamp;
     if (_searching.contains(stamp)) return;
     _searching.add(stamp);
     _reload();
+    final search = widget.search ?? searchAndKeep;
     unawaited(
-      searchAndKeep(rec, st, last.record).catchError((Object _) => null).whenComplete(() {
+      search(rec, st, last.record, onlyIfScored: have != null).catchError((Object _) => null).whenComplete(() {
         _searching.remove(stamp);
         _reload();
       }),

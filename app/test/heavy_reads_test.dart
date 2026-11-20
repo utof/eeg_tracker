@@ -9,11 +9,12 @@ import 'dart:io';
 
 import 'package:eeg_tracker/cache/file_summaries.dart';
 import 'package:eeg_tracker/dream/store.dart';
+import 'package:eeg_tracker/lucid/morning.dart' show searchLastNight;
 import 'package:eeg_tracker/lucid/store.dart';
 import 'package:eeg_tracker/morning/store.dart';
 import 'package:eeg_tracker/nap/rules.dart' show NapEnd;
 import 'package:eeg_tracker/nap/store.dart';
-import 'package:eeg_tracker/recorder/nights.dart' show nightLabel;
+import 'package:eeg_tracker/recorder/nights.dart' show dateName, nightLabel, nightOf;
 import 'package:eeg_tracker/sharp/page.dart' show recentNights;
 import 'package:eeg_tracker/sharp/store.dart';
 import 'package:eeg_tracker/sleep/live_stager.dart' show LiveMode;
@@ -24,6 +25,7 @@ import 'package:eeg_tracker/ui/dream_view.dart' show clock;
 import 'package:eeg_tracker/ui/lucid_screen.dart';
 import 'package:eeg_tracker/ui/lucid_view.dart' show LucidDue;
 import 'package:eeg_tracker/ui/memory_cues_screen.dart' show memoryNightLine;
+import 'package:eeg_tracker/ui/nap_screen.dart' show napSessionRunning;
 import 'package:eeg_tracker/ui/morning_screen.dart' show checkedInTodayAt;
 import 'package:eeg_tracker/ui/nap_view.dart' show endWords;
 import 'package:eeg_tracker/ui/night_lines.dart';
@@ -43,6 +45,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'sharp_prompts_test.dart' show FakeSharpPhone;
 import 'support/app_folder.dart';
 import 'support/read_count.dart';
+import 'wearer_test.dart' show night;
 
 void main() {
   late Directory root;
@@ -230,6 +233,73 @@ void main() {
       expect(seenByApp(Directory(files), ids), first);
       expect(counts.of('/files/nights/'), 0, reason: '$counts');
       expect(counts.of('/cache/try-reports.json'), 1);
+    });
+  });
+
+  group('the Lucid page', () {
+    late Directory tmp;
+    late String small;
+    late LucidNightRecord record;
+    setUp(() {
+      tmp = Directory.systemTemp.createTempSync('lucid_page');
+      small = '${tmp.path}/files/recordings';
+      Directory(small).createSync(recursive: true);
+      final start = DateTime.now().subtract(const Duration(hours: 9));
+      for (var k = 0; k < 3; k++) {
+        writeRun(Directory(small), start.add(Duration(minutes: 10 * k)));
+      }
+      record = LucidNightRecord(startMs: start.millisecondsSinceEpoch, index: 0, cuesFromMs: start.millisecondsSinceEpoch);
+      LucidStore(lucidDirFor(small))
+        ..setOn(true, start)
+        ..saveNight(record);
+    });
+    tearDown(() => tmp.deleteSync(recursive: true));
+
+    Future<List<bool>> open(WidgetTester tester, {int times = 1}) async {
+      final asked = <bool>[];
+      Future<NightSignals?> search(String rec, LucidStore store, LucidNightRecord r, {bool onlyIfScored = false}) async {
+        asked.add(onlyIfScored);
+        return null;
+      }
+
+      for (var i = 0; i < times; i++) {
+        await tester.pumpWidget(MaterialApp(home: LucidScreen(key: UniqueKey(), recordingsDir: small, search: search)));
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+        await tester.pump();
+      }
+      return asked;
+    }
+
+    testWidgets('no search yet: the night is searched once the page opens', (tester) async {
+      expect(await open(tester), [false]);
+    });
+
+    testWidgets('searched before the night was scored: asked again only if scored, not at every open', (tester) async {
+      LucidStore(lucidDirFor(small)).saveSignals(
+        record.stamp,
+        NightSignals(made: DateTime.now(), signals: const [], sweepUv: 120, staged: false),
+      );
+      expect(await open(tester, times: 2), [true, true], reason: 'the search reads nothing until the report is scored');
+    });
+
+    testWidgets('not while a session runs', (tester) async {
+      napSessionRunning = true;
+      addTearDown(() => napSessionRunning = false);
+      expect(await open(tester), isEmpty);
+    });
+
+    test('the search reads the night only once its report is scored', () {
+      final counts = countReads(addTearDown);
+      expect(searchLastNight(small, record, onlyIfScored: true), isNull);
+      expect(counts.of('.f32') + counts.of('.idx'), 0, reason: 'not scored: the night is not read ($counts)');
+      final start = DateTime.fromMillisecondsSinceEpoch(record.startMs);
+      final r = night(dateName(nightOf(start)));
+      r['data_start'] = start.toIso8601String();
+      NightReportStore(nightsDirFor(small)).write(r);
+      final out = searchLastNight(small, record, onlyIfScored: true);
+      expect(out, isNotNull);
+      expect(out!.staged, isTrue);
+      expect(counts.of('.f32'), greaterThanOrEqualTo(3), reason: 'scored: the night is read once ($counts)');
     });
   });
 
