@@ -141,6 +141,12 @@ phone's speed for scoring (rows 3, 26, 27) is unmeasured until the owner's first
 ### 2. Left to build
 
 Needs no owner decision, only time or data:
+- **Whole-day recording, an archive, and what a day of recordings is for** (owner, 2026-11-20):
+  - *Record the whole day* with the headband always on: one long recording (or a session per activity), started by hand or automatically, saved on the phone first and copied to the laptop (nothing lost when the link drops).
+  - *Archive page*: every recording with its date, length, how it started (manual: Start night / Work session / a session; automatic: the watcher), its tags (sleep, work, meeting, walk, rest, manual tags); open any recording and see a timeline you can tap into, with activities tagged automatically and editable; delete recordings by hand.
+  - *Moving off the phone*: optional, off by default: after the laptop has checked its copy, delete raw recordings older than N nights from the phone.
+  - *What a day of recordings is for*: drowsiness hour by hour against last night's sleep, coffee, meetings and breaks; the best hours of the day (with sharp-hours taps and ActivityWatch focus sessions); baselines (alpha strength and speed, eyes open/closed) so a change stands out; labelled minutes (meeting/work/rest) as training data for automatic activity detection; self-experiments with drowsiness as the outcome; the same numbers go to utof_tracker next to mood and anxiety (its `docs/todo.md`, 2026-11-20).
+  - *Later*: understanding what you're doing and suggesting things (a break while working, the smart alarm when asleep, feedback when meditating), building on the auto-start watcher (row 39) and the research `_local/research/2026-11-20-00-auto-activity.md`.
 
 - **[research] Automatic recording and knowing what you're doing** (owner, 2026-11-20): when the headband is on, the app starts reading by itself (a setting: start automatically / ask / off) and works out what you are doing (working, meditating, about to sleep, asleep, walking) to run the right analysis on its own (work session, Lights off and sleep scoring, ...). First a research round on automatic activity/state detection from the headband's EEG plus the phone's sensors, screen, time of day and the laptop's ActivityWatch; no earlier research covers it (`_local/research/2026-11-20-*-auto-activity*.md` when done). Then build it phone-first.
 - **Fit the sleep-pressure constants** (row 10) once there are mornings of ratings.
