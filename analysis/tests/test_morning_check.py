@@ -205,3 +205,72 @@ def test_setup_test_snr():
     # nothing there -> not visible
     quiet = mc.setup_test(np.column_stack([pink(n, 3) for _ in range(4)]), marks)
     assert not quiet["blink"]["visible"] and not quiet["glance"]["visible"] and not quiet["clench"]["visible"]
+
+
+# ---- any number of channels: O1 and O2 by name (docs/data-format.md "The recording header") --------------------
+
+def write_wide_checkin(folder, names, back):
+    """write_checkin's check-in in a file of len(names) channels: the same two alpha channels at columns `back`
+    (O1, O2), the same noise elsewhere; with its <stamp>.header.json. Returns the (n, 4) BrainBit-shaped copy."""
+    import recording as rc
+    local = np.random.default_rng(7)
+    n = 130 * FS
+    t = np.arange(n) / FS
+    four = local.normal(0, 5.0, (n, 4))
+    for c in (0, 1):
+        four[:, c] += np.where(t < 65, 20.0, 4.0) * np.sin(2 * np.pi * 10.0 * t + c)
+    wide = local.normal(0, 60.0, (n, len(names)))  # other sites: louder, no alpha
+    wide[:, back[0]], wide[:, back[1]] = four[:, 0], four[:, 1]
+    t0 = datetime(2026, 11, 18, 6, 59, 58).timestamp()
+    marks = [dict(t=t0 + s, i=int(s * FS), text=x) for s, x in
+             [(1, "morning:start"), (2, "morning:eyes_closed:start"), (62, "morning:eyes_closed:end"),
+              (66, "morning:eyes_open:start"), (126, "morning:eyes_open:end"),
+              (128, 'morning:ratings {"kss":5,"mood":3,"tension":2}'), (128.5, "morning:end")]]
+    path = folder / "2026-11-18-070000.f32"
+    with open(path, "wb") as f:
+        for k, row in enumerate(wide):
+            f.write(struct.pack(f"<I{len(names)}f", k, *(row * 1e-6)))
+    path.with_suffix(".markers.jsonl").write_text("".join(json.dumps(m) + "\n" for m in marks))
+    rc.write(path, rc.diy_board(names, FS, layout="test"))
+    return four, marks
+
+
+def test_the_check_in_reads_o1_and_o2_by_name_in_an_eight_channel_file(tmp_path, monkeypatch, capsys):
+    wide_dir, old_dir = tmp_path / "wide", tmp_path / "old"
+    wide_dir.mkdir(); old_dir.mkdir()
+    names = ("Fz", "C3", "O2", "C4", "Pz", "O1", "F3", "F4")
+    four, marks = write_wide_checkin(wide_dir, names, back=(5, 2))
+    write_recording(old_dir / "2026-11-18-070000.f32", four, marks)  # the same O1 O2 as an old BrainBit file
+    out = {}
+    for d in (wide_dir, old_dir):
+        monkeypatch.setattr("sys.argv", ["morning_check.py", str(d)])
+        mc.main()
+        out[d.name] = json.loads((d / "2026-11-18-070000.morning.json").read_text())
+    assert out["wide"]["channels"] == out["old"]["channels"] and out["wide"]["back"] == out["old"]["back"]
+    assert abs(out["wide"]["back"]["iaf_hz"] - 10) < 0.3 and out["wide"]["back"]["ec_rise"] > 10
+    assert out["old"]["device"] == {"model": "BrainBit Black", "channels": ["O1", "O2", "T3", "T4"]}  # as before
+    assert out["wide"]["device"] == {"model": "DIY board", "channels": list(names)}
+
+
+def test_the_check_in_refuses_a_file_without_o1_and_o2_in_words(tmp_path, monkeypatch):
+    write_wide_checkin(tmp_path, tuple(f"Ch{i}" for i in range(1, 9)), back=(0, 1))
+    monkeypatch.setattr("sys.argv", ["morning_check.py", str(tmp_path)])
+    with pytest.raises(SystemExit) as e:
+        mc.main()
+    assert str(e.value) == ("the morning check-in needs O1 O2; this recording (DIY board: Ch1 Ch2 Ch3 Ch4 Ch5 Ch6 Ch7 Ch8) "
+                            "has no O1, O2")
+    assert not list(tmp_path.glob("*.morning.json"))
+
+
+def test_the_setup_test_needs_all_four_and_says_so(tmp_path, monkeypatch, capsys):
+    """A file with O1 and O2 but no T3/T4: the check-in is analysed, the setup test in the same file is left out."""
+    names = ("O1", "O2", "Fz", "Fp1")
+    _, marks = write_wide_checkin(tmp_path, names, back=(0, 1))
+    with open(tmp_path / "2026-11-18-070000.markers.jsonl", "a") as f:
+        for s, x in [(0.2, "setup:start"), (0.4, "setup:blink"), (0.6, "setup:end")]:
+            f.write(json.dumps(dict(t=marks[0]["t"] - 1 + s, i=int(s * FS), text=x)) + "\n")
+    monkeypatch.setattr("sys.argv", ["morning_check.py", str(tmp_path)])
+    mc.main()
+    res = json.loads((tmp_path / "2026-11-18-070000.morning.json").read_text())
+    assert res["setup_test"] is None and res["back"]["ec_rise"] > 10
+    assert "the setup test needs O1 O2 T3 T4; this recording (DIY board: O1 O2 Fz Fp1) has no T3, T4" in capsys.readouterr().err

@@ -206,11 +206,9 @@ def checkin_halves(f32: Path) -> dict[str, Any]:
     """The check-in's eyes-closed minutes cut in two halves (each a little under a minute, so the one-minute rule
     is not applied): how far apart the halves are, in floor units. Within one sitting: says nothing about days."""
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-    from to_bdf import load  # noqa: PLC0415
-
     mc = wc.mc
     _, sess = mc.find_latest([f32], "morning")
-    uv, _ = load(f32)
+    uv, _ = mc.load_sites(f32, mc.NAMES, "the wearer check")  # O1 O2 T3 T4 by name, whatever else the file holds
     i0, i1, _t0, _t1 = mc.morning_windows(sess)["win"]["eyes_closed"]
     a, b = i0 + int(mc.SKIP_START_S * wc.FS), min(i1 - int(mc.SKIP_END_S * wc.FS), len(uv))
     mid = (a + b) // 2
