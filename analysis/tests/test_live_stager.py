@@ -99,3 +99,15 @@ def test_a_window_over_half_held_is_not_scored():
     # lag 0 of epoch 2: edge 3, window 0..3 has 2 of 3 held -> not scored; epoch 3: edge 4, window 1..4 the same
     assert np.isnan(m[0, 0, 2]).all() and np.isnan(m[0, 0, 3]).all() and not np.isnan(m[0, 0, 5]).any()
     assert not np.isnan(lag).any(), "the input is left alone"
+
+
+def test_walking_epochs_come_out_awake_live_too():
+    """The phone's live scorer runs the walking detector beside the model (walking.epoch_walks; DECISIONS 920)."""
+    lag = np.zeros((1, ls.LAGS, 6, 5), np.float32)
+    for e, k in enumerate([0, 2, 3, 4, 2, 2]):  # W N2 N3 R N2 N2
+        lag[0, ls.BEHIND_EP, e, k] = 1
+    lag[0, ls.BEHIND_EP, 5] = np.nan  # never scored
+    gap = np.array([False, False, False, False, True, False])
+    assert ls.stages_at(lag, ls.BEHIND_EP, gap) == ["W", "N2", "N3", "R", "gap", None]
+    walking = [True, True, False, True, True, True]
+    assert ls.stages_at(lag, ls.BEHIND_EP, gap, walking=walking) == ["W", "W", "N3", "W", "gap", None]

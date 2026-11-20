@@ -31,7 +31,13 @@ This finds it, per 30 s epoch counted from the recording's first sample:
    epoch whose own spectrum has a peak of confidence 1.8 or more within 4 a minute of the readings within 1 minute
    becomes a reading "with its neighbours". Those never carry another epoch.
 
-Every epoch says why it has no reading: g gap, x no usable channel, m moving, s steps, u unclear, o the odd one out;
+7. No reading while walking: an epoch the walking detector (walking.py, run on the same samples) calls walking is
+   `w`. The rules of step 5 catch most steps by themselves (on the owner's walk of 2026-11-20 they read none of 251
+   walking epochs); the walking detector knows a walk from more than one epoch, so a soft-stepped half minute cannot
+   slip through as a pulse of the step rate (DECISIONS 922).
+
+Every epoch says why it has no reading: g gap, x no usable channel, m moving, w walking, s steps, u unclear, o the
+odd one out;
 r is a reading, n a reading with its neighbours. Every threshold is a planning value set on the owner's three
 recordings (2026-11-17, -19, -20) and his walk of 2026-11-20, with no reference heart rate yet: scripts/compare_pulse.py
 checks it against a watch's export.
@@ -48,13 +54,14 @@ import numpy as np
 from numpy.typing import NDArray
 
 import eeg_detectors as det
+import harmonic as hm
+import walking as wk
 
-VERSION = "pulse-v1"
+VERSION = "pulse-v2"  # v2: no reading while walking (the walking detector's veto; DECISIONS 922)
 
 EPOCH_S = 30.0
 HIGH_PASS_HZ = 0.5
 LOW_PASS_HZ = 20.0
-BUTTER_Q = (1 / (2 * math.cos(math.pi / 8)), 1 / (2 * math.cos(3 * math.pi / 8)))  # fourth order: two biquads
 NOTCHES_HZ = (50.0, 60.0)  # mains, both kinds (each only below 0.45 x the sample rate)
 NOTCH_Q = 8.0
 SEGMENT_S = 8.0  # Welch segments...
@@ -99,15 +106,12 @@ Bools = NDArray[np.bool_]
 
 def nfft_for(fs: float) -> int:
     """The smallest power of two whose bins are at most BIN_HZ wide (4096 at 250 Hz)."""
-    n = 1
-    while fs / n > BIN_HZ * (1 + 1e-12):
-        n *= 2
-    return n
+    return hm.nfft_for(fs, BIN_HZ)
 
 
 def whiten_bins(fs: float) -> int:
     """The odd number of bins nearest to WHITEN_HZ (15 at 250 Hz)."""
-    return 2 * round((WHITEN_HZ / (fs / nfft_for(fs)) - 1) / 2) + 1
+    return hm.whiten_bins(fs, BIN_HZ, WHITEN_HZ)
 
 
 def rates() -> Floats:
@@ -115,49 +119,25 @@ def rates() -> Floats:
     return np.array([RATE_LO_HZ + i * RATE_STEP_HZ for i in range(RATES)])
 
 
-def hann(n: int) -> Floats:
-    """The periodic Hann window (scipy's for spectra), written out so Dart computes the same."""
-    return 0.5 - 0.5 * np.cos(2 * math.pi * np.arange(n) / n)
-
-
-def interp(x: Floats, bin_hz: float, w: Floats) -> Floats:
-    """Linear interpolation of the spectrum w (bin k at k x bin_hz) at each x (np.interp's formula, written out)."""
-    j = np.floor(x / bin_hz).astype(np.int64)
-    j = np.where((j + 1) * bin_hz <= x, j + 1, np.where(j * bin_hz > x, j - 1, j))
-    x0, x1 = j * bin_hz, (j + 1) * bin_hz
-    return (w[j + 1] - w[j]) / (x1 - x0) * (x - x0) + w[j]
-
-
 def chain_for(fs: float) -> list[list[float]]:
     """The band-pass chain: the mains notches below 0.45 fs, two high-pass and two low-pass biquads."""
-    lo = min(LOW_PASS_HZ, 0.4 * fs)
-    return ([det.notch(f, NOTCH_Q, fs) for f in NOTCHES_HZ if f < 0.45 * fs]  # type: ignore[arg-type]
-            + [det.highpass(HIGH_PASS_HZ, q, fs) for q in BUTTER_Q]  # type: ignore[arg-type]
-            + [det.lowpass(lo, q, fs) for q in BUTTER_Q])  # type: ignore[arg-type]
+    return hm.band_pass(fs, HIGH_PASS_HZ, LOW_PASS_HZ, NOTCHES_HZ, NOTCH_Q)
 
 
 def filter_channels(x: Floats, fs: float) -> Floats:
     """Each row of x (channels x samples, µV) band-passed, forward only from its first value."""
-    chain = chain_for(fs)
-    return np.vstack([det.run_chain(chain, row) for row in x]) if len(x) else np.zeros_like(x)
+    return hm.filter_channels(x, chain_for(fs))
 
 
 def whitened(seg: Floats, fs: float, top: int) -> Floats:
     """Bins 0..top of the whitened Welch spectrum of one channel's epoch (band-passed samples)."""
     nfft = nfft_for(fs)
     length, hop = round(SEGMENT_S * fs), round(SEGMENT_HOP_S * fs)
-    h = hann(length)
+    h = hm.hann(length)
     p = np.zeros(nfft // 2 + 1)
     for s in range(0, len(seg) - length + 1, hop):
-        v = seg[s:s + length]
-        spec = np.fft.rfft((v - v.sum() / length) * h, n=nfft)
-        p += spec.real * spec.real + spec.imag * spec.imag
-    wb = whiten_bins(fs)
-    half = wb // 2
-    w = np.zeros(top + 1)
-    for k in range(top + 1):  # each bin over the mean of the wb around it (zeros below bin 0)
-        w[k] = p[k] / (p[max(0, k - half):k + half + 1].sum() / wb)
-    return w
+        p += hm.power(seg[s:s + length], h, nfft)
+    return hm.whiten(p, 0, top, whiten_bins(fs))
 
 
 def top_bin(fs: float) -> int:
@@ -167,16 +147,11 @@ def top_bin(fs: float) -> int:
 
 def scores(w: Floats, fs: float) -> Floats:
     """The harmonic score of every candidate rate: the mean of the whitened power at f0, 2 f0, ... HARMONICS f0."""
-    bin_hz = fs / nfft_for(fs)
-    f = rates()
-    acc = interp(f, bin_hz, w)
-    for k in range(2, HARMONICS + 1):
-        acc = acc + interp(k * f, bin_hz, w)
-    return acc / HARMONICS
+    return hm.family(rates(), fs / nfft_for(fs), w, (1.0,) * HARMONICS) / HARMONICS
 
 
 def at(w: Floats, fs: float, x: float) -> float:
-    return float(interp(np.array([x]), fs / nfft_for(fs), w)[0])
+    return hm.at(x, fs / nfft_for(fs), w)
 
 
 def sure_for(channels: int) -> float:
@@ -205,7 +180,7 @@ def doubt(w: Floats, fs: float, f0: float) -> str | None:
 
 @dataclass
 class Epoch:
-    code: str  # r reading, n reading with its neighbours; g gap, x no usable channel, m moving, s steps, u unclear,
+    code: str  # r reading, n reading with its neighbours; g gap, x no usable channel, m moving, w walking, s steps, u unclear,
     #            o the odd one out
     bpm: float  # a minute; nan without a reading
     conf: float  # the reading's confidence; for u, s, o the best channel's; nan for g, x, m
@@ -303,17 +278,24 @@ def neighbours(eps: list[Epoch]) -> None:
             ep.code, ep.bpm, ep.conf, ep.channel = "n", float(f[found[2]] * 60), found[0], found[1]
 
 
-def epochs(x: Floats, fs: float, missing: Bools | None = None) -> list[Epoch]:
+def epochs(x: Floats, fs: float, missing: Bools | None = None, walking: list[bool] | None = None) -> list[Epoch]:
     """Every whole 30 s epoch of x (channels x samples, µV, every channel of the recording) from its first sample;
-    missing marks samples that were filled in (gaps)."""
+    missing marks samples that were filled in (gaps). An epoch the walking detector calls walking (walking.py on the
+    same samples; `walking` gives its per-epoch answer when the caller has it already) is not read (`w`), whatever
+    its own spectrum says, and never carries a neighbour."""
     n = x.shape[1]
     size = round(EPOCH_S * fs)
     y = filter_channels(x, fs)
     miss = np.zeros(n, dtype=bool) if missing is None else missing
+    if walking is None:
+        walking = wk.epoch_flags(wk.windows(x, fs, missing, quick=True), n // size)
     out = []
     for e in range(n // size):
         a = e * size
-        out.append(epoch(y[:, a:a + size], x[:, a:a + size], fs, float(miss[a:a + size].sum()) / fs))
+        ep = epoch(y[:, a:a + size], x[:, a:a + size], fs, float(miss[a:a + size].sum()) / fs)
+        if e < len(walking) and walking[e] and ep.code not in ("g", "x"):
+            ep = Epoch("w", math.nan, math.nan, -1, channels=ep.channels)
+        out.append(ep)
     neighbours(out)
     return out
 
