@@ -48,6 +48,8 @@ source	owner_note				you wrote the row yourself
 source	owner_app_tag				an Archive tag you marked "This is what I was doing"
 source	owner_checkin				a check-in answer
 source	owner_mark_button				a mark button you pressed at the moment
+source	owner_app_prompt				the app asked "Did you ...?" about a detector's estimate and you answered Yes or No
+source	owner_stop_sheet				a chip or your words on the sheet after Stop
 source	owner_tray				an answer to the laptop tray
 source	device_watch				a watch or a fitness band
 source	device_phone				the phone's own sensors (step counter, activity recognition)
