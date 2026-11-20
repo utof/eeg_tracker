@@ -249,3 +249,26 @@ def test_one_refused_night_does_not_stop_the_others(tmp_path: Path, scorer: list
     code, _, nights = run_report(tmp_path, "--hours", "60")
     assert code == 1 and len(scorer) == 1
     assert (nights / f"{nf.evening_date(good.timestamp())}.report.json").is_file()
+
+
+# ---- packing: the header stays plain, the packed .f32 reads by it -----------------------------------------------
+
+def test_the_daily_packing_leaves_the_header_plain_and_the_readers_read_on(tmp_path: Path) -> None:
+    import os, time
+    import pack_old
+    rec = tmp_path / "_local" / "recordings-diy"; rec.mkdir(parents=True)
+    v = nch.volts(250 * 60, 8)
+    f = nch.write_set(rec, T0, v, nch.EIGHT)
+    head = f.with_suffix(".header.json").read_bytes()
+    before = nf.recordings(rec)
+    old = time.time() - 2 * 86400
+    for p in rec.iterdir():
+        os.utime(p, (old, old))
+    lines: list[str] = []
+    assert pack_old.main(["--local", str(tmp_path / "_local")], out=lines.append) == 0, lines
+    assert sorted(p.name for p in rec.iterdir()) == [f"{f.stem}{s}" for s in (".f32.xz", ".header.json", ".idx")]
+    assert f.with_suffix(".header.json").read_bytes() == head  # only the .f32 is packed
+    assert nf.recordings(rec) == before and before[0].rec_bytes == 36
+    uv, _ = to_bdf.load(f)
+    assert np.array_equal(uv, v.astype(np.float64) * 1e6)
+    assert to_bdf.night_header([rec / f"{f.stem}.f32.xz"]).names == nch.EIGHT

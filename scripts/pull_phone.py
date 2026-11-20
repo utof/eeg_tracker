@@ -8,9 +8,11 @@ token. The token may also come from the EEG_PHONE_TOKEN environment variable (ke
 Every --every minutes (default 2) this asks the phone for its list (GET /files: path, bytes, SHA-256, modified time;
 the list Export data's manifest holds) and fetches what the laptop lacks, into the layout of scripts/import_phone.py:
 
-- Raw nights (`recordings/<stamp>.f32 .idx .log .markers.jsonl`) go into `<dest>/recordings/`, next to the laptop's
-  own recordings, so sleep_report.py, morning_check.py and to_bdf.py work on them; everything else keeps its place
-  under `<dest>/phone/`. Raw files come first, tonight's before older ones.
+- Raw nights (`recordings/<stamp>.f32 .idx .log .markers.jsonl .header.json`) go into `<dest>/recordings/`, next to
+  the laptop's own recordings, so sleep_report.py, morning_check.py and to_bdf.py work on them; the DIY board's
+  (`recordings-diy/...`) into `<dest>/recordings-diy/`; everything else keeps its place under `<dest>/phone/` (a
+  check-in's raw files and its header in `phone/mornings/`). Raw files come first, tonight's before older ones.
+  The `.header.json` says what its `.f32` holds (channels, rate; scripts/recording.py) and travels with it.
 - A finished file is fetched under a temporary name, checked against the phone's size and SHA-256, then renamed.
 - A file the phone is still writing (the night being recorded) has no SHA-256 yet: the laptop keeps a partial copy and
   fetches only the new bytes each time (HTTP Range). When the phone lists its SHA-256, the copy is checked whole; a
@@ -45,7 +47,7 @@ import packed  # noqa: E402  (raw files packed after a day: the phone's .f32.gz,
 
 FORMAT = "eeg-tracker-phone-files"
 VERSION = 1
-RAW = (".f32", ".f32.gz", ".idx", ".log", ".markers.jsonl")
+RAW = (".f32", ".f32.gz", ".idx", ".log", ".markers.jsonl", ".header.json")  # a file set (docs/data-format.md)
 LIST_TIMEOUT = 600  # the phone may be working out SHA-256 of files it never listed before
 FILE_TIMEOUT = 60
 
@@ -204,7 +206,9 @@ class State:
 
 
 def is_raw(p: PurePosixPath) -> bool:
-    return len(p.parts) == 2 and p.parts[0] == "recordings" and p.name.endswith(RAW)
+    """A file of a raw file set, the BrainBit's (`recordings/`) or the DIY board's (`recordings-diy/`): its samples,
+    index, log, markers and recording header."""
+    return len(p.parts) == 2 and p.parts[0] in ip.RAW and p.name.endswith(RAW)
 
 
 def order(files: list[Listed]) -> list[Listed]:
@@ -456,7 +460,8 @@ def main(argv: list[str] | None = None, out: Callable[[str], object] = print,
     ap.add_argument("--once", action="store_true", help="one pass, then exit")
     ap.add_argument("--dest", type=Path, default=ip.DEFAULT_DEST, help="where to copy (default: <repo>/_local)")
     ap.add_argument("--raw-only", action="store_true",
-                    help="only the raw recordings (.f32 .idx .log .markers.jsonl, and the phone's packed .f32.gz)")
+                    help="only the raw recordings in recordings/ and recordings-diy/ (.f32 .idx .log .markers.jsonl "
+                         ".header.json, and the phone's packed .f32.gz)")
     a = ap.parse_args(argv)
     if not a.token:
         out("Give the token the app shows: --token <t> (or set EEG_PHONE_TOKEN).")
