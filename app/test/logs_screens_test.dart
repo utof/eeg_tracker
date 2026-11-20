@@ -254,6 +254,15 @@ void main() {
     expect(find.textContaining('% an hour'), findsWidgets);
     expect(find.textContaining('back after 19 s (median)'), findsOneWidget);
     expect(find.text('Contact over the day'), findsOneWidget);
+    await tester.tap(find.text('Delete the battery samples'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pump();
+    await _settle(tester);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
+    await tester.pump();
+    expect(logFiles(Directory('${files.path}/logs'), kind: LogKind.metrics), isEmpty);
+    expect(logFiles(Directory('${files.path}/logs'), kind: LogKind.app), isNotEmpty);
   });
 
   testWidgets('the More tab\'s links open the three pages', (tester) async {

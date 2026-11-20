@@ -127,8 +127,36 @@ class _BatteryScreenState extends State<BatteryScreen> {
         const MutedLine(
           'For a closer look the assistant can read Android\'s own battery history from the laptop (docs/app-logging.md).',
         ),
+        const SizedBox(height: 24),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(onPressed: _delete, child: const Text('Delete the battery samples')),
+        ),
       ],
     );
+  }
+
+  Future<void> _delete() async {
+    final files = _files;
+    if (files == null) return;
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete the battery samples?'),
+        content: const Text(
+          'The battery, frame, start-up and storage measurements on this phone go; this page starts again from the '
+          'nights\' own logs. Copies on the laptop stay.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    final n = deleteLogs(Directory('$files/logs'), {LogKind.metrics});
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(n == 1 ? '1 file deleted' : '$n files deleted')));
+    await _load();
   }
 
   List<Widget> _consumers(BuildContext context, BatteryReport r) {
