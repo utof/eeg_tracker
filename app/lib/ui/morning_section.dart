@@ -2,6 +2,7 @@
 // the ways to the check-in and the trends. Kept in its own file so the night screen's change stays two lines.
 import 'package:flutter/material.dart';
 
+import '../logs/own_text.dart';
 import 'theme.dart';
 
 class MorningSection extends StatelessWidget {
@@ -43,7 +44,7 @@ class MorningSection extends StatelessWidget {
         ],
         if (experiment != null) ...[
           const SizedBox(height: 8),
-          Text(experiment!, style: text.bodyLarge?.copyWith(height: 1.4)),
+          OwnText(child: Text(experiment!, style: text.bodyLarge?.copyWith(height: 1.4))),
         ],
         const SizedBox(height: 16),
         OutlinedButton.icon(

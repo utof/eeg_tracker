@@ -11,6 +11,7 @@ import '../archive/items.dart';
 import '../archive/page.dart';
 import '../archive/raw_remover.dart' show OnLaptop;
 import '../export/store.dart' show sizeText;
+import '../logs/own_text.dart';
 import '../recorder/nights.dart' show nightLabel;
 import '../trends/days.dart' show dayNoon;
 import 'form_parts.dart' show Para;
@@ -399,7 +400,9 @@ class ArchiveRow extends StatelessWidget {
                     Text('${i.kind.word} · ${i.started.words}', style: text.bodyLarge?.copyWith(height: 1.35)),
                     if (tags.isNotEmpty) ...[
                       const SizedBox(height: 2),
-                      Text('Tags: ${tags.join(' · ')}', style: text.bodyMedium?.copyWith(color: Night.ink, height: 1.35)),
+                      OwnText(
+                        child: Text('Tags: ${tags.join(' · ')}', style: text.bodyMedium?.copyWith(color: Night.ink, height: 1.35)),
+                      ),
                     ],
                     if (foundLine != null) ...[const SizedBox(height: 2), Text(foundLine, style: muted)],
                     const SizedBox(height: 2),
