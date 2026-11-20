@@ -29,6 +29,7 @@ const Map<TryOpen, IconData> _openIcons = {
   TryOpen.study: Icons.menu_book_outlined,
   TryOpen.memory: Icons.grid_view_outlined,
   TryOpen.ownBle: Icons.bluetooth_searching,
+  TryOpen.archive: Icons.inventory_2_outlined,
 };
 
 /// The muted line under a finished stop's title: when, and who ticked it.

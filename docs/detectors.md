@@ -1,8 +1,9 @@
 # What the electrodes see, and when you drift off
 
 One set of detectors, shared by every feature that needs them: meditation feedback, the dream catcher, sound for
-states, the night extras of the sleep report, and the drift-off detector during every night with its "Falling
-asleep" check in the morning report. ROADMAP next step 3; DECISIONS 85-89, 140-146 and 180-186. The hands-free gestures (DECISIONS 240-249) sit on top of
+states, the night extras of the sleep report, the drift-off detector during every night with its "Falling
+asleep" check in the morning report, and the Archive's activity lanes over any recording (eyes closed and drowsy by
+the work session's rule, talking by jaw bursts, moving, no signal; DECISIONS 700-709). ROADMAP next step 3; DECISIONS 85-89, 140-146 and 180-186. The hands-free gestures (DECISIONS 240-249) sit on top of
 them.
 
 - **Python reference**: `analysis/eeg_detectors.py`, checked on the owner's recordings with

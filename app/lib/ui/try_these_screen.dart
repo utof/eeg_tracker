@@ -15,6 +15,7 @@ import '../try_these/progress.dart';
 import '../try_these/seen.dart';
 import 'alpha_theta_screen.dart';
 import 'battery_screen.dart' show BatteryScreen;
+import 'archive_screen.dart' show ArchiveScreen;
 import 'dream_screen.dart';
 import 'experiments_screen.dart';
 import 'export_screen.dart';
@@ -239,6 +240,7 @@ class _TryTheseScreenState extends State<TryTheseScreen> {
       TryOpen.memory => const MemoryCuesScreen(),
       TryOpen.ownBle => const OwnBleScreen(),
       TryOpen.battery => BatteryScreen(recordingsDir: rec),
+      TryOpen.archive => const ArchiveScreen(),
       TryOpen.nightScreen || TryOpen.sleepReport || TryOpen.alarm => null,
     };
   }
