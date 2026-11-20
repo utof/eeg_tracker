@@ -130,7 +130,8 @@ void main() {
     await settle();
     final log = w.notes.join('\n');
     expect(log, contains('driver DIY board (lib/headband/diy): eeg_ads1299_lab bench firmware, E9 protocol version 1'));
-    expect(log, contains('datagrams from $boardAddress'));
+    expect(log, contains('datagrams from the board on the Wi-Fi'));
+    expect(log, isNot(contains(boardAddress))); // no address in a log line
     expect(log, contains('channels O1 O2 Fz Fp1'));
     expect(log, contains('board 4 channels, 250 Hz, gain 24, vref 4.5 V (assumed'));
     expect(log, contains('format .f32 records <I4f: board sequence number, then O1 O2 Fz Fp1 in volts; 250 Hz'));
@@ -265,14 +266,15 @@ void main() {
     expect(h.pick(const ['O1', 'O2', 'T3', 'T4'], who: 'x'), [3, 4, 5, 6]);
   });
 
-  test('datagrams from outside the local network are ignored; a second sender is named', () async {
+  test('datagrams from outside the local network are ignored; a second sender is counted, never named', () async {
     final w = await connected();
     sendAll(link, board.next(5), from: '8.8.8.8');
     sendAll(link, board.next(5));
     sendAll(link, board.next(2), from: '192.168.1.77');
     await waitFor(() => w.notes.any((l) => l.startsWith('ignored')));
     expect(w.notes, contains('ignored 5 datagrams from outside the local network'));
-    expect(w.notes, contains('datagrams from 192.168.1.77'));
+    expect(w.notes, contains('datagrams from sender number 2'));
+    expect(w.notes.join('\n'), isNot(contains('192.168')));
     expect(w.notes, contains('more than one sender on this port: is another board or program sending here?'));
     expect(w.seqs.contains(506), isFalse);
   });

@@ -3,6 +3,7 @@
 // both ends under it. Nothing is preselected: an answer is always the user's own.
 import 'package:flutter/material.dart';
 
+import '../logs/own_text.dart';
 import 'theme.dart';
 
 /// A question over one row of choices (a 1-5 scale, live / replay / not sure, yes / no).
@@ -14,9 +15,13 @@ class ChoiceQuestion<T extends Object> extends StatelessWidget {
     required this.value,
     required this.onChanged,
     this.ends,
+    this.ownQuestion = false,
   });
 
   final String question;
+
+  /// The question has words the owner typed (an experiment's line): the usage log never reads it.
+  final bool ownQuestion;
 
   /// (value, label) per segment.
   final List<(T, String)> choices;
@@ -35,7 +40,9 @@ class ChoiceQuestion<T extends Object> extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(question, style: text.bodyLarge?.copyWith(height: 1.4)),
+          ownQuestion
+              ? OwnText(child: Text(question, style: text.bodyLarge?.copyWith(height: 1.4)))
+              : Text(question, style: text.bodyLarge?.copyWith(height: 1.4)),
           const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,

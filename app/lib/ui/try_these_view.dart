@@ -4,6 +4,7 @@
 // top counts the stops in the watch strip's own cells. The night screen's section is [TryEntryView].
 import 'package:flutter/material.dart';
 
+import '../logs/own_text.dart';
 import '../try_these/cards.dart';
 import '../try_these/progress.dart';
 import '../recorder/nights.dart' show nightLabel;
@@ -353,11 +354,13 @@ class _Stop extends StatelessWidget {
                       if (!open && p != null && p.note.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            'Note: ${p.note}',
-                            style: muted?.copyWith(color: Night.ink),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
+                          child: OwnText(
+                            child: Text(
+                              'Note: ${p.note}',
+                              style: muted?.copyWith(color: Night.ink),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ),
                     ],

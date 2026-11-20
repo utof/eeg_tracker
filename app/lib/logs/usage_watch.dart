@@ -14,6 +14,7 @@ import 'package:flutter/scheduler.dart';
 
 import 'log.dart' show Logs;
 import 'metrics.dart';
+import 'own_text.dart';
 import 'usage.dart';
 
 /// The name of the page [route] shows: its settings' name when it has one, else the page widget's own type
@@ -116,8 +117,8 @@ bool _isControl(Widget w) =>
 bool _isTappable(Widget w) => w is InkResponse || (w is GestureDetector && (w.onTap != null || w.onLongPress != null));
 
 /// The control at [position] of view [viewId] and its words: a hit test of the app's render tree, the element of the
-/// deepest render object hit, and the widgets above it. Typed text (EditableText) is never read; digits in words
-/// become `#`. A walk of the element tree per tap (a few thousand elements, well under a millisecond).
+/// deepest render object hit, and the widgets above it. Typed text (EditableText) is never read, nor anything under
+/// an [OwnText]; digits in words become `#`. A walk of the element tree per tap (a few thousand elements, well under a millisecond).
 TapTarget? tapTarget(Offset position, int viewId) {
   final binding = WidgetsBinding.instance;
   final root = binding.rootElement;
@@ -164,8 +165,10 @@ TapTarget? tapTarget(Offset position, int viewId) {
     if (_isControl(best[up].widget)) top = up;
   }
   final w = best[top].widget;
+  // a control inside an OwnText (or right under one) may have the owner's words as its tooltip
+  final own = [for (var k = math.max(0, top - 3); k <= at; k++) best[k].widget].any((c) => c is OwnText);
   String? label;
-  for (var k = top; k <= at && label == null; k++) {
+  for (var k = top; k <= at && label == null && !own; k++) {
     final c = best[k].widget;
     if (c is IconButton && c.tooltip != null) label = c.tooltip;
     if (c is Tooltip && c.message != null) label = c.message;
@@ -188,13 +191,13 @@ String _kind(Widget w) => switch (w) {
   _ => w.runtimeType.toString().replaceAll(RegExp(r'<.*>'), '').replaceFirst(RegExp(r'^_'), ''),
 };
 
-/// The first two pieces of text under [el], joined; null when there are none. Never inside a text field.
+/// The first two pieces of text under [el], joined; null when there are none. Never inside a text field or an [OwnText].
 String? _words(Element el) {
   final out = <String>[];
   void visit(Element e) {
     if (out.length >= 2) return;
     final w = e.widget;
-    if (w is EditableText) return;
+    if (w is EditableText || w is OwnText) return;
     if (w is RichText) {
       final t = w.text.toPlainText().trim();
       if (t.isNotEmpty) out.add(t);

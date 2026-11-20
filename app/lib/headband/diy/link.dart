@@ -51,7 +51,7 @@ class UdpLink implements DiyLink {
 
   @override
   String get describe =>
-      'UDP port ${boundPort ?? port} on ${host == InternetAddress.anyIPv4 ? 'every IPv4 interface' : host.address} '
+      'UDP port ${boundPort ?? port} on ${host == InternetAddress.anyIPv4 ? 'every IPv4 interface' : 'one IPv4 interface'} '
       '(Wi-Fi route${shared ? '; shared with another program on this phone' : ''})';
 
   @override

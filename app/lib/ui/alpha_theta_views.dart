@@ -7,6 +7,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../alphatheta/rules.dart';
+import '../logs/own_text.dart';
 import '../training/check.dart';
 import 'check_views.dart';
 import 'form_parts.dart';
@@ -265,9 +266,9 @@ class AtSetupView extends StatelessWidget {
           ],
         ],
         const SectionHeading('Your stop plan'),
-        Text('Call: ${m.contact.isEmpty ? '–' : m.contact}', style: text.bodyLarge?.copyWith(height: 1.4)),
+        OwnText(child: Text('Call: ${m.contact.isEmpty ? '–' : m.contact}', style: text.bodyLarge?.copyWith(height: 1.4))),
         const SizedBox(height: 6),
-        Text('Grounding: ${m.grounding}', style: text.bodyLarge?.copyWith(height: 1.4)),
+        OwnText(child: Text('Grounding: ${m.grounding}', style: text.bodyLarge?.copyWith(height: 1.4))),
         const Para(
           'Stop is always on the screen; the sound fades over about 10 seconds. Practice, not treatment.',
           color: Night.inkMuted,
@@ -438,7 +439,8 @@ class _AtGroundingViewState extends State<AtGroundingView> {
       Readout(parts: [('$_left', true), (' s', false)], label: _left > 0 ? 'of grounding left' : 'take your time'),
       const SectionHeading('Grounding'),
       for (final (i, line) in groundingText.indexed) Para(line, top: i == 0 ? 0 : 10),
-      if (widget.ownRoutine.isNotEmpty && widget.ownRoutine != defaultGrounding) Para('Yours: ${widget.ownRoutine}'),
+      if (widget.ownRoutine.isNotEmpty && widget.ownRoutine != defaultGrounding)
+        OwnText(child: Para('Yours: ${widget.ownRoutine}')),
     ],
     action: FilledButton.icon(
       onPressed: widget.onDone,

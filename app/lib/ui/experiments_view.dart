@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../experiments/analysis.dart';
 import '../experiments/experiment.dart';
+import '../logs/own_text.dart';
 import '../trends/days.dart';
 import 'form_parts.dart';
 import 'parts.dart';
@@ -131,10 +132,12 @@ class ExperimentView extends StatelessWidget {
     final sealed = p.results == null;
     return [
       Text(statusWords(s), style: text.displaySmall?.copyWith(fontFeatures: tabular)),
-      Para(
-        '“${plan.doText}” against “${plan.dontText}”. Tested on your ${plan.outcome.noun} the next day.',
-        color: Night.inkMuted,
-        top: 10,
+      OwnText(
+        child: Para(
+          '“${plan.doText}” against “${plan.dontText}”. Tested on your ${plan.outcome.noun} the next day.',
+          color: Night.inkMuted,
+          top: 10,
+        ),
       ),
       if (s.phase == ExpPhase.waiting)
         Para(
@@ -142,7 +145,7 @@ class ExperimentView extends StatelessWidget {
         ),
       if (today != null) ...[
         SectionHeading('Today, ${dayLabel(today.day)}'),
-        Text(s.textFor(today.doIt), style: text.headlineSmall?.copyWith(height: 1.25)),
+        OwnText(child: Text(s.textFor(today.doIt), style: text.headlineSmall?.copyWith(height: 1.25))),
         const Para('Drawn by chance, for the sleep ahead. If today cannot be kept, say so tomorrow: it still counts.', color: Night.inkMuted),
         if (stillUpHours(p.now) && today.index > 0)
           const Para('Still up from yesterday? Then yesterday\'s task below is the one for the sleep ahead.', color: Night.inkMuted),
@@ -151,6 +154,7 @@ class ExperimentView extends StatelessWidget {
         ChoiceQuestion<bool>(
           question:
               '${d.day == addDays(s.today, -1) ? 'Yesterday' : dayLabel(d.day)}: ${s.textFor(d.doIt)}. Did you keep to it?',
+          ownQuestion: true,
           choices: const [(true, 'Kept'), (false, 'Not kept')],
           value: null,
           onChanged: (v) => onAnswer?.call(d.day, v),
@@ -213,7 +217,9 @@ class ExperimentView extends StatelessWidget {
           'You looked early ${looks.length == 1 ? 'once' : '${looks.length} times'} (first after '
           '${_days(looks.first.daysDone)}): the answer is a little less sure than its range says.',
         ),
-      Text(sentence(r, plan.doText, plan.dontText), style: text.titleLarge?.copyWith(height: 1.35, fontFeatures: tabular)),
+      OwnText(
+        child: Text(sentence(r, plan.doText, plan.dontText), style: text.titleLarge?.copyWith(height: 1.35, fontFeatures: tabular)),
+      ),
       Para(verdictNote(r), color: Night.inkMuted),
       const SizedBox(height: 12),
       LogLine('Tested', t == null ? 'no' : 'random days', detail: 'counted as drawn, kept or not'),
@@ -344,7 +350,7 @@ class _Earlier extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(s.plan.doText, style: text.bodyLarge?.copyWith(height: 1.3)),
+                  OwnText(child: Text(s.plan.doText, style: text.bodyLarge?.copyWith(height: 1.3))),
                   const SizedBox(height: 2),
                   Text(
                     '${dayLabel(s.plan.start)} · ${s.plan.outcome.label} · ${statusWords(s).toLowerCase()}',

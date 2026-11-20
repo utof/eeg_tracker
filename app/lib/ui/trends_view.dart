@@ -4,6 +4,7 @@
 // forecast's status. Built from a TrendsModel only, so tests render it without a phone.
 import 'package:flutter/material.dart';
 
+import '../logs/own_text.dart';
 import '../trends/days.dart';
 import '../trends/pressure.dart';
 import '../trends/trends.dart';
@@ -148,13 +149,15 @@ class TrendsView extends StatelessWidget {
           ],
           if (onExperiments != null) ...[
             const SectionHeading('Self-experiments'),
-            Para(
-              experimentLine ??
-                  'Everything above is only seen together. To test one habit, let the app draw random days for a '
-                      'few weeks.',
-              color: experimentLine == null ? Night.inkMuted : Night.ink,
-              top: 0,
-            ),
+            if (experimentLine != null)
+              OwnText(child: Para(experimentLine!, color: Night.ink, top: 0))
+            else
+              const Para(
+                'Everything above is only seen together. To test one habit, let the app draw random days for a '
+                'few weeks.',
+                color: Night.inkMuted,
+                top: 0,
+              ),
             const SizedBox(height: 16),
             OutlinedButton.icon(
               onPressed: onExperiments,
