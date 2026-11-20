@@ -33,6 +33,15 @@ Future<String?> storageBusy() async {
   return null;
 }
 
+/// [scanStorage] in a background isolate. Top-level on purpose: a closure made inside the page's own methods carries
+/// the page along, which cannot be sent to another isolate (the page then showed nothing); only [filesDir] crosses.
+Future<StorageUsage> scanInBackground(String filesDir) =>
+    Isolate.run(() => scanStorage(Directory(filesDir), now: DateTime.now()), debugName: 'storage-scan');
+
+/// [planClear] in a background isolate; top-level for the same reason as [scanInBackground].
+Future<ClearPlan> planInBackground(String filesDir, Set<String> items, ClearMode mode) =>
+    Isolate.run(() => planClear(Directory(filesDir), items, mode: mode, now: DateTime.now()), debugName: 'storage-plan');
+
 class StorageScreen extends StatefulWidget {
   const StorageScreen({
     super.key,
@@ -94,7 +103,7 @@ class _StorageScreenState extends State<StorageScreen> {
     final space = await widget.space();
     StorageUsage u;
     try {
-      u = await Isolate.run(() => scanStorage(Directory(dir), now: DateTime.now()), debugName: 'storage-scan');
+      u = await scanInBackground(dir);
     } catch (_) {
       u = StorageUsage(bytes: const {}, files: const {}, clearable: const {}, phoneOnly: const {}, phoneOnlyCount: const {}, why: const {}, onLaptop: 0);
     }
@@ -205,10 +214,7 @@ class _StorageScreenState extends State<StorageScreen> {
     final dir = widget.filesDir;
     ClearRun? run;
     try {
-      final plan = await Isolate.run(
-        () => planClear(Directory(dir), items, mode: mode, now: DateTime.now()),
-        debugName: 'storage-plan',
-      );
+      final plan = await planInBackground(dir, items, mode);
       run = await runClear(
         Directory(dir),
         plan,

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:eeg_tracker/storage/clear.dart';
+import 'package:eeg_tracker/ui/storage_screen.dart';
 import 'package:eeg_tracker/ui/storage_view.dart';
 import 'package:eeg_tracker/ui/theme.dart';
 import 'package:flutter/material.dart';
@@ -108,4 +109,34 @@ void main() {
       }
     }
   }
+
+  // The real page reads the folder in a background isolate: what it sends there must be plain data, not the page
+  // (a closure made inside the page's own methods carried the page with it, the send failed and the page showed 0 MB;
+  // the emulator, integration 17).
+  testWidgets('the real page reads the folder off the screen\'s thread and shows its bytes', (tester) async {
+    final root = Directory.systemTemp.createTempSync('storage_screen');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final files = Directory('${root.path}/files')..createSync();
+    File('${files.path}/nights/2026-11-18.report.json')
+      ..createSync(recursive: true)
+      ..writeAsBytesSync(List.filled(2000000, 32));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: nightTheme(),
+        home: StorageScreen(
+          filesDir: files.path,
+          paired: false,
+          busy: () async => null,
+          space: () async => (total: 64000000000, free: 30000000000),
+        ),
+      ),
+    );
+    StorageUsage? usage() => tester.widget<StorageView>(find.byType(StorageView)).model.usage;
+    for (var i = 0; i < 100 && usage() == null; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump();
+    }
+    expect(usage(), isNotNull);
+    expect(usage()!.bytes['nights.reports'], 2000000);
+  });
 }
