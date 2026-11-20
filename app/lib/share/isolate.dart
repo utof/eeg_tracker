@@ -10,6 +10,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 
+import '../logs/activity.dart' show Activity;
+import '../logs/log.dart' show AppLog;
 import '../recorder/chunk_writer.dart';
 import 'link.dart';
 import 'protocol.dart';
@@ -121,6 +123,17 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
   LaptopAnnouncer? announcer;
   var closing = false;
 
+  // what the laptop copied, every 10 minutes it copied anything (the app log, DECISIONS 718)
+  var told = (files: 0, bytes: 0);
+  void tellCopied() {
+    final f = server.servedFiles - told.files, b = server.servedBytes - told.bytes;
+    if (f == 0) return;
+    told = (files: server.servedFiles, bytes: server.servedBytes);
+    toHost.send(['log', 'sharing on Wi-Fi: the laptop copied $f files, ${(b / 1e6).toStringAsFixed(1)} MB']);
+  }
+
+  final copiedTimer = Timer.periodic(const Duration(minutes: 10), (_) => tellCopied());
+
   /// The bind in flight: [end] waits for it, so a socket it opens is closed too (a killed isolate keeps its
   /// sockets open, so this isolate closes them itself before it says it is down).
   Future<void>? binding;
@@ -130,6 +143,8 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
     closing = true;
     addressTimer?.cancel();
     offTimer?.cancel();
+    copiedTimer.cancel();
+    tellCopied();
     announcer?.stop();
     try {
       await binding?.timeout(const Duration(seconds: 3));
@@ -245,6 +260,8 @@ typedef ShareStatus = ({bool up, List<String> addresses, int port, String note})
 const ShareStatus shareDown = (up: false, addresses: <String>[], port: sharePort, note: '');
 
 /// Owns the server isolate from the recording side. Every method is safe to call at any time and never throws.
+final AppLog _log = AppLog('share');
+
 class ShareHost {
   ShareHost({
     required this.filesDir,
@@ -294,6 +311,15 @@ class ShareHost {
   ShareStatus get status => _status;
   bool get running => !_ended;
 
+  /// When the server came up (its uptime goes into the app log at the end).
+  DateTime? _upSince;
+
+  /// A line for the night's log (or logcat) and the app log.
+  void _say(String line) {
+    _log.info(line);
+    onLog(line);
+  }
+
   Future<void> start(ShareConfig config) async {
     if (!_ended) return;
     try {
@@ -314,6 +340,8 @@ class ShareHost {
       );
       ChunkWriter.onBatch = feed;
       _lock(true);
+      _upSince = DateTime.now();
+      Activity.begin('share'); // for the battery samples (lib/logs, DECISIONS 715)
       if (wifi != null) _wifiTimer = Timer.periodic(_addressCheck, (_) => unawaited(_sendWifi()));
     } catch (e) {
       _end('sharing on Wi-Fi could not start: $e');
@@ -411,15 +439,15 @@ class ShareHost {
           final first = !_status.up, moved = addresses.join(',') != _status.addresses.join(',');
           _status = (up: true, addresses: addresses, port: m[2] as int, note: '');
           if (first) {
-            onLog('sharing on Wi-Fi on: ${_where(_status)}');
+            _say('sharing on Wi-Fi on: ${_where(_status)}');
           } else if (moved) {
-            onLog('sharing on Wi-Fi now at ${_where(_status)}');
+            _say('sharing on Wi-Fi now at ${_where(_status)}');
           }
           final why = m.length > 3 && m[3] is String ? m[3] as String : '';
           if (why.isNotEmpty && why != _why) {
             // what each source returned, once per change: in the night's log and in logcat (tag "flutter")
             debugPrint('eeg_tracker share: $why');
-            onLog('sharing on Wi-Fi: ${why.length > 400 ? '${why.substring(0, 400)}...' : why}');
+            _say('sharing on Wi-Fi: ${why.length > 400 ? '${why.substring(0, 400)}...' : why}');
           }
           _why = why;
           onChange?.call(_status);
@@ -441,9 +469,9 @@ class ShareHost {
         case 'error':
           // the server goes on answering; the error goes to logcat (tag "flutter") and the night's log
           debugPrint('eeg_tracker share: an error in the server, which goes on: ${m[1]}');
-          onLog('sharing on Wi-Fi: an error in the server, which goes on: ${m[1]}');
+          _say('sharing on Wi-Fi: an error in the server, which goes on: ${m[1]}');
         case 'log':
-          onLog(m[1] as String);
+          _say(m[1] as String);
         case 'down':
           _end(m[1] == 'stopped' ? 'sharing on Wi-Fi off' : 'sharing on Wi-Fi off: ${m[1]}');
         default:
@@ -473,7 +501,15 @@ class ShareHost {
     _lock(false);
     _status = (up: false, addresses: const <String>[], port: _status.port, note: line);
     try {
-      onLog(line.length > 200 ? '${line.substring(0, 200)}...' : line);
+      final up = _upSince;
+      _upSince = null;
+      if (up != null) {
+        Activity.end('share');
+        _log.info('sharing on Wi-Fi ended after ${DateTime.now().difference(up).inMinutes} min', {
+          'up_s': DateTime.now().difference(up).inSeconds,
+        });
+      }
+      _say(line.length > 200 ? '${line.substring(0, 200)}...' : line);
     } catch (_) {}
     try {
       onChange?.call(_status);

@@ -17,6 +17,7 @@ import 'package:flutter/foundation.dart';
 import '../detectors/detectors.dart';
 import '../dream/band_link.dart';
 import '../feedback/features.dart' show fs, median;
+import '../logs/usage.dart' show Usage;
 import '../recorder/chunk_writer.dart' show Sample;
 import '../recorder/headband.dart' show HeadbandFinder;
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
@@ -427,6 +428,7 @@ class WorkController extends ChangeNotifier {
       final h = p.tick(now, worn: worn, mono: _mono.now);
       if (h != null) _showHint(h);
       if (was == null && p.onBreak) {
+        Usage.hint('work-break', 'break', data: {'how': 'headband off'}); // the usage log (DECISIONS 718)
         // the headband came off for a break: the hint no longer needs an answer; the card says so, with Back
         hint = null;
         _rehold();
@@ -449,6 +451,7 @@ class WorkController extends ChangeNotifier {
   void _expireHint(DateTime now) {
     final h = hint;
     if (h == null || now.difference(h.at).inMilliseconds / 60000 <= BreakRule.takenWindowMin) return;
+    Usage.hint('work-break', 'ignored', after: now.difference(h.at));
     hint = null;
     _rehold();
   }
@@ -456,6 +459,7 @@ class WorkController extends ChangeNotifier {
   void _showHint(WorkHint h) {
     hint = h;
     _events.add({'at': h.at.toIso8601String(), 'event': 'hint', 'reason': h.reason.name});
+    Usage.hint('work-break', 'shown', data: {'reason': h.reason.name});
     _chimeWaits = h;
     unawaited(_chime());
     _rehold();
@@ -524,7 +528,9 @@ class WorkController extends ChangeNotifier {
     final p = _planner;
     if (p == null || p.onBreak || !active) return;
     final now = _now();
+    Usage.hint('work-break', 'break', data: {'how': 'tapped'});
     if (hint != null) {
+      Usage.hint('work-break', 'answered', answer: HintAnswer.onBreak.name, after: now.difference(hint!.at));
       p.answer(HintAnswer.onBreak, now);
       hint = null;
     } else {
@@ -550,6 +556,7 @@ class WorkController extends ChangeNotifier {
   void answer(HintAnswer a) {
     final p = _planner;
     if (p == null || hint == null || a == HintAnswer.onBreak) return;
+    Usage.hint('work-break', 'answered', answer: a.name, after: _now().difference(hint!.at));
     p.answer(a, _now());
     hint = null;
     _rehold();

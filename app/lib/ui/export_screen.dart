@@ -12,6 +12,8 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import '../export/exporter.dart';
 import '../export/store.dart';
+import '../logs/activity.dart' show Activity;
+import '../logs/log.dart' show AppLog;
 import '../phone.dart';
 import 'dream_screen.dart' show dreamSessionRunning;
 import 'export_view.dart';
@@ -105,6 +107,8 @@ class _ExportScreenState extends State<ExportScreen> {
       _progress = const ExportProgress(0, 0, 0, 0, '');
     });
     await Phone.keepScreenOn(on: true, session: false).catchError((_) {});
+    final took = Stopwatch()..start();
+    Activity.begin('export'); // the battery samples (lib/logs, DECISIONS 715)
     final outcome = await runExport(
       filesDir: files,
       target: ChannelExportTarget(folder),
@@ -114,6 +118,14 @@ class _ExportScreenState extends State<ExportScreen> {
       },
       stopRequested: () => _stop,
     );
+    Activity.end('export');
+    AppLog('export').info(outcome.complete ? 'export done' : 'export not complete', {
+      'everything': everything,
+      'files': outcome.files,
+      'bytes': outcome.bytes,
+      'ms': took.elapsedMilliseconds,
+      'error': ?outcome.error,
+    });
     await Phone.keepScreenOn(on: false, session: false).catchError((_) {});
     if (!mounted) return;
     setState(() {

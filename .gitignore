@@ -5,6 +5,8 @@ __pycache__/
 *.f32.gz
 !app/test/fixtures/sleep_night/*.f32
 logs/
+# the app's own logging code (the phone's files/logs/ folder is made on the phone, never here)
+!app/lib/logs/
 *.bdf
 .venv/
 !app/test/fixtures/phone_export/eeg-export/recordings/*.f32

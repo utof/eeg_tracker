@@ -58,6 +58,10 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
 - [Replay check](#replay-check-off-unless-you-switch-it-on): switch on in Training settings, then just meditate (no steps of its own)
 - [Alpha-theta](#alpha-theta): read the screening and consent once; no steps of its own
 
+**After a day and a night of normal use**
+
+- [Logs, usage and battery](#logs-usage-and-battery-more-how-the-app-runs): a look at the Battery, usage and log pages (5 minutes)
+
 **When the headband is on anyway**
 
 - [When I put the headband on](#when-i-put-the-headband-on-automatic-recording-asks-first-unless-you-change-it): pair it once, then a bedtime with "Ask me" (5 minutes, then a few evenings)
@@ -1852,6 +1856,42 @@ The recordings stay inside the app. To get one night out on its own (Export data
 From there: `adb pull /sdcard/Download/EEG/eeg-night-2026-11-18/`, a USB cable, or pick your Syncthing
 folder in step 4. The night also stays in the app. There is no Delete button yet; Settings > Apps >
 EEG Tracker > Storage > Clear data deletes every night (about 160 MB each).
+
+## Logs, usage and battery (More, "How the app runs")
+
+Three pages under **More** show what the app writes about itself, all in the app's private `files/logs/` folder
+(DECISIONS rows 710-719; what is kept and how to delete it: [docs/app-logging.md](../docs/app-logging.md)):
+
+- **App log**: every part of the app's lines of the last 7 days (the recorder's drops and reconnects with their
+  times and causes, Share on Wi-Fi going on and off and what the laptop copied, scoring and packing times, sessions,
+  auto-start's checks, errors with the screen they happened on and what was running). Filter **All / Problems /
+  Errors** and by part of the app; tap a line for its facts and stack. **Copy** puts the lines shown on the clipboard;
+  **Share the log** opens Android's share sheet with the last 3 days' files (to send to the assistant).
+- **How I use the app**: the switch **Record how I use the app** (on; only inside this app, never what you type, never
+  sent anywhere), then for today, 7 or 30 days: time in the app, each screen's time, the features that ran, the most
+  tapped controls, the pages never opened, scrolling, hints and questions (shown, answered, ignored; whether a break
+  followed a break hint; how often auto-start guessed right), screens that stutter, start-up time and storage per folder.
+- **Battery**: what costs the phone's battery, feature by feature (the Signal tab, a night with the headband link,
+  Share on Wi-Fi, sessions, scoring, ...), in mAh an hour with one plain sentence each (how much is the screen, how
+  much the app's own processor time), every combination measured, the phone with the app closed, and the headband:
+  its battery per recording without the gauge's stuck values, its contact over the day and its link's drops.
+  **Measure battery** (on) reads Android's battery numbers every 1-2 minutes while the app is open or something
+  runs, every minute in a night; it wakes nothing.
+
+Everything also reaches the laptop with **Export data** and **Share on Wi-Fi** (`_local/phone/logs/`), so the
+assistant can read the same records. For more detail the assistant can use Android's own battery history from the
+laptop (the guide in [docs/app-logging.md](../docs/app-logging.md)).
+
+### Owner step: a day and a night with the records on, then a look (5 minutes)
+
+1. Nothing to switch on: use the app as usual for a day and a night (a session or the Signal tab helps).
+2. Next day open **More**, **Battery**: read "What costs the most" and the headband's line for the night.
+3. Open **How I use the app**: look at Screens, Most tapped and Not opened.
+4. Open **App log**, tap **Problems**; if there is anything, tap **Share the log** and send it to the assistant.
+5. Tell the assistant:
+   - Which feature costs the most, and does that match what you feel about the battery?
+   - Anything in "Not opened" you want gone, or something you open often that should be easier to reach?
+   - Any screen marked "stutters", and any error in the log?
 
 ## First phone test (1 hour, screen off)
 

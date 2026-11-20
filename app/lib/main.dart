@@ -7,6 +7,10 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import 'auto/task.dart' show runAutoWatch;
 import 'dream/speech_model.dart' show parakeetNotice;
+import 'logs/engine.dart' show ScreenRecords;
+import 'logs/usage.dart' show Usage;
+import 'logs/usage_watch.dart' show UsageGestures, UsageNavigatorObserver;
+import 'phone.dart' show Phone;
 import 'recorder/recorder_service.dart';
 import 'sharp/prompts.dart';
 import 'ui/auto_hooks.dart';
@@ -16,7 +20,10 @@ import 'ui/study_screen.dart' show StudyLogScreen;
 import 'ui/theme.dart';
 
 void main() {
+  final started = Stopwatch()..start();
   WidgetsFlutterBinding.ensureInitialized();
+  // the app's own log, usage and battery samples in files/logs/ (lib/logs, DECISIONS 710-719)
+  ScreenRecords.start(recordingsDir: Phone.recordingsDir, power: Phone.powerMap, mainStarted: started, processAgeMs: Phone.processAge);
   FlutterForegroundTask.initCommunicationPort(); // status messages from the recorder isolate
   initRecorderService();
   // AnySleep's weights ship in the APK (assets/models); its MIT licence travels with them.
@@ -48,6 +55,11 @@ class _EegTrackerAppState extends State<EegTrackerApp> {
   late final SharpPhone _sharp = widget.sharp ?? ChannelSharpPhone();
   late final AutoHooks _auto = AutoHooks(_navigator); // the headband watcher (lib/auto, DECISIONS 600)
   bool _asking = false;
+
+  /// The home page is named by its tab (`tab:Signal`).
+  final UsageNavigatorObserver _usage = UsageNavigatorObserver(
+    rename: (name) => name == 'NightScreen' ? 'tab:${Usage.homeTab}' : name,
+  );
 
   @override
   void initState() {
@@ -91,6 +103,9 @@ class _EegTrackerAppState extends State<EegTrackerApp> {
     navigatorKey: _navigator,
     debugShowCheckedModeBanner: false,
     theme: nightTheme(),
+    // the usage log (DECISIONS 713): the page on top, and taps, drags and scrolls of the app's own screens
+    navigatorObservers: [_usage],
+    builder: (context, child) => UsageGestures(child: child ?? const SizedBox.shrink()),
     home: const NightScreen(),
   );
 }

@@ -10,6 +10,8 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import '../logs/files.dart' show logTime;
+import '../logs/metrics.dart' show Metrics;
 import '../recorder/chunk_writer.dart' show Sample;
 import 'live_signal.dart';
 
@@ -44,6 +46,7 @@ abstract final class LiveTap {
     if (ohms.isEmpty) return;
     _ohms = Map.unmodifiable(ohms);
     _ohmsAt = at;
+    Metrics.write({'t': logTime(at), 'kind': 'contact', 'source': 'session', 'ohms': ohms}); // contact over the day
   }
 
   /// The newest contact reading of any link in this app run, and when it was taken.

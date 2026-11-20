@@ -87,6 +87,9 @@ class ShareServer {
 
   /// The app's private `files/` folder.
   final Directory filesDir;
+
+  /// File answers sent and their bytes since the server started (the app log's copy volumes, DECISIONS 718).
+  int servedFiles = 0, servedBytes = 0;
   final String token;
   final int port;
 
@@ -617,7 +620,11 @@ class ShareServer {
       res.headers.set('Content-Range', 'bytes $start-$end/$size');
     }
     res.contentLength = end - start + 1;
-    if (req.method != 'HEAD' && end >= start) await res.addStream(file.openRead(start, end + 1));
+    if (req.method != 'HEAD' && end >= start) {
+      await res.addStream(file.openRead(start, end + 1));
+      servedFiles++;
+      servedBytes += end - start + 1;
+    }
     return res.close();
   }
 }

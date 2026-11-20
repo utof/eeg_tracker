@@ -5,6 +5,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../logs/activity.dart' show Activity;
 import '../phone.dart';
 import '../signal/layout.dart';
 import '../signal/signal_feed.dart';
@@ -52,7 +53,10 @@ class _SignalScreenState extends State<SignalScreen> with WidgetsBindingObserver
   /// After the frame: switching the feed tells its listeners, and this may run while the tree builds.
   void _sync() {
     final on = _resumed && _visible;
-    scheduleMicrotask(() => unawaited(widget.feed.setActive(on && mounted)));
+    scheduleMicrotask(() {
+      Activity.set('signal', on: on && mounted); // the battery samples (lib/logs, DECISIONS 715)
+      unawaited(widget.feed.setActive(on && mounted));
+    });
   }
 
   void _changed() {
@@ -63,6 +67,7 @@ class _SignalScreenState extends State<SignalScreen> with WidgetsBindingObserver
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.feed.removeListener(_changed);
+    Activity.set('signal', on: false);
     unawaited(widget.feed.setActive(false));
     super.dispose();
   }

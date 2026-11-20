@@ -14,6 +14,9 @@ import '../alarm/rule.dart';
 import '../auto/channel.dart' show AutoChannel;
 import '../handsfree/store.dart' show nightGestures;
 import '../headband/diy/night.dart';
+import '../logs/activity.dart' show Activity;
+import '../logs/engine.dart' show EngineRecords;
+import '../logs/metrics.dart' show Metrics;
 import '../lucid/bell.dart' show ChannelCueBell;
 import '../cues/night_cues.dart' show CueFactory, oneKindANight;
 import '../lucid/live_cues.dart' show lucidCuesFor;
@@ -175,7 +178,11 @@ CueFactory nightCuesWith(String recordingsDir, NightScorer scorer) => oneKindANi
 Future<NightState> loadNight() async => _PrefsNightStore().load();
 
 @pragma('vm:entry-point')
-void recorderEntryPoint() => FlutterForegroundTask.setTaskHandler(RecorderTaskHandler());
+void recorderEntryPoint() {
+  // this engine's log and battery samples while it lives, which is the night (lib/logs, DECISIONS 715)
+  EngineRecords.start(engine: 'recorder', recordingsDir: Phone.recordingsDir, power: Phone.powerMap);
+  FlutterForegroundTask.setTaskHandler(RecorderTaskHandler());
+}
 
 class RecorderTaskHandler extends TaskHandler {
   RecorderTaskHandler({
@@ -269,6 +276,14 @@ class RecorderTaskHandler extends TaskHandler {
       startNotes: [...?diy?.notes, if (starter != TaskStarter.system) ...?auto],
     );
     _recorder = recorder;
+    // what this night runs, for the battery samples and the usage log (lib/logs/activity.dart, DECISIONS 715)
+    Activity.begin('night');
+    if (scorer != null) Activity.begin('live-model');
+    if (scorer != null && auto == null) Activity.begin('cues');
+    Metrics.band = () {
+      final st = _recorder?.status;
+      return st == null ? null : {'battery': st.battery, 'rssi': st.rssi, 'phase': st.phase.name};
+    };
     // into the night's log, and logcat (tag flutter) for a look at the phone the next morning
     _wifiWatch = WifiWatch(
       read: Phone.wifiState,
@@ -401,10 +416,15 @@ class RecorderTaskHandler extends TaskHandler {
       await _wifi();
     }
     FlutterForegroundTask.sendDataToMain(stoppedMessage);
+    Metrics.band = null;
+    for (final f in const ['headband', 'cues', 'live-model', 'night']) {
+      Activity.set(f, on: false);
+    }
   }
 
   void _onStatus(RecorderStatus s) {
     _send(s);
+    Activity.set('headband', on: s.phase == Phase.recording); // streaming from the headband (DECISIONS 715)
     final now = DateTime.now().millisecondsSinceEpoch;
     _share?.setLive(s.toMap(nowMs: now));
     if (s.phase != _shownPhase || now - _shownAtMs >= 10000) {
