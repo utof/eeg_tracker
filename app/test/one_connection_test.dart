@@ -270,7 +270,7 @@ void main() {
     expect(w.owner.status.value.use, BandUse.night);
 
     // the samples are the headband's own, numbers and all
-    await until(() => w.statuses.last.nightSamples >= 100);
+    await until(() => w.statuses.last.nightSamples >= 300 && w.statuses.last.quality != null, what: 'a judged second');
     expect(w.statuses.last.quality, isNotNull, reason: "the recorder's judge sees the lent signal");
 
     // Stop: the files close, the connection stays with the screen for the next start

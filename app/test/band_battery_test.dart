@@ -47,9 +47,10 @@ void main() {
     expect(t.now.note, contains('6 %'));
     stream(t, t0.add(const Duration(hours: 4)), 5 * 60, 6);
     expect(t.now.estimate, 9, reason: 'nine hours in all');
-    // the same stuck value at the next connection, minutes later, is not believed either
+    // by now the gauge and the estimate agree again: a new connection's 6 % is in line, and taken
     t.note(6, t0.add(const Duration(hours: 9, minutes: 3)), streaming: false);
-    expect(t.now.estimate, 9);
+    expect(t.now.estimate, 6);
+    expect(t.now.stuck, isFalse);
   });
 
   test('a new connection that reads higher was charged; 0-2 % is never believed over a fuller estimate', () {
