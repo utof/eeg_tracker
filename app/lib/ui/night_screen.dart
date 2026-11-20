@@ -763,10 +763,14 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// Export: the owner picks a night, then a folder (system picker); the night's files are copied there.
+  /// Export: the owner picks a night, then a folder (system picker); the night's files are copied there. The nights are
+  /// listed again first, in the background isolate: the packing after the scoring turns a night's `.f32` files into
+  /// `.f32.gz` with no refresh of the screen, and the list of the last refresh would name files that are gone (the
+  /// picker failed on a packed recording's length; DECISIONS 629).
   Future<void> _export() async {
-    final nights = _nights;
-    if (nights.isEmpty) return;
+    final dir = _dir;
+    final nights = dir == null ? _nights : await _listNights(dir);
+    if (nights.isEmpty || !mounted) return;
     final night = await showModalBottomSheet<NightFiles>(
       context: context,
       showDragHandle: true,
