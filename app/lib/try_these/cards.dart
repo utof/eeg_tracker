@@ -294,6 +294,28 @@ const List<TryCard> tryCards = [
     readme: [TryRef('Signal', 'a first look at the signal')],
   ),
   TryCard(
+    id: 'auto-start',
+    group: TryGroup.anotherNight,
+    title: 'When I put the headband on',
+    what: 'The app notices the headband on your head and asks "Start the night?", or starts it by itself if you choose.',
+    takes: '5 minutes, then a few evenings',
+    steps: [
+      'Settings, When I put the headband on: tap Pair the headband and choose it in the dialog.',
+      'Headband on, tap Check now: a quiet notification should ask within about 20 seconds. Tap Not now.',
+      'At bedtime: headband on, phone on the charger, locked. Within 10 minutes "Start the night?" should come.',
+      'Tap Start the night, sleep, and Stop in the morning as usual.',
+    ],
+    tell: [
+      'Did the pairing dialog show the headband, and did the question come with the screen off, how late?',
+      'Did the night start when you put the headband on, not when you tapped?',
+      'Did a question ever come at a wrong moment (headband off, in a session, right after Stop)?',
+      'The headband\'s battery in the evening and in the morning.',
+    ],
+    opens: TryOpen.settings,
+    readme: [TryRef('When I put the headband on', 'pair it, then a bedtime with "Ask me"')],
+    evidence: 'auto-start',
+  ),
+  TryCard(
     id: 'work',
     group: TryGroup.sessions,
     title: 'Work session',

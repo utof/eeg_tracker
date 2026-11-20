@@ -11,6 +11,7 @@ import '../alarm/bell.dart';
 import '../alarm/live_alarm.dart';
 import '../alarm/record.dart';
 import '../alarm/rule.dart';
+import '../auto/channel.dart' show AutoChannel;
 import '../handsfree/store.dart' show nightGestures;
 import '../headband/diy/night.dart';
 import '../lucid/bell.dart' show ChannelCueBell;
@@ -35,6 +36,10 @@ const int _serviceId = 4711;
 const String _nightKey = 'night';
 const String _dirKey = 'recordingsDir';
 const String _alarmKey = 'alarmPlan';
+
+/// A night the headband watcher started (lib/auto, DECISIONS 604): its lines for the night's log. While set, the night
+/// runs no lucid cues (no sound starts without a tap); a start by hand removes it.
+const String _autoKey = 'autoStart';
 
 /// Messages from the screen to the recorder.
 const String stopCommand = 'stop';
@@ -106,13 +111,23 @@ void initRecorderService() {
 
 /// Starts the service. [recordingsDir] is remembered as a fallback for the recorder isolate; [alarm] is tonight's
 /// smart alarm (the screen sets the phone's alarm itself, before this). [callback] is for smoke tests only.
+/// [autoNotes]: the headband watcher starts the night (its lines for the log); a start by hand first makes the watcher
+/// let go of a headband it holds while asking ([fromWatcher]: the watcher's own start, it has let go already).
 Future<ServiceRequestResult> startRecorderService(
   String? recordingsDir, {
   AlarmPlan? alarm,
   Function callback = recorderEntryPoint,
+  List<String>? autoNotes,
+  bool fromWatcher = false,
 }) async {
+  if (!fromWatcher) await AutoChannel.release();
   if (recordingsDir != null) await FlutterForegroundTask.saveData(key: _dirKey, value: recordingsDir);
   if (await FlutterForegroundTask.isRunningService) return const ServiceRequestSuccess();
+  if (autoNotes == null) {
+    await FlutterForegroundTask.removeData(key: _autoKey);
+  } else {
+    await FlutterForegroundTask.saveData(key: _autoKey, value: jsonEncode(autoNotes));
+  }
   if (alarm == null) {
     await FlutterForegroundTask.removeData(key: _alarmKey);
   } else {
@@ -203,6 +218,7 @@ class RecorderTaskHandler extends TaskHandler {
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     final rec = await _recordingsDir();
     final plan = await _alarmPlan();
+    final auto = await _autoNotes();
     // Stop (or the system's destroy) came while this was starting: it has been answered; no night starts after it.
     if (_stopping) return;
     final diy = _diy = this.finder == null ? diyNightFor(rec) : null;
@@ -235,9 +251,9 @@ class RecorderTaskHandler extends TaskHandler {
       alarmPlan: plan,
       alarm: scorer == null ? null : alarm(rec, scorer),
       // the lucid dream cues or the memory cues, one kind a night: the shared model, the phone's media player
-      // (DECISIONS 303, 507)
-      cues: scorer == null ? null : cues(rec, scorer),
-      startNotes: diy?.notes ?? const [],
+      // (DECISIONS 303, 507); neither in a night the headband watcher started (DECISIONS 604)
+      cues: scorer == null || auto != null ? null : cues(rec, scorer),
+      startNotes: [...?diy?.notes, if (starter != TaskStarter.system) ...?auto],
     );
     _recorder = recorder;
     final early = _lightsOffEarly;
@@ -386,6 +402,17 @@ class RecorderTaskHandler extends TaskHandler {
     try {
       final raw = await FlutterForegroundTask.getData<String>(key: _alarmKey);
       return raw == null ? null : AlarmPlan.fromJson(jsonDecode(raw));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The watcher's lines when it started this night; null for a start by hand.
+  static Future<List<String>?> _autoNotes() async {
+    try {
+      final raw = await FlutterForegroundTask.getData<String>(key: _autoKey);
+      final j = raw == null ? null : jsonDecode(raw);
+      return j is List ? [for (final x in j) '$x'] : null;
     } catch (_) {
       return null;
     }

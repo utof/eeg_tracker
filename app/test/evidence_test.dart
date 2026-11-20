@@ -27,6 +27,7 @@ void main() {
       'study-timing',
       'work-session',
       'memory-cues',
+      'auto-start',
     ]) {
       final md = await rootBundle.loadString('assets/evidence/$name.md');
       expect(md, startsWith('# '), reason: name);

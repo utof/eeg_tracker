@@ -23,12 +23,17 @@ class MainActivity : FlutterActivity() {
     /** Pairing with a laptop (PairLinkActivity.kt): "take" hands over the link once, "open" says one arrived. */
     private var linkChannel: MethodChannel? = null
 
+    /** The headband watcher's channel (AutoWatch.kt): pairing needs this Activity; a notification tap says "launch". */
+    private var autoChannel: MethodChannel? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
         PhoneChannel.register(messenger, applicationContext)
         AlarmChannel.register(messenger, applicationContext)
         AudioRoute.register(messenger, applicationContext) // where the sound goes (feedback sessions warn on Bluetooth)
+        AutoWatch.takeIntent(applicationContext, intent)
+        autoChannel = AutoWatch.register(messenger, applicationContext, this)
         // Export needs this Activity for the system folder picker, so it lives here, not in PhoneChannel.
         val data = DataExport(applicationContext).also { dataExport = it }
         MethodChannel(messenger, NightExport.CHANNEL).setMethodCallHandler { call, result ->
@@ -148,6 +153,7 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (takeSharpIntent(intent)) sharpChannel?.invokeMethod("open", null)
+        if (AutoWatch.takeIntent(applicationContext, intent)) autoChannel?.invokeMethod("launch", null)
     }
 
     /** Keeps a sharp-hours question from [intent] for the Dart side; not when Android replays it from Recents. */
@@ -170,6 +176,7 @@ class MainActivity : FlutterActivity() {
         sharpChannel = null
         PairLinks.onArrived = null
         linkChannel = null
+        autoChannel = null
         SessionService.onStopTapped = null
         SessionService.onButtonTapped = null
         SessionService.onFocusChanged = null
@@ -209,6 +216,10 @@ class MainActivity : FlutterActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == AutoWatch.REQUEST_PAIR) {
+            AutoWatch.onPairResult(applicationContext, resultCode, data)
+            return
+        }
         if (requestCode == DataExport.REQUEST) {
             val result = pendingPick ?: return
             pendingPick = null

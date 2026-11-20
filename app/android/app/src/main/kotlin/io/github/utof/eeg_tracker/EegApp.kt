@@ -14,6 +14,7 @@ import io.flutter.embedding.engine.FlutterEngine
 class EegApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        AutoWatch.trackScreen(this) // when the screen went off, for the headband watcher's rules
         FlutterForegroundTaskPlugin.addTaskLifecycleListener(object : FlutterForegroundTaskLifecycleListener {
             override fun onEngineCreate(flutterEngine: FlutterEngine?) {
                 flutterEngine?.let {

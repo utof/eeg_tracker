@@ -66,6 +66,10 @@ Each line says what it does. In brackets: how well the research backs it **for t
 - **Signal tab and the bottom bar** (Night, Sessions, Signal, Trends, More): a 3D head you can turn with each
   electrode's contact, live traces per electrode in µV, and the raw data; it reads the night's or a session's stream,
   never a second connection.
+- **When I put the headband on** (automatic recording, first phase): the app notices the headband on your head (a
+  10-second contact check when you open the app, in your bedtime window, or when the paired headband comes near),
+  guesses night or work, and asks "Start the night?" by default; Automatic and Do nothing per kind in Settings. Not
+  now writes nothing; Yes keeps the minutes since the check. Never during a recording or a session.
 
 ### On the laptop
 

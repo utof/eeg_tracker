@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
+import '../auto/store.dart' show AutoStore, autoDirFor;
 import '../detectors/gestures.dart' show GestureSettings;
 import '../handsfree/calibration_controller.dart';
 import '../handsfree/store.dart';
@@ -16,6 +17,8 @@ import '../study/store.dart' show StudyStore, studyDirFor;
 import '../sound/check_in_sound.dart';
 import '../training/check_store.dart' show filesDirFor;
 import '../wearer/wearer.dart';
+import 'auto_start_screen.dart';
+import 'auto_start_view.dart' show autoSummary;
 import 'evidence_sheet.dart';
 import 'hands_free_view.dart';
 import 'nearby.dart';
@@ -53,6 +56,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _recordings;
   WearerResult? _wearer;
 
+  /// "When I put the headband on" in words (DECISIONS 600), when the folder is known.
+  String? _auto;
+
   @override
   void initState() {
     super.initState();
@@ -72,8 +78,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     final studyOn = await _readStudyOn();
     final memoryOn = await _readMemoryOn();
+    String? auto;
+    try {
+      auto = rec == null ? null : autoSummary(AutoStore(autoDirFor(rec)).settings());
+    } catch (_) {
+      auto = null;
+    }
     if (!mounted) return;
     setState(() {
+      _auto = auto;
       _studyOn = studyOn;
       _memoryOn = memoryOn;
       _store = store;
@@ -181,7 +194,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     onStudy: () => unawaited(_openStudy()),
     memoryOn: _memoryOn,
     onMemory: () => unawaited(_openMemory()),
+    autoStart: _auto,
+    onAutoStart: () => unawaited(_openAuto()),
   );
+
+  Future<void> _openAuto() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AutoStartScreen()));
+    await _load();
+  }
 }
 
 class CalibrationScreen extends StatefulWidget {

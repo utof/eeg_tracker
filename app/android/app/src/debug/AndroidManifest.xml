@@ -4,4 +4,14 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <application>
+        <!-- Debug builds only: a faked "headband came near" for the emulator smoke test (AutoDebugReceiver.kt). -->
+        <receiver
+            android:name=".AutoDebugReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="io.github.utof.eeg_tracker.auto.DEBUG_PRESENCE" />
+            </intent-filter>
+        </receiver>
+    </application>
 </manifest>
