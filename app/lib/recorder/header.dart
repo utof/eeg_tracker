@@ -9,6 +9,9 @@
 // - A feature that needs particular sites (the sleep model's O1 O2 T3 T4, the morning check-in's O1 O2) picks them
 //   by name with [RecordingHeader.pick], and says in words when a recording lacks one ([MissingSites]); it never
 //   reads another channel in its place.
+// - `session` says what kind of session wrote a file set when it is not sleep: `work` for a work session's raw EEG
+//   (DECISIONS 683). Such a set is never a night: the nights' chaining, the sleep scoring and the laptop's
+//   night_files.py leave it out ([RecordingHeader.isSleep]). Absent (every night, nap and file from before): sleep.
 //
 // The laptop's twin is scripts/recording.py; both follow the same rules on the same files.
 import 'dart:convert';
@@ -102,6 +105,12 @@ class HeaderSite {
 /// BrainBit default (any other file set from before the header).
 enum HeaderSource { file, log, legacy, made }
 
+/// The header's `session` of a work session's raw EEG (DECISIONS 683).
+const String sessionWork = 'work';
+
+/// `session` values whose file sets are sleep, as a set without one: they join the nights.
+const Set<String> sleepSessions = {'night', 'nap'};
+
 class RecordingHeader {
   const RecordingHeader({
     required this.channels,
@@ -112,6 +121,7 @@ class RecordingHeader {
     this.ground,
     this.counter = counterPacket,
     this.madeBy,
+    this.session,
     this.source = HeaderSource.made,
   });
 
@@ -124,7 +134,27 @@ class RecordingHeader {
   final HeaderSite? ground;
   final String counter;
   final String? madeBy;
+
+  /// What kind of session wrote the file set when it is not a night or a nap (`work`); null: sleep (DECISIONS 683).
+  final String? session;
   final HeaderSource source;
+
+  /// The file set joins the nights: written by a night or a nap (no `session`, or `night` / `nap`).
+  bool get isSleep => session == null || sleepSessions.contains(session);
+
+  /// This header with [kind] as its `session`.
+  RecordingHeader forSession(String? kind) => RecordingHeader(
+    channels: channels,
+    sampleRate: sampleRate,
+    device: device,
+    layout: layout,
+    reference: reference,
+    ground: ground,
+    counter: counter,
+    madeBy: madeBy,
+    session: kind,
+    source: source,
+  );
 
   int get count => channels.length;
   List<String> get names => [for (final c in channels) c.name];
@@ -151,6 +181,7 @@ class RecordingHeader {
     'record': record,
     'counter': counter,
     'made_by': madeBy,
+    'session': ?session, // left out for sleep: a night's header is as it always was
   };
 
   /// The header's file text: one JSON object and a newline.
@@ -209,6 +240,10 @@ class RecordingHeader {
     }
 
     final counter = text('counter');
+    final session = text('session');
+    if (session != null && (session.isEmpty || session.length > maxNameLength || session.trim() != session)) {
+      bad('session must be a word of 1 to $maxNameLength characters, or absent');
+    }
     return RecordingHeader(
       channels: List.unmodifiable(channels),
       sampleRate: rate,
@@ -218,6 +253,7 @@ class RecordingHeader {
       ground: _site(j['ground'], 'ground', bad),
       counter: counter ?? counterPacket,
       madeBy: text('made_by'),
+      session: session,
       source: HeaderSource.file,
     );
   }
@@ -284,10 +320,11 @@ class RecordingHeader {
       other.reference == reference &&
       other.ground == ground &&
       other.counter == counter &&
-      other.madeBy == madeBy;
+      other.madeBy == madeBy &&
+      other.session == session;
 
   @override
-  int get hashCode => Object.hash(Object.hashAll(channels), sampleRate, device, layout, reference, ground, counter);
+  int get hashCode => Object.hash(Object.hashAll(channels), sampleRate, device, layout, reference, ground, counter, session);
 }
 
 List<double>? _xyz(Object? v, void Function() bad) {

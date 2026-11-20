@@ -127,10 +127,11 @@ def _recording_nights(local: Path, phone: set[str], folder: str = "recordings", 
     for p in packed.raw_files(where):
         t = nf.stamp_time(p)
         try:
-            empty = packed.size(p) < recording.read(p).record_bytes
+            h = recording.read(p)
+            empty = packed.size(p) < h.record_bytes
         except (OSError, recording.HeaderError):  # a packed file whose end, or a header that, cannot be read:
             continue  # unreadable() names it
-        if t is not None and empty:
+        if t is not None and empty and h.is_sleep:  # a work session's run is no part of a night (DECISIONS 683)
             near = [d for d, r in rows.items() if r["start"] <= t < r["end"] + nf.CHAIN_GAP_S]
             if near:
                 stems[max(near)].append(p.stem)

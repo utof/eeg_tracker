@@ -1,8 +1,9 @@
 // Work sessions on the phone (DECISIONS 446): `files/work-sessions/<stem>.work.json`, one per session, next to
 // `files/recordings/` in the app's private folder; Export data and Share on Wi-Fi take the whole folder like any other.
 // The file is written whole (a temporary file, then a rename; compact JSON) every few minutes during the session and
-// at Stop, so a crash loses at most the last minutes. No raw EEG: the per-30-s numbers are enough to re-score a session
-// with other weights or lines (docs/data-format.md, "Work sessions").
+// at Stop, so a crash loses at most the last minutes. The per-30-s numbers are enough to re-score a session with other
+// weights or lines (docs/data-format.md, "Work sessions"); the raw EEG is kept apart, as a recording in
+// `files/recordings/` whose header says `session: work` (DECISIONS 683; the file's `raw` names it).
 // Reading (DECISIONS 523): a Start opens only the files named for the last 28 hours; the page's list keeps each file's
 // summary for as long as the file is unchanged, and decodes new or changed files away from the screen's thread.
 import 'dart:convert';

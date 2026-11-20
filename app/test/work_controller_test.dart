@@ -7,7 +7,9 @@ import 'dart:math' as math;
 
 import 'package:eeg_tracker/dream/band_link.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
+import 'package:eeg_tracker/recorder/header.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
+import 'package:eeg_tracker/recorder/nights.dart' show forgetNightSets, nightsIn;
 import 'package:eeg_tracker/session_keeper.dart';
 import 'package:eeg_tracker/sound/audio_route.dart' show MediaVolume;
 import 'package:eeg_tracker/sound/work_sound.dart';
@@ -20,10 +22,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/fast_band.dart' show OneFinder, until;
 import 'support/gates.dart';
 
-enum Mode { awake, drowsy, eyesClosed, off, stall }
+enum Mode { awake, drowsy, eyesClosed, off, stall, talking, flat, wild }
 
 /// O1/O2: 10 Hz alpha; blinks every 4 s and sideways eye movements every 5 s while awake; none while drowsy; the
-/// rails when off. Each batch is one second of its own clock.
+/// rails when off. Talking: the awake signal with 9 of every 10 seconds of jaw movement (4 Hz, 160-300 µV on every
+/// channel) and muscle (80 Hz at T3/T4), as in a call; flat: every channel still (an electrode on the desk); wild:
+/// 2000 µV of mains on every channel (floating electrodes). Each batch is one second of its own clock.
 class WorkBand implements Headband {
   WorkBand({required this.start});
   final double start;
@@ -63,16 +67,29 @@ class WorkBand implements Headband {
         out.add(Sample.four(pack: _pack++ % 2048, o1: 0.4, o2: 0.4, t3: 0.4, t4: 0.4));
         continue;
       }
+      if (mode == Mode.flat) {
+        out.add(Sample.four(pack: _pack++ % 2048, o1: 0.012, o2: -0.008, t3: 0.02, t4: -0.015));
+        continue;
+      }
+      if (mode == Mode.wild) {
+        final hum = 2000 * math.sin(2 * math.pi * 50 * t);
+        out.add(Sample.four(pack: _pack++ % 2048, o1: hum * 1e-6, o2: hum * 0.9e-6, t3: -hum * 1e-6, t4: hum * 1.1e-6));
+        continue;
+      }
       final amp = switch (mode) {
-        Mode.awake => 10.0,
+        Mode.awake || Mode.talking => 10.0,
         Mode.drowsy => 16.0,
         Mode.eyesClosed => 40.0,
-        Mode.off || Mode.stall => 0.0,
+        Mode.off || Mode.stall || Mode.flat || Mode.wild => 0.0,
       };
       final alpha = amp * math.sin(2 * math.pi * 10 * t);
       final slow = 3 * math.sin(2 * math.pi * 3 * t);
-      var blink = 0.0, eye = 0.0;
-      if (mode == Mode.awake) {
+      var blink = 0.0, eye = 0.0, jaw = 0.0, emg = 0.0;
+      if (mode == Mode.talking && t % 10 < 9) {
+        jaw = math.sin(2 * math.pi * 4 * t);
+        emg = 40 * math.sin(2 * math.pi * 80 * t);
+      }
+      if (mode == Mode.awake || mode == Mode.talking) {
         final bt = t % 4 - 2;
         blink = -120 * math.exp(-bt * bt / (2 * 0.04 * 0.04));
         final et = t % 5;
@@ -82,10 +99,10 @@ class WorkBand implements Headband {
       }
       out.add(Sample.four(
         pack: _pack++ % 2048,
-        o1: (alpha + blink + slow + _noise()) * 1e-6,
-        o2: (alpha * 0.9 + blink - slow + _noise()) * 1e-6,
-        t3: (blink + eye + slow + _noise()) * 1e-6,
-        t4: t4lost ? 0.4 : (blink - eye - slow + _noise()) * 1e-6,
+        o1: (alpha + blink + slow + 160 * jaw + _noise()) * 1e-6,
+        o2: (alpha * 0.9 + blink - slow + 170 * jaw + _noise()) * 1e-6,
+        t3: (blink + eye + slow + 300 * jaw + emg + _noise()) * 1e-6,
+        t4: t4lost ? 0.4 : (blink - eye - slow + 280 * jaw - emg + _noise()) * 1e-6,
       ));
     }
     return out;
@@ -167,12 +184,16 @@ void main() {
     FakeSessionKeeper? keeper,
     Future<bool?> Function()? inCall,
     Future<MediaVolume?> Function()? mediaVolume,
+    bool Function()? laptopMeeting,
+    bool raw = false,
   }) => WorkController(
     finder: OneFinder(band),
     sound: sound,
     keeper: keeper,
     inCall: inCall,
     mediaVolume: mediaVolume,
+    laptopMeeting: laptopMeeting,
+    recordingsDir: raw ? Directory('${tmp.path}/recordings') : null,
     store: WorkStore(Directory('${tmp.path}/work-sessions')),
     timing: const WorkTiming(link: fastLink, tick: Duration(milliseconds: 4), noDataAfter: Duration(seconds: 3)),
     clock: band.now,
@@ -411,13 +432,15 @@ void main() {
     c.dispose();
   });
 
-  test('a hint during a call: its words show at once, its chime waits until the call is over (DECISIONS 495)', () async {
+  test('a call that begins as a hint shows: its words show at once, its chime waits until the call is over (DECISIONS 495)', () async {
     final band = WorkBand(start: DateTime(2026, 11, 19, 10).millisecondsSinceEpoch / 1000);
     final sound = SilentWorkSound(), keeper = FakeSessionKeeper();
     var call = true, asked = 0;
-    final c = make(band, sound: sound, keeper: keeper, inCall: () async {
+    late final WorkController c;
+    // the call rings the moment the hint comes (during a call no hint is decided at all, DECISIONS 685)
+    c = make(band, sound: sound, keeper: keeper, inCall: () async {
       asked++;
-      return call;
+      return call && c.hint != null;
     });
     await c.start();
     await until(() => c.level == DrowsyLevel.alert);
@@ -428,6 +451,7 @@ void main() {
     await until(() => band.clockS > at + 30);
     expect(sound.played, isNot(contains('chime')), reason: 'not over a call');
     expect(asked, greaterThan(1), reason: 'checked again while the hint waits');
+    expect(c.meeting, isTrue, reason: 'the call is a meeting');
     call = false;
     await until(() => sound.played.contains('chime'));
     expect(sound.played.where((p) => p == 'chime'), hasLength(1));
@@ -441,7 +465,8 @@ void main() {
     final band = WorkBand(start: DateTime(2026, 11, 19, 10).millisecondsSinceEpoch / 1000);
     final sound = SilentWorkSound();
     var call = true;
-    final c = make(band, sound: sound, inCall: () async => call);
+    late final WorkController c;
+    c = make(band, sound: sound, inCall: () async => call && c.hint != null);
     await c.start();
     await until(() => c.level == DrowsyLevel.alert);
     band.mode = Mode.drowsy;
@@ -732,6 +757,244 @@ void main() {
       expect(c.stretchMin, closeTo(40, 0.5));
       expect(c.planner!.thresholdMin(t0), 60, reason: 'the lunch Stop was the hint\'s break');
       expect(eventsOf(c), contains(startsWith('stretch carried over')));
+      await c.stop();
+      c.dispose();
+    });
+  });
+
+  group('a working day (2026-11-20: talking in a call read as the headband off)', () {
+    WorkBand bandAt10() => WorkBand(start: DateTime(2026, 11, 20, 10).millisecondsSinceEpoch / 1000);
+
+    test('talking (jaw, muscle and movement on every channel) is worn but not readable: never a break', () async {
+      final band = bandAt10();
+      final keeper = FakeSessionKeeper();
+      final c = make(band, keeper: keeper);
+      await c.start();
+      await until(() => c.level == DrowsyLevel.alert);
+      final at = band.clockS, worn = c.wornMin;
+      band.mode = Mode.talking;
+      await until(() => band.clockS > at + 12 * 60);
+      expect(c.planner!.breaks, isEmpty, reason: 'talking is not the headband off');
+      expect(c.onBreak, isFalse);
+      expect(c.worn, isTrue);
+      expect(c.wornMin - worn, greaterThan(11), reason: 'a call is worn time');
+      expect(c.signal, WorkSignal.noisy, reason: 'Talking / moving: reading paused');
+      expect(c.level, DrowsyLevel.unknown, reason: 'no reading from talking');
+      expect(keeper.spec!.text, isNot('On a break'));
+      band.mode = Mode.awake;
+      await until(() => c.level == DrowsyLevel.alert);
+      expect(c.signal, WorkSignal.good);
+      await c.stop();
+      c.dispose();
+    });
+
+    for (final off in [Mode.off, Mode.flat, Mode.wild]) {
+      test('the headband really off (${off.name}) is a break after 5 minutes', () async {
+        final band = bandAt10();
+        final c = make(band);
+        await c.start();
+        await until(() => c.stage == WorkStage.running);
+        final at = band.clockS;
+        band.mode = off;
+        await until(() => band.clockS > at + 4 * 60);
+        expect(c.onBreak, isFalse, reason: 'under 5 minutes only pauses the count');
+        expect(c.worn, isFalse);
+        expect(c.signal, WorkSignal.off);
+        await until(() => c.onBreak);
+        expect(band.clockS - at, inInclusiveRange(5 * 60, 6 * 60));
+        expect(c.planner!.breaks.single.source, BreakSource.headbandOff);
+        band.mode = Mode.awake;
+        await until(() => !c.onBreak);
+        await c.stop();
+        c.dispose();
+      });
+    }
+
+    test('calibrating while you talk: no break, it waits for quiet half minutes; quiet ones finish it', () async {
+      final band = bandAt10()..mode = Mode.talking;
+      final keeper = FakeSessionKeeper();
+      final c = make(band, keeper: keeper);
+      await c.start();
+      await until(() => band.clockS > 10 * 60);
+      expect(c.stage, WorkStage.calibrating);
+      expect(c.onBreak, isFalse);
+      expect(c.planner!.breaks, isEmpty);
+      expect(c.worn, isTrue);
+      expect(c.signal, WorkSignal.noisy);
+      final at = band.clockS;
+      band.mode = Mode.awake;
+      await until(() => c.stage == WorkStage.running);
+      expect(band.clockS - at, lessThan(4.5 * 60), reason: '6 quiet half minutes after the first minute');
+      await c.stop();
+      c.dispose();
+    });
+
+    test('Back after a tapped break while calibrating keeps what calibration gathered; the break is not learned from', () async {
+      final band = bandAt10();
+      final c = make(band);
+      await c.start();
+      await until(() => (c.drowsiness?.baselineLeft ?? 6) <= 3);
+      final left = c.drowsiness!.baselineLeft;
+      c.takeBreak();
+      expect(c.onBreak, isTrue, reason: 'a tap starts a break, also while calibrating');
+      final at = band.clockS;
+      await until(() => band.clockS > at + 3 * 60);
+      expect(c.drowsiness!.baselineLeft, left, reason: 'half minutes on a break are not the baseline');
+      c.back();
+      expect(c.stage, WorkStage.calibrating);
+      final back = band.clockS;
+      await until(() => c.stage == WorkStage.running);
+      expect(band.clockS - back, lessThan((left + 2) * 30), reason: 'it goes on where it was: no new settling minute');
+      await c.stop();
+      c.dispose();
+    });
+
+    test('the headband off 5 minutes while calibrating: no break; calibration starts over once it is back', () async {
+      final band = bandAt10();
+      final c = make(band);
+      await c.start();
+      await until(() => (c.drowsiness?.baselineLeft ?? 6) <= 3);
+      final at = band.clockS, worn = c.wornMin;
+      band.mode = Mode.off;
+      await until(() => band.clockS > at + 7 * 60);
+      expect(c.onBreak, isFalse, reason: 'no break starts by itself while calibrating');
+      expect(c.planner!.breaks, isEmpty);
+      expect(c.wornMin - worn, lessThan(0.5), reason: 'off is not worn time');
+      expect(c.signal, WorkSignal.off);
+      final back = band.clockS;
+      band.mode = Mode.awake;
+      await until(() => eventsOf(c).any((e) => e.startsWith('calibration starts over')));
+      expect(c.drowsiness!.baselineLeft, WorkRule.baselineEpochs);
+      expect(c.drowsiness!.settleLeft, greaterThan(0), reason: 'a settling minute first');
+      await until(() => c.stage == WorkStage.running);
+      expect(band.clockS - back, inInclusiveRange(4 * 60, 5.5 * 60), reason: 'a settling minute and 3 minutes again');
+      await c.stop();
+      c.dispose();
+    });
+
+    test('a finished baseline stays after a long time off: Back never calibrates again', () async {
+      final band = bandAt10();
+      final c = make(band);
+      await c.start();
+      await until(() => c.level == DrowsyLevel.alert);
+      final baseline = c.drowsiness!.baseline;
+      band.mode = Mode.off;
+      await until(() => c.onBreak);
+      final at = band.clockS;
+      await until(() => band.clockS > at + 20 * 60);
+      band.mode = Mode.awake;
+      await until(() => !c.onBreak);
+      expect(c.stage, WorkStage.running);
+      expect(identical(c.drowsiness!.baseline, baseline), isTrue);
+      await until(() => c.level == DrowsyLevel.alert);
+      await c.stop();
+      c.dispose();
+    });
+
+    test('the raw EEG of the whole session is kept as a recording that is no night, and closed at Stop', () async {
+      final band = bandAt10();
+      final c = make(band, raw: true);
+      await c.start();
+      final stem = c.rawStem!;
+      final dir = Directory('${tmp.path}/recordings');
+      for (final ext in ['f32', 'idx', 'log', 'header.json']) {
+        expect(File('${dir.path}/$stem.$ext').existsSync(), isTrue, reason: '$ext from the start, calibration included');
+      }
+      final h = readHeader(File('${dir.path}/$stem.f32'));
+      expect(h.session, sessionWork);
+      expect(h.isSleep, isFalse);
+      expect(h.names, ['O1', 'O2', 'T3', 'T4']);
+      await until(() => c.level == DrowsyLevel.alert);
+      c.takeBreak();
+      final at = band.clockS;
+      await until(() => band.clockS > at + 60);
+      c.back();
+      await c.stop();
+      final f32 = File('${dir.path}/$stem.f32');
+      final n = f32.lengthSync() ~/ h.recordBytes;
+      expect(f32.lengthSync() % h.recordBytes, 0);
+      expect(n, closeTo(band.clockS * 250, 2 * 250), reason: 'every sample since the stream started');
+      final idx = File('${dir.path}/$stem.idx').lengthSync();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(f32.lengthSync(), n * h.recordBytes, reason: 'closed: nothing more is written');
+      expect(File('${dir.path}/$stem.idx').lengthSync(), idx);
+      final log = File('${dir.path}/$stem.log').readAsLinesSync();
+      expect(log.first, contains('work session (not a night'));
+      expect(log.last, endsWith('stopped'));
+      final marks = File('${dir.path}/$stem.markers.jsonl').readAsLinesSync().map((l) => (jsonDecode(l) as Map)['text']);
+      expect(marks, containsAllInOrder(['work: calibrated', 'work: on a break (tapped)', 'work: back (tapped)']));
+      expect(c.last!['raw'], stem);
+      expect(c.rawNote, contains('MB) is kept with your recordings'));
+      forgetNightSets();
+      expect(nightsIn(dir), isEmpty, reason: 'a work session is not a night');
+      c.dispose();
+    });
+
+    test('a call on the phone labels a meeting: no drowsiness verdict, no hint until it ends; then the hint comes', () async {
+      final band = bandAt10();
+      final keeper = FakeSessionKeeper();
+      var call = false;
+      final c = make(band, keeper: keeper, inCall: () async => call);
+      await c.start();
+      await until(() => c.level == DrowsyLevel.alert);
+      call = true;
+      await until(() => c.meeting);
+      expect(c.meetingSource, 'phone call');
+      expect(keeper.spec!.text, startsWith('In a meeting'));
+      final at = band.clockS;
+      band.mode = Mode.drowsy;
+      await until(() => band.clockS > at + 10 * 60);
+      expect(c.hint, isNull, reason: 'no hint during a call');
+      expect(c.level, DrowsyLevel.unknown, reason: 'no verdict from a meeting');
+      expect(c.onBreak, isFalse);
+      call = false;
+      await until(() => !c.meeting);
+      await until(() => c.hint != null);
+      expect(c.hint!.reason, HintReason.drowsy);
+      await c.stop();
+      final j = c.last!;
+      final meetings = (j['meetings']! as List).cast<Map<String, Object?>>();
+      expect(meetings.single['source'], 'phone call');
+      expect(j['meeting_min'] as num, inInclusiveRange(9.5, 11.5));
+      final epochs = (j['epochs']! as List).cast<Map<String, Object?>>();
+      final inMeeting = epochs.where((e) => e['meeting'] == true).toList();
+      expect(inMeeting.length, inInclusiveRange(18, 22));
+      expect(inMeeting.every((e) => e['level'] == 'unknown' && e['index'] == null), isTrue);
+      expect((j['minutes']! as Map)['meeting'] as num, inInclusiveRange(9, 11));
+      expect(eventsOf(c), containsAllInOrder(['meeting started', 'meeting ended']));
+      c.dispose();
+    });
+
+    test("the laptop's word that its session is in a meeting labels one too (POST /work meeting)", () async {
+      final band = bandAt10()..mode = Mode.talking;
+      var laptop = true;
+      final c = make(band, laptopMeeting: () => laptop);
+      await c.start();
+      await until(() => band.clockS > 6 * 60);
+      expect(c.meeting, isTrue);
+      expect(c.meetingSource, 'laptop');
+      expect(c.stage, WorkStage.calibrating);
+      expect(c.calibrationWaits, isFalse, reason: 'in a meeting it says so instead');
+      expect(c.onBreak, isFalse);
+      laptop = false;
+      band.mode = Mode.awake;
+      await until(() => c.stage == WorkStage.running);
+      await c.stop();
+      final meetings = (c.last!['meetings']! as List).cast<Map<String, Object?>>();
+      expect(meetings.single['source'], 'laptop');
+      c.dispose();
+    });
+
+    test('calibration says it waits for a quiet minute while you talk, on the page and the card', () async {
+      final band = bandAt10()..mode = Mode.talking;
+      final keeper = FakeSessionKeeper();
+      final c = make(band, keeper: keeper);
+      await c.start();
+      await until(() => band.clockS > 3 * 60);
+      expect(c.calibrationWaits, isTrue);
+      expect(keeper.spec!.text, 'Calibrating: waiting for a quiet minute');
+      band.mode = Mode.awake;
+      await until(() => !c.calibrationWaits && keeper.spec!.text == 'Calibrating');
       await c.stop();
       c.dispose();
     });

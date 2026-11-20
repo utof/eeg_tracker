@@ -4,6 +4,9 @@
 // when work starts, asks the watcher for a check. The tray sends it to the phone paired by its QR code when a session
 // starts or ends (scripts/laptop_work.py `phone_work_signal`): Share on Wi-Fi's `POST /work`, with its token, taken by
 // the app's own server between nights (share/control.dart); during a night it answers 503.
+// The word may say whether the laptop's session is in a meeting (`meeting`, DECISIONS 666 and 685): the tray sends it
+// at the session's start and end and whenever a meeting starts or ends inside it. A word that only changes the meeting
+// asks for no check; the work session on the phone reads it ([laptopMeetingNow]) to label its meeting minutes.
 import 'dart:convert';
 import 'dart:io';
 
@@ -26,9 +29,9 @@ class LaptopStore {
       final Object? j = jsonDecode(_file.readAsStringSync());
       if (j is! Map) return null;
       final at = j['at'] is String ? DateTime.tryParse(j['at'] as String)?.toLocal() : null;
-      final working = j['working'];
+      final working = j['working'], meeting = j['meeting'];
       if (at == null || working is! bool) return null;
-      return LaptopWork(working: working, at: at);
+      return LaptopWork(working: working, at: at, meeting: meeting is bool ? meeting : null);
     } catch (_) {
       return null; // none yet, or not ours
     }
@@ -37,18 +40,57 @@ class LaptopStore {
   void save(LaptopWork w) {
     dir.createSync(recursive: true);
     final tmp = File('${_file.path}.tmp')
-      ..writeAsStringSync(jsonEncode({'version': 1, 'working': w.working, 'at': isoLocal(w.at)}), flush: true);
+      ..writeAsStringSync(
+        jsonEncode({'version': 1, 'working': w.working, 'at': isoLocal(w.at), 'meeting': ?w.meeting}),
+        flush: true,
+      );
     tmp.renameSync(_file.path);
   }
 }
 
-/// The hook for the laptop: a work session started ([working] true) or ended. Keeps it, and on a start asks for a
-/// check (the watcher decides whether one runs). Never throws.
-Future<void> laptopWorkSignal({required bool working, DateTime? at}) async {
+/// A laptop meeting word is believed this long at most (a tray that died mid-meeting never says it ended): the
+/// tray's own limit for backdating a call (scripts/laptop_work.py `BACKDATE_MAX_H`).
+const Duration laptopMeetingMax = Duration(hours: 3);
+
+/// A word that only changes the meeting of a session the laptop already reported (working before and now, the word
+/// says `meeting`, the one before is under 12 hours old) asks for no headband check.
+bool asksForCheck(LaptopWork? before, LaptopWork word) {
+  if (!word.working) return false;
+  if (before == null || !before.working || word.meeting == null) return true;
+  return word.at.difference(before.at) >= const Duration(hours: 12);
+}
+
+/// The laptop's latest word in this app process (null: none since the app started and none read from the file).
+LaptopWork? lastLaptopWord;
+
+/// The laptop says its work session is in a meeting now (the word under [laptopMeetingMax] old).
+bool laptopMeetingNow([DateTime? now]) {
+  final w = lastLaptopWord;
+  if (w == null || !w.working || w.meeting != true) return false;
+  final age = (now ?? DateTime.now()).difference(w.at);
+  return !age.isNegative && age < laptopMeetingMax;
+}
+
+/// The kept word for [lastLaptopWord] when this process has none yet (the app was started during the meeting).
+void seedLaptopWord(String recordingsDir) {
+  if (lastLaptopWord != null) return;
+  try {
+    lastLaptopWord = LaptopStore(autoDirFor(recordingsDir)).load();
+  } catch (_) {}
+}
+
+/// The hook for the laptop: a work session started ([working] true) or ended, and whether it is in a meeting
+/// ([meeting]; null: not said). Keeps it, and when work starts asks for a check (the watcher decides whether one
+/// runs). Never throws.
+Future<void> laptopWorkSignal({required bool working, bool? meeting, DateTime? at}) async {
+  final word = LaptopWork(working: working, at: at ?? DateTime.now(), meeting: meeting);
+  lastLaptopWord = word;
   try {
     final rec = await Phone.recordingsDir();
     if (rec == null) return;
-    LaptopStore(autoDirFor(rec)).save(LaptopWork(working: working, at: at ?? DateTime.now()));
-    if (working) await AutoChannel.requestCheck('laptop');
+    final store = LaptopStore(autoDirFor(rec));
+    final before = store.load();
+    store.save(word);
+    if (asksForCheck(before, word)) await AutoChannel.requestCheck('laptop');
   } catch (_) {}
 }

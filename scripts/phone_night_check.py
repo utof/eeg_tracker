@@ -277,6 +277,8 @@ def load_runs(folder: Path) -> list[Run]:
         except OSError:
             text = ""
         head = recording.read(folder / f"{stem}.f32")  # a damaged header: an error naming it (main says it)
+        if not head.is_sleep:
+            continue  # a work session's raw EEG is no run of a night (DECISIONS 683)
         try:
             samples = packed.size(folder / f"{stem}.f32") // head.record_bytes
         except OSError:

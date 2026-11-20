@@ -13,7 +13,9 @@ so the owner's night and a late-morning sleep after it land in one report. The c
 oldest recording in the folder, so the same files always give the same nights.
 
 A recording's record size and rate are its own (scripts/recording.py: its <stamp>.header.json, else its .log's
-format line, else the BrainBit's 20 bytes at 250 Hz), so minutes are right for any number of channels.
+format line, else the BrainBit's 20 bytes at 250 Hz), so minutes are right for any number of channels. A recording
+whose header names a session that is not sleep (the phone's work session, `session: work`, DECISIONS 683) is no
+recording of a night: recordings() leaves it out, so it is never chained, scored or reported as sleep.
 """
 from __future__ import annotations
 
@@ -108,9 +110,10 @@ def _end(path: Path, start: float, size: int, rec_bytes: int = REC_BYTES, fs: fl
 
 
 def recordings(folder: Path, on_bad: Callable[[Path, Exception], None] | None = None) -> list[Rec]:
-    """Every recording with at least one sample, oldest first; a packed one by its plain name. A recording whose
-    header is damaged is an error naming the file (recording.HeaderError), never a guess at its record size; with
-    `on_bad` it is handed over (path, error) and left out instead."""
+    """Every recording of sleep with at least one sample, oldest first; a packed one by its plain name. A work
+    session's (its header's `session`) is left out. A recording whose header is damaged is an error naming the file
+    (recording.HeaderError), never a guess at its record size; with `on_bad` it is handed over (path, error) and left
+    out instead."""
     out = []
     for p in packed.raw_files(folder):
         start = stamp_time(p)
@@ -126,6 +129,8 @@ def recordings(folder: Path, on_bad: Callable[[Path, Exception], None] | None = 
             if on_bad is None:
                 raise
             on_bad(p, e)
+            continue
+        if not h.is_sleep:
             continue
         if size >= h.record_bytes:
             out.append(Rec(p, start, _end(p, start, size, h.record_bytes, h.sample_rate), size, h.record_bytes,

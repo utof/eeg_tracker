@@ -54,7 +54,7 @@ List<Object?> shareIsolateArgs(
 /// `['m', id, t, i]` a marker's answer (t null = not recording), `['w', nets, note]` Android's answer about the
 /// Wi-Fi address again, `['x']` stop. Messages out: `['port', SendPort]`, `['up', addresses, port, why]` (why: empty,
 /// or what each source returned when no Wi-Fi address was found), `['marker', id, text]`, `['copying', n]` file
-/// requests being answered, `['work', working]` the laptop's work signal, `['error', text]` an error that did not
+/// requests being answered, `['work', working, meeting]` the laptop's work signal, `['error', text]` an error that did not
 /// stop it, `['log', line]` (the paired laptop), `['down', why]`.
 ///
 /// Every error inside it is caught (DECISIONS row 587): before the server listens it ends the isolate the orderly way
@@ -114,7 +114,7 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
     },
     hashCache: File('${args[1]! as String}/cache/share-hashes.json'),
     onCopying: (n) => toHost.send(['copying', n]),
-    onWork: args.length > 8 && args[8] == true ? (working) => toHost.send(['work', working]) : null,
+    onWork: args.length > 8 && args[8] == true ? (working, meeting) => toHost.send(['work', working, meeting]) : null,
   );
   Timer? addressTimer;
   Timer? offTimer;
@@ -277,7 +277,7 @@ class ShareHost {
 
   /// The paired laptop's work signal (`POST /work`): a work session started ([working]) or ended there. Only the app
   /// between nights takes it (automatic recording, lib/auto/laptop.dart); null: the server answers 503.
-  final void Function(bool working)? onWork;
+  final void Function(bool working, bool? meeting)? onWork;
 
   /// Tests replace the server with one that throws.
   final Future<void> Function(List<Object?> args) entry;
@@ -436,7 +436,7 @@ class ShareHost {
           _copiedAt = DateTime.now();
         case 'work':
           try {
-            onWork?.call(m[1] == true);
+            onWork?.call(m[1] == true, m.length > 2 && m[2] is bool ? m[2] as bool : null);
           } catch (_) {}
         case 'error':
           // the server goes on answering; the error goes to logcat (tag "flutter") and the night's log

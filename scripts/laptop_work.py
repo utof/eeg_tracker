@@ -885,8 +885,8 @@ def phone_work_signal(local: Path, working: bool, *, meeting: bool | None = None
     with the token phone_link.py keeps. Automatic recording on the phone takes "working" from it (DECISIONS 603) and
     may check whether the headband is on. One word for the log ("sent", "not paired", "refused (503)": a night
     records, or sharing is off, "not reachable"); the token is never in it. Never raises; no proxy (local network).
-    [meeting]: whether the session is in a meeting now (DECISIONS 666; the phone ignores it until it labels talking
-    minutes with it)."""
+    [meeting]: whether the session is in a meeting now (DECISIONS 666), sent at the session's start and end and at
+    each meeting's start and end inside it; the phone's work session labels its meeting minutes by it (DECISIONS 685)."""
     t = _phone_target(local)
     if t is None:
         return "not paired"
@@ -1045,6 +1045,9 @@ class WorkTray:
         self.log.append(f"{hm(now)} {text}")
         if s is not None:
             s.note(now, text); self.last_saved = None
+            # the phone labels its work session's talking minutes by it (DECISIONS 685): a word that only changes
+            # the meeting asks it for no headband check
+            self._tell_phone(now, True)
         if new is None:
             held, self.held = self.held, {}
             for key, args in held.items():

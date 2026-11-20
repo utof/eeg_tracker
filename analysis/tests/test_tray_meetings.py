@@ -283,6 +283,19 @@ def test_the_phone_hears_whether_the_session_is_in_a_meeting(tmp_path):
     assert got == [b'{"working": true, "meeting": true}', b'{"working": false, "meeting": false}']
 
 
+def test_a_meeting_starting_or_ending_inside_a_session_tells_the_phone(tmp_path):
+    """The phone's work session labels its talking minutes by it (DECISIONS 685): a word at the session's start, at
+    each meeting's start and end inside it, and at its end."""
+    afk = [awake(at(9), 20), away(at(9, 20), 40), awake(at(10), 20)]
+    window = [win(TERM, at(9), 20), win("zoom", at(9, 20), 40, "Zoom Workplace"), win(TERM, at(10), 20)]
+    r = meeting_rig(tmp_path, afk, window, [(at(9, 21), at(10), "zoom")])
+    told: list[tuple[bool, bool]] = []
+    r.tray.work_signal = lambda working: told.append((working, working and r.tray.meeting_now is not None))
+    r.tray.start(at(9)); r.until(at(10, 15), at(9))
+    r.tray.stop(r.t)
+    assert told == [(True, False), (True, True), (True, False), (False, False)]
+
+
 def test_a_session_file_with_meetings_reads_back(tmp_path):
     afk = [awake(at(9), 20), away(at(9, 20), 20)]
     window = [win(TERM, at(9), 20), win("zoom", at(9, 20), 20, "Zoom Workplace")]

@@ -9,8 +9,9 @@
 //   GET  /files          every file Export data would copy: path, bytes, sha256, modified_ms (and a packed
 //                        recording's `original`: the .f32 it holds)
 //   GET  /files/<path>   one file, with HTTP Range (a growing night file is fetched piece by piece)
-//   POST /work           the paired laptop's work signal, {"working": true|false} (scripts/laptop_work.py), for
-//                        automatic recording (lib/auto/laptop.dart; 503 where nothing takes it: during a night)
+//   POST /work           the paired laptop's work signal, {"working": true|false} and optionally "meeting":
+//                        true|false (scripts/laptop_work.py), for automatic recording and the work session's
+//                        meetings (lib/auto/laptop.dart; 503 where nothing takes it: during a night)
 //   the laptop's own jobs (/sleep-report, /morning-report, /hypnogram.png): 503, as the page server answers
 //   while the recorder is away
 //
@@ -106,8 +107,8 @@ class ShareServer {
   final void Function(int copying)? onCopying;
 
   /// The paired laptop's work signal (`POST /work`): a work session started ([working]) or ended there (DECISIONS
-  /// 603); null: nothing takes it here (503).
-  final void Function(bool working)? onWork;
+  /// 603), and whether it is in a meeting (null: not said; DECISIONS 685); null: nothing takes it here (503).
+  final void Function(bool working, bool? meeting)? onWork;
   final DateTime Function() _now;
 
   /// SHA-256 worked out by this server (not taken from the cache or the export's index); for tests.
@@ -385,23 +386,24 @@ class ShareServer {
     return _send(req.response, 200, utf8.encode('ok'), 'text/plain');
   }
 
-  /// The laptop's work signal: `{"working": true|false}`, nothing else, under 200 bytes.
+  /// The laptop's work signal: `{"working": true|false}`, optionally with `"meeting": true|false`, under 200 bytes.
   Future<void> _work(HttpRequest req) async {
     final bytes = BytesBuilder(copy: false);
     await for (final chunk in req) {
       if (bytes.length <= 200) bytes.add(chunk);
     }
-    bool? working;
+    bool? working, meeting;
     if (bytes.length <= 200) {
       try {
         final Object? j = jsonDecode(utf8.decode(bytes.takeBytes()));
         if (j is Map && j['working'] is bool) working = j['working'] as bool;
+        if (j is Map && j['meeting'] is bool) meeting = j['meeting'] as bool;
       } catch (_) {}
     }
     if (working == null) return _json(req.response, 400, {'error': 'send {"working": true} or {"working": false}'});
     final take = onWork;
     if (take == null) return _json(req.response, 503, {'error': 'the work signal is not taken now (a night records)'});
-    take(working);
+    take(working, meeting);
     return _json(req.response, 202, {'ok': true});
   }
 

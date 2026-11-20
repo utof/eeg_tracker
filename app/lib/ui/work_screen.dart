@@ -3,10 +3,12 @@
 // the session keeper (SessionService.kt) holds it with a notification whose words follow the level and the hint; the
 // screen is kept on only when the phone refused that. Layout in work_view.dart.
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
+import '../auto/laptop.dart' show laptopMeetingNow, seedLaptopWord;
 import '../auto/work_start.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
@@ -42,6 +44,7 @@ class _WorkScreenState extends State<WorkScreen> {
     keeper: PhoneSessionKeeper(),
     inCall: phoneInCall,
     mediaVolume: phoneMediaVolume,
+    laptopMeeting: laptopMeetingNow,
   );
   bool _nightRunning = false, _eyesClosedFirst = false, _screenOn = false;
   List<WorkSummary> _sessions = const [];
@@ -65,6 +68,8 @@ class _WorkScreenState extends State<WorkScreen> {
       if (rec != null) {
         _recordings = rec;
         _c.store = WorkStore(workDirFor(rec));
+        _c.recordingsDir = Directory(rec); // the raw EEG, beside the nights' (DECISIONS 683)
+        seedLaptopWord(rec); // the laptop's last word, for a meeting already going on
       }
     } catch (_) {
       // without the folder the session still runs; it is just not saved
@@ -242,6 +247,9 @@ class _WorkScreenState extends State<WorkScreen> {
       closedLeft: c.closedLeft,
       calibrationLeftMin: c.calibrationLeftMin,
       kept: c.kept || !c.active,
+      meeting: c.active && c.meeting,
+      calibrationWaits: c.calibrationWaits,
+      rawNote: c.stage == WorkStage.done ? c.rawNote : null,
       summary: _summaryOf(last),
       wearerOn: _wearerOn,
       sessions: _sessions,

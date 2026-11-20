@@ -36,6 +36,25 @@ def test_minutes_come_from_each_files_own_record_and_rate(tmp_path: Path) -> Non
     assert [(r.rec_bytes, r.fs) for r in recs] == [(36, 250), (68, 500), (20, 250), (28, 250)]
 
 
+def test_a_work_sessions_raw_eeg_is_no_night_and_never_scored_as_sleep(tmp_path: Path) -> None:
+    """The phone's work session keeps its raw EEG beside the nights (DECISIONS 683); its header says `session: work`.
+    A night's morning: the work recording at 09:00 would chain into the night by its evening date."""
+    from dataclasses import replace
+    work_header = replace(rc.brainbit(made_by="eeg_tracker app"), session="work")
+    night = nch.write_set(tmp_path, datetime(2026, 11, 19, 23), nch.volts(250 * 60, 4), BB, header=rc.brainbit())
+    nap = nch.write_set(tmp_path, datetime(2026, 11, 20, 0, 30), nch.volts(250 * 60, 4), BB,
+                        header=replace(rc.brainbit(), session="nap"))
+    work = nch.write_set(tmp_path, datetime(2026, 11, 20, 9), nch.volts(250 * 120, 4), BB, header=work_header)
+    assert rc.read(work).session == "work" and not rc.read(work).is_sleep
+    assert rc.read(night).is_sleep and rc.read(nap).is_sleep
+    recs = nf.recordings(tmp_path)
+    assert [r.path for r in recs] == [night, nap]
+    (n,) = nf.nights(recs)
+    assert n.name == "2026-11-19" and work not in [r.path for r in n.recs]
+    packed.pack(work)  # packed after a day as any recording: still no night
+    assert [r.path for r in nf.recordings(tmp_path)] == [night, nap]
+
+
 def test_a_file_shorter_than_one_of_its_records_is_no_recording(tmp_path: Path) -> None:
     f = nch.write_set(tmp_path, T0, nch.volts(1, 8), nch.EIGHT)
     assert len(nf.recordings(tmp_path)) == 1

@@ -38,6 +38,10 @@ final Map<String, WorkViewModel> states = {
   'rated': WorkViewModel(stage: WorkStage.running, level: DrowsyLevel.drowsy, cells: _cells, wornMin: 64, stretchMin: 48, hintsToday: 2, hint: _hint, rated: 2),
   'break': const WorkViewModel(stage: WorkStage.running, level: DrowsyLevel.drowsy, onBreak: true, breakMin: 6, cells: _cells, wornMin: 64, hintsToday: 2),
   'noisy': const WorkViewModel(stage: WorkStage.running, noisy: true, signal: WorkSignal.noisy, cells: _cells, wornMin: 90, stretchMin: 30, hintsToday: 2, kept: false),
+  'calibrating_talking': const WorkViewModel(stage: WorkStage.calibrating, calibrationWaits: true, signal: WorkSignal.noisy, calibrationLeftMin: 3, wornMin: 9, stretchMin: 9),
+  'meeting': const WorkViewModel(stage: WorkStage.running, meeting: true, signal: WorkSignal.noisy, cells: _cells, wornMin: 95, stretchMin: 35, hintsToday: 1),
+  'off': const WorkViewModel(stage: WorkStage.running, level: DrowsyLevel.alert, signal: WorkSignal.off, cells: _cells, wornMin: 64, stretchMin: 23),
+  'done_raw': WorkViewModel(stage: WorkStage.done, summary: _past, rawNote: 'The raw EEG (54 MB) is kept with your recordings, apart from your nights, and goes out with Export data.'),
   'done_marked': WorkViewModel(stage: WorkStage.done, summary: _other, wearerOn: true),
   'done': WorkViewModel(stage: WorkStage.done, summary: _past, wearerOn: true, afterBreak: 'After your break: drowsiness went down (drowsy before, alert after).'),
   'failed': const WorkViewModel(stage: WorkStage.failed, message: 'Headband not found. Is it switched on, charged, and free (no night recording)?'),
@@ -120,6 +124,25 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
     await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: WorkView(model: states['calibrating']!)));
     expect(find.textContaining('media volume'), findsNothing);
+  });
+
+  testWidgets('a working day in words: talking is not a break, calibration waits, a meeting, the raw EEG kept (DECISIONS 680-685)', (tester) async {
+    tester.view.physicalSize = const Size(1210, 2695);
+    tester.view.devicePixelRatio = 2.75;
+    addTearDown(tester.view.reset);
+    Future<void> show(String k) => tester.pumpWidget(MaterialApp(theme: nightTheme(), home: WorkView(model: states[k]!)));
+    await show('calibrating_talking');
+    expect(find.text('Calibrating'), findsOneWidget);
+    expect(find.textContaining('Waiting for a quiet minute to calibrate (talking?)'), findsOneWidget);
+    expect(find.text('Talking / moving — reading paused'), findsOneWidget);
+    expect(find.text('On a break'), findsOneWidget, reason: 'only the button: no break status');
+    await show('meeting');
+    expect(find.text('In a meeting'), findsOneWidget);
+    expect(find.textContaining('break hints wait until it ends'), findsOneWidget);
+    await show('off');
+    expect(find.text('The headband seems off: no skin contact in the signal'), findsOneWidget);
+    await show('done_raw');
+    expect(find.textContaining('The raw EEG (54 MB) is kept with your recordings'), findsOneWidget);
   });
 
   testWidgets('during a night the page says so and Start is off', (tester) async {
