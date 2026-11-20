@@ -8,6 +8,7 @@ import 'dart:io';
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/recorder_service.dart';
 import 'package:eeg_tracker/share/protocol.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -228,6 +229,30 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 300));
     expect(wifiReads, seen, reason: 'the Wi-Fi watch stops with the night');
     await h.onDestroy(DateTime.now(), false);
+  }, timeout: const Timeout(Duration(seconds: 60)));
+
+  test('a night the headband watcher started serves from the saved setting: the Wi-Fi lock as the recorder, Wi-Fi lines', () async {
+    // The watcher starts the night from its own engine (lib/auto/task.dart), with no screen to send the share setting
+    // (DECISIONS 600, 612): the recorder reads the saved one, holds the lock while it serves and logs the Wi-Fi.
+    final printed = <String>[];
+    final was = debugPrint;
+    debugPrint = (String? m, {int? wrapWidth}) => printed.add(m ?? '');
+    addTearDown(() => debugPrint = was);
+    final port = await freePort();
+    await saveShareConfig(ShareConfig(token: token, port: port).switchedOn(DateTime.now().millisecondsSinceEpoch));
+    await FlutterForegroundTask.saveData(key: 'autoStart', value: jsonEncode(['started automatically: test']));
+    final h = handler(NoBand());
+    await h.onStart(DateTime.now(), TaskStarter.developer);
+    await until(() => locks.lastOrNull?['on'] == true && printed.any((l) => l.startsWith('eeg_tracker wifi ')));
+    expect(locks.last, {'on': true, 'who': 'recorder'});
+    expect(printed.where((l) => l.startsWith('eeg_tracker wifi ')).first, startsWith('eeg_tracker wifi connected'));
+
+    h.onReceiveData(stopCommand);
+    await until(() => toMain.any((m) => m is Map && m['kind'] == 'stopped') && locks.last['on'] == false);
+    expect(locks.last, {'on': false, 'who': 'recorder'});
+    await h.onDestroy(DateTime.now(), false);
+    await FlutterForegroundTask.removeData(key: 'autoStart');
+    await FlutterForegroundTask.removeData(key: shareKey);
   }, timeout: const Timeout(Duration(seconds: 60)));
 
   test('the share switch moved on, off and on again within a second leaves one server, the last one asked', () async {
