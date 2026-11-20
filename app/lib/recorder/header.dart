@@ -13,6 +13,7 @@
 // The laptop's twin is scripts/recording.py; both follow the same rules on the same files.
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import '../signal/layout.dart' show Montage, Site, SiteKind, Vec3, brainBitMontage, standardName, standardSites;
 import 'packed.dart' show plainFileOf, rawLength;
@@ -181,12 +182,14 @@ class RecordingHeader {
       }
       if (!seen.add(name)) bad('channel name $name appears twice');
       final site = c['site'];
-      if (site != null && site is! String) bad('channel $name: site must be a 10-10 name or null');
+      if (site != null && (site is! String || site.isEmpty || site.length > 16)) {
+        bad('channel $name: site must be a 10-10 name (up to 16 characters) or null');
+      }
       channels.add(
         HeaderChannel(
           name,
           site: site as String?,
-          xyz: _xyz(c['xyz'], () => bad('channel $name: xyz must be three numbers or null')),
+          xyz: _xyz(c['xyz'], () => bad('channel $name: xyz must be three numbers of unit length, or null')),
         ),
       );
     }
@@ -253,7 +256,8 @@ class RecordingHeader {
     return out;
   }
 
-  /// The channel [name] by exact name, else by its 10-10 site; null when none.
+  /// The channel [name] by exact name, else by a channel's `site` field (its 10-10 name; scripts/recording.py's rule);
+  /// null when none.
   int? indexOf(String name) {
     for (var i = 0; i < channels.length; i++) {
       if (channels[i].name == name) return i;
@@ -262,7 +266,7 @@ class RecordingHeader {
     if (want == null) return null;
     for (var i = 0; i < channels.length; i++) {
       final c = channels[i];
-      if ((c.site != null && standardName(c.site!) == want) || standardName(c.name) == want) return i;
+      if (c.site != null && standardName(c.site!) == want) return i;
     }
     return null;
   }
@@ -292,7 +296,10 @@ List<double>? _xyz(Object? v, void Function() bad) {
     bad();
     return null;
   }
-  return List.unmodifiable([for (final x in v) (x as num).toDouble()]);
+  final xyz = [for (final x in v) (x as num).toDouble()];
+  final length = math.sqrt(xyz[0] * xyz[0] + xyz[1] * xyz[1] + xyz[2] * xyz[2]);
+  if ((length - 1).abs() > 0.01) bad(); // a direction: unit length, within the rounding of a written header
+  return List.unmodifiable(xyz);
 }
 
 HeaderSite? _site(Object? v, String key, Never Function(String) bad) {

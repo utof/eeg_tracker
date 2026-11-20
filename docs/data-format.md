@@ -100,8 +100,15 @@ says what its `.f32` holds, so a record can carry any number of channels (DECISI
 | `reference`, `ground` | `{"name", "where", "site"}` (`where` in words, `site` a 10-10 name or `null`), or `null` when not known. BrainBit: `Ref`, `forehead`, `Fpz`; the DIY board: `Ref` on an earlobe (`A1`) and `Bias` on the other (`A2`), a plan |
 | `made_by` | the program that wrote it (optional) |
 
-Unknown fields are ignored (a later version 1 may add some). A header that is not valid JSON or breaks a rule above is
-an error that names the file: readers never guess past a damaged header.
+Required: `format`, `version`, `channels`, `sample_rate`, `unit`, `record`, `counter`; a missing `reference` or `ground`
+reads as `null`. A `site` is text of up to 16 characters (the writers fill it only for 10-10 names and A1 A2 M1 M2); an
+`xyz` counts as unit length within 0.01. Unknown fields are ignored (a later version 1 may add some). A header that is
+not valid JSON or breaks a rule above is an error that names the file: readers never guess past a damaged header.
+
+- **Phone**: `app/lib/recorder/header.dart` (`readHeader`, `RecordingHeader.pick`); places (`xyz`) from the layout
+  of the Signal tab and its positions file.
+- **Laptop**: `scripts/recording.py` (standard library) reads, checks and writes it; every reader asks it what a
+  `.f32` holds (`read`), and features find their channels with `pick`. The laptop writes `xyz` as `null`.
 
 ```json
 {"format": "eeg-tracker-recording", "version": 1, "device": "BrainBit", "layout": "BrainBit",
@@ -114,15 +121,19 @@ an error that names the file: readers never guess past a damaged header.
 **Files without a header** (everything recorded before 2026-11-20) read as before, in this order:
 
 1. the `.log`'s format line, `format .f32 records <I<n>f: board sequence number, then <names> in volts; <fs> Hz`
-   (the DIY board's files, laptop and phone): n channels at fs, the names from that line (`Ch1`..`Chn` when it does
-   not hold n names), device `DIY board`;
+   (the DIY board's files, laptop and phone), looked for in the first 256 KiB of the `.log`: n channels at fs, the
+   names from that line (`Ch1`..`Chn` when it does not hold n different names), device `DIY board`;
 2. otherwise the BrainBit's: `O1 O2 T3 T4`, 250 Hz, volts, `<I4f`.
 
 **Channels by name.** A feature that needs particular sites picks them by name from the header, never by place:
-the sleep model (AnySleep) and the drift-off detector need `O1 O2 T3 T4`, the morning check-in `O1 O2`. A channel
-matches by its exact name first, else by its 10-10 site (`T7` stands for `T3`, `T8` for `T4`, `P7` for `T5`, `P8` for
-`T6`, in any letter case). When a recording lacks one, the feature says which sites it needs and which channels the
-recording has, and does not run: it never reads another channel in its place.
+the sleep model (AnySleep), the night extras and the drift-off detector need `O1 O2 T3 T4`, the morning check-in's
+measures `O1 O2` (its setup test and the phone's check-in all four). A channel matches by its exact name first, else
+by its `site` (`T7` stands for `T3`, `T8` for `T4`, `P7` for `T5`, `P8` for `T6`, in any letter case). When a recording
+lacks one, the feature says which sites it needs and which channels the recording has (`the sleep model needs O1 O2
+T3 T4; this recording (DIY board: Ch1 ... Ch8) has no O1, O2, T3, T4`), and does not run: it never reads another
+channel in its place. A night without them gets no sleep report: `sleep_report.py` says which sites are missing,
+writes nothing for it, builds the other nights and exits 1; the phone's scorer keeps the same words as the night's
+failure.
 
 ## Packed raw recordings (`<stamp>.f32.xz`, `<stamp>.f32.gz`)
 
@@ -149,7 +160,10 @@ and the nights' chaining reads the last `.idx` row of every recording). Files un
 
 ## One night (BDF+)
 
-- Channels `O1 O2 T3 T4`, unit `uV`, physical range ±400 000 µV, 250 Hz, 1 s data records, `BDF+C`.
+- One signal per channel of the recordings, labelled with the channel's name (BrainBit: `O1 O2 T3 T4`), at the
+  recordings' rate (250 Hz for the BrainBit); unit `uV`, physical range ±400 000 µV, 1 s data records, `BDF+C`.
+  Recordings that hold different channels or rates are not joined (`to_bdf.py` names both). A label holds up to 16
+  ASCII characters; a longer name is refused.
 - File time equals clock time: missing time (Bluetooth drops, restarts) is filled by holding the last value and
   covered by a `BAD_gap` annotation; the end is padded to a whole second (`BAD_padding`). MNE treats
   annotations starting with `BAD` as bad data.
@@ -696,7 +710,10 @@ that send its code (`Authorization: Bearer <code>`, `X-EEG-Token`, or `?token=`)
   `Content-Range: bytes */<size>` when it starts past the end), `X-Modified-Ms`, and HEAD. Read-only.
 
 `scripts/pull_phone.py` mirrors these into the layout of `scripts/import_phone.py` (raw nights into
-`_local/recordings/`, the rest into `_local/phone/`). `_local/phone/pull-state.json` holds `partial` (copies of files
+`_local/recordings/`, the rest into `_local/phone/`). A recording's `<stamp>.header.json` travels with its `.f32` into
+`recordings/`, `recordings-diy/` and `phone/mornings/`; `--raw-only` takes `recordings/` and `recordings-diy/`.
+`/state` and `/stream` carry the recording's own channels: `names`, one `data` row and one `uv` value per channel, and
+the board's `fs` (the BrainBit's four at 250 Hz otherwise). `_local/phone/pull-state.json` holds `partial` (copies of files
 the phone is still writing, with their size) and `raw` (checked raw files, which the phone may add to later);
 `_local/phone/pulls.jsonl` has a line per pass that fetched something or found a problem. A partial copy ends where
 the phone's file ended when it was listed; readers should ignore an incomplete last record, as they do for a
@@ -718,12 +735,14 @@ wrong proof or a client outside the local network. `_local/phone/link.json` (mod
 - `catalog.json`: `format` (`eeg-tracker-catalog`), `version` 1, `made`, `local`, `nights` and `missing`. One object
   per night, oldest first: `date` (evening date, as the sleep report names it), `id` (the date; `<date>-diy` for the
   DIY board's nights, which are read from `_local/recordings-diy/` and listed apart from a BrainBit night of the same
-  evening, DECISIONS 381; their hours use the board's rate and record width from the `.log`), `source`
+  evening, DECISIONS 381; their hours use the board's rate and record width from the recording header, else the
+  `.log`), `source`
   (`laptop`, `phone`, `laptop+phone` or `diy`), `recordings` (runs with samples), `start` and `end` (first and last data), `hours_recorded`
   (samples at 250 Hz), `minutes_missing` (time between them without samples), `raw` (`false` for a phone report
   whose raw night is not on the laptop), `report` (`by` laptop or phone, `asleep_min`, `deep_min`, `dream_min`, or
   `null`), `morning` (its check-in files), `files`, `bytes` and `file_list` (`path` from `_local/`, `bytes`,
-  `mtime_ns`, `sha256`, `kind`: `raw` for `.f32 .f32.xz .idx .log .markers.jsonl`, else `derived`; for a packed
+  `mtime_ns`, `sha256`, `kind`: `raw` for `.f32 .f32.xz .idx .log .markers.jsonl .header.json`, else `derived`; a
+  damaged `.header.json` is a PROBLEM ("damaged") on every run and its recording is counted in no night; for a packed
   `.f32.xz` also `original`: `path`, `bytes` and `sha256` of the `.f32` it holds). `missing`: raw files an earlier
   catalog listed that are gone, with `night` and `since` (a `.f32` that became its `.f32.xz` with the same bytes is
   "packed", not missing; with other bytes it is a PROBLEM, "changed"). `--check` unpacks every packed file and

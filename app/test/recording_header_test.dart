@@ -121,6 +121,8 @@ void main() {
         'xyz': [1, 2],
       };
       expect(() => read(badXyz), says('xyz'));
+      (badXyz['channels']! as List)[0] = {'name': 'M1', 'xyz': [0.5, 0, 0]};
+      expect(() => read(badXyz), says('unit length'));
       expect(
         () => RecordingHeader.decode('{"format": ', where: 'the.header.json'),
         throwsA(isA<HeaderError>().having((e) => '$e', 'text', contains('not valid JSON'))),
