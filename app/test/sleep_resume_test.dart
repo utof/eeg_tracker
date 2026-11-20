@@ -441,6 +441,41 @@ void main() {
     });
   });
 
+  test('a night started where the screen does not see it (the headband watcher) stops it: the rule may ask Android', () async {
+    // The watcher starts the night recorder from its own engine (DECISIONS 604): the screen's flags say nothing, so
+    // the screen's rule asks whether the recorder's service runs, before every model call.
+    writeRun(recordings, start, 6);
+    final calls = <String>[];
+    var serviceRuns = false;
+    var asked = 0;
+    final scoring = SleepScoring(
+      SleepScorer(
+        recordingsDir: recordings,
+        store: store,
+        openRun: (run) async => _SlowRun(CountingRun(run, calls)),
+        prepare: (files) async => fakeInput(start.millisecondsSinceEpoch ~/ 1000),
+        see: (files) async => null,
+      ),
+      stopFor: () async {
+        asked++;
+        await Future<void>.delayed(const Duration(milliseconds: 1)); // a platform call
+        return serviceRuns ? 'a night records' : null;
+      },
+    );
+    final go = scoring.run();
+    await until(() => calls.length >= 3);
+    serviceRuns = true; // the watcher's "Start the night"
+    final at = calls.length;
+    await go;
+    expect(calls.length, lessThanOrEqualTo(at + 1), reason: 'went on scoring beside the night');
+    expect(calls.length, lessThan(callsPerNight));
+    expect(asked, greaterThanOrEqualTo(at));
+    expect(scoring.blocked, isEmpty, reason: 'a pause, not a failure');
+    serviceRuns = false;
+    await scoring.run();
+    expect(calls, hasLength(callsPerNight));
+  });
+
   test('Share on Wi-Fi answers while a night is scored with a heavy preparation', () async {
     writeRun(recordings, start, 6);
     final s = SleepScorer(

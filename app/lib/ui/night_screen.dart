@@ -375,6 +375,18 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     return null;
   }
 
+  /// [_scoringStop] before each of the scorer's model calls, with the recorder's service asked at once: a night the
+  /// headband watcher started from its own engine (DECISIONS 604) stops the go at the next call, not when the screen's
+  /// 5-second look notices it.
+  Future<String?> _scoringStopNow() async {
+    final now = _scoringStop();
+    if (now != null) return now;
+    try {
+      if (await FlutterForegroundTask.isRunningService) return 'a night records';
+    } catch (_) {}
+    return null;
+  }
+
   void _onScoring() {
     if (mounted) setState(() {});
   }
@@ -459,7 +471,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
           closeRun: (run) => (run as OnnxStageRun).close(),
           log: debugPrint,
         ),
-        stopFor: _scoringStop,
+        stopFor: _scoringStopNow,
         waitFor: () => _share.copying ? 'the laptop copies files' : null,
       )..addListener(_onScoring);
     }

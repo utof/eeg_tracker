@@ -28,8 +28,9 @@ class SleepScoring extends ChangeNotifier {
 
   final SleepScorer scorer;
 
-  /// Why a go must stop now ("a night records"), or null: checked before every model call.
-  final String? Function()? stopFor;
+  /// Why a go must stop now ("a night records"), or null: checked before every model call. It may ask Android (a
+  /// night the headband watcher started from its own engine, DECISIONS 604, shows in no flag of the screen's).
+  final FutureOr<String?> Function()? stopFor;
 
   /// Why a go should wait a moment ("the laptop copies"), or null: checked before every model call.
   final String? Function()? waitFor;
@@ -148,7 +149,8 @@ class SleepScoring extends ChangeNotifier {
   Future<void> _between() async {
     final was = step;
     for (;;) {
-      final stop = _halted ? 'a night or a session started' : stopFor?.call();
+      final stop = _halted ? 'a night or a session started' : await stopFor?.call();
+      if (stop == null && _halted) throw const ScoringPaused('a night or a session started'); // halted meanwhile
       if (stop != null) throw ScoringPaused(stop);
       final wait = waitFor?.call();
       if (wait == null) break;
