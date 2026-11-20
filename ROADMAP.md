@@ -142,6 +142,14 @@ phone's speed for scoring (rows 3, 26, 27) is unmeasured until the owner's first
 ### 2. Left to build
 
 Needs no owner decision, only time or data:
+- **Record first** (owner, 2026-11-21: "press record and it records at all times, and all other buttons change their
+  functionality"; design `docs/specs/2026-11-21-record-first-design.md`, DECISIONS 880-899): one Record button records
+  all day; Sleep, Nap, Work, Meditate, coaches and Dream catcher become stretches marked on the running recording (no new
+  search, file or calibration); nights and naps only from sleep stretches (an awake recording is never a night); on Stop
+  "What was this recording?" chips and your own words become labels. Five steps: (1) Record button + stretches, (2)
+  sleep on a running recording + reports from sleep stretches, (3) the stop sheet, (4) daytime activities on the
+  recording's stream (after the one-connection lane), (5) labels shared with utof_tracker (its Alcohol button) and
+  nights with vs without alcohol.
 - **Whole-day recording, an archive, and what a day of recordings is for** (owner, 2026-11-20):
   - *Record the whole day* with the headband always on: one long recording (or a session per activity), started by hand or automatically, saved on the phone first and copied to the laptop (nothing lost when the link drops).
   - *Archive page*: every recording with its date, length, how it started (manual: Start night / Work session / a session; automatic: the watcher), its tags (sleep, work, meeting, walk, rest, manual tags); open any recording and see a timeline you can tap into, with activities tagged automatically and editable; delete recordings by hand.
@@ -255,6 +263,10 @@ Research for later: the rules for a public release (see the last table).
 
 ## Decisions waiting for the owner
 
+- Record first (asked 2026-11-21): (1) all-day recording and the headband battery: only warn "charge before bed" (the
+  assistant's pick) or stop the daytime recording by itself to save the night? (2) an Alcohol button in utof_tracker (one
+  tap per drink, like coffee)? (3) sleep the app finds but you haven't confirmed: "Maybe slept" with no report until you
+  answer (the assistant's pick) or a draft report anyway?
 - Download about 58 GB of public sleep recordings (Dreem) to test the sleep scorer on headband-shaped data (over the
   10 GB-a-week download limit).
 - Clear the GitHub billing lock, so GitHub builds the app on every change (the laptop can build it too).
