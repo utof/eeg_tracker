@@ -43,6 +43,10 @@ class WorkBand implements Headband {
 
   /// T4 has lost contact: held at the rail.
   bool t4lost = false;
+
+  /// Called in the batch's own step, after the clock moved on and just before the batch is sent: what a test
+  /// changes here (the phone's clock, say) arrives together with the batch, so no tick of the session comes between.
+  void Function()? beforeBatch;
   bool _started = false;
   final List<String> calls = [];
   final _signal = StreamController<List<Sample>>.broadcast(sync: true);
@@ -114,6 +118,7 @@ class WorkBand implements Headband {
       if (!_signal.hasListener) return;
       final b = _batch();
       clockS += 1;
+      beforeBatch?.call();
       if (mode != Mode.stall) _signal.add(b); // a stall: the clock goes on, nothing arrives
     });
   }
@@ -649,11 +654,21 @@ void main() {
       );
       await c.start();
       await until(() => c.level == DrowsyLevel.alert);
-      final before = c.wornMin, at = band.clockS;
-      offset = const Duration(hours: 2);
-      await until(() => band.clockS > at + 20);
+      final before = c.wornMin;
+      // The clock jumps as a batch arrives, as on the phone where batches come many times a second: set from here
+      // instead, a tick of the session could come between the jump and the next batch and read 2 hours without data,
+      // let the headband go and wait for it forever (the old flake, about half the runs under load).
+      double? at;
+      band.beforeBatch = () {
+        offset = const Duration(hours: 2);
+        at = band.clockS;
+        band.beforeBatch = null;
+      };
+      await until(() => at != null && band.clockS > at! + 20);
       expect(c.wornMin - before, lessThan(1));
       expect(c.hint, isNull);
+      expect(c.signalLost, isFalse, reason: 'the jump is not a stall');
+      expect(band.calls, isNot(contains('disconnect')), reason: 'the headband was kept');
       await c.stop();
       c.dispose();
     });
