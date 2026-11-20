@@ -109,7 +109,7 @@ class SleepSoFarView extends StatelessWidget {
     if (s.step != null) return '${s.step}.';
     if (s.failed != null) return 'Could not score just now: ${s.failed}';
     if (s.waiting != null) {
-      return 'Waiting: ${s.waiting}. Its own readings fill in meanwhile; the rest is scored once it is done.';
+      return 'Waiting: ${s.waiting}. Its readings fill in until it is done.';
     }
     if (r == null || r.stages.isEmpty) return 'Nothing to show yet: the sleep model needs 5 minutes of recording.';
     return 'Scored up to ${clock(r.end)}, 2 minutes behind the recording at that look.';

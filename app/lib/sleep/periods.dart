@@ -5,6 +5,9 @@
 const List<String> stageNames = ['W', 'N1', 'N2', 'N3', 'R'];
 const Set<String> asleepStages = {'N1', 'N2', 'N3', 'R'};
 const String gapStage = 'gap';
+
+/// An epoch nothing has scored yet ("Sleep so far" while its look waits): neither asleep, awake nor missing.
+const String unscoredStage = 'unscored';
 const double epochMinutes = 0.5;
 
 const double splitMin = 60;

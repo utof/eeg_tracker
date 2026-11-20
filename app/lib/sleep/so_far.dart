@@ -35,6 +35,8 @@ import 'live_stager.dart' show behindEpochs;
 import 'model.dart';
 import 'night_signal.dart';
 import 'periods.dart';
+
+export 'periods.dart' show unscoredStage;
 import 'prep.dart';
 import 'progress.dart' show cacheDirFor;
 import 'report.dart' show PeriodView;
@@ -57,8 +59,6 @@ const int epochInputSamples = 30 * sampleRate;
 const String soFarMethod = '$phoneModelId so-far 64min+8min own windows';
 const int soFarVersion = 1;
 
-/// An epoch nothing has scored yet (the look paused, and no live epoch stands in).
-const String unscoredStage = 'unscored';
 
 /// Model input [w0, w1) and the epochs kept from it [c0, c1).
 typedef SoFarWindow = ({int w0, int w1, int c0, int c1});
