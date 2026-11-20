@@ -7,8 +7,10 @@ dream (REM) sleep. The result is a chart of the night (a hypnogram) plus sleep o
 
 ## Evidence for this headband: some
 
-Similar dry headbands matched lab scoring for sleep timing and for wake, dream and non-dream sleep, but this
-headband has never been checked against a lab recording, and the five-stage detail (light and deep sleep) is weak.
+Similar dry headbands, each with its own model, matched lab scoring for sleep timing and for wake, dream and non-dream
+sleep. This headband has never been checked against a lab recording, the five-stage detail (light and deep sleep) is
+weak, and **dream sleep (REM) may be under-counted until it is checked**: on two phone nights it came out at 7-10 % of
+sleep, against a usual 20-25 %.
 
 ## What the research says
 
@@ -26,6 +28,15 @@ headband has never been checked against a lab recording, and the five-stage deta
 
 ## Where the data does not support it
 
+- **Dream sleep may be under-counted.** On the owner's first two phone nights the model scored 7 % and 10 % of sleep
+  as dream sleep; young adults usually have about 20-25 %, and headbands checked against lab sleep studies miss it by
+  only about 2 minutes on average (limits about -16 to +19 minutes). The same model found 29-33 % on two earlier
+  nights, so the headband can show it. The model was never trained on these dry side and back electrodes, and on one
+  night nine changes to its input that need no training all gave the same or less dream sleep. Side-to-side eye
+  movements, a sign of dream sleep, crowded into the "light sleep" right next to its dream-sleep blocks, so those
+  blocks look cut short. Wearing new equipment can also really shorten and delay dream sleep, so some nights may truly
+  have little. Until a lab night or another check settles it, read dream-sleep minutes as a trend between your own
+  nights, not as the true amount.
 - Nobody has scored sleep from a BrainBit next to a lab sleep study. Until that is done, the chart is a first
   guess.
 - Light sleep (N1) is missed by every headband. Dry electrodes may record extra slow waves, which can push light
@@ -59,6 +70,18 @@ headband has never been checked against a lab recording, and the five-stage deta
   care. On the first recorded night 13 % of the sleep was noisy and 3 % had no usable electrode.
 - An upgrade (AnySleep fine-tuned on public nights reshaped to this headband's channels) is adopted only if it
   adds at least 0.03 kappa on nights it has not seen.
+- **Dream sleep check** in each night's report, to judge any later change to the scoring (it measures, it changes no
+  stage): the dream-sleep share against the usual 20-25 %, the time from falling asleep to the first dream sleep
+  (usually 1-2 hours), dream sleep in the last third of the night against the first (usually most comes late), the
+  model's own dream-sleep likelihood added up against the minutes it scored (if they match, a different cut-off would
+  not add dream sleep), and side-to-side eye movements from the two electrodes nearest the eyes (T3 minus T4 here):
+  how many fall in dream sleep and how often they come in dream sleep against other sleep. The eye-movement rule is
+  a first guess, not checked against eye electrodes: a second counts when the left-right difference swings more than
+  40 µV with the two sides moving in opposite directions. On the night of 2026-11-19: dream sleep 43 min (10 %), the
+  first after 2 h 29 min, 27 min in the last third and 13 min in the first; the likelihood added up to 38 min; 20 %
+  of the eye movements fell in dream sleep, which was 10 % of the sleep, about 10 seconds a minute with eye movements
+  in dream sleep against about 5 in other sleep. The report keeps the model's probabilities for every 30 seconds, so
+  a later scoring change can be checked on old nights too.
 - Big foundation models only in a later side-by-side test; none is used now.
 
 ## Sources
@@ -73,6 +96,11 @@ headband has never been checked against a lab recording, and the five-stage deta
 - [Mikhaylov 2024: dry electrodes record extra slow power](https://pmc.ncbi.nlm.nih.gov/articles/PMC11679099/)
 - [Wang 2025: dry 8-site band, light sleep missed](https://europepmc.org/article/PMC/PMC12561290)
 - [SLEEPYLAND: model agreement vs accuracy](https://arxiv.org/html/2506.08574v2)
+- [Markov, Elgendi and Menon 2025: 43 headband studies against lab sleep, dream sleep missed by about 2 minutes](https://www.ebi.ac.uk/europepmc/webservices/rest/PMC13055050/fullTextXML)
+- [Ohayon 2004: how much dream sleep is usual at each age](https://pubmed.ncbi.nlm.nih.gov/15586779/)
+- [Earable: side electrodes catch side-to-side eye movements almost as well as gel electrodes](https://arxiv.org/abs/2211.02592)
+- [First nights with equipment: less and later dream sleep](https://pmc.ncbi.nlm.nih.gov/articles/PMC8027063)
+- [YASA's eye-movement detector, the idea behind the rule here](https://yasa-sleep.org/generated/yasa.rem_detect.html)
 
 ## Libraries and models
 
@@ -83,4 +111,4 @@ headband has never been checked against a lab recording, and the five-stage deta
 - [MNE](https://pypi.org/project/mne/) (BSD-3): reads and filters the recording.
 - [pyedflib](https://github.com/holgern/pyedflib/blob/master/LICENSE) (BSD-3): reads and writes BDF+ files.
 
-Checked: 2026-11-18
+Checked: 2026-11-20
