@@ -6,9 +6,11 @@ same files and answer the same routes. The DIY board's channel names and count c
 then uint32 + one float32 per channel), and its hub refuses the sleep and morning reports, which read BrainBit's
 O1 O2 T3 T4 only (DECISIONS 350-359):
 
-Files in --out, one set per recorder run (docs/data-format.md): <stamp>.f32 (records: uint32 packet number + 4
-float32 volts O1 O2 T3 T4), <stamp>.idx (one record per arriving batch: float64 unix time + uint64 index of its
-first sample; gaps are found from these times), <stamp>.log (wall-clock lines), <stamp>.markers.jsonl.
+Files in --out, one set per recorder run (docs/data-format.md): <stamp>.header.json (what the .f32 holds: the
+channels in record order, the rate, the device; written first, scripts/recording.py), <stamp>.f32 (records: uint32
+packet number + one float32 in volts per channel; O1 O2 T3 T4 for the BrainBit), <stamp>.idx (one record per
+arriving batch: float64 unix time + uint64 index of its first sample; gaps are found from these times), <stamp>.log
+(wall-clock lines), <stamp>.markers.jsonl.
 
 Routes: GET /state (last 4 s, contact, battery), GET /stream (server-sent events), POST /marker, POST /contact,
 GET/POST /sleep-report and /morning-report, GET /hypnogram.png, and the pages in scripts/web/ by name.
@@ -19,6 +21,8 @@ from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Sequence
+
+import recording  # scripts/recording.py: the recording header (standard library only)
 
 try:
     import battery as batt  # scripts/battery.py: drops the gauge's stuck values, time left from the trend
@@ -34,6 +38,7 @@ IDX = struct.Struct("<dQ")
 NAMES = ("O1", "O2", "T3", "T4")
 FS = 250
 HERE = Path(__file__).parent
+MADE_BY = "eeg_tracker scripts/recorder_hub.py"
 
 Row = tuple[float, ...]  # (packet number, then one value in volts per channel: O1 O2 T3 T4 for BrainBit): one .f32 record
 
@@ -41,9 +46,12 @@ Row = tuple[float, ...]  # (packet number, then one value in volts per channel: 
 class Hub:
     """Samples in, files and live pages out. add_batch() may be called from any thread; write_pending() and
     report() from the recorder's main loop. names and fs default to BrainBit's; reports=False answers the sleep and
-    morning report routes with an error instead of scoring these files."""
+    morning report routes with an error instead of scoring these files. `header` is what every file set's
+    <stamp>.header.json says (recording.Header); without one it is the BrainBit's for the default channels, else
+    made from the names (a site where a name is a 10-10 one)."""
 
-    def __init__(self, out: Path, names: Sequence[str] = NAMES, fs: int = FS, reports: bool = True) -> None:
+    def __init__(self, out: Path, names: Sequence[str] = NAMES, fs: int = FS, reports: bool = True,
+                 header: recording.Header | None = None) -> None:
         self.out = Path(out); self.out.mkdir(parents=True, exist_ok=True)
         self.reports = reports
         self.names: tuple[str, ...] = tuple(names); self.fs = fs; self.rec = REC  # set again by configure()
@@ -64,26 +72,41 @@ class Hub:
         self.stamp: str | None = None
         self.data = self.logf = self.idxf = self.markf = None
         self.server: ThreadingHTTPServer | None = None
-        self.configure(names, fs)  # BrainBit's defaults give REC, as before
+        self.header: recording.Header = recording.brainbit(MADE_BY)  # set again by configure()
+        self.configure(names, fs, header)  # BrainBit's defaults give REC, as before
 
     # ---- files ---------------------------------------------------------------------------------------------
-    def configure(self, names: Sequence[str], fs: int = FS) -> None:
-        """Channel names (the record is uint32 + one float32 each) and rate; only while no file set is open."""
+    def configure(self, names: Sequence[str], fs: int = FS, header: recording.Header | None = None) -> None:
+        """Channel names (the record is uint32 + one float32 each), rate and the header the next file sets get; only
+        while no file set is open."""
         if self.data is not None:
             raise RuntimeError("change the channels between file sets only")
+        names = tuple(names)
+        if header is None:
+            if names == recording.BRAINBIT_NAMES and fs == recording.BRAINBIT_FS:
+                header = recording.brainbit(MADE_BY)
+            else:
+                header = recording.checked(recording.Header(
+                    tuple(recording.Channel(n, recording.site_of(n)) for n in names), fs, recording.PACKET_NUMBER,
+                    made_by=MADE_BY), "the hub's header")
+        elif header.names != names or header.sample_rate != fs:
+            raise ValueError(f"the header ({' '.join(header.names)} at {header.sample_rate} Hz) does not match the "
+                             f"channels ({' '.join(names)} at {fs} Hz)")
         with self.lock:
-            self.names = tuple(names); self.fs = fs
+            self.names = names; self.fs = fs; self.header = header
             self.rec = struct.Struct(f"<I{len(self.names)}f")
             self.ring = collections.deque(maxlen=fs * 5)
 
     def open_files(self, stamp: str | None = None) -> str:
         """Create this run's files; call once a headband is found, so runs while it is off leave no empty files.
-        A stamp already used in --out moves on by a second (a new set never appends to an old one)."""
+        A stamp already used in --out moves on by a second (a new set never appends to an old one). The set's
+        <stamp>.header.json is written first, before any sample."""
         if stamp is None:
             t = datetime.now()
-            while (self.out / f"{t:%Y-%m-%d-%H%M%S}.f32").exists():
+            while any((self.out / f"{t:%Y-%m-%d-%H%M%S}{s}").exists() for s in (".f32", recording.SUFFIX)):
                 t += timedelta(seconds=1)
             stamp = f"{t:%Y-%m-%d-%H%M%S}"
+        recording.write(self.out / f"{stamp}.f32", self.header)
         self.stamp = stamp
         self.data = open(self.out / f"{self.stamp}.f32", "ab")
         self.logf = open(self.out / f"{self.stamp}.log", "a")

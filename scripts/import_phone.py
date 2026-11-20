@@ -6,8 +6,8 @@ usage: import_phone.py <export folder> [--dest _local] [--dry-run] [--rehash]
 folder"), or the folder holding it: the Syncthing folder, or a copy taken with
 `adb pull /sdcard/Download/EEG/eeg-export`.
 
-- Raw nights (`recordings/<stamp>.f32 .idx .log .markers.jsonl`) go into `<dest>/recordings/`, next to the laptop's
-  own recordings; the DIY board's (`recordings-diy/...`) into `<dest>/recordings-diy/`, next to the laptop's DIY
+- Raw nights (`recordings/<stamp>.f32 .idx .log .markers.jsonl .header.json`; the header says what the `.f32` holds,
+  scripts/recording.py) go into `<dest>/recordings/`, next to the laptop's own recordings; the DIY board's (`recordings-diy/...`) into `<dest>/recordings-diy/`, next to the laptop's DIY
   recordings and never among the BrainBit nights (docs/diy-board.md); everything else keeps its place under
   `<dest>/phone/` (`phone/nights/<date>.report.json`, `phone/meditations/...`, `phone/dream-catcher/...`).
 - A file is copied only when its size and SHA-256 match the manifest (the copy is checked, then renamed into place).

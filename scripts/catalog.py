@@ -13,16 +13,19 @@ or starting within 12 hours after it).
 
 The DIY board's recordings (<local>/recordings-diy/, DECISIONS 381: scripts/record_diy.py) are nights of their
 own, source "diy", cut by the same chain rule and never mixed into a BrainBit night of the same evening (a DIY row has
-`id` <date>-diy and the sidecar <date>-diy.sha256). Their records are as wide as the board's channels and their rate is
-the board's: both are read from the file's .log ("format .f32 records <I4f ...; 250 Hz"; without that line, 4 channels
-at 250 Hz). They have no sleep report and no check-in.
+`id` <date>-diy and the sidecar <date>-diy.sha256). They have no sleep report and no check-in.
+
+A recording's record width and rate, in either folder, are its own (scripts/recording.py): from its
+<stamp>.header.json first, else from its .log ("format .f32 records <I4f ...; 250 Hz"), else 4 channels at 250 Hz.
+A header that is damaged is a PROBLEM ("damaged") on every run and its recording joins no night: its hours are never
+worked out from a guessed width.
 
 Writes <out>/catalog.json (the table and every file's size, time and SHA-256), <out>/<date>.sha256 per night
 (`sha256sum -c` format, paths from <local>), <out>/catalog.txt (the summary it prints), and appends what changed to
 <out>/history.log. A run hashes only the files whose size or time changed since the last catalog; --check re-hashes
 every file, reports damage and writes nothing.
 
-Raw files (.f32 .idx .log .markers.jsonl: the recorders only ever append to them) that got longer with their earlier
+Raw files (.f32 .idx .log .markers.jsonl: the recorders only ever append to them; and .header.json, written once) that got longer with their earlier
 bytes intact "grew"; any other change to one is a PROBLEM, as are a file whose bytes changed under the same size and
 time ("damaged", --check) and a raw file gone ("missing", said on every run until it is back). Reports, charts and
 BDFs are rebuilt by the scripts, so a new copy of one is only "rebuilt". Exit status 1 when there is a PROBLEM.
@@ -36,7 +39,7 @@ Read-only on the data: it never deletes, moves or packs a recording or a report.
 """
 from __future__ import annotations
 
-import argparse, hashlib, json, lzma, os, re, sys, zlib
+import argparse, hashlib, json, lzma, os, sys, zlib
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -44,13 +47,13 @@ from typing import Callable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import night_files as nf  # noqa: E402
 import packed  # noqa: E402
+import recording  # noqa: E402
 
 FORMAT, VERSION = "eeg-tracker-catalog", 1
-RAW = (".f32", *packed.PACKED_FORMS, ".idx", ".log", ".markers.jsonl")
+RAW = (".f32", *packed.PACKED_FORMS, ".idx", ".log", ".markers.jsonl", recording.SUFFIX)
 LAPTOP_REPORT = (".report.json", ".sleep.json", ".hypnogram.png", ".bdf")  # scripts/sleep_report.py's files
 MORNING_WITHIN_S = 12 * 3600
 DIY = "recordings-diy"
-DIY_FORMAT = re.compile(r"format \.f32 records <I(\d+)f\b.*?; (\d+(?:\.\d+)?) Hz")
 CHUNK = 1 << 20
 SHOW = 5  # names listed before "and N more"
 DEFAULT_LOCAL = Path(__file__).resolve().parents[1] / "_local"
@@ -103,30 +106,18 @@ def _add(local: Path, row: dict, rel: str, kind: str) -> None:
         row["paths"].append((rel, kind))
 
 
-def diy_format(log: Path) -> tuple[int, float]:
-    """(bytes of one record, samples a second) of a DIY file set, from its .log's format line."""
-    try:
-        m = DIY_FORMAT.search(log.read_text(errors="replace"))
-    except OSError:
-        m = None
-    return (4 + 4 * int(m.group(1)), float(m.group(2))) if m else (nf.REC_BYTES, float(nf.FS))
-
-
 def _recording_nights(local: Path, phone: set[str], folder: str = "recordings", diy: bool = False) -> dict[str, dict]:
     """The nights in <folder>/ by night_files.py's chain rule, each with its runs' files: the raw ones and anything
     else made from one run alone (a hand-made BDF). Runs without samples join the night they fall in. For the DIY
-    board's folder (`diy`) the row's id carries "-diy" and a run's seconds come from its own record width and rate."""
+    board's folder (`diy`) the row's id carries "-diy". A run's seconds come from its own record width and rate (its
+    header, else its log's format line, else the BrainBit's); a recording whose header is damaged joins no night
+    (unreadable() names it)."""
     rows: dict[str, dict] = {}
     stems: dict[str, list[str]] = {}
     where = local / folder
-
-    def seconds(r: nf.Rec) -> float:
-        width, fs = diy_format(r.path.with_suffix(".log")) if diy else (nf.REC_BYTES, nf.FS)
-        return r.size // width / fs
-
-    for n in nf.nights(nf.recordings(where)):
+    for n in nf.nights(nf.recordings(where, on_bad=lambda _p, _e: None)):
         row = _row(n.name, n.start, n.end)
-        samples_s = sum(seconds(r) for r in n.recs)
+        samples_s = sum(r.samples / r.fs for r in n.recs)
         source = "diy" if diy else "+".join(sorted({"phone" if r.path.name in phone else "laptop" for r in n.recs}))
         row.update(recordings=len(n.recs), raw=True, hours_recorded=round(samples_s / 3600, 2),
                    minutes_missing=round(max(0.0, n.end - n.start - samples_s) / 60, 1), source=source)
@@ -136,9 +127,9 @@ def _recording_nights(local: Path, phone: set[str], folder: str = "recordings", 
     for p in packed.raw_files(where):
         t = nf.stamp_time(p)
         try:
-            empty = packed.size(p) < nf.REC_BYTES
-        except OSError:  # a packed file whose end cannot be read: unreadable() names it
-            continue
+            empty = packed.size(p) < recording.read(p).record_bytes
+        except (OSError, recording.HeaderError):  # a packed file whose end, or a header that, cannot be read:
+            continue  # unreadable() names it
         if t is not None and empty:
             near = [d for d, r in rows.items() if r["start"] <= t < r["end"] + nf.CHAIN_GAP_S]
             if near:
@@ -168,10 +159,15 @@ def _add_phone_reports(local: Path, rows: dict[str, dict]) -> None:
 
 
 def unreadable(local: Path) -> list[str]:
-    """Packed raw files whose length cannot be read (their end is damaged): no night can take them, so they are named
-    as damaged on every run."""
+    """Packed raw files whose length cannot be read (their end is damaged) and recording headers that break a rule:
+    no night can take those recordings, so the files are named as damaged on every run."""
     out = []
     for folder in ("recordings", DIY, "phone/mornings"):
+        for h in sorted((local / folder).glob(f"*{recording.SUFFIX}")):
+            try:
+                recording.read_file(h)
+            except recording.HeaderError:
+                out.append(h.relative_to(local).as_posix())
         for p in packed.raw_files(local / folder):
             d = packed.on_disk(p)
             if d is not None and packed.is_packed(d):

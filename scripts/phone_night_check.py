@@ -19,6 +19,11 @@ batteries, contact, the phone's sleep report and, when numpy is there (as under
 `uv run --project analysis`), flat, railed and 50 Hz hum per channel. `--compare` puts a laptop night's numbers next
 to it. Standard library only, apart from that optional numpy part. It only reads files.
 
+A recording may hold any number of channels: what each `.f32` holds (channels, rate, what its counter counts) comes
+from its `<stamp>.header.json` (scripts/recording.py), for files from before the header from the `.log`'s format line
+(the DIY board's), else it is the BrainBit's O1 O2 T3 T4 at 250 Hz. The signal table has one column per channel of
+the night's first recording; recordings of the same night that hold other channels are counted and named.
+
 The thresholds of the verdict are planning values (DECISIONS row 320), not measured limits.
 """
 from __future__ import annotations
@@ -33,10 +38,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import night_files as nf  # noqa: E402  (standard library only)
 import packed  # noqa: E402  (a recording packed after a day, <stamp>.f32.xz, reads as the plain one)
+import recording  # noqa: E402  (what a .f32 holds: its header; standard library only)
 from battery import STUCK  # noqa: E402  the headband gauge's stuck readings (0-2 %, 100 %)
 
-FS = 250
-REC = 20  # one `<I4f` record in a .f32
+FS = 250  # the BrainBit's rate; a run's own is Run.fs
+REC = 20  # one `<I4f` record in a BrainBit .f32; a run's own record size is Run.rec
 IDX = struct.Struct("<dQ")
 CHUNK = 65536  # records read at a time
 MIN_GAP_S = 0.5  # as scripts/to_bdf.py: more than this between batches is a gap
@@ -44,7 +50,7 @@ LIST_GAP_S = 30  # gaps listed one by one
 SHOW_GAPS = 12
 SHORT_DROP_S = 5  # a break inside one file shorter than this is a hiccup, not a drop
 WRAP, MAX_JUMP = 2048, 1024  # the packet counter rules of app/lib/recorder/packets.dart
-CHANNELS = ("O1", "O2", "T3", "T4")
+CHANNELS = ("O1", "O2", "T3", "T4")  # the BrainBit's; a run's own are Run.names
 ROOT = Path(__file__).resolve().parent.parent
 
 # The verdict (planning values, DECISIONS row 320)
@@ -84,7 +90,7 @@ RULES = [(k, re.compile(p)) for k, p in [
     ("contact_recheck", r"contact re-check asked(?P<rest>.*)"),  # L
     ("live_page", r"live check page on port \d+"),  # L
     ("info", r"(?:sdk library|features|commands|parameters)(?: unavailable:)? .*"),  # L
-    ("rec_started", r"recording started, 250 Hz(?P<laptop>, Ctrl\+C to stop)?"),  # P L
+    ("rec_started", r"recording started, \d+(?:\.\d+)? Hz(?P<laptop>, Ctrl\+C to stop)?"),  # P L
     ("samples", r"samples (?P<n>\d+) \(\+(?P<got>-?\d+)\)(?: battery (?P<bat>\S+)%)?"),  # P L
     ("stall", r"no data, state (?P<state>\S+); (?:restarting stream \(try \d+\)|reconnecting)"),  # P L
     ("stream_restarted", r"stream restarted(?:, battery \S+%)?"),  # P L
@@ -212,6 +218,10 @@ class Run:
     unknown: list[str]
     source: str = "unknown"
     _idx: tuple[array, array] | None = None
+    rec: int = REC  # bytes of one record (the run's header)
+    fs: float = FS  # samples a second
+    names: tuple[str, ...] = CHANNELS  # the channels in record order
+    counter: str = recording.PACKET_NUMBER  # what the record's uint32 counts
 
     @property
     def path(self) -> Path:
@@ -266,12 +276,14 @@ def load_runs(folder: Path) -> list[Run]:
             text = (folder / f"{stem}.log").read_text(errors="replace")
         except OSError:
             text = ""
+        head = recording.read(folder / f"{stem}.f32")  # a damaged header: an error naming it (main says it)
         try:
-            samples = packed.size(folder / f"{stem}.f32") // REC
+            samples = packed.size(folder / f"{stem}.f32") // head.record_bytes
         except OSError:
             samples = 0
         events, unknown = parse_log(text, stem)
-        runs.append(Run(stem, folder, start, samples, events, unknown, source_of(events)))
+        runs.append(Run(stem, folder, start, samples, events, unknown, source_of(events), rec=head.record_bytes,
+                        fs=float(head.sample_rate), names=head.names, counter=head.counter))
     runs.sort(key=lambda r: (r.start, r.stem))
     known = [r for r in runs if r.source != "unknown"]
     for r in runs:  # an empty or unreadable log: the source of the nearest run in time
@@ -327,21 +339,21 @@ def stretches(run: Run) -> list[Stretch]:
         return []
     times, firsts = run.idx()
     if not times:
-        return [Stretch(run.start, run.start + run.samples / FS, run, 0, run.samples)]
+        return [Stretch(run.start, run.start + run.samples / run.fs, run, 0, run.samples)]
     out: list[Stretch] = []
     n = len(times)
     s = 0
-    t0_s = times[0] - ((firsts[1] if n > 1 else run.samples) - firsts[0]) / FS
+    t0_s = times[0] - ((firsts[1] if n > 1 else run.samples) - firsts[0]) / run.fs
     for k in range(1, n):
         end = firsts[k + 1] if k + 1 < n else run.samples
-        t0 = times[k] - (end - firsts[k]) / FS
+        t0 = times[k] - (end - firsts[k]) / run.fs
         if t0 - times[k - 1] > MIN_GAP_S:
             out.append(Stretch(t0_s, times[k - 1], run, firsts[s], firsts[k], times[s], firsts[s], times[k - 1],
                                firsts[k - 1]))
             s, t0_s = k, t0
     out.append(Stretch(t0_s, times[-1], run, firsts[s], run.samples, times[s], firsts[s], times[-1], firsts[-1]))
     if firsts[0] > 0:  # samples before the first index row join the first stretch
-        out[0].t0 -= firsts[0] / FS
+        out[0].t0 -= firsts[0] / run.fs
         out[0].i0 = 0
     return out
 
@@ -367,10 +379,16 @@ class Break:
 
 
 # ---- the packet counter ---------------------------------------------------------------------------------------------
-def jump(prev: int, cur: int) -> tuple[str, int]:
+def jump(prev: int, cur: int, counter: str = recording.PACKET_NUMBER) -> tuple[str, int]:
     """One step of the packet counter: ("ok" | "lost" | "repeat" | "restart", samples lost). The rules of
     app/lib/recorder/packets.dart, plus: a counter that falls back from beyond 2047 starts again (BrainBit's SDK
-    sends the last batch of the previous connection first, then counts from 8), which loses nothing."""
+    sends the last batch of the previous connection first, then counts from 8), which loses nothing.
+    Any other counter (the DIY board's sequence number) is a plain uint32: every step forward past 1 is that many
+    frames missing, a step back is a restart."""
+    if counter != recording.PACKET_NUMBER:
+        step = (cur - prev) % 2**32
+        return ("ok", 0) if step == 1 else ("repeat", 0) if step == 0 else ("lost", step - 1) if step < 2**31 else (
+            "restart", 0)
     raw = cur - prev
     if raw == 1:
         return "ok", 0
@@ -395,12 +413,13 @@ class Packets:
     per_hour: dict = field(default_factory=dict)  # local hour start (unix) -> samples lost
 
 
-def _packs(b: bytes) -> array:
+def _packs(b: bytes, rec: int = REC) -> array:
+    """The counters of whole records of `rec` bytes (the first uint32 of each)."""
     a = array("I")
     a.frombytes(b)
     if sys.byteorder == "big":
         a.byteswap()
-    return a[0::5]
+    return a[0::rec // 4]
 
 
 _unpacked: dict[str, bytes] = {}
@@ -421,10 +440,10 @@ def pack_at(run: Run, j: int) -> int | None:
     try:
         data = unpacked(run)
         if data is not None:
-            b = data[j * REC:j * REC + 4]
+            b = data[j * run.rec:j * run.rec + 4]
         else:
             with open(run.path, "rb") as f:
-                f.seek(j * REC)
+                f.seek(j * run.rec)
                 b = f.read(4)
     except (OSError, lzma.LZMAError, zlib.error, EOFError):
         return None
@@ -440,7 +459,7 @@ def burst(run: Run, i0: int) -> bool:
         return False
     z = bisect.bisect_right(times, times[k] + 0.5, lo=k)
     end = firsts[z] if z < len(firsts) else run.samples
-    return end - i0 >= FS
+    return end - i0 >= run.fs
 
 
 def scan_packets(run: Run, cuts: set[int], out: Packets) -> None:
@@ -455,8 +474,8 @@ def scan_packets(run: Run, cuts: set[int], out: Packets) -> None:
     except OSError:
         return
     with f:
-        while b := f.read(CHUNK * REC):
-            packs = _packs(b[: len(b) // REC * REC])
+        while b := f.read(CHUNK * run.rec):
+            packs = _packs(b[: len(b) // run.rec * run.rec], run.rec)
             if not packs:
                 break
             seq = ([prev] if prev is not None else []) + packs.tolist()
@@ -469,12 +488,12 @@ def scan_packets(run: Run, cuts: set[int], out: Packets) -> None:
                     j = start + k + 1
                     if j in cuts:
                         continue
-                    kind, n = ("restart", 0) if j == first_batch else jump(seq[k], seq[k + 1])
+                    kind, n = ("restart", 0) if j == first_batch else jump(seq[k], seq[k + 1], run.counter)
                     if kind == "lost":
                         out.lost += n
                         out.jumps += 1
                         out.longest = max(out.longest, n)
-                        t = times[max(0, bisect.bisect_right(firsts, j) - 1)] if times else run.start + j / FS
+                        t = times[max(0, bisect.bisect_right(firsts, j) - 1)] if times else run.start + j / run.fs
                         h = hour_of(t)
                         out.per_hour[h] = out.per_hour.get(h, 0) + n
                     elif kind == "repeat":
@@ -584,7 +603,7 @@ def parse_ohms(text: str) -> dict[str, float | None]:
     out: dict[str, float | None] = {}
     for part in text.split():
         k, _, v = part.partition("=")
-        if k in CHANNELS:
+        if k and v:  # any channel name: the recording's own
             out[k] = float("inf") if v == "inf" else _num(v)
     return out
 
@@ -652,7 +671,7 @@ def contact_numbers(evs: list[Event], runs: list[Run]) -> dict:
     recorder, also during tests with the headband off), else the first reading; later = the ones after it."""
     readings = [(e.t, parse_ohms(e.g["ohms"]), e.stem) for e in evs if e.kind == "contact"]
     failed = [e for e in evs if e.kind in ("contact_failed", "contact_none")]
-    long = {r.stem for r in runs if r.samples >= 10 * 60 * FS}
+    long = {r.stem for r in runs if r.samples >= 10 * 60 * r.fs}
     k = next((i for i, x in enumerate(readings) if x[2] in long), 0)
     return dict(start=readings[k][:2] if readings else None, later=[x[:2] for x in readings[k + 1:]],
                 failed=len(failed))
@@ -710,36 +729,46 @@ def report_numbers(found: tuple[Path, dict] | None, runs: list[Run]) -> dict | N
 
 
 def signal_numbers(runs: list[Run]) -> dict | None:
-    """Flat and railed seconds and the 50 Hz hum per channel; None without numpy. One minute at a time."""
+    """Flat and railed seconds and the 50 Hz hum per channel of the night's first recording; None without numpy.
+    One minute at a time. Recordings that hold other channels (or another rate) are left out and named in `other`."""
     try:
         import numpy as np
     except ImportError:
         return None
-    dt = np.dtype([("pack", "<u4"), ("v", "<f4", 4)])
-    flat, railed = np.zeros(4, int), np.zeros(4, int)
-    hums: list[list[float]] = [[] for _ in CHANNELS]
+    if not runs:
+        return None
+    names, fs = runs[0].names, int(round(runs[0].fs))
+    n_ch = len(names)
+    dt = np.dtype([("pack", "<u4"), ("v", "<f4", (n_ch,))])
+    flat, railed = np.zeros(n_ch, int), np.zeros(n_ch, int)
+    hums: list[list[float]] = [[] for _ in names]
     seconds = 0
-    win = 4 * FS
+    win = 4 * fs
     hann = np.hanning(win)
-    freqs = np.fft.rfftfreq(win, 1 / FS)
+    freqs = np.fft.rfftfreq(win, 1 / fs)
     mains, ref = (freqs >= 49) & (freqs < 51), (freqs >= 30) & (freqs < 45)
+    other: dict[str, int] = {}
     for run in runs:
-        if run.samples < FS:
+        if run.names != names or int(round(run.fs)) != fs:
+            what = " ".join(run.names) + ("" if int(round(run.fs)) == fs else f" at {run.fs:g} Hz")
+            other[what] = other.get(what, 0) + 1
+            continue
+        if run.samples < fs:
             continue
         data = unpacked(run)
         mm = (np.frombuffer(data, dtype=dt, count=run.samples) if data is not None
               else np.memmap(run.path, dtype=dt, mode="r", shape=(run.samples,)))
-        for a in range(0, run.samples - FS + 1, 60 * FS):
-            v = np.asarray(mm["v"][a:a + 60 * FS], dtype=np.float64) * 1e6
-            whole = len(v) // FS * FS
-            s = v[:whole].reshape(-1, FS, 4)
+        for a in range(0, run.samples - fs + 1, 60 * fs):
+            v = np.asarray(mm["v"][a:a + 60 * fs], dtype=np.float64) * 1e6
+            whole = len(v) // fs * fs
+            s = v[:whole].reshape(-1, fs, n_ch)
             seconds += s.shape[0]
             flat += (np.ptp(s, axis=1) < FLAT_UV).sum(axis=0)
             railed += (np.abs(s).max(axis=1) >= RAIL_UV).sum(axis=0)
             if len(v) >= win:
                 x = v[:win] - v[:win].mean(axis=0)
                 p = np.abs(np.fft.rfft(x * hann[:, None], axis=0)) ** 2
-                for c in range(4):
+                for c in range(n_ch):
                     den = p[ref, c].mean()
                     if den > 1e-12:
                         hums[c].append(float(p[mains, c].mean() / den))
@@ -748,7 +777,8 @@ def signal_numbers(runs: list[Run]) -> dict | None:
         return None
     return dict(seconds=seconds, flat=flat.tolist(), railed=railed.tolist(),
                 hum=[statistics.median(h) if h else None for h in hums],
-                hum_high=[sum(x > HUM_HIGH for x in h) / len(h) if h else None for h in hums])
+                hum_high=[sum(x > HUM_HIGH for x in h) / len(h) if h else None for h in hums],
+                other=[f"{what} ({plural(k, 'recording')})" for what, k in other.items()])
 
 
 def analyse(runs: list[Run], source: str, name: str, report_dirs: list[Path], signal: bool = True) -> dict:
@@ -768,7 +798,7 @@ def analyse(runs: list[Run], source: str, name: str, report_dirs: list[Path], si
         br = Break(a.t1, b.t0, a.run, b.run)
         if br.inside:
             p0, p1 = pack_at(a.run, b.i0 - 1), pack_at(a.run, b.i0)
-            if p0 is not None and p1 is not None and jump(p0, p1) == ("ok", 0):
+            if p0 is not None and p1 is not None and jump(p0, p1, a.run.counter) == ("ok", 0):
                 br.late = burst(a.run, b.i0)
                 br.paused = not br.late
         if br.late or (br.inside and br.length <= MIN_GAP_S):
@@ -790,6 +820,7 @@ def analyse(runs: list[Run], source: str, name: str, report_dirs: list[Path], si
     rate = sum(n for _, n in long) / sum(t for t, _ in long) if long else None
     tens = [n / t for t, n in long if t >= 600]
     samples = sum(r.samples for r in data_runs)
+    signal_s = sum(r.samples / r.fs for r in data_runs)
     span = st[-1].t1 - st[0].t0
     # signal minutes per clock hour
     per_hour: dict[float, float] = {}
@@ -805,8 +836,9 @@ def analyse(runs: list[Run], source: str, name: str, report_dirs: list[Path], si
     late = [b for b in breaks if b.cat == "late"]
     tries = [e for e in evs if e.kind == "try"]
     s.update(
-        empty=False, start=st[0].t0, end=st[-1].t1, span_s=span, samples=samples, signal_s=samples / FS,
-        missing_s=max(0.0, span - samples / FS), breaks=breaks, drops=drops, hiccups=hiccups, late=late,
+        empty=False, start=st[0].t0, end=st[-1].t1, span_s=span, samples=samples, signal_s=signal_s,
+        channels=data_runs[0].names, fs=data_runs[0].fs,  # of the night's first recording (the signal table's)
+        missing_s=max(0.0, span - signal_s), breaks=breaks, drops=drops, hiccups=hiccups, late=late,
         per_hour={h: v / 60 for h, v in sorted(per_hour.items())}, packets=pk, rate=rate,
         rate_range=(min(tens), max(tens)) if tens else None, rate_s=sum(t for t, _ in long),
         tries=dict(direct=sum(e.g["how"] != "scan" for e in tries), scan=sum(e.g["how"] == "scan" for e in tries),
@@ -898,8 +930,8 @@ def judge(s: dict) -> None:
                        "bad"))
     if cover < BAD_COVER:
         issues.append((90, f"{100 - cover * 100:.0f} % of the night is missing ({dur(s['missing_s'])}).", "bad"))
-    if s["rate"] is not None and abs(s["rate"] / FS - 1) > RATE_TOL:
-        issues.append((85, f"Samples arrive at {s['rate']:.1f} a second, not 250: the clock or the batches are off.",
+    if s["rate"] is not None and abs(s["rate"] / s["fs"] - 1) > RATE_TOL:
+        issues.append((85, f"Samples arrive at {s['rate']:.1f} a second, not {s['fs']:g}: the clock or the batches are off.",
                        "bad"))
     lost = s["packets"].lost / max(1, s["samples"] + s["packets"].lost)
     if lost > LOST_SOME:
@@ -977,12 +1009,12 @@ def _setup_issues(s: dict, issues: list) -> None:
                            "those electrodes before Start.", None))
     sig = s["signal"]
     if sig:
-        for ch, f, r in zip(CHANNELS, sig["flat"], sig["railed"]):
+        for ch, f, r in zip(s["channels"], sig["flat"], sig["railed"]):
             if (f + r) / sig["seconds"] > BAD_SHARE:
                 issues.append((42, f"{ch} was flat or at the rail for {dur(f + r)} "
                                f"({(f + r) / sig['seconds'] * 100:.0f} % of the night): that electrode lost the skin.",
                                None))
-        high = [ch for ch, h in zip(CHANNELS, sig["hum"]) if h is not None and h > HUM_HIGH]
+        high = [ch for ch, h in zip(s["channels"], sig["hum"]) if h is not None and h > HUM_HIGH]
         if high:
             issues.append((35, f"Strong 50 Hz hum on {', '.join(high)}: keep chargers and mains cables away from the "
                            "bed.", None))
@@ -1055,7 +1087,7 @@ def render(s: dict) -> str:
         out.append(f"  short gaps    {'; '.join(bits)}")
     if s["rate"] is not None:
         rng = f"; stretches over 10 min {s['rate_range'][0]:.2f} to {s['rate_range'][1]:.2f}" if s["rate_range"] else ""
-        out.append(f"  rate          {s['rate']:.2f} samples/s (should be 250) over {dur(s['rate_s'])} of unbroken "
+        out.append(f"  rate          {s['rate']:.2f} samples/s (should be {s['fs']:g}) over {dur(s['rate_s'])} of unbroken "
                    f"data{rng}")
     pk = s["packets"]
     out += ["", "Packets"]
@@ -1145,13 +1177,13 @@ def render(s: dict) -> str:
     out += ["", "Contact" + (f" at the start ({hm(c['start'][0])})" if c["start"] else "")]
     if c["start"]:
         out.append("  " + "   ".join(f"{ch} {ohms_text(c['start'][1].get(ch))} {contact_word(c['start'][1].get(ch))}"
-                                     for ch in CHANNELS))
+                                     for ch in s["channels"]))
     else:
         out.append("  no reading" + (f" ({c['failed']} failed checks)" if c["failed"] else ""))
     if c["later"]:
         t, last = c["later"][-1]
         out.append(f"  later         {len(c['later'])} readings; last at {hm(t)}: "
-                   + "  ".join(f"{ch} {ohms_text(last.get(ch))}" for ch in CHANNELS))
+                   + "  ".join(f"{ch} {ohms_text(last.get(ch))}" for ch in s["channels"]))
     out += _render_signal(s)
     out += _render_report(s)
     unk = s["unknown"]
@@ -1178,12 +1210,14 @@ def _render_signal(s: dict) -> list[str]:
     if not sig:
         why = "numpy not found: run under `uv run --project analysis`" if s["signal_tried"] else "--no-signal"
         return ["", f"Signal: skipped ({why})"]
-    out = ["", "Signal        " + "".join(f"{ch:>10}" for ch in CHANNELS)]
+    out = ["", "Signal        " + "".join(f"{ch:>10}" for ch in s["channels"])]
     out.append("  flat min    " + "".join(f"{v / 60:>10.1f}" for v in sig["flat"]))
     out.append("  railed min  " + "".join(f"{v / 60:>10.1f}" for v in sig["railed"]))
     out.append("  50 Hz hum   " + "".join(f"{hum_word(h):>10}" for h in sig["hum"]))
     out.append(f"  (hum: power at 49-51 Hz against 30-45 Hz, median of one 4 s window a minute; "
                f"over {HUM_SOME} some, over {HUM_HIGH} high, as the live page)")
+    if sig.get("other"):
+        out.append(f"  recordings of this night that hold other channels, not in this table: {'; '.join(sig['other'])}")
     return out
 
 
@@ -1240,7 +1274,7 @@ def render_compare(a: dict, b: dict) -> str:
             "headband battery": (f"{band['first']} -> {band['last']} %" if band and band["first"] is not None
                                  else "stuck gauge" if band else "-"),
             "contact at start, kΩ": " ".join(f"{v / 1e3:.0f}" if v not in (None, float("inf")) else "-"
-                                             for v in (c[1].get(ch) for ch in CHANNELS)) if c else "-",
+                                             for v in (c[1].get(ch) for ch in s["channels"])) if c else "-",
             "flat+railed min": " ".join(f"{(f + r) / 60:.0f}" for f, r in zip(sig["flat"], sig["railed"]))
             if sig else "-",
             "50 Hz hum": " ".join(hum_word(h).split()[0] for h in sig["hum"]) if sig else "-",
@@ -1285,14 +1319,14 @@ def main(argv: list[str] | None = None) -> int:
         ap.error(f"night must be an evening date like 2026-11-19, not {a.night}")
     try:
         s = check(a.data, a.night, a.source, not a.no_signal)
-    except LookupError as e:
+    except (LookupError, recording.RecordingError) as e:
         print(e, file=sys.stderr)
         return 2
     print(render(s))
     if a.compare:
         try:
             other = check(a.data, a.compare, "laptop", not a.no_signal)
-        except LookupError as e:
+        except (LookupError, recording.RecordingError) as e:
             print(f"\nNo comparison: {e}")
         else:
             print("\n" + render_compare(s, other))
