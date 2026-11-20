@@ -11,15 +11,17 @@ which crashes ONNX Runtime with 4 cores), boots it headless, and checks what rea
   (a) update over yesterday: the old APK with real finished nights and their reports (read-only copies of
       --nights and --reports, by default the main checkout's _local/recordings and _local/phone/nights), then the new
       APK over it (`adb install -r`): no finished night may be scored again, every report stays byte for byte.
-  (b) Share on Wi-Fi while the app sits in the background, Doze forced, its standby bucket "rare" and `am freeze`
-      sent: `/state` must answer within 5 s.
+  (b) Share on Wi-Fi between nights: `/state` answers with the app in front; in the background (Doze forced, its
+      standby bucket "rare") nothing keeps the app running since DECISIONS 678, so that is only reported; once the app
+      is in front again it must answer within 30 s. (b2), with (c): the same in the background while a work session
+      runs, whose service holds the app: `/state` must answer 3 of 3 within 5 s.
   (c) a replayed noisy work session (the made-up "talking" recording through the replay build's headband, at real
       speed for 6.5 minutes): no break may start by itself. Runs when --replay is given (DECISIONS 735; the
       work-day fix it waited for is in main since integration 17).
   (d) logcat, ANRs and Android's exit reasons are collected; a crash or an ANR of the app fails, and the app's own
       files/app-starts.log must have recorded its starts with the exit reasons.
 
-Prints a plain PASS / FAIL / SKIP list; exit status 1 when anything failed. About 10 minutes, 16 with (c).
+Prints a plain PASS / FAIL / SKIP list; exit status 1 when anything failed. About 12 minutes, 30 with (c).
 
 Only its own things: a private adb server on port 5041 (--adb-port; ADB_LIBUSB=0 ADB_USB=0) and the emulator's own serial on
 every adb call, never another device or the default adb server; the emulator and that server are stopped by PID
@@ -481,8 +483,40 @@ def quiet(command: str, timeout: float = 30) -> str:
         return f"no answer in {timeout:.0f} s"
 
 
+BACKGROUND = ("dumpsys battery unplug", f"am set-inactive {PKG} true", f"am set-standby-bucket {PKG} rare",
+              "dumpsys deviceidle force-idle")
+FRONT_AGAIN = ("dumpsys deviceidle unforce", "dumpsys battery reset", f"am set-inactive {PKG} false",
+               f"am set-standby-bucket {PKG} active")
+
+
+def to_background(details: list[str]) -> str:
+    """Home, past Android 14+'s 10 s before a cached app is frozen, then Doze forced and the standby bucket "rare";
+    returns the process's state."""
+    sh("input keyevent KEYCODE_HOME")
+    time.sleep(15)
+    details.append(f"in the background: {proc_state()}")
+    for c in BACKGROUND:
+        out = quiet(c)
+        details.append(f"$ {c}{(': ' + out[:100]) if out else ''}")
+    time.sleep(20)
+    state = proc_state()
+    details.append(f"after Doze and the rare bucket: {state}")
+    return state
+
+
+def ask_three(local: int, token: str, details: list[str]) -> list[tuple[bool, float, str]]:
+    answers = [ask_state(local, token) for _ in range(3)]
+    for ok, s, body in answers:
+        details.append(f"/state: {'answered' if ok else 'no answer'} in {s:.2f} s{'' if ok else ' (' + body + ')'}")
+    return answers
+
+
 def check_share() -> Result:
-    name = "(b) Share on Wi-Fi in the background"
+    """Between nights (DECISIONS 678, the owner's: no notification, so nothing keeps the app running for sharing) the
+    server answers while the app is open; in the background Android may freeze it or Doze may cut it off, which is
+    only reported. It must answer again once the app is back in front: a server that stays dead (the 2026-11-19
+    hang, DECISIONS 587) fails. The background answers with a session's service holding the app are (c)'s."""
+    name = "(b) Share on Wi-Fi between nights"
     start_app()
     if not wait_main():
         return Result(name, "FAIL", "the app's main screen did not come up within 2 minutes", screen_words("b-start"))
@@ -504,51 +538,52 @@ def check_share() -> Result:
         return Result(name, "FAIL", "sharing did not switch on (no code saved)")
     local = 18765 + (os.getpid() % 1000)
     adb("forward", f"tcp:{local}", f"tcp:{SHARE_PORT}")
-    details = []
+    details: list[str] = []
     try:
         ok, s, body = ask_state(local, token)
         details.append(f"in front: {'answered' if ok else 'no answer'} in {s:.2f} s ({body})")
         if not ok:
             return Result(name, "FAIL", f"/state did not answer even with the app in front ({body})", details)
-        sh("input keyevent KEYCODE_HOME")
-        time.sleep(15)  # past Android 14+'s 10 s before a cached app is frozen
-        details.append(f"in the background: {proc_state()}")
-        for c in ("dumpsys battery unplug", f"am set-inactive {PKG} true", f"am set-standby-bucket {PKG} rare",
-                  "dumpsys deviceidle force-idle"):
-            out = quiet(c)
-            details.append(f"$ {c}{(': ' + out[:100]) if out else ''}")
-        time.sleep(20)
-        state = proc_state()
-        details.append(f"after Doze and the rare bucket: {state}")
-        answers = [ask_state(local, token) for _ in range(3)]
-        for ok, s, body in answers:
-            details.append(f"/state: {'answered' if ok else 'no answer'} in {s:.2f} s{'' if ok else ' (' + body + ')'}")
-        # harder than stock Android: a forced freeze (`am freeze`), which Android never applies to a process with a
-        # foreground service; nothing can answer while frozen, but the server must answer again once thawed. (An `am
-        # freeze` of a process Android froze already hangs on the emulator: then it is not sent.)
-        thawed = (False, 0.0, "not tried")
-        if "frozen no" in state:
-            out = quiet(f"am freeze {PKG}")
-            details.append(f"$ am freeze {PKG}: {out[:100]}")
-            frozen = [ask_state(local, token, timeout=3) for _ in range(2)]
-            details.append(f"while frozen: {sum(f[0] for f in frozen)} of 2 answered (none expected)")
-            quiet(f"am unfreeze {PKG}")
-            thawed = ask_state(local, token, timeout=10)
-            details.append(f"after am unfreeze: {'answered' if thawed[0] else 'no answer'} in {thawed[1]:.2f} s")
+        state = to_background(details)
+        away = ask_three(local, token, details)
+        for c in FRONT_AGAIN:
+            quiet(c)
+        start_app()
+        back = (False, 0.0, "not tried")
+        t0 = time.time()
+        while time.time() - t0 < 30 and not back[0]:
+            back = ask_state(local, token)
+        details.append(f"back in front: {'answered' if back[0] else 'no answer'} in {time.time() - t0:.2f} s")
     finally:
-        for c in (f"am unfreeze {PKG}", "dumpsys deviceidle unforce", "dumpsys battery reset",
-                  f"am set-inactive {PKG} false", f"am set-standby-bucket {PKG} active"):
+        for c in FRONT_AGAIN:
             quiet(c)
         adb("forward", "--remove", f"tcp:{local}", check=False)
+    bg = (f"in the background with Doze forced and the bucket rare it answered {sum(a[0] for a in away)} of 3 "
+          f"({state}; no keep-alive between nights since DECISIONS 678, so none is required)")
+    if not back[0]:
+        return Result(name, "FAIL", f"/state did not answer within 30 s once the app was back in front ({back[2]}); {bg}",
+                      details)
+    return Result(name, "PASS", f"/state answered in front ({s:.2f} s) and again once back in front; {bg}", details)
+
+
+def check_session_share(local: int, token: str) -> Result:
+    """Share on Wi-Fi with a Work session running and the app in the background: the session's service holds the
+    process, so the server must answer (DECISIONS 678: "a Work session's card keeps the process")."""
+    name = "(b2) Share on Wi-Fi in the background during a work session"
+    details: list[str] = []
+    try:
+        state = to_background(details)
+        answers = ask_three(local, token, details)
+    finally:
+        for c in FRONT_AGAIN:
+            quiet(c)
+        start_app()
+        time.sleep(3)
     if not all(a[0] for a in answers):
-        return Result(name, "FAIL", f"/state answered {sum(a[0] for a in answers)} of 3 times within 5 s with the app in "
-                      f"the background, Doze forced and its standby bucket rare ({state})", details)
-    if not thawed[0]:
-        return Result(name, "FAIL", f"/state did not answer again after a forced freeze was lifted ({thawed[2]})", details)
-    worst = max(a[1] for a in answers)
-    return Result(name, "PASS", f"/state answered 3 of 3 within {worst:.2f} s in the background with Doze forced and "
-                  f"the standby bucket rare ({state}); after a forced freeze it answered again in {thawed[1]:.2f} s",
-                  details)
+        return Result(name, "FAIL", f"/state answered {sum(a[0] for a in answers)} of 3 times within 5 s with a work "
+                      f"session running, the app in the background, Doze forced and the bucket rare ({state})", details)
+    return Result(name, "PASS", f"/state answered 3 of 3 within {max(a[1] for a in answers):.2f} s with a work session "
+                  f"running, the app in the background, Doze forced and the bucket rare ({state})", details)
 
 
 # ---- (c) a replayed noisy work session ----------------------------------------------------------------------------
@@ -564,7 +599,8 @@ def make_talking(stage: Path) -> Path:
     return done[0]
 
 
-def check_talking(replay: Path, stage: Path) -> Result:
+def check_talking(replay: Path, stage: Path, also: list[Result]) -> Result:
+    """(c); with sharing on, (b2) is added to [also] from the same session, with the app in the background."""
     name = "(c) a replayed noisy work session"
     f32 = make_talking(stage)
     stem = f32.name[: -len(".f32")]
@@ -601,6 +637,17 @@ def check_talking(replay: Path, stage: Path) -> Result:
         # while working, so it cannot tell
         if any("on this break" in t.lower() for t in texts):
             broke = True
+    token = share_token()
+    if token:
+        say("(b2) Share on Wi-Fi in the background during the work session")
+        local = 18765 + (os.getpid() % 1000)
+        adb("forward", f"tcp:{local}", f"tcp:{SHARE_PORT}")
+        try:
+            also.append(check_session_share(local, token))
+        finally:
+            adb("forward", "--remove", f"tcp:{local}", check=False)
+    else:
+        also.append(Result("(b2) Share on Wi-Fi in the background during a work session", "SKIP", "sharing was off"))
     hit = emu.match("Stop", exact=True)
     if hit:
         sh(f"input tap {hit[1]} {hit[2]}")
@@ -643,8 +690,7 @@ def collect(out: Path, started_ms: int) -> Result:
     # (2026-11-20: an APK without its GeneratedPluginRegistrant answered every plugin call so)
     unhandled = [l.split("Unhandled Exception:", 1)[1].strip()[:160] for l in lines
                  if " flutter " in l and "Unhandled Exception:" in l]
-    for u in sorted({u for u in unhandled if u.startswith("MissingPluginException")}):
-        problems.append(u)
+    problems += sorted({u for u in unhandled if u.startswith("MissingPluginException")})
     for i, l in enumerate(lines):
         if f"ANR in {PKG}" in l:
             problems.append(l.strip())
@@ -741,7 +787,9 @@ def main() -> int:
                 say("(c) a replayed noisy work session")
                 if talking_job:
                     talking_job.wait(timeout=900)
-                results.append(check_talking(a.replay, stage))
+                also: list[Result] = []
+                results.append(check_talking(a.replay, stage, also))
+                results += also
         if "d" in a.only:
             say("(d) crashes, ANRs, exit reasons")
             results.append(collect(out, started_ms))

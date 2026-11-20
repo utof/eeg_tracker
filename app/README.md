@@ -232,11 +232,13 @@ AVD, the emulator and its adb server at the end. It prints PASS / FAIL / SKIP:
   `_local/phone/nights/` and the recordings they name from `_local/recordings/`, read-only; `--reports`, `--nights`),
   then `adb install -r` of the new one: no night may be scored again, every report stays byte for byte. Catches the
   "old nights scored again after each update" bug (DECISIONS 580).
-- **(b) Share on Wi-Fi in the background**: sharing on (More tab), Home, Doze forced, standby bucket "rare", past
-  Android's freezer delay; `/state` must answer within 5 s, three times. Then a forced `am freeze` (harder than stock
-  Android, which never freezes an app with a foreground service): `/state` must answer again once thawed. Catches the
-  Share hang of 2026-11-19 (DECISIONS 587, 589): a build without the fix sits in the background as a cached process,
-  which Android freezes.
+- **(b) Share on Wi-Fi between nights**: sharing on (More tab), `/state` must answer with the app in front. Then
+  Home, Doze forced, standby bucket "rare", past Android's freezer delay: since DECISIONS 678 (no notification, so
+  nothing keeps the app running for sharing between nights) the app is a cached process there and need not answer;
+  the run only reports it. Once the app is in front again `/state` must answer within 30 s: a server that stays dead
+  (the Share hang of 2026-11-19, DECISIONS 587) fails.
+- **(b2) Share on Wi-Fi in the background during a work session** (with (c)): the same background steps while the
+  replayed work session runs; its service holds the app, so `/state` must answer within 5 s, three times.
 - **(c) a replayed noisy work session** (with `--replay`; a SKIP without it): the made-up talking recording through
   the replay headband into a real work session for 6.5 minutes; no break may start by itself, and the saved session
   must name the replay as its headband. Catches the "calibrating, then on break" loop of 2026-11-20 (DECISIONS 680,
@@ -244,7 +246,7 @@ AVD, the emulator and its adb server at the end. It prints PASS / FAIL / SKIP:
 - **(d) crashes, ANRs, exit reasons**: logcat, `/data/anr` and `dumpsys activity exit-info` are kept; a crash or an
   ANR fails, and the app's own `files/app-starts.log` must hold its starts with Android's exit reasons.
 
-Logs and details go to `/var/tmp/eeg-precheck-<time>/out/` (`--out`). About 10 minutes, 16 with (c).
+Logs and details go to `/var/tmp/eeg-precheck-<time>/out/` (`--out`). About 12 minutes, 30 with (c) on the 2-core AVD.
 
 ## Replay headband (test and replay builds only)
 
