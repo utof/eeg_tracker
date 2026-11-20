@@ -220,12 +220,12 @@ Build the candidate (`flutter build apk --release --target-platform android-arm6
 ```bash
 source ~/.local/share/linsa/env.sh
 cd app && python3 tool/precheck.py --old <the APK on the phone now> --new build/app/outputs/flutter-apk/app-release.apk \
-  [--replay <replay build> --talking]          # run it in the heavy build slot: it boots an emulator
+  [--replay <replay build>] [--adb-port N]     # run it in the heavy build slot: it boots an emulator
 ```
 
 It makes an AVD under `/var/tmp` (API 36 x86_64 image, **2 cores**: the phone's arm64 APK runs there through Android's
-ARM translation, and ONNX Runtime crashes at launch with 4), uses a private adb server (port 5041, `ADB_LIBUSB=0
-ADB_USB=0`) and the emulator's own serial on every call, never the phone or the default adb server, and removes the
+ARM translation, and ONNX Runtime crashes at launch with 4), uses a private adb server (port 5041 or `--adb-port`,
+`ADB_LIBUSB=0 ADB_USB=0`) and the emulator's own serial on every call, never the phone or the default adb server, and removes the
 AVD, the emulator and its adb server at the end. It prints PASS / FAIL / SKIP:
 
 - **(a) update over yesterday**: the old APK with the phone's finished nights (copies of the reports in
@@ -237,10 +237,10 @@ AVD, the emulator and its adb server at the end. It prints PASS / FAIL / SKIP:
   Android, which never freezes an app with a foreground service): `/state` must answer again once thawed. Catches the
   Share hang of 2026-11-19 (DECISIONS 587, 589): a build without the fix sits in the background as a cached process,
   which Android freezes.
-- **(c) a replayed noisy work session** (only with `--replay` and `--talking`): the made-up talking recording through
-  the replay headband into a real work session for 6.5 minutes; no break may start by itself. **Harness ready, to be
-  switched on once `fix/app-work-session-day` is in main** (the "calibrating, then on break" loop, DECISIONS 680, 735);
-  until then it is a SKIP. The laptop's replay tests already show the loop on main and its fix.
+- **(c) a replayed noisy work session** (with `--replay`; a SKIP without it): the made-up talking recording through
+  the replay headband into a real work session for 6.5 minutes; no break may start by itself, and the saved session
+  must name the replay as its headband. Catches the "calibrating, then on break" loop of 2026-11-20 (DECISIONS 680,
+  735); the laptop's replay tests check the same with talking from the start and after calibration.
 - **(d) crashes, ANRs, exit reasons**: logcat, `/data/anr` and `dumpsys activity exit-info` are kept; a crash or an
   ANR fails, and the app's own `files/app-starts.log` must hold its starts with Android's exit reasons.
 

@@ -3,7 +3,7 @@
 "Pre-install check"; DECISIONS 733).
 
     python3 app/tool/precheck.py --old LAST_ON_PHONE.apk --new CANDIDATE.apk \\
-        [--replay REPLAY_BUILD.apk --talking] [--nights DIR] [--reports DIR] [--out DIR] [--keep]
+        [--replay REPLAY_BUILD.apk] [--nights DIR] [--reports DIR] [--out DIR] [--adb-port N] [--keep]
 
 It makes a new AVD under /var/tmp with 2 cores (the phone's arm64 APK runs there through Android's ARM translation,
 which crashes ONNX Runtime with 4 cores), boots it headless, and checks what reached the owner's phone on 2026-11-19/20:
@@ -14,15 +14,14 @@ which crashes ONNX Runtime with 4 cores), boots it headless, and checks what rea
   (b) Share on Wi-Fi while the app sits in the background, Doze forced, its standby bucket "rare" and `am freeze`
       sent: `/state` must answer within 5 s.
   (c) a replayed noisy work session (the made-up "talking" recording through the replay build's headband, at real
-      speed for 6.5 minutes): no break may start by itself. Runs only with --replay and --talking: the harness is
-      ready, to be switched on once fix/app-work-session-day is in main (DECISIONS 735); its navigation to the work
-      page has not yet completed in a scripted run (see there).
+      speed for 6.5 minutes): no break may start by itself. Runs when --replay is given (DECISIONS 735; the
+      work-day fix it waited for is in main since integration 17).
   (d) logcat, ANRs and Android's exit reasons are collected; a crash or an ANR of the app fails, and the app's own
       files/app-starts.log must have recorded its starts with the exit reasons.
 
 Prints a plain PASS / FAIL / SKIP list; exit status 1 when anything failed. About 10 minutes, 16 with (c).
 
-Only its own things: a private adb server on port 5041 (ADB_LIBUSB=0 ADB_USB=0) and the emulator's own serial on
+Only its own things: a private adb server on port 5041 (--adb-port; ADB_LIBUSB=0 ADB_USB=0) and the emulator's own serial on
 every adb call, never another device or the default adb server; the emulator and that server are stopped by PID
 and the AVD deleted at the end (--keep leaves the AVD and the seed copies). Run it in the heavy build slot.
 """
@@ -72,6 +71,14 @@ ENV.pop("ANDROID_SERIAL", None)
 # connect to [::1] never returns (a dead server would hang every call instead of failing)
 SERVER = ["-L", f"tcp:127.0.0.1:{ADB_PORT}"]
 SERIAL = ""
+
+
+def use_adb_port(port: int) -> None:
+    """Our private server on [port] instead of 5041 (another check's server may hold that one)."""
+    global ADB_PORT
+    ADB_PORT = port
+    ENV["ANDROID_ADB_SERVER_PORT"] = str(port)
+    SERVER[:] = ["-L", f"tcp:127.0.0.1:{port}"]
 
 
 def say(line: str) -> None:
@@ -578,7 +585,9 @@ def check_talking(replay: Path, stage: Path) -> Result:
         texts = [l for l, _, _ in emu.nodes()]
         line = " | ".join(t for t in texts if len(t) < 90)[:300]
         details.append(f"+{(time.time() - t0) / 60:.1f} min: {line}")
-        if any("On a break" in t or "on a break" in t.lower() for t in texts):
+        # on a break the readout says "on this break" (and the button "Back"); "On a break" is the button's word
+        # while working, so it cannot tell
+        if any("on this break" in t.lower() for t in texts):
             broke = True
     hit = emu.match("Stop", exact=True)
     if hit:
@@ -664,13 +673,15 @@ def main() -> int:
     p.add_argument("--old", type=Path, required=True, help="the APK on the phone now (the last one installed there)")
     p.add_argument("--new", type=Path, required=True, help="the candidate APK")
     p.add_argument("--replay", type=Path, help="the replay build of the candidate (--dart-define=EEG_REPLAY=true)")
-    p.add_argument("--talking", action="store_true", help="run (c); meaningful once fix/app-work-session-day is in main")
+    p.add_argument("--talking", action="store_true", help="kept for old commands: (c) runs whenever --replay is given")
     p.add_argument("--nights", type=Path, default=MAIN / "_local" / "recordings", help="recordings to seed (read-only)")
     p.add_argument("--reports", type=Path, default=MAIN / "_local" / "phone" / "nights", help="the phone's night reports")
     p.add_argument("--out", type=Path, help="where the logs go (default: the run's folder under /var/tmp)")
     p.add_argument("--only", default="abcd", help="which checks, e.g. 'bd'")
     p.add_argument("--keep", action="store_true", help="keep the AVD and the copies (the emulator still stops)")
+    p.add_argument("--adb-port", type=int, default=ADB_PORT, help="our private adb server's port (default 5041)")
     a = p.parse_args()
+    use_adb_port(a.adb_port)
     for apk in (a.old, a.new, *([a.replay] if a.replay else [])):
         if not apk.is_file():
             p.error(f"{apk} is not there")
@@ -686,7 +697,7 @@ def main() -> int:
     results: list[Result] = []
     em = Emulator(work, a.keep)
     talking_job = None
-    if "c" in a.only and a.replay and a.talking and not list((stage / "scenarios" / "talking-work").glob("*.f32")):
+    if "c" in a.only and a.replay and not list((stage / "scenarios" / "talking-work").glob("*.f32")):
         stage.mkdir(parents=True, exist_ok=True)  # made while the emulator boots
         talking_job = subprocess.Popen(["dart", "run", "tool/replay_scenario.dart", "talking-work", str(stage / "scenarios")],
                                        cwd=str(APP), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -702,10 +713,9 @@ def main() -> int:
             say("(b) Share on Wi-Fi in the background")
             results.append(check_share())
         if "c" in a.only:
-            if not (a.replay and a.talking):
+            if not a.replay:
                 results.append(Result("(c) a replayed noisy work session", "SKIP",
-                                      "harness ready; enable (--replay <replay build> --talking) once "
-                                      "fix/app-work-session-day is in main (integration 17)"))
+                                      "needs the candidate's replay build: --replay <replay build>"))
             else:
                 say("(c) a replayed noisy work session")
                 if talking_job:

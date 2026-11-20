@@ -385,17 +385,15 @@ void main() {
       c.dispose();
     });
 
-    // The 2026-11-20 break loop (DECISIONS 680): talking read as the headband off. Fixed on fix/app-work-session-day,
-    // not yet on main: on main this replay starts a break (checked 2026-11-20); enable both once main has the fix.
-    const waitsForFix = 'enable once fix/app-work-session-day (DECISIONS 680-686) is merged into main';
-
+    // The 2026-11-20 break loop (DECISIONS 680): talking read as the headband off. Before fix/app-work-session-day
+    // (DECISIONS 680-686, merged in integration 17) both replays started a break; with it neither does (DECISIONS 735).
     test('talking from the start (a meeting) never starts a break', () async {
       final c = await play('talking-work', untilS: 11 * 60);
       expect(c.planner!.breaks, isEmpty);
       expect(c.worn, isTrue, reason: 'talking is skin contact');
       await c.stop();
       c.dispose();
-    }, skip: waitsForFix);
+    });
 
     test('talking after calibration never starts a break', () async {
       final c = await play('quiet-then-talking', untilS: 16 * 60);
@@ -403,6 +401,6 @@ void main() {
       expect(c.planner!.breaks, isEmpty);
       await c.stop();
       c.dispose();
-    }, skip: waitsForFix);
+    });
   });
 }
