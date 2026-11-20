@@ -186,17 +186,25 @@ void main() {
       tester.view.physicalSize = const Size(1080, 2400);
       tester.view.devicePixelRatio = 1080 / 393;
       addTearDown(tester.view.reset);
+      // the page is worked out in a background isolate (DECISIONS 620-629): real time passes until it shows
+      Future<void> until(Finder f) async {
+        for (var i = 0; i < 300 && f.evaluate().isEmpty; i++) {
+          await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+          await tester.pump();
+        }
+      }
+
       await tester.runAsync(() async {
         await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: TrendsScreen(recordingsDir: rec)));
         await Future<void>.delayed(const Duration(milliseconds: 50));
       });
-      await tester.pump();
+      await until(find.textContaining('Learning your usual: 0 of 28 days.'));
       expect(find.textContaining('Learning your usual: 0 of 28 days.'), findsOneWidget);
       await tester.runAsync(() async {
         await tester.tap(find.byType(Switch));
         await Future<void>.delayed(const Duration(milliseconds: 50));
       });
-      await tester.pump();
+      await until(find.textContaining('Off. When on'));
       expect(find.textContaining('Off. When on'), findsOneWidget);
       final settings = jsonDecode(File('${tmp.path}/files/unusual/settings.json').readAsStringSync()) as Map;
       expect(settings['on'], isFalse);

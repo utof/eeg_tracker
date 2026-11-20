@@ -266,7 +266,15 @@ class NightView extends StatelessWidget {
           if (!m.running && morning != null) ...[const SectionHeading('Morning'), morning!],
           // Each feature's first try and what to tell the assistant afterwards (DECISIONS 340), between nights.
           if (!m.running)
-            ...[const SectionHeading('Try these'), TryTheseEntry(onSleepReport: onSleepReport, onAlarm: onAlarm)],
+            ...[
+              const SectionHeading('Try these'),
+              // read again when the newest night's report changes, not every minute (DECISIONS 620-629)
+              TryTheseEntry(
+                onSleepReport: onSleepReport,
+                onAlarm: onAlarm,
+                changed: (sleep?.nightOf, sleep?.scored, sleep?.scoringStep == null),
+              ),
+            ],
           // Before the night the phone settings matter most; during it, the headband.
           if (m.running) ...headband,
           const SectionHeading('Phone'),

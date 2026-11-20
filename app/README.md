@@ -179,6 +179,11 @@ sound-for-states sessions the same way, and `test/state_synth_test.dart` checks 
 edges, the beat in the sound or only between the ears) without an audio device.
 `test/wearer_cross_check_test.dart` checks "Was this you?" against `analysis/wearer_check.py` (fixture made by
 `analysis/make_wearer_fixture.py` from made-up signals and histories).
+`test/heavy_reads_test.dart` counts the files the app opens on the screen's thread (DECISIONS 620-629) on a made-up
+folder with 60 days of history (`test/support/app_folder.dart`, `test/support/read_count.dart` wraps every `File` the
+code makes): the night screen's lines, the study reminders, "Was this you?", Trends, Try these and the Lucid page.
+Work that reads more than a few KB belongs in a background isolate, and a file shown again and again is read once
+(`lib/cache/file_summaries.dart`: newest by name, kept JSON, kept summaries in `files/cache/`).
 `test/sleep_prep_test.dart` checks the sleep model's input against a fixture made by the laptop's Python
 (`test/fixtures/make_sleep_fixture.py`); `test/night_extras_cross_check_test.dart` checks the night extras against
 `analysis/night_extras.py` (fixture made by `analysis/make_extras_fixture.py`), and `tool/night_extras.dart` runs them

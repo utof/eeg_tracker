@@ -1,6 +1,7 @@
 // The morning check-in (DECISIONS rows 120 and 125): the laptop page moved to the phone. Owns the headband while
 // it runs, from this screen, only between nights (as meditation, row 75). Layout in morning_view.dart.
 import 'dart:async';
+import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -32,6 +33,22 @@ String? checkedInTodayAt(List<MorningRecord> records, DateTime now) {
   if (todays.isEmpty) return null;
   final t = todays.first.start;
   return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+}
+
+/// [outcomeFor] over the app's folders, in a background isolate. A top-level function, so that the isolate's closure
+/// holds only [done] and [recordingsDir], never a page (row 160: a closure that sent the whole page broke Export).
+Future<MorningOutcome> outcomeInBackground(MorningRecord done, String recordingsDir) =>
+    Isolate.run(() => outcomeFor(done, readTrendInputs(recordingsDir)), debugName: 'check-in outcome');
+
+/// [checkedInTodayAt] from the folder: only today's files are opened, and none again while they are unchanged
+/// (DECISIONS 620-629; the night screen asks at every start and return).
+String? checkedInTodayIn(MorningStore store, DateTime now) {
+  try {
+    final first = store.firstOfDay(dayKey(now));
+    return first == null ? null : checkedInTodayAt([first], now);
+  } catch (_) {
+    return null;
+  }
 }
 
 /// This check-in's numbers with yesterday and your usual: the trends' morning rows with this check-in standing
@@ -96,7 +113,7 @@ class _MorningScreenState extends State<MorningScreen> {
         _recordings = rec;
         final store = MorningStore(morningsDirFor(rec));
         _c.store = store;
-        _doneAt = checkedInTodayAt(store.list(), DateTime.now());
+        _doneAt = checkedInTodayIn(store, DateTime.now());
         _experiment = experimentLine(currentExperiment(rec, DateTime.now()));
       }
     } catch (_) {
@@ -122,25 +139,36 @@ class _MorningScreenState extends State<MorningScreen> {
     final rec = _recordings, res = _c.result;
     final done = res == null ? null : MorningRecord.fromJson(res);
     if (rec == null || done == null) return;
-    try {
-      _outcome = outcomeFor(done, readTrendInputs(rec));
-      _doneAt = checkedInTodayAt(_c.store?.list() ?? const [], DateTime.now());
-    } catch (_) {
-      _outcome = null;
-    }
+    final store = _c.store;
+    _doneAt = store == null ? null : checkedInTodayIn(store, DateTime.now());
+    // every report, check-in and practice: read in a background isolate (DECISIONS 620-629)
+    unawaited(
+      outcomeInBackground(done, rec)
+          .then<MorningOutcome?>((o) => o, onError: (Object _) => null)
+          .then((o) {
+            if (mounted) setState(() => _outcome = o);
+          }),
+    );
     _wearerId = done.id;
     _checkWearer();
   }
 
-  /// The check over the app's files, for this check-in; never worth breaking the result page.
+  /// The newest check asked for: an older one that ends later is dropped.
+  int _wearerAsked = 0;
+
+  /// The check over the app's files, for this check-in, in a background isolate (DECISIONS 620-629); never worth
+  /// breaking the result page.
   void _checkWearer() {
     final rec = _recordings, id = _wearerId;
     if (rec == null || id == null) return;
-    try {
-      _wearer = wearerLine(refreshWearer(rec, DateTime.now()), kindCheckIn, id);
-    } catch (_) {
-      _wearer = null;
-    }
+    final n = ++_wearerAsked;
+    unawaited(
+      wearerInBackground(rec, DateTime.now())
+          .then<WearerLine?>((r) => wearerLine(r, kindCheckIn, id), onError: (Object _) => null)
+          .then((line) {
+            if (mounted && n == _wearerAsked) setState(() => _wearer = line);
+          }),
+    );
   }
 
   void _answerWearer(String? answer) {
@@ -151,7 +179,7 @@ class _MorningScreenState extends State<MorningScreen> {
     } catch (e) {
       _say('Not saved: $e');
     }
-    setState(_checkWearer);
+    _checkWearer();
   }
 
   void _screen({required bool on}) {

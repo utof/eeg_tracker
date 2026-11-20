@@ -6,6 +6,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../cache/file_summaries.dart' show firstParsed, newestFirst;
 import '../recorder/chunk_writer.dart' show fileStem;
 import '../sleep/live_stager.dart' show LiveMode;
 import 'rules.dart';
@@ -231,4 +232,8 @@ class NapStore {
     }
     return out..sort((a, b) => b.start.compareTo(a.start));
   }
+
+  /// The newest readable nap, found by its file name (its start): the night screen's line opens this one file, and
+  /// none while it is unchanged (DECISIONS 620-629).
+  NapSession? newest() => firstParsed(newestFirst(dir, '.nap.json'), NapSession.fromJson);
 }

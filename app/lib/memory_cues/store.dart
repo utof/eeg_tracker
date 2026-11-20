@@ -18,6 +18,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../cache/file_summaries.dart' show JsonMemo;
 import '../cues/night_cues.dart' show CueMoment;
 import '../lucid/store.dart' show nightStamp;
 import '../sleep/report.dart' show isoLocal;
@@ -198,15 +199,8 @@ class MemoryStore {
   /// The two sound files (sound 0, sound 1).
   List<File> get soundFiles => [for (final n in memorySoundFiles) File('${dir.path}/$n')];
 
-  Object? _read(File f) {
-    try {
-      return jsonDecode(f.readAsStringSync());
-    } on FileSystemException {
-      return null;
-    } on FormatException {
-      return null;
-    }
-  }
+  /// Decoded again only when the file changed (the night screen's line, DECISIONS 620-629).
+  Object? _read(File f) => JsonMemo.read(f);
 
   void _write(File f, Object j) {
     f.parent.createSync(recursive: true);
