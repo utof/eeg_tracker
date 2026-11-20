@@ -72,11 +72,16 @@ Map<String, Object?> shareMessage(ShareStatus s) => {
   'addresses': s.addresses,
   'port': s.port,
   'note': s.note,
+  'here': s.here,
+  'net': s.net,
+  'copied_at_ms': s.copiedAtMs,
+  'copied_by': s.copiedBy,
 };
 
 ShareStatus? shareStatusFrom(Object? data) {
   if (data is! Map || data['kind'] != 'share' || data.containsKey('config')) return null;
-  final a = data['addresses'], p = data['port'], n = data['note'];
+  final a = data['addresses'], p = data['port'], n = data['note'], h = data['here'], net = data['net'];
+  final at = data['copied_at_ms'], by = data['copied_by'];
   return (
     up: data['up'] == true,
     addresses: [
@@ -86,6 +91,10 @@ ShareStatus? shareStatusFrom(Object? data) {
     ],
     port: p is int ? p : sharePort,
     note: n is String ? n : '',
+    here: h is String ? h : '',
+    net: net is String ? net : '',
+    copiedAtMs: at is int ? at : 0,
+    copiedBy: by is String ? by : '',
   );
 }
 

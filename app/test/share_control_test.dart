@@ -91,7 +91,7 @@ void main() {
     expect(c.status.up, isFalse);
     await c.sync(night: true, filesDir: files.path);
     expect(c.line().text, 'Starting.');
-    c.onRecorderStatus((up: true, addresses: const ['10.0.0.7', '127.0.0.1'], port: 8765, note: ''));
+    c.onRecorderStatus(shareStatusWith(shareDown, up: true, addresses: const ['10.0.0.7', '127.0.0.1'], port: 8765));
     expect(c.line().text, 'On at 10.0.0.7:8765 until 10:05.');
 
     // the switch during a night goes to the recorder
@@ -126,10 +126,10 @@ void main() {
 
     await c.beforeNight();
     await c.sync(night: true, filesDir: files.path);
-    c.onRecorderStatus((up: true, addresses: const ['127.0.0.1'], port: 8765, note: ''));
+    c.onRecorderStatus(shareStatusWith(shareDown, up: true, addresses: const ['127.0.0.1'], port: 8765));
     expect(c.line().text, 'On, but no Wi-Fi address found. Join your home Wi-Fi, or use a USB cable: see Address and code.');
     expect(c.line().warn, isTrue);
-    c.onRecorderStatus((up: false, addresses: const [], port: 8765, note: 'sharing on Wi-Fi stopped by an error: x'));
+    c.onRecorderStatus(shareStatusWith(shareDown, note: 'sharing on Wi-Fi stopped by an error: x'));
     expect(c.line().text, 'Sharing stopped by itself. Switch it off and on again.');
     expect(c.line().warn, isTrue);
   });

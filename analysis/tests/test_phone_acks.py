@@ -1,6 +1,6 @@
-"""The laptop's side of moving raw recordings off the phone (DECISIONS 690-699): scripts/pull_phone.py hashes its copies
-again from disk and acks only what equals the phone's list, under the pairing's key (POST /ack, the proof in
-app/test/fixtures/phone_ack.json); it never deletes; a phone's record of a set that left it is checked against what
+"""The laptop's side of moving raw recordings off the phone (DECISIONS 690-699, 755): scripts/pull_phone.py hashes its
+copies again from disk and acks only what equals the phone's list, in a request signed with the pairing's key (POST
+/ack; the signature's vectors in app/test/fixtures/phone_link.json); it never deletes; a phone's record of a set that left it is checked against what
 this laptop holds; the catalog marks such nights. Against the fake phone of test_pull_phone.py."""
 import json
 import os
@@ -20,8 +20,7 @@ from test_catalog import local  # noqa: E402,F401  (the catalog's fake _local, a
 from test_packed import phone_packed, signal  # noqa: E402
 from test_pull_phone import NOW, STEM, TOKEN, FakePhone, sha  # noqa: E402
 
-KEY = "a2V5LWZvci10aGUtYWNrLWZpeHR1cmUtb25seS0zMi1ieXRlcw"
-FIXTURE = json.loads((ROOT / "app" / "test" / "fixtures" / "phone_ack.json").read_text())
+KEY = "a" * 64
 
 
 @pytest.fixture
@@ -33,16 +32,20 @@ def phone():
 
 
 def run(phone: FakePhone, dest: Path, key: str | None = KEY, **kw) -> pp.Pass:
-    return pp.pull(pp.Phone(phone.base, TOKEN), dest, now=NOW, key=key, **kw)
+    """A pass as the paired laptop makes it (signed with the key), or by hand with the token (no key: no acks)."""
+    p = pp.Phone(phone.base, key=key, home=True) if key else pp.Phone(phone.base, TOKEN)
+    return pp.pull(p, dest, now=NOW, key=key, **kw)
 
 
 def acks_sent(phone: FakePhone) -> list[str]:
     return [f["path"] for post in phone.ack_posts for f in post]
 
 
-def test_the_proof_is_the_phones():
-    assert pp.ack_proof(FIXTURE["key"], FIXTURE["body"].encode()) == FIXTURE["proof"]
-    assert pp.ack_proof(FIXTURE["key"] + "x", FIXTURE["body"].encode()) != FIXTURE["proof"]
+def test_acks_are_signed_requests_and_the_token_never_leaves(phone, tmp_path):
+    phone.put(f"{STEM}.f32", b"\x01" * 4000)
+    rep = run(phone, tmp_path / "_local")
+    assert rep.acked == [f"{STEM}.f32"]
+    assert ("POST", "/ack", True) in phone.signed and phone.bearer == 0
 
 
 def test_finished_files_are_acked_after_they_are_hashed_again_once_and_nothing_is_deleted(phone, tmp_path):
@@ -102,10 +105,11 @@ def test_no_acks_without_the_pairing_or_from_an_older_app_and_nothing_hashed_the
     phone.no_ack = False
     rep = run(phone, dest)  # asked again only hours later
     assert rep.acked == [] and hashed == []
-    phone.key = "another-key-another-key-another-key"  # a pairing the phone no longer has
+    phone.key = "0" * 64  # a pairing the phone no longer has: every signed request is refused, acks too
     (dest / "phone" / "pull-state.json").unlink()
-    rep = run(phone, dest)
-    assert rep.acked == [] and hashed == [] and "wrong proof" in (rep.ack_note or "")
+    with pytest.raises(pp.Refused):
+        run(phone, dest)
+    assert hashed == [] and phone.ack_posts == []
 
 
 def test_a_pass_hashes_at_most_its_budget_oldest_first(phone, tmp_path):

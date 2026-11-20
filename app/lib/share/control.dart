@@ -1,4 +1,6 @@
-// Share on Wi-Fi from the screen's side (DECISIONS rows 220-229): the switch, who serves, and when it ends.
+// Share on Wi-Fi from the screen's side (DECISIONS rows 220-229, 750-759): the switch, who serves, when it ends, and
+// where a paired phone shares (its home Wi-Fi, or one allowed by hand for 12 hours: no notification says so, this
+// screen and the laptop's tray do).
 //
 // During a night the recorder's service serves (it keeps running with the screen off) and tells the screen where;
 // between nights the app serves the files itself while it runs (open, or holding a session such as a Work session)
@@ -46,26 +48,15 @@ class ShareControl extends ChangeNotifier {
     _network = networkChanges?.listen((_) => unawaited(_host?.networkChanged()), onError: (Object _) {});
   }
 
+  /// Android's network changes (NetworkWatch): the server looks at its Wi-Fi again at once.
+
   /// The daytime session that holds the headband (lib/share/shared_session.dart), for /state (DECISIONS 671).
   final ValueListenable<Map<String, Object?>?> _session;
 
-  /// Android's network changes (NetworkWatch): the paired laptop is told where this phone is at once (DECISIONS 676).
   StreamSubscription<void>? _network;
 
-  Map<String, Object?>? _sessionWas;
-
-  /// The session's summary to the server; a session that starts also tells the paired laptop where this phone is
-  /// (DECISIONS 678: between nights the app may have been frozen until now).
-  void _sessionChanged() {
-    final now = _session.value, was = _sessionWas;
-    _sessionWas = now;
-    _host?.setSession(now);
-    if (was == null && now != null) unawaited(_host?.tellLaptop());
-  }
-
-  /// The app came to the front again (it may have been frozen in the background): the paired laptop hears where this
-  /// phone is now, so it copies what it missed (DECISIONS 678).
-  void resumed() => unawaited(_host?.tellLaptop());
+  /// The session's summary to the server (/state's `session`).
+  void _sessionChanged() => _host?.setSession(_session.value);
 
   final Future<ShareConfig> Function() load;
   final Future<void> Function(ShareConfig config) save;
@@ -149,10 +140,10 @@ class ShareControl extends ChangeNotifier {
     await _apply();
   });
 
-  /// Pairs with the laptop of [link] (DECISIONS rows 530-539), after the owner tapped Connect. The handshake first
-  /// (the laptop proves the one-time code before this phone's token leaves it); only when it worked is sharing
-  /// switched on, if it was off, and the laptop remembered, so it is told where this phone is from then on. A
-  /// failure changes nothing but a token made for the occasion.
+  /// Pairs with the laptop of [link] (DECISIONS rows 530-539, 753), after the owner tapped Connect. The laptop proves
+  /// the one-time code first; both sides then work out the same key (nothing secret crosses the Wi-Fi). Only when it
+  /// worked is sharing switched on, if it was off, and the laptop remembered. A failure changes nothing but a token
+  /// made for the occasion.
   Future<PairOutcome> pair(PairLink link, {LinkClient? client}) {
     final done = Completer<PairOutcome>();
     unawaited(
@@ -160,20 +151,13 @@ class ShareControl extends ChangeNotifier {
         try {
           var c = await load();
           if (c.token.length < tokenLength) {
-            c = c.withNewToken(); // the laptop needs the token the server will have
+            c = c.withNewToken(); // the server needs a token for the cable and for tools given the code by hand
             await save(c);
             _config = c;
           }
-          final answer = await (client ?? LinkClient()).handshake(
-            host: link.host,
-            port: link.port,
-            via: 'code',
-            secret: link.code,
-            sharePort: c.port,
-            token: c.token,
-          );
+          final answer = await (client ?? LinkClient()).pair(host: link.host, port: link.port, code: link.code, sharePort: c.port);
           final nowMs = _now().millisecondsSinceEpoch;
-          final laptop = PairedLaptop(host: link.host, port: link.port, key: answer.key!, name: answer.name, pairedAtMs: nowMs);
+          final laptop = PairedLaptop(host: link.host, port: link.port, key: answer.key, name: answer.name, pairedAtMs: nowMs);
           _config = (c.activeAt(nowMs) ? c : c.switchedOn(nowMs)).withLaptop(laptop);
           await save(_config);
           await _apply();
@@ -188,7 +172,16 @@ class ShareControl extends ChangeNotifier {
     return done.future;
   }
 
-  /// Forgets the paired laptop: it is told nothing more (its own copy of the token stops working at New code).
+  /// "Share here for 12 hours" (DECISIONS 752): a paired phone also shares on the Wi-Fi it is on now, which is not
+  /// its home; [on] false ends it at once.
+  Future<void> shareHere(bool on) => _serial(() async {
+    final c = await load();
+    _config = on ? c.sharedHere(_now().millisecondsSinceEpoch, _status.net) : c.notHere();
+    await save(_config);
+    await _apply();
+  });
+
+  /// Forgets the paired laptop: its signed requests are refused from now on (the token it never had is not needed).
   Future<void> forgetLaptop() => _serial(() async {
     _config = (await load()).withLaptop(null);
     await save(_config);
@@ -263,25 +256,33 @@ class ShareControl extends ChangeNotifier {
     } catch (_) {}
   }
 
-  /// The line under the switch.
+  /// The line under the switch: whether it shares, where, and when the laptop last copied (DECISIONS 752: this, the
+  /// sheet and the laptop's tray say it, not a notification).
   ShareLine line() {
     final nowMs = _now().millisecondsSinceEpoch;
+    final old = _config.oldLaptop;
     if (!_config.activeAt(nowMs)) {
+      if (old != null && !_config.paired) {
+        return (on: false, text: 'Paired with $old before this update: pair once more (one scan of its code) to share safely.', warn: true, address: null);
+      }
       return (on: false, text: 'Lets your laptop watch the signal and copy the files over your home Wi-Fi.', warn: false, address: null);
     }
     final at = shareAddress(_status);
     final laptop = _config.laptop;
-    final until = laptop != null
-        ? 'paired with ${laptop.name}' // no end time while paired (DECISIONS 675)
-        : 'until ${clockText(DateTime.fromMillisecondsSinceEpoch(_config.offAtMs))}';
+    final copied = copiedText(_status, laptop?.name);
+    if (at != null && laptop != null) {
+      final text = switch (_status.here) {
+        'home' => 'On, on your home Wi-Fi, for ${laptop.name}. $copied',
+        'here' => 'On, on this Wi-Fi until ${clockText(DateTime.fromMillisecondsSinceEpoch(_config.hereUntilMs))} (allowed by you). $copied',
+        _ => 'Paused on this Wi-Fi until ${laptop.name} says it is your home Wi-Fi. Not at home? Address and code: Share here.',
+      };
+      return (on: true, text: text, warn: false, address: at);
+    }
     if (at != null) {
+      final until = 'until ${clockText(DateTime.fromMillisecondsSinceEpoch(_config.offAtMs))}';
       return (
         on: true,
-        text: laptop != null
-            ? (_night ? 'On at $at, $until.' : 'On at $at, $until. The laptop copies while this app is open or records.')
-            : _night
-            ? 'On at $at $until.'
-            : 'On at $at $until. Keep this app open while the laptop copies.',
+        text: _night ? 'On at $at $until.' : 'On at $at $until. Keep this app open while the laptop copies.',
         warn: false,
         address: at,
       );
@@ -314,3 +315,17 @@ class ShareControl extends ChangeNotifier {
 
 /// `07:40`.
 String clockText(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+/// "Last copied by my-laptop at 14:05." (or "on 19 Nov at 14:05" before today), or "Nothing copied yet.".
+String copiedText(ShareStatus s, String? laptop, {DateTime? now}) {
+  if (s.copiedAtMs <= 0) return 'Nothing copied yet.';
+  final at = DateTime.fromMillisecondsSinceEpoch(s.copiedAtMs), today = now ?? DateTime.now();
+  final by = switch (s.copiedBy) {
+    'laptop' => laptop ?? 'the paired laptop',
+    'cable' => 'a computer on the USB cable',
+    _ => 'a device with the code',
+  };
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  final sameDay = at.year == today.year && at.month == today.month && at.day == today.day;
+  return 'Last copied by $by ${sameDay ? '' : 'on ${at.day} ${months[at.month - 1]} '}at ${clockText(at)}.';
+}

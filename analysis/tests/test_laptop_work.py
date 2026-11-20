@@ -552,19 +552,26 @@ def test_the_phone_hears_when_a_work_session_starts_and_ends(tmp_path):
     assert tray2.session is not None
 
 
-def test_the_work_signal_goes_to_the_paired_phone_with_its_token(tmp_path):
-    """POST /work on the phone's Share on Wi-Fi server, with the token from phone_link.py's link.json; an answer in
-    words for the log; the token is never part of it."""
+def test_the_work_signal_goes_to_the_paired_phone_signed(tmp_path):
+    """POST /work on the phone's Share on Wi-Fi server, signed with the key from phone_link.py's link.json
+    (DECISIONS 755: the phone takes it from nobody else); an answer in words for the log; no secret in it."""
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    got: list[tuple[str, str | None, bytes]] = []
+    from test_pull_phone import signed_ok
+    key = "6" * 64
+    got: list[tuple[str, str | None, bytes, bool]] = []
     code = [202]
 
     class Phone(BaseHTTPRequestHandler):
         def do_POST(self):
             n = int(self.headers.get("Content-Length") or 0)
-            got.append((self.path, self.headers.get("Authorization"), self.rfile.read(n)))
-            self.send_response(code[0]); self.send_header("Content-Length", "0"); self.end_headers()
+            body = self.rfile.read(n)
+            reply = signed_ok(self, key, body)
+            got.append((self.path, self.headers.get("Authorization"), body, reply is not None))
+            self.send_response(code[0] if reply else 401)
+            if reply:
+                self.send_header("X-Eeg-Reply", reply)
+            self.send_header("Content-Length", "0"); self.end_headers()
 
         def log_message(self, *a):
             pass
@@ -575,17 +582,19 @@ def test_the_work_signal_goes_to_the_paired_phone_with_its_token(tmp_path):
         assert lw.phone_work_signal(tmp_path, True) == "not paired"
         (tmp_path / "phone").mkdir()
         (tmp_path / "phone" / "link.json").write_text(json.dumps(
-            {"version": 1, "phone": {"address": "127.0.0.1", "port": srv.server_port, "token": "abcdefgh1234"}}))
+            {"version": 2, "key": key, "phone": {"address": "127.0.0.1", "port": srv.server_port}}))
         assert lw.phone_work_signal(tmp_path, True) == "sent"
         assert lw.phone_work_signal(tmp_path, False) == "sent"
-        assert got == [("/work", "Bearer abcdefgh1234", b'{"working": true}'),
-                       ("/work", "Bearer abcdefgh1234", b'{"working": false}')]
+        assert got == [("/work", None, b'{"working": true}', True), ("/work", None, b'{"working": false}', True)]
         code[0] = 503                                     # a night records: the phone does not take it
         out = lw.phone_work_signal(tmp_path, True)
-        assert out == "refused (503)" and "abcdefgh1234" not in out
+        assert out == "refused (503)" and key not in out
     finally:
         srv.shutdown(); srv.server_close()
     assert lw.phone_work_signal(tmp_path, True, timeout=0.5) == "not reachable"
     (tmp_path / "phone" / "link.json").write_text(json.dumps(
-        {"version": 1, "phone": {"address": "8.8.8.8", "port": 8765, "token": "abcdefgh1234"}}))
+        {"version": 2, "key": key, "phone": {"address": "8.8.8.8", "port": 8765}}))
     assert lw.phone_work_signal(tmp_path, True) == "not paired"   # only a local-network phone is ever called
+    (tmp_path / "phone" / "link.json").write_text(json.dumps(
+        {"version": 1, "laptop_key": "k" * 43, "phone": {"address": "127.0.0.1", "port": 8765, "token": "abcdefgh1234"}}))
+    assert lw.phone_work_signal(tmp_path, True) == "not paired"   # an old pairing: one new scan first

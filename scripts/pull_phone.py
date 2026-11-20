@@ -54,13 +54,13 @@ from typing import Callable
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # find import_phone.py even under `python3 -I`
 import import_phone as ip  # noqa: E402  (the layout, the index of copies and the path check are its own)
 import packed  # noqa: E402  (raw files packed after a day: the phone's .f32.gz, the laptop's .f32.xz)
+import phone_auth as pa  # noqa: E402  (the paired laptop's signatures: DECISIONS 751-755)
 
 FORMAT = "eeg-tracker-phone-files"
 VERSION = 1
 RAW = (".f32", ".f32.gz", ".idx", ".log", ".markers.jsonl", ".header.json")  # a file set (docs/data-format.md)
 LIST_TIMEOUT = 600  # the phone may be working out SHA-256 of files it never listed before
 FILE_TIMEOUT = 60
-ACK_PROOF = "eeg-tracker ack v1"  # POST /ack's HMAC: app/lib/recorder/acks.dart ackProof
 ACK_BUDGET = 4 * 1024 ** 3  # bytes hashed again for acks in one pass
 ACK_BATCH = 400  # files per POST /ack (the phone takes up to 256 KB)
 ACK_RETRY_S = 6 * 3600  # an app without /ack is asked again after this long
@@ -71,16 +71,19 @@ class PhoneError(Exception):
 
 
 class Refused(Exception):
-    """The token is wrong or this is not the app: trying again will not help."""
+    """The token or the key is refused, or this is not the app: trying again will not help."""
+
+
+class NotThePhone(Refused):
+    """What answered at the phone's address did not prove the pairing's key: nothing it says is used."""
+
+
+class Paused(PhoneError):
+    """The phone does not share on this Wi-Fi: not its home network and not allowed there by hand (DECISIONS 752)."""
 
 
 class AckRefused(Exception):
     """POST /ack was refused whole: no route (an older app), not paired, or a wrong key."""
-
-
-def ack_proof(key: str, body: bytes) -> str:
-    """HMAC-SHA256 of `eeg-tracker ack v1|` and the body under the pairing's key, in hex (app/test/fixtures/phone_ack.json)."""
-    return hmac.new(key.encode("utf-8"), ACK_PROOF.encode() + b"|" + body, hashlib.sha256).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -119,6 +122,7 @@ class Pass:
     ack_note: str | None = None  # why nothing was acked this pass (not paired, an older app)
     removed: list[str] = field(default_factory=list)  # raw sets that left the phone, their files here
     lost: list[str] = field(default_factory=list)  # raw files the phone removed that this laptop does not hold
+    here: str | None = None  # what the paired phone says of its Wi-Fi: home, here (allowed by hand) or paused
 
     @property
     def problems(self) -> bool:
@@ -135,26 +139,77 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class Phone:
-    """The phone's Share on Wi-Fi server."""
+    """The phone's Share on Wi-Fi server. With the pairing's [key] (scripts/phone_link.py) every request is signed
+    (phone_auth.py) and the token never leaves this laptop; each answer must prove the key too, or it is not the
+    paired phone. [home]: whether this laptop is on the network where it paired, said in each signature. Without a
+    key (a phone shared by hand: --token), the token goes in a header, never in the address."""
 
-    def __init__(self, base: str, token: str) -> None:
+    def __init__(self, base: str, token: str | None = None, *, key: str | None = None,
+                 home: Callable[[], bool] | bool = False) -> None:
         self.base = base.rstrip("/")
         self.token = token
-        self.opener = urllib.request.build_opener(_NoRedirect)
+        self.key = key
+        self._home = home if callable(home) else (lambda: bool(home))
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+
+    def _send(self, path: str, headers: dict[str, str] | None = None, timeout: float = FILE_TIMEOUT,
+              data: bytes | None = None):
+        """The response, or urllib's HTTPError for an error answer; a signed request's answer is checked first."""
+        method = "POST" if data is not None else "GET"
+        h = dict(headers or {})
+        nonce = None
+        if self.key:
+            signed = pa.signed_headers(self.key, method, path, data or b"", home=self._home())
+            nonce = signed[pa.NONCE_H]
+            h.update(signed)
+        elif self.token:
+            h["Authorization"] = f"Bearer {self.token}"
+        req = urllib.request.Request(self.base + path, data=data, method=method, headers=h)
+        try:
+            r = self.opener.open(req, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if nonce is not None and e.code != 401 and not pa.reply_ok(self.key or "", nonce, e.headers.get(pa.REPLY_H)):
+                raise NotThePhone("it did not prove the pairing's key") from e
+            raise
+        except (OSError, urllib.error.URLError) as e:
+            raise PhoneError(f"no answer: {getattr(e, 'reason', e)}") from e
+        if nonce is not None and not pa.reply_ok(self.key or "", nonce, r.headers.get(pa.REPLY_H)):
+            r.close()
+            raise NotThePhone("it did not prove the pairing's key")
+        return r
+
+    @staticmethod
+    def _why(e: urllib.error.HTTPError) -> str | None:
+        try:
+            w = json.loads(e.read().decode("utf-8")).get("error")
+        except (OSError, ValueError, AttributeError):
+            return None
+        return w if isinstance(w, str) else None
 
     def _open(self, path: str, headers: dict[str, str] | None = None, timeout: float = FILE_TIMEOUT,
               data: bytes | None = None):
-        req = urllib.request.Request(self.base + path, data=data, method="POST" if data is not None else "GET",
-                                     headers={"Authorization": f"Bearer {self.token}", **(headers or {})})
         try:
-            return self.opener.open(req, timeout=timeout)
+            return self._send(path, headers, timeout, data)
         except urllib.error.HTTPError as e:
+            why = self._why(e)
+            if e.code == 401:
+                raise Refused(f"the phone refused this laptop's signature ({why})" if self.key and why else
+                              "the phone refused the token") from e
+            if e.code == 403 and why == "not sharing on this Wi-Fi":
+                raise Paused(why) from e
             if e.code in (401, 403):
-                raise Refused("the phone refused the token" if e.code == 401 else
-                              "the phone refused this computer's address (it serves the local network only)") from e
+                raise Refused(f"the phone refused ({why or 'local network only'})") from e
             raise PhoneError(f"the phone answered {e.code} for {path}") from e
-        except (OSError, urllib.error.URLError) as e:
-            raise PhoneError(f"no answer from {self.base} ({getattr(e, 'reason', e)})") from e
+
+    def who(self) -> dict | None:
+        """GET /who (signed only): the app's word that it is there and what it says of its Wi-Fi (`here`: home, here
+        or paused); None when it is not the paired phone's answer."""
+        try:
+            with self._open("/who", timeout=5) as r:
+                m = json.loads(r.read(4096).decode("utf-8"))
+        except (OSError, ValueError, Refused):
+            return None
+        return m if isinstance(m, dict) and m.get("app") == "eeg-tracker" else None
 
     def files(self) -> tuple[list[Listed], list[str]]:
         """The phone's list, and the paths in it that are not usable."""
@@ -189,27 +244,26 @@ class Phone:
             out.append(Listed(p, size, digest, mod, orig, f.get("acked") is True))
         return out, bad
 
-    def ack(self, files: list[dict[str, str]], key: str) -> tuple[list[str], list[dict]]:
-        """POST /ack: (paths the phone took, [{path, why}] it did not). Raises AckRefused when it refused all of it."""
+    def ack(self, files: list[dict[str, str]], key: str | None = None) -> tuple[list[str], list[dict]]:
+        """POST /ack, signed with the pairing's key: (paths the phone took, [{path, why}] it did not). Raises
+        AckRefused when it refused all of it."""
+        if not self.key:
+            raise AckRefused("only the paired laptop acks (no key here)")
         body = json.dumps({"v": 1, "files": files}, separators=(",", ":")).encode()
-        headers = {"Content-Type": "application/json", "X-Eeg-Ack": ack_proof(key, body)}
-        req = urllib.request.Request(self.base + "/ack", data=body, method="POST",
-                                     headers={"Authorization": f"Bearer {self.token}", **headers})
         try:
-            with self.opener.open(req, timeout=FILE_TIMEOUT) as r:
+            with self._send("/ack", {"Content-Type": "application/json"}, FILE_TIMEOUT, body) as r:
                 m = json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
+            why = self._why(e)
             if e.code == 401:
-                raise Refused("the phone refused the token") from e
-            try:
-                why = json.loads(e.read().decode("utf-8")).get("error")
-            except (OSError, ValueError, AttributeError):
-                why = None
+                raise Refused(f"the phone refused this laptop's signature ({why})") from e
+            if e.code == 403 and why == "not sharing on this Wi-Fi":
+                raise Paused(why) from e
             raise AckRefused({404: "the phone's app is older than acks (update it)",
                               403: f"the phone refused the ack ({why or 'local network only'})"}.get(
                                   e.code, f"the phone answered {e.code} to the ack")) from e
-        except (OSError, ValueError) as e:
-            raise PhoneError(f"the ack did not reach the phone ({e})") from e
+        except ValueError as e:
+            raise PhoneError(f"the ack's answer could not be read ({e})") from e
         acked = [a for a in m.get("acked") or [] if isinstance(a, str)] if isinstance(m, dict) else []
         refused = [r for r in m.get("refused") or [] if isinstance(r, dict)] if isinstance(m, dict) else []
         return acked, refused
@@ -395,8 +449,9 @@ def pull(phone: Phone, dest: Path, *, raw_only: bool = False, now: datetime | No
     """One pass: the phone's list, then everything the laptop lacks; with the pairing's [key], then the acks."""
     pairing = key
     now = now or datetime.now().astimezone()
+    here = phone.who() if phone.key else None
     listed, bad = phone.files()
-    rep = Pass(listed=len(listed), refused=bad)
+    rep = Pass(listed=len(listed), refused=bad, here=here.get("here") if here and isinstance(here.get("here"), str) else None)
     index, state = ip.Index(dest, False), State(dest)
     replaced = dest / "phone" / "replaced" / ip._stamp(now)
     try:
@@ -472,7 +527,7 @@ def pull(phone: Phone, dest: Path, *, raw_only: bool = False, now: datetime | No
         state.save()
         index.save()
         if rep.changed or rep.problems:
-            _record(rep, dest, phone.base, now)
+            _record(rep, dest, "paired" if phone.key else "by code", now)
     return rep
 
 
@@ -581,12 +636,13 @@ def acknowledge(phone: Phone, dest: Path, listed: list[Listed], key: str, rep: P
             by = {a["path"]: a["sha256"] for a in todo}
             with f.open("a", encoding="utf-8") as out:
                 out.write(json.dumps({"acked": datetime.fromtimestamp(t).astimezone().isoformat(timespec="seconds"),
-                                      "phone": phone.base, "files": [{"path": p, "sha256": by.get(p)} for p in acked]})
+                                      "files": [{"path": p, "sha256": by.get(p)} for p in acked]})
                           + "\n")
 
 
-def _record(rep: Pass, dest: Path, base: str, now: datetime) -> None:
-    line = dict(pulled=now.isoformat(timespec="seconds"), phone=base, listed=rep.listed, bytes=rep.fetched,
+def _record(rep: Pass, dest: Path, how: str, now: datetime) -> None:
+    """One line of pulls.jsonl: how the phone was reached (paired, or by code), never its address (DECISIONS 757)."""
+    line = dict(pulled=now.isoformat(timespec="seconds"), phone=how, listed=rep.listed, bytes=rep.fetched,
                 new=len(rep.new), grown=len(rep.grown), checked=len(rep.checked), updated=len(rep.updated),
                 kept=len(rep.kept), damaged=len(rep.damaged), waiting=len(rep.waiting), refused=len(rep.refused),
                 acked=len(rep.acked), removed=len(rep.removed), lost=len(rep.lost))
@@ -640,19 +696,23 @@ def summary(rep: Pass, dest: Path, now: datetime) -> list[str]:
 
 
 def pairing_key(dest: Path) -> str | None:
-    """The key of this laptop's pairing with the phone (`<dest>/phone/link.json`, scripts/phone_link.py); None without."""
+    """The key of this laptop's pairing with the phone (`<dest>/phone/link.json` version 2, scripts/phone_link.py);
+    None without one (a pairing of the first version needs one new scan)."""
     try:
-        k = json.loads((dest / "phone" / "link.json").read_text(encoding="utf-8")).get("laptop_key")
-    except (OSError, ValueError, AttributeError):
+        raw = json.loads((dest / "phone" / "link.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return None
-    return k if isinstance(k, str) and len(k) >= 32 else None
+    k = raw.get("key") if isinstance(raw, dict) and raw.get("version") == 2 else None
+    return k if isinstance(k, str) and pa.KEY.fullmatch(k) else None
 
 
 def main(argv: list[str] | None = None, out: Callable[[str], object] = print,
          sleep: Callable[[float], object] = time.sleep) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("phone", help="the address the app shows, e.g. http://192.168.1.23:8765")
-    ap.add_argument("--token", default=os.environ.get("EEG_PHONE_TOKEN"), help="the token the app shows (or EEG_PHONE_TOKEN)")
+    ap.add_argument("phone", nargs="?", help="the address the app shows, e.g. http://192.168.1.23:8765 (default: the "
+                                             "paired phone's, from <dest>/phone/link.json)")
+    ap.add_argument("--token", default=os.environ.get("EEG_PHONE_TOKEN"),
+                    help="the code the app shows (or EEG_PHONE_TOKEN), for a phone not paired with this laptop")
     ap.add_argument("--every", type=float, default=2, help="minutes between passes (default 2)")
     ap.add_argument("--once", action="store_true", help="one pass, then exit")
     ap.add_argument("--dest", type=Path, default=ip.DEFAULT_DEST, help="where to copy (default: <repo>/_local)")
@@ -663,12 +723,26 @@ def main(argv: list[str] | None = None, out: Callable[[str], object] = print,
                     help="only the raw recordings in recordings/ and recordings-diy/ (.f32 .idx .log .markers.jsonl "
                          ".header.json, and the phone's packed .f32.gz)")
     a = ap.parse_args(argv)
-    if not a.token:
-        out("Give the token the app shows: --token <t> (or set EEG_PHONE_TOKEN).")
+    paired = pairing_key(a.dest)
+    if a.phone is None:
+        import phone_link  # the paired phone's address and this laptop's home network
+        p = phone_link.paired_phone(a.dest / "phone" / "link.json")
+        if p is None:
+            out("No phone is paired with this laptop: pair it (python3 scripts/phone_link.py), or give its address "
+                "and the code the app shows (--token or EEG_PHONE_TOKEN).")
+            return 2
+        home = p[3]
+        phone = Phone(f"http://{p[0]}:{p[1]}", key=p[2], home=lambda: home is not None and phone_link.home_id() == home)
+    elif a.token:
+        base = a.phone if "://" in a.phone else f"http://{a.phone}"
+        phone = Phone(base.split("?")[0], a.token)
+    elif paired:  # the paired phone at another address (adb forward): signed with the key
+        base = a.phone if "://" in a.phone else f"http://{a.phone}"
+        phone = Phone(base.split("?")[0], key=paired, home=False)
+    else:
+        out("Give the code the app shows: --token <t> (or set EEG_PHONE_TOKEN), or pair the phone with this laptop.")
         return 2
-    base = a.phone if "://" in a.phone else f"http://{a.phone}"
-    phone = Phone(base.split("?")[0], a.token)
-    key = None if a.no_ack else pairing_key(a.dest)
+    key = None if a.no_ack or phone.key is None else phone.key
     while True:
         now = datetime.now().astimezone()
         code = 0
@@ -678,7 +752,7 @@ def main(argv: list[str] | None = None, out: Callable[[str], object] = print,
                 out(line)
             code = 1 if rep.problems else 0
         except Refused as e:
-            out(f"Cannot pull: {e}. Check the address and token on the phone (Your data, Share on Wi-Fi).")
+            out(f"Cannot pull: {e}. Check the address and code on the phone (Your data, Share on Wi-Fi).")
             return 2
         except PhoneError as e:
             out(f"{now.strftime('%H:%M')} {e}" + ("" if a.once else f"; trying again in {a.every:g} min"))

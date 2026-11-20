@@ -426,7 +426,7 @@ void main() {
     await until(() => host!.status.up);
     expect(host!.status.addresses, ['192.168.77.5']);
     expect(shareAddress(host!.status), '192.168.77.5:$port');
-    expect(log.single, 'sharing on Wi-Fi on: 192.168.77.5 port $port');
+    expect(log.single, 'sharing on Wi-Fi on: port $port, 1 Wi-Fi address'); // no address in a log (DECISIONS 757)
     expect((await ask(port, '/files')).code, 200); // 127.0.0.1: adb forward
   });
 
@@ -443,8 +443,8 @@ void main() {
     await until(() => host!.status.addresses.isNotEmpty);
     expect(log, [
       'sharing on Wi-Fi on: no Wi-Fi address yet, port 8765',
-      'sharing on Wi-Fi: no Wi-Fi address found (android: vpn tun0 10.10.10.1/30; interfaces: failed: x)',
-      'sharing on Wi-Fi now at 192.168.1.5 port 8765',
+      'sharing on Wi-Fi: no Wi-Fi address found (android: vpn tun0 x.x.x.x/30; interfaces: failed: x)',
+      'sharing on Wi-Fi: the Wi-Fi network changed (port 8765, 1 Wi-Fi address)',
     ]);
   });
 
@@ -467,13 +467,12 @@ void main() {
     const s = RecorderStatus(phase: Phase.recording, nightSamples: 250 * 60 * 12);
     expect(notificationText(s), 'Recording · 12 min');
     expect(notificationText(s, shareDown), 'Recording · 12 min');
-    const up = (up: true, addresses: ['192.168.1.23', '127.0.0.1'], port: 8765, note: '');
+    final up = shareStatusWith(shareDown, up: true, addresses: ['192.168.1.23', '127.0.0.1'], port: 8765, here: 'home', net: '192.168.1.0/24', copiedAtMs: 5, copiedBy: 'laptop');
     expect(notificationText(s, up), 'Recording · 12 min · shared on Wi-Fi at 192.168.1.23:8765');
-    expect(notificationText(s, (up: true, addresses: const ['127.0.0.1'], port: 8765, note: '')), 'Recording · 12 min · shared on Wi-Fi');
-    final back = shareStatusFrom(shareMessage(up))!;
-    expect(back.up, isTrue);
+    expect(notificationText(s, shareStatusWith(shareDown, up: true, addresses: const ['127.0.0.1'])), 'Recording · 12 min · shared on Wi-Fi');
+    final back = shareStatusFrom(shareMessage(up))!; // the night recorder's word reaches the screen whole
     expect(back.addresses, ['192.168.1.23', '127.0.0.1']);
-    expect(back.port, 8765);
+    expect((back.up, back.port, back.here, back.net, back.copiedAtMs, back.copiedBy), (true, 8765, 'home', '192.168.1.0/24', 5, 'laptop'));
     expect(shareStatusFrom({'kind': 'status'}), isNull);
     expect(shareStatusFrom({'kind': 'share', 'config': <String, Object?>{}}), isNull);
   });

@@ -103,12 +103,6 @@ void main() {
   List<String> names(Directory d) => (d.listSync().whereType<File>().map((f) => f.uri.pathSegments.last).toList())..sort();
 
   group('the proof and the acks', () {
-    test('the proof is the one in the fixture, which the laptop computes too', () {
-      final fx = jsonDecode(File('test/fixtures/phone_ack.json').readAsStringSync()) as Map<String, Object?>;
-      expect(ackProof(fx['key']! as String, utf8.encode(fx['body']! as String)), fx['proof']);
-      expect(ackProof('${fx['key']}x', utf8.encode(fx['body']! as String)), isNot(fx['proof']));
-    });
-
     test('an ack is kept only for the bytes the phone holds: a wrong hash, a file still written or one not shared are refused', () async {
       final stem = run(DateTime(2026, 11, 17, 23));
       final f32 = File('${rec.path}/$stem.f32');

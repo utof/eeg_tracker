@@ -26,6 +26,7 @@ from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # find night_files.py even under `python3 -I`
 import local_http  # noqa: E402
+import phone_auth as pa  # noqa: E402
 try:
     import night_files as nf  # scripts/night_files.py: the results jobs (standard library only)
 except Exception:
@@ -37,7 +38,10 @@ KINDS = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": 
 
 
 def make_handler(rec_host: str, rec_port: int, rec_dir: Path = HERE.parent / "_local" / "recordings",
-                 token: str | None = None):
+                 token: str | None = None, *, key: str | None = None, home=None):
+    """[token]: a phone shared by hand (sent in a header). [key]: the paired phone (scripts/phone_link.py): every
+    request passed on is signed with it, the token is never used, and an answer that does not prove the key is
+    not passed back (DECISIONS 751); [home] says whether this laptop is on the network where it paired."""
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -104,15 +108,23 @@ def make_handler(rec_host: str, rec_port: int, rec_dir: Path = HERE.parent / "_l
             if method == "POST":
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
             stream = urlsplit(self.path).path.rstrip("/").endswith("/stream")
+            nonce = None
             try:
                 c = http.client.HTTPConnection(rec_host, rec_port, timeout=None if stream else 10)
                 headers = {"Content-Type": self.headers.get("Content-Type", "text/plain")}
-                if token:
+                if key:
+                    signed = pa.signed_headers(key, method, self.path, body or b"", home=bool(home and home()))
+                    nonce = signed[pa.NONCE_H]
+                    headers.update(signed)
+                elif token:
                     headers["Authorization"] = f"Bearer {token}"  # the phone's Share on Wi-Fi asks for it
                 c.request(method, self.path, body=body, headers=headers)
                 r = c.getresponse()
             except OSError:
                 self._away(); return
+            if nonce is not None and r.status != 401 and not pa.reply_ok(key or "", nonce, r.getheader(pa.REPLY_H)):
+                c.close()  # not the paired phone: nothing it says reaches the page
+                self._send(502, b'{"error": "not the paired phone"}', "application/json"); return
             if not stream:
                 data = r.read(); self._send(r.status, data, r.getheader("Content-Type", "application/octet-stream"))
                 c.close(); return

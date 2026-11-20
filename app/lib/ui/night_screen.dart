@@ -379,7 +379,6 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _resumedAtMs = DateTime.now().millisecondsSinceEpoch;
-      _share.resumed(); // the paired laptop hears from this phone again (DECISIONS 678)
       unawaited(_refresh());
     }
   }

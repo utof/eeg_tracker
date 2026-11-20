@@ -105,14 +105,14 @@ void main() {
   }
 
   group('token and address', () {
-    test('no token, a wrong token: 401; header, X-EEG-Token and ?token= all work', () async {
+    test('no token, a wrong token: 401; only the Authorization header carries it, never X-EEG-Token or ?token= (DECISIONS 754)', () async {
       expect((await ask('/state', tok: null)).code, 401);
       expect((await ask('/state', tok: 'abcdefghjkmx')).code, 401);
       expect((await ask('/state', tok: '')).code, 401);
       expect((await ask('/files/settings.json', tok: null)).code, 401);
       expect((await ask('/state')).code, 200);
-      expect((await ask('/state', tok: null, headers: {'X-EEG-Token': token})).code, 200);
-      expect((await ask('/state?token=$token', tok: null)).code, 200);
+      expect((await ask('/state', tok: null, headers: {'X-EEG-Token': token})).code, 401);
+      expect((await ask('/state?token=$token', tok: null)).code, 401);
     });
 
     test('a client that is not on the local network is refused, token or not', () async {

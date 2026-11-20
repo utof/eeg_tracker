@@ -262,10 +262,18 @@ def test_the_phone_hears_whether_the_session_is_in_a_meeting(tmp_path):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     got: list[bytes] = []
 
+    from test_pull_phone import signed_ok
+    key = "6" * 64
+
     class Phone(BaseHTTPRequestHandler):
         def do_POST(self):
-            got.append(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
-            self.send_response(202); self.send_header("Content-Length", "0"); self.end_headers()
+            body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            got.append(body)
+            reply = signed_ok(self, key, body)
+            self.send_response(202 if reply else 401)
+            if reply:
+                self.send_header("X-Eeg-Reply", reply)
+            self.send_header("Content-Length", "0"); self.end_headers()
 
         def log_message(self, *a):
             pass
@@ -275,7 +283,7 @@ def test_the_phone_hears_whether_the_session_is_in_a_meeting(tmp_path):
     try:
         (tmp_path / "phone").mkdir()
         (tmp_path / "phone" / "link.json").write_text(json.dumps(
-            {"version": 1, "phone": {"address": "127.0.0.1", "port": srv.server_port, "token": "abcdefgh1234"}}))
+            {"version": 2, "key": key, "phone": {"address": "127.0.0.1", "port": srv.server_port}}))
         assert lw.phone_work_signal(tmp_path, True, meeting=True) == "sent"
         assert lw.phone_work_signal(tmp_path, False, meeting=False) == "sent"
     finally:

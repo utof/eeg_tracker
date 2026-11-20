@@ -32,18 +32,19 @@ class LocalServer(ThreadingHTTPServer):
         self.server_port = int(port)
 
 
-def own_hosts(handler: BaseHTTPRequestHandler) -> set[str]:
-    """The `Host` values this server answers to: loopback names and the address it is bound to, with its port."""
+def own_hosts(handler: BaseHTTPRequestHandler, extra: tuple[str, ...] = ()) -> set[str]:
+    """The `Host` values this server answers to: loopback names and the address it is bound to (and [extra]
+    addresses, such as the one phone_link.py's QR code names), with its port."""
     host, port = handler.server.server_address[:2]
-    names = {"127.0.0.1", "localhost", "[::1]"}
+    names = {"127.0.0.1", "localhost", "[::1]"} | {e for e in extra if e}
     if host not in ("", "0.0.0.0", "::"):
         names.add(f"[{host}]" if ":" in str(host) else str(host))
     return {f"{n}:{port}" for n in names} | ({n for n in names} if port == 80 else set())
 
 
-def refused(handler: BaseHTTPRequestHandler) -> str | None:
+def refused(handler: BaseHTTPRequestHandler, extra_hosts: tuple[str, ...] = ()) -> str | None:
     """Why this request is turned away (a word for the answer), or None to answer it."""
-    ok = own_hosts(handler)
+    ok = own_hosts(handler, extra_hosts)
     host = (handler.headers.get("Host") or "").strip().lower()
     if host not in ok:
         return "wrong host"
@@ -64,9 +65,9 @@ def refuse(handler: BaseHTTPRequestHandler, why: str) -> None:
     handler.close_connection = True
 
 
-def guard(handler: BaseHTTPRequestHandler) -> bool:
+def guard(handler: BaseHTTPRequestHandler, extra_hosts: tuple[str, ...] = ()) -> bool:
     """True when the request may go on; else it is answered with 403 here."""
-    why = refused(handler)
+    why = refused(handler, extra_hosts)
     if why is None:
         return True
     refuse(handler, why)  # a body is not read: the connection closes after the answer
