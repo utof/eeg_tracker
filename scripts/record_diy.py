@@ -91,6 +91,7 @@ class Recording:
         self.hub, self.montage, self.vref, self.port, self.seconds = hub, montage, vref, port, seconds
         self.tracker = db.Tracker()
         self.link_desc = "?"
+        self.senders_seen = 0
         self.early: list[str] = []  # log lines before a file set is open, written into it when it opens
         self.prev_stamp: str | None = None; self.prev_reason = ""
         self.started: float | None = None  # first frame of the run (--seconds counts from here)
@@ -162,9 +163,11 @@ class Recording:
     def on_input(self, reader: db.Reader, frames: list[db.Frame], lines: list[str], now: float) -> None:
         """One poll of the link: firmware text, new UDP senders, the damage counts, then the frames."""
         self.on_lines(lines)
-        for sender in reader.take_senders():
-            self.note(f"datagrams from {sender}")
-            if len(reader.link.senders) > 1:
+        for _ in reader.take_senders():  # counted, never named: a log line carries no network address
+            self.senders_seen += 1
+            self.note("datagrams from the board on the Wi-Fi" if self.senders_seen == 1
+                      else f"datagrams from sender number {self.senders_seen}")
+            if self.senders_seen > 1:
                 self.note("more than one sender on this port: is another board or program sending here?")
         bad, skipped = reader.take_counts()
         self.bad += bad; self.skipped += skipped

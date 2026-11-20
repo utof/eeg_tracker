@@ -198,7 +198,8 @@ class _Receiver {
     }
     final who = from.address;
     if (senders.add(who)) {
-      _line('datagrams from $who');
+      // counted, never named: a log line carries no network address
+      _line(senders.length == 1 ? 'datagrams from the board on the Wi-Fi' : 'datagrams from sender number ${senders.length}');
       if (senders.length > 1) _line('more than one sender on this port: is another board or program sending here?');
     }
     sender = who;

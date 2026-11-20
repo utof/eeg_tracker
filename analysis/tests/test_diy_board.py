@@ -245,6 +245,27 @@ def test_the_board_hub_refuses_the_brainbit_reports(tmp_path):
         hub.server.shutdown()
 
 
+def test_the_log_counts_the_boards_senders_and_never_names_one(tmp_path):
+    class Link:
+        senders = {"192.168.1.50", "192.168.1.77"}
+
+    class Reader:
+        link = Link()
+
+        def take_senders(self): return ["192.168.1.50", "192.168.1.77"]
+        def take_counts(self): return 0, 0
+
+    hub = recorder_hub.Hub(tmp_path, names=("O1", "O2", "Fz", "Fp1"), reports=False)
+    rec = record_diy.Recording(hub, record_diy.load_montage(None), 4.5, 9000, 0)
+    hub.open_files("2026-11-19-010203")
+    rec.on_input(Reader(), [], [], 1000.0)
+    hub.close()
+    log = (tmp_path / "2026-11-19-010203.log").read_text()
+    assert "datagrams from the board on the Wi-Fi" in log and "datagrams from sender number 2" in log
+    assert "more than one sender on this port" in log
+    assert "192.168" not in log
+
+
 # ---- safety: the host only reads -------------------------------------------------------------------------------
 def test_the_host_never_writes_to_the_board():
     """The bench firmware's only inputs are the operator's answers R, V (voltages measured) and T / N (mode). The

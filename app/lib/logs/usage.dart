@@ -3,7 +3,8 @@
 //
 //   view     the screen shown now (`screen`: a page's widget name such as `MeditationScreen`, or `tab:Signal`)
 //   app      the app came to the front or left it (`state`: front / back)
-//   tap      a control tapped: `screen`, `control` (its kind), `label` (its own words, digits as #), `id` (its key)
+//   tap      a control tapped: `screen`, `control` (its kind), `label` (its own words, digits as #, never words the
+//            owner typed: own_text.dart), `id` (its key)
 //   scroll   a scroll by finger: `screen`, `axis`, `dir`, `px`, `ms`, `reach` (how far down the page, 0-1)
 //   drag     a drag that scrolled nothing (the 3D head, a slider): `screen`, `dir`, `px`, `ms`, `fingers`
 //   feature  a feature started or stopped: `name`, `on`, `s` (how long it ran, at the stop)
