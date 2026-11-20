@@ -72,8 +72,11 @@ class Phone {
   static Future<bool> exportFolderUsable(String uri) async =>
       await _export.invokeMethod<bool>('folderUsable', {'uri': uri}) ?? false;
 
-  /// Keeps the screen on (or lets it sleep again) while the app is in front.
-  static Future<void> keepScreenOn({required bool on}) => _window.invokeMethod<void>('keepScreenOn', {'on': on});
+  /// Keeps the screen on (or lets it sleep again) while the app is in front. [session] false: not a session screen
+  /// (Share on Wi-Fi's first minutes, an export), so Android's side still asks sharp-hours questions and lets the
+  /// headband watcher check (MainActivity.kt `SharpPrompts.screenHeld`).
+  static Future<void> keepScreenOn({required bool on, bool session = true}) =>
+      _window.invokeMethod<void>('keepScreenOn', {'on': on, if (!session) 'session': false});
 
   /// Turns this window's brightness down to the lowest (the dream catcher in bed), or back to the phone's setting.
   static Future<void> dimScreen({required bool on}) => _window.invokeMethod<void>('dim', {'on': on});

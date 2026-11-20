@@ -104,7 +104,7 @@ class _ExportScreenState extends State<ExportScreen> {
       _outcome = null;
       _progress = const ExportProgress(0, 0, 0, 0, '');
     });
-    await Phone.keepScreenOn(on: true).catchError((_) {});
+    await Phone.keepScreenOn(on: true, session: false).catchError((_) {});
     final outcome = await runExport(
       filesDir: files,
       target: ChannelExportTarget(folder),
@@ -114,7 +114,7 @@ class _ExportScreenState extends State<ExportScreen> {
       },
       stopRequested: () => _stop,
     );
-    await Phone.keepScreenOn(on: false).catchError((_) {});
+    await Phone.keepScreenOn(on: false, session: false).catchError((_) {});
     if (!mounted) return;
     setState(() {
       _progress = null;

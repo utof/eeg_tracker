@@ -1,6 +1,7 @@
 // The keeper that lets a session go on with the phone locked (DECISIONS rows 190-196), against a fake Android side.
 import 'dart:async';
 
+import 'package:eeg_tracker/phone.dart';
 import 'package:eeg_tracker/session_keeper.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -150,5 +151,22 @@ void main() {
     expect(calls, hasLength(n));
     await tapStop(); // nothing holds: nothing happens
     expect((stops, sessionStops), (1, 1));
+  });
+
+  test('the screen kept on for sharing or an export is not a session screen; a session screen is', () async {
+    // MainActivity.kt takes a screen kept on as a session on screen (no sharp-hours question, no headband check by
+    // the watcher), except when it is said not to be one
+    const window = MethodChannel('eeg_tracker/window');
+    final sent = <Object?>[];
+    messenger.setMockMethodCallHandler(window, (call) async => sent.add(call.arguments));
+    addTearDown(() => messenger.setMockMethodCallHandler(window, null));
+    await Phone.keepScreenOn(on: true);
+    await Phone.keepScreenOn(on: true, session: false);
+    await Phone.keepScreenOn(on: false, session: false);
+    expect(sent, [
+      {'on': true},
+      {'on': true, 'session': false},
+      {'on': false, 'session': false},
+    ]);
   });
 }

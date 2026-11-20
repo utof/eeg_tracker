@@ -281,7 +281,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     load: loadShareConfig,
     save: saveShareConfig,
     sendToRecorder: FlutterForegroundTask.sendDataToTask,
-    keepScreenOn: (on) => Phone.keepScreenOn(on: on),
+    keepScreenOn: (on) => Phone.keepScreenOn(on: on, session: false),
     keepAlive: (on, offAtMs) => PhoneSessionKeeper.keepInBackground(
       on ? KeepSpec(title: 'Sharing on Wi-Fi', text: shareKeepText(offAtMs), focus: false) : null,
       onStop: () => unawaited(_share.setOn(false)),

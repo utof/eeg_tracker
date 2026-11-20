@@ -136,7 +136,9 @@ class MainActivity : FlutterActivity() {
                 "keepScreenOn" -> runOnUiThread {
                     if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    SharpPrompts.screenHeld = on // every session screen keeps the screen on: no question then
+                    // every session screen keeps the screen on: no question and no headband check then; sharing's
+                    // first minutes and an export say they are not a session
+                    if (call.argument<Boolean>("session") != false) SharpPrompts.screenHeld = on
                     result.success(null)
                 }
                 "dim" -> runOnUiThread {
