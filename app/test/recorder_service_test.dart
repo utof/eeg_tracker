@@ -2,6 +2,7 @@
 // night recorder: the platform channels it uses (the app's phone channel, the plugin's methods, shared preferences)
 // are answered here; the headband is a finder that never finds one. Share on Wi-Fi runs for real (isolate, socket).
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:eeg_tracker/recorder/headband.dart';
@@ -144,6 +145,33 @@ void main() {
     expect(saved.active, isTrue);
     expect(saved.lightsOffMs, inInclusiveRange(sent, sent + 1000));
     await h.onDestroy(DateTime.now(), false);
+  });
+
+  test('a night the headband watcher started makes no sound cues, neither the lucid nor the memory cues', () async {
+    // The night's one cue factory is the one-kind-a-night choice of the lucid and the memory cues (DECISIONS 507);
+    // automatic means recording and silent analysis only (DECISIONS 604), so neither kind may be made.
+    expect(RecorderTaskHandler().cues, nightCuesWith);
+    final made = <String>[];
+    RecorderTaskHandler cueing() => RecorderTaskHandler(
+      finder: NoBand.new,
+      cues: (dir, _) {
+        made.add(dir);
+        return (_) => null;
+      },
+    );
+    // the watcher's start keeps its lines for the night's log under this key (startRecorderService's autoNotes)
+    await FlutterForegroundTask.saveData(key: 'autoStart', value: jsonEncode(['started automatically: test']));
+    final auto = cueing();
+    await auto.onStart(DateTime.now(), TaskStarter.developer);
+    expect(made, isEmpty, reason: 'sound cues were made for a night the watcher started');
+    await auto.onDestroy(DateTime.now(), false);
+
+    // a start by hand removes the key: tonight's cues are made as before
+    await FlutterForegroundTask.removeData(key: 'autoStart');
+    final byHand = cueing();
+    await byHand.onStart(DateTime.now(), TaskStarter.developer);
+    expect(made, ['${files.path}/recordings']);
+    await byHand.onDestroy(DateTime.now(), false);
   });
 
   test('a wedged SDK: the native restart ends the process; Dart exits only if it is still alive 2 s later', () async {
