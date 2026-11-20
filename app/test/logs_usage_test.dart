@@ -5,12 +5,14 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:eeg_tracker/auto/log.dart' show AutoLog;
 import 'package:eeg_tracker/logs/activity.dart';
 import 'package:eeg_tracker/logs/files.dart';
 import 'package:eeg_tracker/logs/log.dart';
 import 'package:eeg_tracker/logs/usage.dart';
 import 'package:eeg_tracker/logs/usage_report.dart';
 import 'package:eeg_tracker/logs/usage_watch.dart';
+import 'package:eeg_tracker/session_keeper.dart';
 import 'package:eeg_tracker/ui/home_tabs.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show FrameTiming;
@@ -174,6 +176,38 @@ void main() {
       final f = [for (final e in usage()) if (e['ev'] == 'feature') e];
       expect(f.first, allOf(containsPair('name', 'signal'), containsPair('on', true)));
       expect(f.last, allOf(containsPair('on', false), containsPair('s', 180)));
+    });
+
+    testWidgets('a session held and let go marks its feature and the headband; the keeper logs it', (tester) async {
+      final k = PhoneSessionKeeper();
+      await k.hold(const KeepSpec(title: 'Meditation', headband: true));
+      expect(Activity.active, ['headband', 'session:Meditation']);
+      await k.hold(const KeepSpec(title: 'Meditation', text: 'Settled', headband: true)); // a re-hold: still one
+      await k.release();
+      expect(Activity.active, isEmpty);
+      final app = [
+        for (final f in logFiles(tmp, kind: LogKind.app))
+          for (final l in f.readAsLinesSync()) jsonDecode(l) as Map<String, Object?>,
+      ];
+      expect([for (final l in app) l['msg']], ['session held: Meditation', 'session let go']);
+    });
+
+    test('the headband watcher\'s question and answer become hints; its check\'s ohms a contact reading', () {
+      final log = AutoLog(Directory('${tmp.path}/auto-start'));
+      final t = DateTime(2026, 11, 20, 23);
+      log.add(t, 'check', {'trigger': 'bedtime', 'ohms': {'O1': 150000.0}, 'guess': 'night'});
+      log.add(t, 'question', {'kind': 'night', 'text': 'Start the night?'});
+      log.add(t, 'answer', {'kind': 'night', 'answer': 'yes', 'after_s': 42.5});
+      log.add(t, 'answer', {'kind': 'night', 'answer': 'none'});
+      final hints = [for (final e in usage()) if (e['ev'] == 'hint') e];
+      expect([for (final h in hints) h['step']], ['shown', 'answered', 'ignored']);
+      expect(hints[1], allOf(containsPair('answer', 'yes'), containsPair('after_s', 43), containsPair('guess', 'night')));
+      final metrics = [
+        for (final f in logFiles(tmp, kind: LogKind.metrics))
+          for (final l in f.readAsLinesSync()) jsonDecode(l) as Map<String, Object?>,
+      ];
+      expect(metrics.single, allOf(containsPair('kind', 'contact'), containsPair('source', 'auto')));
+      expect(log.events(), hasLength(4), reason: 'its own log is unchanged');
     });
 
     test('frame timings per screen: frames, slow, janky, the worst', () {
