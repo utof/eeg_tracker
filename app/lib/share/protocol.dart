@@ -346,5 +346,6 @@ String statusWord(String phase) => switch (phase) {
   _ => 'not recording',
 };
 
-/// `http://192.168.1.23:8765/?token=...`: what the QR code holds.
-String shareUrl(String address, int port, String token) => 'http://$address:$port/?token=$token';
+/// `http://192.168.1.23:8765/`: what the sheet's QR code holds. Never the token (DECISIONS 754): a link's address
+/// ends up in browser history, proxies and logs.
+String shareUrl(String address, int port) => 'http://$address:$port/';

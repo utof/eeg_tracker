@@ -91,6 +91,18 @@ class Phone {
   /// Turns this window's brightness down to the lowest (the dream catcher in bed), or back to the phone's setting.
   static Future<void> dimScreen({required bool on}) => _window.invokeMethod<void>('dim', {'on': on});
 
+  /// Keeps this window out of screenshots, screen recordings and the recent-apps preview (Android's FLAG_SECURE)
+  /// while [on]: the Share on Wi-Fi sheet shows the code (DECISIONS 754).
+  static Future<void> secureScreen({required bool on}) async {
+    try {
+      await _window.invokeMethod<void>('secure', {'on': on});
+    } on PlatformException {
+      // the sheet still shows
+    } on MissingPluginException {
+      // not Android
+    }
+  }
+
   static Future<PhoneSnapshot> snapshot() async =>
       PhoneSnapshot(await _channel.invokeMethod<Map<Object?, Object?>>('snapshot') ?? const {});
 

@@ -722,7 +722,7 @@ void main() {
     test('the laptop\'s words for the phases, and the address the QR code holds', () {
       expect(statusWord('recording'), 'recording');
       expect(statusWord('idle'), 'not recording');
-      expect(shareUrl('192.168.1.23', 8765, 'abc'), 'http://192.168.1.23:8765/?token=abc');
+      expect(shareUrl('192.168.1.23', 8765), 'http://192.168.1.23:8765/'); // never the token (DECISIONS 754)
     });
   });
 }

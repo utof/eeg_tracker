@@ -899,9 +899,13 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
             until: DateTime.fromMillisecondsSinceEpoch(_share.config.offAtMs),
             night: _running,
             laptop: _share.config.laptop,
+            here: _share.status.here,
+            hereUntil: _share.config.hereUntilMs > 0 ? DateTime.fromMillisecondsSinceEpoch(_share.config.hereUntilMs) : null,
+            copied: copiedText(_share.status, _share.config.laptop?.name),
           ),
           onNewToken: _share.newToken,
           onForgetLaptop: _share.forgetLaptop,
+          onShareHere: _share.shareHere,
         );
       },
     ),
