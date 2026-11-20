@@ -37,7 +37,8 @@ void main() {
       keepScreenOn: (on) async => awake.add(on),
       keepAlive: (on, offAtMs) async => alive.add(on ? 'on until ${clockText(DateTime.fromMillisecondsSinceEpoch(offAtMs))}' : 'off'),
       clock: () => now,
-      host: (dir, onChange) => ShareHost(filesDir: dir, onLog: (_) {}, onChange: onChange, entry: fakeServer),
+      host: (dir, onChange, wifiLock) =>
+            ShareHost(filesDir: dir, onLog: (_) {}, onChange: onChange, entry: fakeServer, wifiLock: wifiLock),
     );
   });
   tearDown(() async {

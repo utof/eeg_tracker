@@ -286,6 +286,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       on ? KeepSpec(title: 'Sharing on Wi-Fi', text: shareKeepText(offAtMs), focus: false) : null,
       onStop: () => unawaited(_share.setOn(false)),
     ),
+    // the app's own server between nights holds the Wi-Fi lock too (DECISIONS 612); the recorder holds its own
+    wifiLock: (on) => Phone.wifiLock(on: on, who: 'screen'),
   )..addListener(_onScoring);
 
   /// Pairing with a laptop by one scan (DECISIONS rows 530-539): its QR code opens the app with a pair link.
@@ -889,6 +891,10 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
         await Phone.openSettings('xiaomiBatterySaver');
       case FixAction.xiaomiDone:
         await FlutterForegroundTask.saveData(key: _xiaomiDoneKey, value: true);
+      case FixAction.wifiSettings:
+        await Phone.openSettings('wifi');
+      case FixAction.vpnSettings:
+        await Phone.openSettings('vpn');
     }
     await _refresh();
   }
@@ -936,7 +942,14 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       battery: s?.battery,
       rssi: s?.rssi,
       contactOhms: s?.contactOhms ?? (showLast ? last.contactOhms : const {}),
-      checks: phoneChecks(phone: _phone, nearbyAllowed: _nearby, xiaomiDone: _xiaomiDone, bluetooth: !diy),
+      // Wi-Fi matters tonight with Share on Wi-Fi on or the DIY board (its datagrams), DECISIONS 613
+      checks: phoneChecks(
+        phone: _phone,
+        nearbyAllowed: _nearby,
+        xiaomiDone: _xiaomiDone,
+        bluetooth: !diy,
+        wifi: diy || _share.on,
+      ),
       nightsOnPhone: _nights.length,
       exportLine: _running || _pending == null
           ? null

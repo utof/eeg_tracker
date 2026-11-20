@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'export/exporter.dart';
 import 'recorder/battery.dart';
 import 'recorder/headband.dart';
+import 'recorder/wifi_watch.dart' show WifiState;
 import 'share/protocol.dart' show WifiNets;
 
 const MethodChannel _channel = MethodChannel('eeg_tracker/phone');
@@ -41,6 +42,14 @@ class PhoneSnapshot {
 
   /// HyperOS or MIUI version name when the phone is a Xiaomi, else null.
   String? get xiaomiOs => (_m['hyperOs'] as String?) ?? (_m['miui'] as String?);
+
+  /// Android's old "Wi-Fi sleep policy" setting where the phone still has it (0: Wi-Fi sleeps with the screen off,
+  /// 1: not while charging, 2: never); null when it is not set. Xiaomi's "Keep Wi-Fi on during sleep" may write it
+  /// (not verified, DECISIONS 613).
+  int? get wifiSleepPolicy => (_m['wifiSleepPolicy'] as num?)?.toInt();
+
+  /// A VPN is on (its app's Always-on and "Block connections without VPN" cannot be read by an app).
+  bool get vpnActive => _m['vpnActive'] == true;
 }
 
 class Phone {
@@ -82,7 +91,7 @@ class Phone {
       PhoneSnapshot(await _channel.invokeMethod<Map<Object?, Object?>>('snapshot') ?? const {});
 
   /// Opens a settings page: `batteryOptimization`, `appDetails`, `notifications`, `bluetooth`,
-  /// `batterySaver`, `xiaomiAutostart`, `xiaomiBatterySaver`. Falls back to the app's details page.
+  /// `batterySaver`, `xiaomiAutostart`, `xiaomiBatterySaver`, `wifi`, `vpn`. Falls back to the app's details page.
   static Future<bool> openSettings(String page) async =>
       await _channel.invokeMethod<bool>('openSettings', {'page': page}) ?? false;
 
@@ -94,9 +103,17 @@ class Phone {
   static Future<PhoneBattery?> battery() async =>
       PhoneBattery.fromMap(await _channel.invokeMapMethod<Object?, Object?>('battery'));
 
-  /// Share on Wi-Fi during a night: holds (or lets go of) a Wi-Fi lock, so Wi-Fi keeps answering with the screen
-  /// off (PhoneChannel.kt). Works from the recorder's engine too.
-  static Future<void> wifiLock({required bool on}) => _channel.invokeMethod<void>('wifiLock', {'on': on});
+  /// Share on Wi-Fi (and the DIY board's datagrams): [who] asks for (or lets go of) the process's one Wi-Fi lock,
+  /// held while anyone asks (PhoneChannel.kt): `screen` for the app's own server between nights, `recorder` for the
+  /// recorder's service during a night, so a hand-over at a night's start or Stop never drops it. Works from both
+  /// engines.
+  static Future<void> wifiLock({required bool on, required String who}) =>
+      _channel.invokeMethod<void>('wifiLock', {'on': on, 'who': who});
+
+  /// The phone's Wi-Fi now for the night's log (lib/recorder/wifi_watch.dart): on it or not, link speed, signal, band,
+  /// the default route, the screen, Doze and the Wi-Fi lock; never the network's name. Works from both engines.
+  static Future<WifiState?> wifiState() async =>
+      WifiState.fromMap(await _channel.invokeMapMethod<Object?, Object?>('wifiState'));
 
   /// This phone's IPv4 addresses on Wi-Fi with their prefix (`192.168.1.5/24`), as Android itself sees its networks
   /// (VPNs and mobile data left out), and a note of what each source returned (PhoneChannel.kt). Works from the
@@ -124,7 +141,8 @@ class ChannelPhoneProbe implements PhoneProbe {
     return 'android ${s.sdkInt}, battery-opt exempt ${yn(s.ignoringBatteryOptimizations)}, '
         'background restricted ${yn(s.backgroundRestricted)}, power save ${yn(s.powerSaveMode)}, '
         'standby bucket ${s.standbyBucket ?? '?'}, notifications ${yn(s.notificationsEnabled)}'
-        '${s.xiaomiOs != null ? ', xiaomi ${s.xiaomiOs}' : ''}';
+        '${s.xiaomiOs != null ? ', xiaomi ${s.xiaomiOs}' : ''}'
+        '${s.wifiSleepPolicy != null ? ', wifi sleep policy ${s.wifiSleepPolicy}' : ''}, vpn ${yn(s.vpnActive)}';
   }
 
   @override

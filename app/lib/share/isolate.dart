@@ -257,7 +257,8 @@ class ShareHost {
   final MarkerResult? Function(String text)? onMarker;
   final void Function(ShareStatus status)? onChange;
 
-  /// Keeps Wi-Fi awake with the screen off (PhoneChannel.kt); only the night recorder passes it.
+  /// Keeps Wi-Fi awake while the server runs (PhoneChannel.kt): true after it starts, false when it ends however it
+  /// ends. The recorder's service and the app's own server between nights pass it, each under its own name.
   final Future<void> Function(bool on)? wifiLock;
 
   /// Android's own answer about the phone's Wi-Fi address (`Phone.wifiNets`, PhoneChannel.kt), asked before the

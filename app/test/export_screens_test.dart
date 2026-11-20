@@ -230,6 +230,8 @@ void main() {
         expect(find.textContaining('scripts/pull_phone.py http://${address ?? '127.0.0.1'}:8765 --token kq7m2xwp9dfh'), findsOneWidget);
         // between nights a notification keeps the app answering in the background (DECISIONS row 589)
         expect(find.textContaining('"Sharing on Wi-Fi" notification'), name == 'app' ? findsOneWidget : findsNothing);
+        // the laptop losing the phone loses nothing (the owner's night of 2026-11-20, DECISIONS 614)
+        expect(find.textContaining('If the laptop cannot reach the phone, nothing is lost'), findsOneWidget);
       });
     }
   }

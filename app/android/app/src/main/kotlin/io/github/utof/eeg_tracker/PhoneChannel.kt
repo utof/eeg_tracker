@@ -15,6 +15,7 @@ import android.media.MediaPlayer
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
@@ -47,19 +48,32 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
         }
 
         /**
-         * Share on Wi-Fi during a night (lib/share/isolate.dart): one Wi-Fi lock for the whole process, so
-         * Wi-Fi keeps answering the laptop while the screen is off. Not counted: "on" twice is held once, "off"
-         * always lets go. Android drops it by itself when the process ends.
+         * Share on Wi-Fi (lib/share/isolate.dart) and the DIY board's datagrams: one Wi-Fi lock for the whole
+         * process, held while any engine asks ([WifiHolders]: "screen" between nights, "recorder" during a night,
+         * DECISIONS 612). Android drops it by itself when the process ends; an engine that ends lets go of its own.
+         *
+         * The mode (DECISIONS 610): WIFI_MODE_FULL_HIGH_PERF is the only mode that ever counted with the screen off
+         * (Wi-Fi out of power save while connected). From Android 14 the platform turns it into
+         * WIFI_MODE_FULL_LOW_LATENCY by default (AOSP WifiLockManager, device config wifi/high_perf_lock_deprecated,
+         * default true), which only counts while the app is in front with the screen on. No app-held lock keeps
+         * Android 14's Wi-Fi out of power save with the screen off; on Android 10-13 this one still does, and on 14
+         * it helps while the app is open. Wi-Fi itself stays connected with the screen off unless a phone setting
+         * turns it off (README "Share on Wi-Fi": the settings to check).
          */
         private var wifiLock: WifiManager.WifiLock? = null
+        private val holders = WifiHolders()
 
+        /** Every change of who holds it goes to logcat (tag eeg_tracker): a handful of lines a night. */
         @Synchronized
-        fun holdWifi(context: Context, on: Boolean) {
-            if (on) {
+        fun holdWifi(context: Context, who: String, on: Boolean) {
+            val before = holders.names()
+            val want = holders.set(who, on)
+            if (holders.names() != before) {
+                Log.i("eeg_tracker", "wifi lock: $who ${if (on) "on" else "off"}, held for [${holders.names().joinToString()}]")
+            }
+            if (want) {
                 if (wifiLock?.isHeld == true) return
                 val wm = context.applicationContext.getSystemService(WifiManager::class.java) ?: return
-                // HIGH_PERF is the one mode that also counts with the screen off; Android 14 marks it deprecated
-                // and some builds treat it as LOW_LATENCY (screen on only). Harmless either way.
                 @Suppress("DEPRECATION")
                 val lock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "eeg_tracker:share")
                 lock.setReferenceCounted(false)
@@ -88,9 +102,10 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
                 "openSettings" -> result.success(openSettings(call.argument<String>("page") ?: "appDetails"))
                 "exitReasons" -> result.success(exitReasons(call.argument<Number>("sinceMs")?.toLong() ?: 0L))
                 "wifiLock" -> {
-                    holdWifi(context, call.argument<Boolean>("on") == true)
+                    holdWifi(context, call.argument<String>("who") ?: "recorder", call.argument<Boolean>("on") == true)
                     result.success(null)
                 }
+                "wifiState" -> result.success(wifiState())
                 "restartProcess" -> {
                     restartProcess(call.argument<Number>("delayMs")?.toInt() ?: 5000)
                     result.success(null)
@@ -222,6 +237,88 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
         return mapOf("nets" to nets.toList(), "note" to note)
     }
 
+    /**
+     * The phone's Wi-Fi now, for the night's log (lib/recorder/wifi_watch.dart, DECISIONS 611), read every 10 s by
+     * the recorder: switched on, on a Wi-Fi network (not a VPN over it), link speed, signal and frequency, which
+     * network the default route uses ("none" also when Android blocks the app's network), the screen, Doze and this
+     * process's Wi-Fi lock. The network's name and address are never read (no location permission is needed or used).
+     */
+    private fun wifiState(): Map<String, Any?> {
+        val m = HashMap<String, Any?>()
+        val wm = context.getSystemService(WifiManager::class.java)
+        val cm = context.getSystemService(ConnectivityManager::class.java)
+        val pm = context.getSystemService(PowerManager::class.java)
+        m["enabled"] = try {
+            wm?.isWifiEnabled
+        } catch (e: Exception) {
+            null
+        }
+        var connected = false
+        var info: WifiInfo? = null
+        try {
+            @Suppress("DEPRECATION")
+            for (n in cm?.allNetworks ?: emptyArray()) {
+                val caps = cm?.getNetworkCapabilities(n) ?: continue
+                if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) continue
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
+                connected = true
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) info = caps.transportInfo as? WifiInfo
+                break
+            }
+            val default = cm?.let { c -> c.activeNetwork?.let { c.getNetworkCapabilities(it) } }
+            m["route"] = WifiFacts.route(default?.let { transports(it) })
+        } catch (e: Exception) {
+            m["route"] = "?"
+        }
+        if (connected) {
+            val wi = info ?: try {
+                @Suppress("DEPRECATION")
+                wm?.connectionInfo
+            } catch (e: Exception) {
+                null
+            }
+            if (wi != null) {
+                m["linkMbps"] = WifiFacts.linkMbps(wi.linkSpeed)
+                m["rssi"] = WifiFacts.rssi(wi.rssi)
+                m["freqMhz"] = WifiFacts.freqMhz(wi.frequency)
+            }
+        }
+        m["connected"] = connected
+        m["screenOn"] = pm?.isInteractive
+        m["idle"] = pm?.isDeviceIdleMode
+        m["lock"] = wifiLock?.isHeld == true
+        return m
+    }
+
+    private fun transports(c: NetworkCapabilities): Set<String> = buildSet {
+        if (c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) add("wifi")
+        if (c.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) add("cell")
+        if (c.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) add("vpn")
+        if (c.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) add("ethernet")
+        if (c.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH)) add("bluetooth")
+    }
+
+    /** A VPN applies to this app (its Always-on and lockdown settings cannot be read by an app since Android 12). */
+    private fun vpnActive(): Boolean? = try {
+        val cm = context.getSystemService(ConnectivityManager::class.java)
+        @Suppress("DEPRECATION")
+        (cm?.allNetworks ?: emptyArray()).any { cm?.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true }
+    } catch (e: Exception) {
+        null
+    }
+
+    /**
+     * Android's old Wi-Fi sleep policy (0: Wi-Fi sleeps with the screen off, 1: not while charging, 2: never); the
+     * platform no longer uses it, Xiaomi's "Keep Wi-Fi on during sleep" may still write it (not verified). Null when
+     * the phone does not have it.
+     */
+    private fun wifiSleepPolicy(): Int? = try {
+        @Suppress("DEPRECATION")
+        WifiFacts.sleepPolicy(Settings.Global.getInt(context.contentResolver, Settings.Global.WIFI_SLEEP_POLICY, -1))
+    } catch (e: Exception) {
+        null
+    }
+
     /** The app's private folder (filesDir/recordings): other apps cannot read it, Android encrypts it. */
     private fun recordingsDir(): String? {
         val dir = recordingsFolder(context)
@@ -244,6 +341,8 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
         m["bluetoothOn"] = bluetoothOn()
         m["hyperOs"] = getprop("ro.mi.os.version.name")
         m["miui"] = getprop("ro.miui.ui.version.name")
+        m["wifiSleepPolicy"] = wifiSleepPolicy()
+        m["vpnActive"] = vpnActive()
         return m
     }
 
@@ -316,6 +415,8 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
             )
             "bluetooth" -> listOf(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
             "batterySaver" -> listOf(Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS))
+            "wifi" -> listOf(Intent(Settings.ACTION_WIFI_SETTINGS))
+            "vpn" -> listOf(Intent(Settings.ACTION_VPN_SETTINGS))
             // Xiaomi screens: component names from open-source helpers, not checked on HyperOS (research note 5).
             "xiaomiAutostart" -> listOf(
                 Intent().setComponent(
