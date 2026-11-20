@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
+import 'auto/task.dart' show runAutoWatch;
 import 'dream/speech_model.dart' show parakeetNotice;
 import 'recorder/recorder_service.dart';
 import 'sharp/prompts.dart';
@@ -27,6 +28,10 @@ void main() {
   });
   runApp(const EegTrackerApp());
 }
+
+/// The headband watcher's own engine (AutoWatchService.kt, lib/auto/task.dart; DECISIONS 600).
+@pragma('vm:entry-point')
+Future<void> autoWatchMain() => runAutoWatch();
 
 class EegTrackerApp extends StatefulWidget {
   const EegTrackerApp({super.key, this.sharp});

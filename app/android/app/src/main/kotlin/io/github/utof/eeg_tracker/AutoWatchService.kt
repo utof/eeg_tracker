@@ -188,7 +188,8 @@ class AutoWatchService : Service() {
             task = MethodChannel(messenger, "eeg_tracker/auto_task").apply { setMethodCallHandler(::onTaskCall) }
             engine = e
             e.dartExecutor.executeDartEntrypoint(
-                DartExecutor.DartEntrypoint(loader.findAppBundlePath(), "package:eeg_tracker/auto/task.dart", "autoWatchMain"),
+                // in main.dart: an entry point outside the libraries main reaches is left out of the build
+                DartExecutor.DartEntrypoint(loader.findAppBundlePath(), "autoWatchMain"),
             )
         }
     }

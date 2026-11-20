@@ -1,4 +1,4 @@
-// The watcher's own engine (DECISIONS 600): AutoWatchService.kt runs [autoWatchMain] in a Flutter engine of its own,
+// The watcher's own engine (DECISIONS 600): AutoWatchService.kt runs [runAutoWatch] in a Flutter engine of its own,
 // inside a short foreground service ("Checking whether the headband is on"), whenever Android says the headband came
 // near, a bedtime check rings, the laptop says work started, or the app is opened. It takes the triggers one by one,
 // runs the watcher (controller.dart) with the real headband, phone and starters, arms the next bedtime checks, and
@@ -23,8 +23,9 @@ import 'store.dart';
 
 const MethodChannel _task = MethodChannel('eeg_tracker/auto_task');
 
-@pragma('vm:entry-point')
-Future<void> autoWatchMain() async {
+/// The engine's body; its entry point is `autoWatchMain` in main.dart (an entry point must sit in a library the app's
+/// main reaches, or the build leaves it out).
+Future<void> runAutoWatch() async {
   WidgetsFlutterBinding.ensureInitialized();
   initRecorderService(); // the night recorder's options, in case this engine starts it
   await AutoTask().run();
