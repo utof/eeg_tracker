@@ -141,6 +141,71 @@ def test_a_helper_that_stopped_is_listed_and_the_rest_is_information(tmp_path: P
     assert "  helpers       " in pnc.render(s)
 
 
+WIFI_START = "wifi connected, 866 Mbps, -58 dBm, 5 GHz; default route wifi; screen on; idle no; lock held"
+
+
+def test_wifi_off_while_sharing_says_when_and_what_to_check(tmp_path: Path) -> None:
+    """The owner's night of 2026-11-20: the laptop lost the phone soon after the screen went off. The Wi-Fi lines
+    (app/lib/recorder/wifi_watch.dart) say from when to when the phone itself was off Wi-Fi."""
+    run = PhoneRun(T, seconds=600, night_end=True, hum_t3=False, flat_t4=False,
+                   head=["sharing on Wi-Fi on: 192.168.1.5 port 8765", WIFI_START],
+                   extra=[(130, "wifi connected, 866 Mbps, -60 dBm, 5 GHz; default route wifi; screen off; idle no; "
+                                "lock held"),
+                          (250, "wifi not connected; default route cell; screen off; idle yes; lock held"),
+                          (300, "wifi unreadable: PlatformException(phone, x)"),
+                          (490, "wifi connected, 433 Mbps, -71 dBm, 2.4 GHz; default route vpn over wifi; screen off; "
+                                "idle no; lock held")])
+    write_run(tmp_path / "recordings", run)
+    s = pnc.check(tmp_path, NIGHT, signal=False)
+    assert s["unknown"] == []
+    w = s["wifi"]
+    assert [(round(a - T.timestamp()), round(b - T.timestamp()), what) for a, b, what in w["off"]] == [
+        (250, 490, "not connected, screen off, default route cell")]
+    assert (w["lines"], w["unreadable"], w["dbm"], w["shared"]) == (4, 1, (-71, -58), True)
+    text = pnc.render(s)
+    assert "  Wi-Fi         off from 23:04 to 23:08 (not connected, screen off, default route cell)" in text
+    assert any(f.startswith("Wi-Fi was off from 23:04 to 23:08 while sharing was on") for f in s["fixes"]), s["fixes"]
+    assert s["verdict"] == "Good night for the recorder"  # the recording itself did not suffer
+
+
+def test_wifi_still_off_at_the_end_and_connected_all_night(tmp_path: Path) -> None:
+    off = PhoneRun(T, seconds=600, night_end=True, hum_t3=False, flat_t4=False, head=[WIFI_START],
+                   extra=[(250, "wifi off; default route cell; screen off; idle yes; lock not held")])
+    write_run(tmp_path / "a" / "recordings", off)
+    s = pnc.check(tmp_path / "a", NIGHT, signal=False)
+    assert s["wifi"]["off"][0][2] == "switched off, screen off, default route cell"
+    end = hm_of(s["last_line"])
+    assert f"  Wi-Fi         off from 23:04 until the end ({end}; switched off, screen off, default route cell)" in \
+        pnc.render(s)
+    assert not any(f.startswith("Wi-Fi was off") for f in s["fixes"])  # sharing was off: nothing to mirror
+
+    on = PhoneRun(T, seconds=600, night_end=True, hum_t3=False, flat_t4=False, head=[WIFI_START],
+                  extra=[(130, "wifi connected, 866 Mbps, -61 dBm, 5 GHz; default route wifi; screen off; idle yes; "
+                               "lock held")])
+    write_run(tmp_path / "b" / "recordings", on)
+    s = pnc.check(tmp_path / "b", NIGHT, signal=False)
+    assert s["wifi"]["off"] == []
+    assert "  Wi-Fi         connected all night (2 lines; signal -61 to -58 dBm)" in pnc.render(s)
+
+
+def test_the_settings_line_keeps_the_wifi_sleep_policy_and_the_vpn() -> None:
+    rest = ("34, battery-opt exempt yes, background restricted no, power save no, standby bucket 10, notifications yes, "
+            "xiaomi OS1.0, wifi sleep policy 0, vpn yes")
+    got = pnc.settings_of(rest)
+    assert (got["wifi sleep policy"], got["vpn"], got["xiaomi"]) == ("0", "yes", "OS1.0")
+
+
+def test_a_night_from_an_app_without_wifi_lines(tmp_path: Path) -> None:
+    write_run(tmp_path / "recordings", PhoneRun(T, seconds=600, night_end=True))
+    s = pnc.check(tmp_path, NIGHT, signal=False)
+    assert s["wifi"] is None
+    assert "  Wi-Fi         not logged (an app from before 2026-11-20)" in pnc.render(s)
+
+
+def hm_of(t: float) -> str:
+    return datetime.fromtimestamp(t).strftime("%H:%M")
+
+
 def test_too_short_a_night_is_not_trustworthy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pnc, "MIN_NIGHT_H", 2.0)
     write_run(tmp_path / "recordings", PhoneRun(T, seconds=120, night_end=True))
@@ -333,6 +398,9 @@ PHONE_LINES = [
     f"connected BB Black {ADDRESS} serial  battery null% signal unknown (no scan)",
     "phone android 34, battery-opt exempt yes, background restricted no, power save no, standby bucket 10, "
     "notifications yes, xiaomi OS1.0",
+    # since 2026-11-20 (DECISIONS 613): Android's old Wi-Fi sleep policy when the phone has it, and a VPN
+    "phone android 34, battery-opt exempt yes, background restricted no, power save no, standby bucket 10, "
+    "notifications yes, xiaomi OS1.0, wifi sleep policy 2, vpn yes",
     "phone battery 87% charge 3612345 uAh current -310250 uA unplugged temp 31.2 C",
     "phone battery ?% charge ? uAh current ? uA plugged ? temp ? C",
     "phone battery 87% charge 3612345 uAh current 310250 uA plugged usb temp 31.2 C",
@@ -426,6 +494,14 @@ PHONE_LINES = [
     "sharing on Wi-Fi on: 192.168.1.23:8765",
     "sharing on Wi-Fi off",
     "sharing on Wi-Fi stopped by an error: SocketException",
+] + [  # the phone's Wi-Fi, on every change and every 30 minutes (app/lib/recorder/wifi_watch.dart, DECISIONS 611)
+    "wifi connected, 866 Mbps, -58 dBm, 5 GHz; default route wifi; screen off; idle no; lock held",
+    "wifi connected, 2.4 GHz; default route vpn over wifi; screen on; idle no; lock not held",
+    "wifi connected; default route none; screen ?; idle ?; lock held",
+    "wifi not connected; default route cell; screen off; idle yes; lock held",
+    "wifi not connected; default route vpn over cell; screen off; idle yes; lock held",
+    "wifi off; default route none; screen off; idle yes; lock not held",
+    "wifi unreadable: PlatformException(phone, x)",
 ]
 OWN_LINES = [  # our own connection's notes (app/lib/headband/own/), in the same .log
     "driver own Bluetooth LE (lib/headband/own, universal_ble); service 6e400001; device {}; mtu 517",
@@ -501,6 +577,16 @@ def test_every_line_the_app_writes_has_a_sample(path: str, call: str) -> None:
     samples = PHONE_LINES + OWN_LINES
     missing = [s for s in starts if not any(x.startswith(s) for x in samples)]
     assert missing == []
+
+
+def test_the_apps_wifi_lines_have_samples() -> None:
+    """Every Wi-Fi line wifi_watch.dart can write starts like one of the samples above."""
+    text = (ROOT / "app/lib/recorder/wifi_watch.dart").read_text()
+    starts = [x.split("$")[0] for x in re.findall(r"'(wifi [^']*)'", text)]
+    assert len(starts) >= 2, "no 'wifi ...' lines found in wifi_watch.dart: has the code moved?"
+    assert [x for x in starts if not any(line.startswith(x) for line in PHONE_LINES)] == []
+    states = re.findall(r"'(connected|not connected|off)'", text)
+    assert sorted(set(states)) == ["connected", "not connected", "off"]
 
 
 def test_the_apps_own_battery_and_packet_lines_have_samples() -> None:

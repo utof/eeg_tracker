@@ -54,6 +54,8 @@ class PhoneRun:
     hum_t3: bool = True
     flat_t4: bool = True
     log: list[tuple[float, str]] | None = None  # the whole log instead (seconds after the stamp, line)
+    extra: list[tuple[float, str]] = field(default_factory=list)  # (seconds after the stamp, line): lines anywhere
+    # in the run, such as the Wi-Fi lines (lib/recorder/wifi_watch.dart)
     app_counts: str | None = None  # the app's packet line ("N samples, missing ..."), the night's; else this run's
 
     @property
@@ -151,6 +153,7 @@ def log_lines(run: PhoneRun, n: int) -> list[tuple[float, str]]:
         lines.append((end + 1.2, "phone battery summary: 1% in 0.2 h = 5.00 %/h, 40 mAh = 200 mAh/h"))
     after = run.data_at + run.seconds
     lines += [(after + d, x) for d, x in run.after]
+    lines += run.extra
     return sorted(lines, key=lambda x: x[0])
 
 

@@ -14,7 +14,8 @@ stop"), and a night is made of one source's recordings only. `--source laptop` c
 
 For that night it reads every gap in the data (from the `.idx` arrival times) with the log's reason for it, the
 packet counter in the `.f32` (lost samples per hour), the sample rate, drops and reconnect tries, restarts of the app
-by Android, the phone and headband batteries, contact, the phone's sleep report and, when numpy is there (as under
+by Android, when the phone was off Wi-Fi (Share on Wi-Fi cannot reach the laptop then), the phone and headband
+batteries, contact, the phone's sleep report and, when numpy is there (as under
 `uv run --project analysis`), flat, railed and 50 Hz hum per channel. `--compare` puts a laptop night's numbers next
 to it. Standard library only, apart from that optional numpy part. It only reads files.
 
@@ -61,6 +62,7 @@ FLAT_UV, RAIL_UV = 1.4, 390_000.0  # analysis/eeg_detectors.py: raw range in a s
 HUM_SOME, HUM_HIGH = 20, 200  # scripts/live_page.html: power at 49-51 Hz against 30-45 Hz
 GOOD_OHMS, FAIR_OHMS = 1e6, 2.5e6  # app/lib/recorder/contact.dart (row 51, planning values)
 BAD_SHARE = 0.10  # a channel flat or railed this share of the night is worth fixing
+WIFI_OFF_S = 120  # Wi-Fi off this long while sharing is worth fixing (a planning value)
 
 # ---- the log --------------------------------------------------------------------------------------------------------
 # Every line the recorders write. P = the phone app (app/lib/recorder/night_recorder.dart, battery.dart,
@@ -136,6 +138,13 @@ RULES = [(k, re.compile(p)) for k, p in [
     # P: an IO or store error ends one run, never the night (DECISIONS 390): storage full, a broken night store
     ("error", r"the run ended on an unexpected error: .*; the night goes on|could not save the newest data: .*|"
               r"could not save the night state: .*; the recording goes on"),
+    # P: the phone's Wi-Fi on every change and every 30 minutes (app/lib/recorder/wifi_watch.dart, DECISIONS 611): on
+    # it or not, link speed, signal and band, which network the default route uses, the screen, Doze ("idle") and the
+    # app's Wi-Fi lock. The network's name is never written.
+    ("wifi", r"wifi (?P<state>connected|not connected|off)(?:, (?P<mbps>\d+) Mbps)?(?:, (?P<dbm>-?\d+) dBm)?"
+             r"(?:, (?P<ghz>[\d.]+) GHz)?; default route (?P<route>[^;]+); screen (?P<screen>on|off|\?); "
+             r"idle (?P<idle>yes|no|\?); lock (?P<lock>held|not held)"),
+    ("wifi_unreadable", r"wifi unreadable: (?P<err>.*)"),  # P
     # P: the night's live helpers and their markers (the drift-off detector and hands-free, rows 182 and 247; the
     # smart alarm, 230-236; the lucid cues, 300-309; their one sleep model, 330) and Share on Wi-Fi (220-229). Their
     # problems (a helper stopped, or could not start or ring) are listed under "helpers"; the rest is information.
@@ -145,7 +154,7 @@ RULES = [(k, re.compile(p)) for k, p in [
 HELPER_PROBLEM = re.compile(r"\bstopped(?: by an error)?: |could not")
 PHONE_ONLY = {"phone_settings", "phone_battery", "battery_summary", "try", "reconnected", "service_restart",
               "prev_exit", "direct_off", "drop", "packets", "packets_end", "stuck", "out_of_range", "answered_out",
-              "no_start", "error", "mending", "try_rescan", "lost_own_stopped"}
+              "no_start", "error", "mending", "try_rescan", "lost_own_stopped", "wifi", "wifi_unreadable"}
 LAPTOP_ONLY = {"live_page", "info", "laptop_drop", "laptop_stuck", "contact_recheck", "reconnected_old",
                "reconnect_failed_old", "lost_ble"}
 STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?) (.*)$")
@@ -649,6 +658,33 @@ def contact_numbers(evs: list[Event], runs: list[Run]) -> dict:
                 failed=len(failed))
 
 
+WIFI_WORD = {"not connected": "not connected", "off": "switched off"}
+
+
+def wifi_numbers(evs: list[Event]) -> dict | None:
+    """The phone's Wi-Fi through the night, from its Wi-Fi lines: each stretch off it (from the first line that says so
+    to the next that says connected; None when still off at the last line) with what the first line said, the
+    signal, and whether sharing was on. None for a night of an app without these lines."""
+    lines = [e for e in evs if e.kind == "wifi"]
+    if not lines:
+        return None
+    off: list[tuple[float, float | None, str]] = []
+    went: tuple[float, str] | None = None
+    for e in lines:
+        if e.g["state"] == "connected":
+            if went is not None:
+                off.append((went[0], e.t, went[1]))
+                went = None
+        elif went is None:
+            went = (e.t, f"{WIFI_WORD[e.g['state']]}, screen {e.g['screen']}, default route {e.g['route']}")
+    if went is not None:
+        off.append((went[0], None, went[1]))
+    dbm = [int(e.g["dbm"]) for e in lines if "dbm" in e.g]
+    return dict(lines=len(lines), off=off, dbm=(min(dbm), max(dbm)) if dbm else None,
+                unreadable=sum(e.kind == "wifi_unreadable" for e in evs),
+                shared=any(e.kind == "helper" and e.g["text"].startswith("sharing on Wi-Fi on") for e in evs))
+
+
 def find_report(report_dirs: list[Path], name: str, source: str) -> tuple[Path, dict] | None:
     for d in report_dirs:
         p = d / f"{name}.report.json"
@@ -789,7 +825,7 @@ def analyse(runs: list[Run], source: str, name: str, report_dirs: list[Path], si
         laptop_stop=next((e.t for e in reversed(evs) if e.kind == "stopped"), None) if source == "laptop" else None,
         app_packets=next((e.g for e in reversed(evs) if e.kind in ("packets_end", "packets")), None),
         settings=next((settings_of(e.g["rest"]) for e in reversed(evs) if e.kind == "phone_settings"), None),
-        battery=battery_numbers(evs), contact=contact_numbers(evs, runs),
+        battery=battery_numbers(evs), contact=contact_numbers(evs, runs), wifi=wifi_numbers(evs),
         rssi=[e.g["signal"] for e in evs if e.kind == "connected" and "signal" in e.g],
         report=report_numbers(find_report(report_dirs, name, source), runs),
         signal=signal_numbers(data_runs) if signal else None, signal_tried=signal,
@@ -957,6 +993,14 @@ def _setup_issues(s: dict, issues: list) -> None:
     if ph and not ph["plugged"] and ph["per_hour"] is not None and ph["per_hour"] > 5:
         issues.append((32, f"The phone used {ph['per_hour']:.1f} % an hour (about {ph['per_hour'] * 8:.0f} % for "
                        "8 hours): charge it overnight.", None))
+    w = s["wifi"]
+    if s["source"] == "phone" and w and w["shared"]:
+        long = [(a, b) for a, b, _ in w["off"] if (b or s["last_line"]) - a >= WIFI_OFF_S]
+        if long:
+            when = "; ".join(f"from {hm(a)} to {hm(b)}" if b else f"from {hm(a)} until the end" for a, b in long)
+            issues.append((33, f"Wi-Fi was off {when} while sharing was on, so the laptop could not mirror the night "
+                           "then (nothing is lost: the night is on the phone). Check the phone's Wi-Fi sleep settings "
+                           "(app/README.md, Share on Wi-Fi).", None))
     if s["unknown"]:
         issues.append((25, f"{len(s['unknown'])} log lines this check does not know (first: "
                        f"'{s['unknown'][0][:90]}'): teach scripts/phone_night_check.py.", None))
@@ -1056,6 +1100,7 @@ def render(s: dict) -> str:
             out.append(f"    process ended {e.g['when'][11:19]} {e.g['reason']}{desc}")
         if s["direct_off"]:
             out.append("  direct        off after a restart during a direct connection (scans only)")
+        out.append("  Wi-Fi         " + wifi_text(s))
     else:
         out.append(f"  runs          {s['runs']} recorder runs ({s['data_runs']} with data)")
     if s["killed"]:
@@ -1113,6 +1158,19 @@ def render(s: dict) -> str:
     out += ["", f"Log: {s['lines']} lines read, " + (f"{len(unk)} not understood, e.g. '{unk[0][:100]}'" if unk
                                                        else "all understood.")]
     return "\n".join(out)
+
+
+def wifi_text(s: dict) -> str:
+    """`off from 03:25 to 07:40 (not connected, screen off, default route cell)`, or `connected all night (...)`."""
+    w = s["wifi"]
+    if w is None:
+        return "not logged (an app from before 2026-11-20)"
+    failed = f"; {plural(w['unreadable'], 'reading')} failed" if w["unreadable"] else ""
+    if not w["off"]:
+        sig = f"; signal {w['dbm'][0]} to {w['dbm'][1]} dBm" if w["dbm"] else ""
+        return f"connected all night ({plural(w['lines'], 'line')}{sig}{failed})"
+    return "; ".join(f"off from {hm(a)} to {hm(b)} ({what})" if b is not None else
+                     f"off from {hm(a)} until the end ({hm(s['last_line'])}; {what})" for a, b, what in w["off"]) + failed
 
 
 def _render_signal(s: dict) -> list[str]:
