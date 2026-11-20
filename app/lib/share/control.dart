@@ -15,10 +15,13 @@ import '../phone.dart';
 import 'isolate.dart';
 import 'link.dart';
 import 'protocol.dart';
+import 'shared_session.dart';
 
-/// The notification's words while the app keeps itself running to share between nights.
-String shareKeepText(int offAtMs) =>
-    'Your laptop can copy the files until ${clockText(DateTime.fromMillisecondsSinceEpoch(offAtMs))}. Stop turns it off.';
+/// The notification's words while the app keeps itself running to share between nights. [offAtMs] -1: a laptop is
+/// paired and sharing has no end time (DECISIONS 675).
+String shareKeepText(int offAtMs, [String? laptop]) => offAtMs < 0
+    ? '${laptop ?? 'Your laptop'} can copy the files and see the headband while they are paired. Stop turns it off.'
+    : 'Your laptop can copy the files until ${clockText(DateTime.fromMillisecondsSinceEpoch(offAtMs))}. Stop turns it off.';
 
 /// What the main screen's "Your data" section shows.
 typedef ShareLine = ({bool on, String text, bool warn, String? address});
@@ -40,8 +43,22 @@ class ShareControl extends ChangeNotifier {
     this.wifiLock,
     ShareHostMaker? host,
     DateTime Function()? clock,
+    ValueListenable<Map<String, Object?>?>? session,
+    Stream<void>? networkChanges,
   }) : _makeHost = host ?? _appHost,
-       _now = clock ?? DateTime.now;
+       _now = clock ?? DateTime.now,
+       _session = session ?? sharedSession {
+    _session.addListener(_sessionChanged);
+    _network = networkChanges?.listen((_) => unawaited(_host?.networkChanged()), onError: (Object _) {});
+  }
+
+  /// The daytime session that holds the headband (lib/share/shared_session.dart), for /state (DECISIONS 671).
+  final ValueListenable<Map<String, Object?>?> _session;
+
+  /// Android's network changes (NetworkWatch): the paired laptop is told where this phone is at once (DECISIONS 676).
+  StreamSubscription<void>? _network;
+
+  void _sessionChanged() => _host?.setSession(_session.value);
 
   final Future<ShareConfig> Function() load;
   final Future<void> Function(ShareConfig config) save;
@@ -215,7 +232,7 @@ class ShareControl extends ChangeNotifier {
 
   /// Keeps the app running while it serves between nights; once per change.
   Future<void> _keepAlive(bool want) async {
-    final until = want ? _config.offAtMs : null;
+    final until = want ? (_config.endsAtMs ?? -1) : null; // -1: paired, no end time (DECISIONS 675)
     if (until == _aliveUntil) return;
     _aliveUntil = until;
     try {
@@ -238,6 +255,7 @@ class ShareControl extends ChangeNotifier {
       notifyListeners();
     }, wifiLock);
     host.setLive(const {});
+    host.setSession(_session.value);
     await host.start(_config);
   }
 
@@ -263,11 +281,18 @@ class ShareControl extends ChangeNotifier {
       return (on: false, text: 'Lets your laptop watch the signal and copy the files over your home Wi-Fi.', warn: false, address: null);
     }
     final at = shareAddress(_status);
-    final until = clockText(DateTime.fromMillisecondsSinceEpoch(_config.offAtMs));
+    final laptop = _config.laptop;
+    final until = laptop != null
+        ? 'paired with ${laptop.name}' // no end time while paired (DECISIONS 675)
+        : 'until ${clockText(DateTime.fromMillisecondsSinceEpoch(_config.offAtMs))}';
     if (at != null) {
       return (
         on: true,
-        text: _night ? 'On at $at until $until.' : 'On at $at until $until. Keep this app open while the laptop copies.',
+        text: laptop != null
+            ? 'On at $at, $until.'
+            : _night
+            ? 'On at $at $until.'
+            : 'On at $at $until. Keep this app open while the laptop copies.',
         warn: false,
         address: at,
       );
@@ -291,6 +316,8 @@ class ShareControl extends ChangeNotifier {
 
   @override
   void dispose() {
+    _session.removeListener(_sessionChanged);
+    unawaited(_network?.cancel());
     unawaited(_stopHost());
     if (_aliveUntil != null) unawaited(keepAlive?.call(false, 0).catchError((Object _) {}));
     super.dispose();

@@ -23,6 +23,7 @@ import '../recorder/status.dart';
 import '../session_keeper.dart' show KeepSpec, PhoneSessionKeeper;
 import '../share/control.dart';
 import '../share/isolate.dart' show shareAddress;
+import '../share/network_watch.dart';
 import '../sleep/onnx_runs.dart';
 import '../sleep/report.dart';
 import '../sleep/scorer.dart';
@@ -306,11 +307,12 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     sendToRecorder: FlutterForegroundTask.sendDataToTask,
     keepScreenOn: (on) => Phone.keepScreenOn(on: on, session: false),
     keepAlive: (on, offAtMs) => PhoneSessionKeeper.keepInBackground(
-      on ? KeepSpec(title: 'Sharing on Wi-Fi', text: shareKeepText(offAtMs), focus: false) : null,
+      on ? KeepSpec(title: 'Sharing on Wi-Fi', text: shareKeepText(offAtMs, _share.config.laptop?.name), focus: false) : null,
       onStop: () => unawaited(_share.setOn(false)),
     ),
     // the app's own server between nights holds the Wi-Fi lock too (DECISIONS 612); the recorder holds its own
     wifiLock: (on) => Phone.wifiLock(on: on, who: 'screen'),
+    networkChanges: NetworkWatch.changes(), // the paired laptop hears from this phone at once (DECISIONS 676)
   )..addListener(_onScoring);
 
   /// Pairing with a laptop by one scan (DECISIONS rows 530-539): its QR code opens the app with a pair link.

@@ -123,7 +123,8 @@ class ShareSheet extends StatelessWidget {
           const Divider(),
           _Line('Code', m.token, copy: m.token),
           const Divider(),
-          _Line('Turns off at', clockText(m.until)),
+          // paired with a laptop: sharing has no end time (DECISIONS 675)
+          m.laptop != null ? const _Line('Turns off', 'only when you switch it off') : _Line('Turns off at', clockText(m.until)),
           const Divider(),
           if (m.laptop != null) ...[
             _Line('Laptop', m.laptop!.name),
@@ -135,7 +136,9 @@ class ShareSheet extends StatelessWidget {
                 ? 'No Wi-Fi address found. Join your home Wi-Fi: it appears here within a minute. A USB cable works '
                       'without it (below).'
                 : m.night
-                ? 'It keeps answering with the screen off while the night records, and for 15 minutes after Stop.'
+                ? (m.laptop != null
+                      ? 'It keeps answering with the screen off while the night records, and after Stop while the laptop is paired.'
+                      : 'It keeps answering with the screen off while the night records, and for 15 minutes after Stop.')
                 : 'Between nights it keeps answering in the background too, with a "Sharing on Wi-Fi" notification '
                       '(its Stop turns sharing off).',
             style: address == null ? muted?.copyWith(color: Night.caution) : muted,

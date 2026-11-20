@@ -192,7 +192,8 @@ void main() {
   group('the laptop recorder\'s routes', () {
     test('/state before any data: the keys of the laptop, empty data, age 999', () async {
       final s = await json('/state');
-      expect(s.keys.toSet(), (shapes['state_keys']! as List).toSet());
+      expect(s.keys.toSet(), {...(shapes['state_keys']! as List), ...(shapes['phone_state_keys']! as List)});
+      expect(s['session'], isNull);
       expect(s['status'], 'not recording');
       expect(s['battery'], '?');
       expect(s['names'], shapes['names']);
@@ -202,6 +203,33 @@ void main() {
       expect(s['contact_t'], isNull);
       expect(s['age'], 999);
       expect(s['minutes'], 0);
+    });
+
+    test("/state's session: a Work session's level and signal for the laptop tray, its data's age by the phone's clock (DECISIONS 671)", () async {
+      server.setSession({
+        'kind': 'work',
+        'since': '2026-11-19T00:00:00.000Z',
+        'stage': 'running',
+        'level': 'getting_drowsy',
+        'signal': 'good',
+        'on_break': false,
+        'hint': {'reason': 'drowsy', 'at': '2026-11-19T00:50:00.000Z'},
+        'data_at': now.microsecondsSinceEpoch / 1e6 - 2.5,
+        'not_listed': 'dropped',
+      });
+      var s = (await json('/state'))['session'] as Map;
+      expect(s.keys.toList(), shapes['session_keys']);
+      expect(s['level'], 'getting_drowsy');
+      expect(s['hint'], {'reason': 'drowsy', 'at': '2026-11-19T00:50:00.000Z'});
+      expect(s['age'], 2.5);
+      now = now.add(const Duration(minutes: 2)); // the screen stopped telling: its data grows old
+      expect(((await json('/state'))['session'] as Map)['age'], 122.5);
+      server.setSession({'kind': 'work', 'since': '2026-11-19T00:00:00.000Z', 'data_at': null});
+      s = (await json('/state'))['session'] as Map;
+      expect(s['age'], isNull);
+      server.setSession(null);
+      expect((await json('/state'))['session'], isNull);
+      expect((await json('/state'))['status'], 'not recording', reason: 'a Work session writes no recording');
     });
 
     test('/state while recording: the last 4 s in µV around each channel\'s mean, the status in the laptop\'s words', () async {

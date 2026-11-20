@@ -378,6 +378,27 @@ void main() {
     expect((await ask(night, '/work', method: 'POST', body: '{"working": true}')).code, 503);
   });
 
+  test("the Work session's summary reaches /state through the server's isolate, also when set before it starts", () async {
+    final port = await freePort();
+    final h = makeHost(null);
+    h.setSession({'kind': 'work', 'since': '2026-11-19T00:00:00.000Z', 'stage': 'calibrating', 'signal': 'good'});
+    await h.start(config(port));
+    await until(() => h.status.up);
+    Future<Map<Object?, Object?>?> session() async => (jsonDecode((await ask(port, '/state')).body) as Map)['session'] as Map?;
+    Future<void> waitFor(bool Function(Map<Object?, Object?>? s) ok) async {
+      for (var i = 0; i < 100 && !ok(await session()); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(ok(await session()), isTrue);
+    }
+
+    await waitFor((s) => s?['stage'] == 'calibrating');
+    h.setSession({'kind': 'work', 'since': '2026-11-19T00:00:00.000Z', 'stage': 'running', 'level': 'alert'});
+    await waitFor((s) => s?['level'] == 'alert');
+    h.setSession(null);
+    await waitFor((s) => s == null);
+  });
+
   test('off, or past its time: nothing starts', () async {
     await makeHost(null).start(const ShareConfig());
     expect(host!.running, isFalse);

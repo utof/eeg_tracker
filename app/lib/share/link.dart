@@ -273,7 +273,7 @@ class LaptopAnnouncer {
   final List<Duration> retries;
 
   Timer? _timer;
-  bool _closed = false;
+  bool _closed = false, _busy = false, _again = false;
   int _fails = 0;
   LinkFailure? _last;
   bool _known = false;
@@ -282,6 +282,18 @@ class LaptopAnnouncer {
   int told = 0;
 
   void start() => _schedule(Duration.zero);
+
+  /// The phone's network came back or changed (DECISIONS 676): one try now, not at the next 5 minutes, and the
+  /// quick retries again after a failure. A try under way finishes first; then one more follows.
+  void soon() {
+    if (_closed) return;
+    _fails = 0;
+    if (_busy) {
+      _again = true;
+      return;
+    }
+    _schedule(Duration.zero);
+  }
 
   void stop() {
     _closed = true;
@@ -297,6 +309,19 @@ class LaptopAnnouncer {
   /// One try now; true when the laptop took it.
   Future<bool> tell() async {
     if (_closed) return false;
+    _busy = true;
+    try {
+      return await _tell();
+    } finally {
+      _busy = false;
+      if (_again && !_closed) {
+        _again = false;
+        _schedule(Duration.zero);
+      }
+    }
+  }
+
+  Future<bool> _tell() async {
     LinkFailure? failure;
     try {
       await _client.handshake(
