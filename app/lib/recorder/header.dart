@@ -196,8 +196,9 @@ class RecordingHeader {
     }
     if (j['unit'] != 'V') bad('unit ${jsonEncode(j['unit'])}: the records hold volts (V)');
     final want = '<I${channels.length}f';
-    if (j['record'] != want)
+    if (j['record'] != want) {
       bad('record ${jsonEncode(j['record'])} does not match ${channels.length} channels ($want)');
+    }
     String? text(String k) {
       final v = j[k];
       if (v != null && v is! String) bad('$k must be text or null');
@@ -296,11 +297,13 @@ List<double>? _xyz(Object? v, void Function() bad) {
 
 HeaderSite? _site(Object? v, String key, Never Function(String) bad) {
   if (v == null) return null;
-  if (v is! Map || v['name'] is! String || (v['name'] as String).isEmpty)
+  if (v is! Map || v['name'] is! String || (v['name'] as String).isEmpty) {
     bad('$key must be an object with a name, or null');
+  }
   final where = v['where'], site = v['site'];
-  if ((where != null && where is! String) || (site != null && site is! String))
+  if ((where != null && where is! String) || (site != null && site is! String)) {
     bad('$key: where and site are text or null');
+  }
   return HeaderSite(v['name'] as String, where: where as String?, site: site as String?);
 }
 
