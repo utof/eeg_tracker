@@ -40,6 +40,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT / "analysis"))
+import battery  # noqa: E402  (the headband gauge's one rule, DECISIONS 766)
 import catalog  # noqa: E402  (which files make up a night, and its hashing)
 import day_summary as ds  # noqa: E402  (the 04:00 day, the Trends numbers)
 import night_files as nf  # noqa: E402
@@ -496,6 +497,7 @@ NIGHT_COLUMNS = [
     # contact_<channel>_ohm columns go here, one per channel name (from the recordings' headers and logs)
     "band_battery_start_pct", "band_battery_end_pct", "band_stuck_at", "band_end_est_pct", "band_streamed_h",
     "phone_battery_start_pct", "phone_battery_end_pct", "phone_cost_mah_h", "phone_cost_pct_h", "phone_steady_h",
+    "battery_rule",
     "slept_rating", "checkin", "model", "second_opinion", "agree_5_stage_pct", "agree_w_nrem_rem_pct",
     "report_file", "report_sha256", "raw_files", "inputs_sha256", "sources",
 ]
@@ -511,7 +513,8 @@ def log_numbers(g: Group | None, local: Path, hashes: Hashes, cache: Path) -> di
     scripts/phone_night_check.py reads them, by battery.py's one rule); cached by the logs' hashes."""
     if g is None or not g.logs:
         return {}
-    key = digest_lines((rel, hashes.sha(rel) or "") for rel in g.logs)
+    rules = f"{battery.RULE}; {pnc.PHONE_COST_RULE}"
+    key = digest_lines([(rel, hashes.sha(rel) or "") for rel in g.logs] + [("rules", rules)])
     f = cache / f"{''.join(ch if ch.isalnum() or ch in '-_' else '_' for ch in g.id)}.logs.json"
     hit = _json(f)
     if isinstance(hit, dict) and hit.get("key") == key:
@@ -548,7 +551,7 @@ def log_numbers(g: Group | None, local: Path, hashes: Hashes, cache: Path) -> di
         phone_battery_start_pct=phone["first"] if phone else None, phone_battery_end_pct=phone["last"] if phone else None,
         phone_cost_mah_h=_r(steady["mah_per_hour"], 0) if steady else None,
         phone_cost_pct_h=_r(steady["per_hour"], 2) if steady else None,
-        phone_steady_h=_r(steady["hours"], 1) if steady else None)
+        phone_steady_h=_r(steady["hours"], 1) if steady else None, battery_rule=rules if band or phone else None)
     cache.mkdir(parents=True, exist_ok=True)
     _write(f, json.dumps(dict(key=key, numbers=nums)).encode())
     return nums

@@ -969,9 +969,10 @@ are cut by `night_files.py`'s chain rule and named by the evening date, as the c
 | `contact_at`, `contact_<channel>_ohm` | the contact check at the start (the first of a run that recorded 10 minutes or more), ohms per channel; empty: no contact, or no reading |
 | `band_battery_start_pct`, `band_battery_end_pct` | the headband's first and last believable gauge readings (the stuck rule, DECISIONS 766) |
 | `band_stuck_at` | the gauge values left out as stuck (`0 1 2 100`, and any value unchanged for 60 minutes of streaming) |
-| `band_end_est_pct`, `band_streamed_h` | the charge at the night's last reading by wear time, an estimate: the last full reading (95 % or more, first or after 30 minutes off the stream) minus 11 % an hour streamed since; and those hours |
+| `band_end_est_pct`, `band_streamed_h` | the charge at the night's last reading by wear time, an estimate: the reading it counts from (a full one: 95 % or more, first or after 30 minutes off the stream; or a believable one over 3 points above the one before: charged in between) minus 11 % an hour streamed since; and those hours |
 | `phone_battery_start_pct`, `phone_battery_end_pct` | the phone's first and last readings |
 | `phone_cost_mah_h`, `phone_cost_pct_h`, `phone_steady_h` | the phone's own cost over its steady hours (DECISIONS 767: not the first hour after unplugging, not hours with the screen on) and how many hours that was |
+| `battery_rule` | the battery rules these numbers were made with (`battery-v1: ...; phone-cost-v1: ...`): a change of rule makes them again |
 | `slept_rating` | "How did you sleep?" (1-5) at the check-in after the night (the catalog's attachment) |
 | `checkin` | that check-in's file |
 | `model`, `second_opinion` | the sleep model and version; the second model (laptop reports) |

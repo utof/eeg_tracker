@@ -80,6 +80,8 @@ FULL_PHONE_PCT = 99  # a night that starts unplugged at this level was just unpl
 SCREEN_MA = 200.0
 PHONE_GAP_S = 600  # phone battery readings further apart than this are not joined into a stretch
 LOW_BAND_PCT = 20  # the headband's charge (by wear time) under this: charge it before the next night
+PHONE_COST_RULE = (f"phone-cost-v1: no first {UNPLUG_SKIP_S // 60} min after unplugging, no screen-on hours "
+                   f"(without screen lines: {SCREEN_MA:g} mA or more)")
 
 # ---- the log --------------------------------------------------------------------------------------------------------
 # Every line the recorders write. P = the phone app (app/lib/recorder/night_recorder.dart, battery.dart,

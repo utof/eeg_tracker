@@ -111,3 +111,15 @@ def test_the_live_note_shows_a_stuck_gauge_and_the_estimate() -> None:
     assert r["level"] is None
     left = round(98 - battery.DRAIN_PER_H * 70 / 60)
     assert r["text"] == f"gauge stuck (reads 6%); about {left}% by wear time (estimate)"
+
+
+def test_a_charge_in_between_restarts_the_estimate() -> None:
+    """The laptop night of 2026-11-17: down to 9 %, charged off the stream, then 37 % and falling."""
+    t0 = NOW - 6 * 3600
+    a = [(t0, 96)] + streaming(t0 + 10, 60, [96 - k // 4 for k in range(360)])  # down to 7 %
+    b = streaming(a[-1][0] + 20 * 60, 30, [37 - k // 60 for k in range(180)])
+    est = battery.wear_estimate(a + b, b[-1][0])
+    assert est["full"] == 37 and est["since"] == b[0][0] and est["hours"] == 0.5
+    assert est["pct"] == round(37 - battery.DRAIN_PER_H * 0.5)
+    frozen = [(t0, 98)] + streaming(t0 + 10, 70, 98) + [(t0 + 2 * 3600, 98)]  # a gauge frozen at 98 % all night
+    assert battery.wear_estimate(frozen, frozen[-1][0])["since"] == t0  # its reading after a pause is no charge

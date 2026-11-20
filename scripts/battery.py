@@ -10,8 +10,9 @@ scripts/phone_night_check.py and the data book (scripts/data_book.py):
   the same readings; it never counts as a level.
 - **Trend:** the time left comes from a straight line through the believable readings of the last 90 minutes (since
   the last charge).
-- **By wear time (an estimate):** the last full reading (95 % or more, at the first reading or after 30 minutes
-  without streaming, when a charge was possible) minus 11 % for every hour streamed since (measured on the nap of
+- **By wear time (an estimate):** the reading it counts from (a full one: 95 % or more, at the first reading or after
+  30 minutes without streaming, when a charge was possible; or a believable reading more than 3 points above the
+  believable one before it: charged in between) minus 11 % for every hour streamed since (measured on the nap of
   2026-11-20: 99 % to 79 % in 1.8 h). Planning values; always shown as an estimate.
 
 Readings are (unix time, percent), oldest first; the recorder writes one every 10 s while it streams, so the time
@@ -28,11 +29,14 @@ STREAM_GAP_S = 120  # readings further apart than this: the headband was not str
 DRAIN_PER_H = 11.0  # % an hour of streaming, measured on the nap of 2026-11-20 (planning value)
 FULL_PCT = 95  # a reading this high ...
 CHARGE_OFF_S = 30 * 60  # ... first, or after this long without streaming, is a full charge for the estimate
+CHARGE_RISE = 3  # a believable reading this many points above the one before: charged in between (as the trend's rule)
 LINE = re.compile(r"^(\S+) .*\bbattery (\d+)%")
 WINDOW_S = 90 * 60     # trend over the last 90 minutes
 MIN_SPAN_S = 20 * 60   # at least 20 minutes of readings
 MIN_DROP = 2           # and a drop of at least 2 % before saying anything about time left
 WEAR_HOURS = 16.0      # how far back the recorder reads its logs, so the estimate finds the last full reading
+RULE = (f"battery-v1: stuck {' '.join(map(str, sorted(STUCK)))} % or unchanged {STUCK_AFTER_S // 60} min streaming; "
+        f"estimate {DRAIN_PER_H:g} %/h from a full ({FULL_PCT}+ %) or charged reading")  # the data book's rows name it
 
 Points = list[tuple[float, int]]
 
@@ -97,22 +101,30 @@ def streaming_s(points: Points, since: float, until: float) -> float:
 
 
 def last_full(points: Points, at: float) -> tuple[float, int] | None:
-    """The latest reading at or before `at` that counts as a full charge: FULL_PCT or more, and the first reading or
-    one after CHARGE_OFF_S without a reading (the headband off the stream, so it may have been charged). A full
-    reading after a short drop (the gauge read 100 % after 5.3 h of streaming on 2026-11-20) does not count."""
-    best, prev = None, None
+    """The latest reading at or before `at` the estimate counts from: a full charge (FULL_PCT or more, and the first
+    reading or one after CHARGE_OFF_S without a reading: the headband was off the stream, so it may have been charged;
+    after the first, never a value found frozen) or a believable reading over CHARGE_RISE points above the one before it
+    (charged in between). A full reading after a short drop (the gauge read 100 % after 5.3 h of streaming on
+    2026-11-20) does not count."""
+    stuck = stuck_values(points)
+    frozen = stuck - STUCK
+    best, prev, prev_good = None, None, None
     for t, v in points:
         if t > at:
             break
-        if v >= FULL_PCT and (prev is None or t - prev >= CHARGE_OFF_S):
+        if v >= FULL_PCT and (prev is None or (t - prev >= CHARGE_OFF_S and v not in frozen)):
             best = (t, v)
+        elif v not in stuck and prev_good is not None and v > prev_good + CHARGE_RISE:
+            best = (t, v)
+        if v not in stuck:
+            prev_good = v
         prev = t
     return best
 
 
 def wear_estimate(points: Points, at: float) -> dict | None:
-    """The charge at `at` by wear time: `pct` (whole percent, 0 at the least), `hours` streamed since the last full
-    reading, `full` (that reading) and `since` (its time); None without a full reading. An estimate, not a reading."""
+    """The charge at `at` by wear time: `pct` (whole percent, 0 at the least), `hours` streamed since the reading it
+    counts from (last_full), `full` (that reading) and `since` (its time); None without one. An estimate."""
     full = last_full(points, at)
     if full is None:
         return None
