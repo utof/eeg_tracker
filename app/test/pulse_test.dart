@@ -133,7 +133,7 @@ void main() {
       final p = got.pulse!;
       expect(got.why, isNull);
       expect(p.channels, ['O1', 'O2', 'T3', 'T4']);
-      expect(p.epochs, 8); // 240 s from the first sample a second before the first batch arrives
+      expect(p.epochs, 8); // 240 s: eight whole epochs from the first sample
       expect(p.read, greaterThanOrEqualTo(6));
       for (var e = 0; e < p.epochs; e++) {
         if (p.bpm[e] != null) {

@@ -10,6 +10,7 @@ last sleep period), a check-in's number is the first of the day that has it. Rea
   phone/sharp-hours/ratings.jsonl, reactions.jsonl, focus-*.jsonl (the laptop's focus sessions, scripts/aw_focus.py)
   phone/study-review/log.jsonl      phone/work-sessions/*.work.json
   phone/meditations/*.meditation.json, phone/alpha-theta/*.alphatheta.json
+  pulse/*.pulse.json                 the laptop's (scripts/compare_pulse.py --out)  phone/pulse/*.pulse.json  the phone's
 
 Left out, and said so in the day's `excluded` list: anything marked "someone else" (nights, check-ins, work
 sessions), nights scored from under 5 minutes, the sleep numbers of a night more than half of whose time asleep was
@@ -25,7 +26,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 SCHEMA = 1  # of the eeg_day event (docs/utof-interface.md)
-MEASURES_VERSION = 2  # of the measure list below (2: sleep efficiency, sleep regularity, the sleep rating; DECISIONS 658)
+MEASURES_VERSION = 3  # of the measure list below (2: sleep efficiency, sleep regularity, the sleep rating, DECISIONS
+#                       658; 3: pulse while asleep, DECISIONS 817)
 DAY_START_HOUR = 4
 SOMEONE_ELSE = "someone else"
 NOISY_NIGHT_SHARE = 0.5  # planning value (DECISIONS 553): more of the time asleep noisy or missing than this
@@ -33,6 +35,9 @@ CLEAN_CHECKIN_SHARE = 0.5  # planning value (DECISIONS 553): less of a check-in'
 EFFICIENCY_MIN_IN_BED = 30  # sleep_days.dart efficiencyMinInBedMin (DECISIONS 654): shorter stays say nothing
 REGULARITY_DAYS, REGULARITY_MIN_NIGHTS = 7, 5  # sleep_days.dart (DECISIONS 655)
 REGULARITY_CAP_MIN = 720.0
+PULSE_FORMAT, PULSE_VERSION = "eeg-tracker-pulse", 1  # docs/data-format.md "Pulse"
+PULSE_MIN_READINGS = 10  # pulse/detector.dart PulseRule.minNightReadings (DECISIONS 816-817): 5 minutes asleep
+ASLEEP_CHARS = "123R"  # a report's `stages` letters for N1 N2 N3 REM
 WORK_DAY_MIN_MINUTES = 30  # work/days.dart workDayMinMinutes (DECISIONS 481)
 BREAK_MIN, RECENT_EPOCHS, DROWSY_EPOCHS = 5, 12, 8  # work/breaks.dart BreakRule
 MORNING_VERSION = "morning-v1"
@@ -66,6 +71,9 @@ _M = [
      "deviation of the time of day, the two averaged; needs 5 nights in the 7; smaller is steadier"),
     ("jaw", "Jaw muscle bursts", "per hour asleep", "sleep", "night before", "headband", "jaw-and-blinks", "strong",
      "bursts an hour asleep; a trend to compare nights, not a test for teeth grinding"),
+    ("pulse", "Pulse while asleep", "per minute", "sleep", "night before", "headband", "pulse", "weak",
+     "the median of the pulse readings in the asleep 30 s epochs of the day's nights (the pulse files of the phone or "
+     "the laptop, read on each report's clock), from 10 readings; an experiment, not yet checked against a watch"),
     ("kss", "Sleepiness (check-in)", "1-9", "morning", "morning", "self-report", "morning-check-in", None,
      "Karolinska Sleepiness Scale at the day's first check-in"),
     ("mood", "Mood (check-in)", "1-5", "morning", "morning", "self-report", "morning-check-in", None,
@@ -259,6 +267,8 @@ def _nights(days: Days, local: Path) -> None:
     jaw: dict[str, list[tuple[float, float, float | None]]] = defaultdict(list)  # day -> (bursts, min, per hour)
     noise: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])  # day -> noisy or missing min, min asleep
     stays: dict[str, list[tuple[datetime, float, float, float, float]]] = defaultdict(list)  # day -> see _timing
+    pulse: dict[str, dict[tuple[str, int], float]] = defaultdict(dict)  # day -> (night, epoch) -> reading asleep
+    pulses = read_pulses(local)
     for r in read_reports(local):
         day, night = day_key(final_wake(r)), r["night_of"]
         if r["_wearer"] == SOMEONE_ELSE:
@@ -293,15 +303,71 @@ def _nights(days: Days, local: Path) -> None:
         stay = _timing(r, drift)
         if stay:
             stays[day].append(stay)
+        for e, b in _pulse_asleep(r, pulses).items():
+            pulse[day][(night, e)] = b
         if asleep_x and _num(asleep_x.get("jaw_per_hour")) is not None and (_num(asleep_x.get("min")) or 0) > 0:
             jaw[day].append((_num(asleep_x.get("jaw_bursts")) or 0.0, _num(asleep_x["min"]),
                              _num(asleep_x["jaw_per_hour"])))
     _efficiency_and_regularity(days, stays)
     for day, (bad, total) in noise.items():  # over the day's scored nights, the noisy ones too
         days.quality[day]["night_noisy_share"] = round(bad / total, 3)
+    for day, v in pulse.items():  # pulse/night.dart pulseDayNumbers: every reading asleep of the day's nights
+        if len(v) >= PULSE_MIN_READINGS:
+            days.numbers[day]["pulse"] = round(_median(list(v.values())) * 10) / 10
     for day, a in jaw.items():  # trends.dart: the night's own number, or over all the day's hours asleep
         days.numbers[day]["jaw"] = a[0][2] if len(a) == 1 else \
             round(sum(x[0] for x in a) / (sum(x[1] for x in a) / 60) * 10) / 10
+
+
+def read_pulses(local: Path) -> list[dict]:
+    """The pulse files (docs/data-format.md "Pulse"): the laptop's (`pulse/`) and the phone's (`phone/pulse/`), those
+    with readings; others are skipped."""
+    out = []
+    for folder in (local / "pulse", local / "phone" / "pulse"):
+        for f in sorted(folder.glob("*.pulse.json")):
+            j = _json(f)
+            if isinstance(j, dict) and j.get("format") == PULSE_FORMAT and j.get("version") == PULSE_VERSION \
+                    and isinstance(j.get("start_ms"), int) and isinstance(j.get("bpm"), list):
+                out.append(j)
+    return out
+
+
+def _night_stages(r: dict) -> tuple[float, str] | None:
+    """(unix seconds of the first epoch, one letter per 30 s: W 1 2 3 R -) of a report: the phone's `stages`, or the
+    laptop's sleep.json beside it."""
+    if isinstance(r.get("stages"), str):
+        return parse_time(r["data_start"]).timestamp(), r["stages"]
+    side = r["_file"].parent / str(r.get("sleep_json") or "")
+    if r.get("sleep_json") and side.is_file():
+        j = _json(side)
+        if isinstance(j, dict) and isinstance(j.get("epochs"), list) and isinstance(j.get("start"), str):
+            letters = {"W": "W", "N1": "1", "N2": "2", "N3": "3", "R": "R"}
+            st = "".join(letters.get(str(e.get("anysleep")), "-") for e in j["epochs"] if isinstance(e, dict))
+            start = parse_time(j["start"])
+            if start is not None:
+                return start.timestamp(), st
+    return None
+
+
+def _pulse_asleep(r: dict, pulses: list[dict]) -> dict[int, float]:
+    """A night's pulse readings in its asleep epochs, by epoch of its own clock: each reading goes to the epoch holding
+    its middle (pulse/detector.dart pulseAligned); the first file with a reading for an epoch wins."""
+    stages = _night_stages(r)
+    if stages is None:
+        return {}
+    t0, st = stages
+    out: dict[int, float] = {}
+    for p in pulses:
+        ep = _num(p.get("epoch_s")) or 30.0
+        start = p["start_ms"] / 1000
+        for j, b in enumerate(p["bpm"]):
+            v = _num(b)
+            if v is None:
+                continue
+            e = math.floor((start + j * ep + ep / 2 - t0) / 30)
+            if 0 <= e < len(st) and st[e] in ASLEEP_CHARS:
+                out.setdefault(e, v)
+    return out
 
 
 def _minute_of_day(t: datetime) -> float:

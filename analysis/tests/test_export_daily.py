@@ -359,10 +359,39 @@ def test_the_sleep_rating_is_the_first_of_the_days_check_ins_with_one_in_1_to_5(
     assert "slept" not in d["2026-11-21"]["numbers"]
 
 
-def test_the_measure_set_is_version_2_and_names_the_new_numbers():
+def test_the_measure_set_is_version_3_and_names_the_new_numbers():
     m = ds.measure_set()
-    assert m["version"] == 2 == ds.MEASURES_VERSION
+    assert m["version"] == 3 == ds.MEASURES_VERSION
     ids = {x["id"]: x for x in m["measures"]}
     assert {"efficiency", "regularity", "slept"} <= set(ids)
     assert ids["slept"]["source"] == "self-report" and ids["slept"]["unit"] == "1-5"
     assert "Lights off" in ids["efficiency"]["rule"] and "recording" in ids["efficiency"]["rule"]
+
+
+def test_pulse_while_asleep_from_the_pulse_files_on_each_nights_clock(tmp_path):
+    """DECISIONS 817: the median of every reading in an asleep epoch of the day's nights, from 10 readings; the
+    phone's report by its `stages`, the laptop's by its sleep.json; a pulse file's epochs go to the epoch holding
+    their middle."""
+    loc = tmp_path / "_local"
+    start = "2026-11-19T23:30:00+03:00"
+    t0 = datetime.fromisoformat(start)
+    _w(loc / "phone/nights/2026-11-19.report.json", _report(
+        "2026-11-19", start, "2026-11-20T07:00:00+03:00", 20.0, 20.0, 0.0, 0.0, 0, 0.0, stages="WW" + "2" * 50 + "WWWWWWWW"))
+    bpm = [None, 70.0] + [54.0 + (k % 3) for k in range(12)] + [None] * 46  # 12 readings asleep, one awake
+    _w(loc / "phone/pulse/2026-11-19-232959.pulse.json", dict(
+        format="eeg-tracker-pulse", version=1, start_ms=int((t0.timestamp() - 10) * 1000), epoch_s=30, bpm=bpm))
+    _w(loc / "phone/pulse/other.pulse.json", dict(format="something else", version=1, start_ms=0, bpm=[99.0]))
+    days = ds.summarise(loc)
+    assert days.numbers["2026-11-20"]["pulse"] == 55.0  # 54 55 56 four times each, the 70 awake left out
+    # a laptop night with its sleep.json, and too few readings: no number
+    ep = [dict(t="2026-11-21T00:00:00", anysleep=s, yasa=s) for s in ["W"] + ["N2"] * 20]
+    _w(loc / "nights/2026-11-20.sleep.json", dict(start="2026-11-21T00:00:00", epoch_s=30, epochs=ep))
+    _w(loc / "nights/2026-11-20.report.json", dict(_report(
+        "2026-11-20", "2026-11-21T00:00:00+03:00", "2026-11-21T07:00:00+03:00", 10.0, 10.0, 0.0, 0.0, 0, 0.0),
+        sleep_json="2026-11-20.sleep.json"))
+    t1 = datetime.fromisoformat("2026-11-21T00:00:00").timestamp()
+    _w(loc / "pulse/2026-11-21-000000.pulse.json", dict(
+        format="eeg-tracker-pulse", version=1, start_ms=int(t1 * 1000), epoch_s=30, bpm=[60.0] * 9 + [None] * 12))
+    days = ds.summarise(loc)
+    assert "pulse" not in days.numbers["2026-11-21"]  # 8 readings asleep (the first epoch is awake): under 10
+    assert "pulse" in ds.MEASURE_IDS and ds.MEASURES[ds.MEASURE_IDS.index("pulse")]["evidence"] == "weak"
