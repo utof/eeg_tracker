@@ -89,6 +89,23 @@ def test_write_never_replaces_a_header(tmp_path: Path) -> None:
     assert rc.read(f32).names == ("O1", "O2", "T3", "T4")
 
 
+def test_a_session_kind_is_kept_and_only_sleep_joins_the_nights(tmp_path: Path) -> None:
+    """`session` (DECISIONS 683): `work` for the phone's work session; absent, `night` or `nap` is sleep."""
+    from dataclasses import replace
+    h = replace(rc.brainbit(made_by="eeg_tracker app"), session="work")
+    f32 = tmp_path / "2026-11-20-090000.f32"
+    rc.write(f32, h)
+    assert json.loads(rc.header_path(f32).read_text())["session"] == "work"
+    back = rc.read(f32)
+    assert back == h and back.session == "work" and not back.is_sleep
+    assert "session" not in rc.to_json(rc.brainbit()), "a night's header is as it always was"
+    assert rc.brainbit().is_sleep and replace(rc.brainbit(), session="nap").is_sleep
+    for bad in ("", " work", "x" * 33, 7):
+        d = rc.to_json(rc.brainbit()); d["session"] = bad
+        with pytest.raises(rc.HeaderError):
+            rc.parse(d, "the test header")
+
+
 def test_unknown_fields_are_ignored(tmp_path: Path) -> None:
     f32 = tmp_path / "a.f32"
     put(tmp_path / "a.header.json", {**EXAMPLE, "later": {"x": 1}, "channels": [dict(c, gain=24) for c in EXAMPLE["channels"]]})

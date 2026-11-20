@@ -14,6 +14,10 @@ Owner's rule (2026-11-20): features are made with custom arrangements and number
 
 A header that is not valid JSON or breaks a rule is a HeaderError that names the file: readers never guess past a
 damaged header. Standard library only: the recorder hub imports this and must never import numpy (DECISIONS 3).
+
+`session` (optional) says what kind of session wrote a file set when it is not sleep: `work` for the phone's work
+session (DECISIONS 683). Such a set is never a night (night_files.recordings leaves it out); absent, `night` or `nap`:
+sleep, as every file before it.
 """
 from __future__ import annotations
 
@@ -32,6 +36,7 @@ LOG_BYTES = 256 * 1024  # the format line is among a .log's first lines: only th
 PACKET_NUMBER, SEQUENCE_NUMBER = "packet number", "board sequence number"
 BRAINBIT, DIY_BOARD = "BrainBit", "DIY board"
 BRAINBIT_NAMES = ("O1", "O2", "T3", "T4")
+SLEEP_SESSIONS = frozenset({"night", "nap"})  # a header's `session` whose file set joins the nights, as one without
 BRAINBIT_FS = 250
 
 # the 10-10 sites (and the earlobes and mastoids, which the reference and the bias use), as they are written
@@ -86,6 +91,7 @@ class Header:
     reference: Electrode | None = None
     ground: Electrode | None = None
     made_by: str | None = None
+    session: str | None = None  # `work`: a work session's raw EEG, never a night; None: sleep (DECISIONS 683)
     unit: str = UNIT
     source: str = field(default="header", compare=False)  # "header" | "log" (its format line) | "default" (BrainBit)
 
@@ -108,6 +114,11 @@ class Header:
     @property
     def struct(self) -> struct.Struct:
         return record_struct(self.n)
+
+    @property
+    def is_sleep(self) -> bool:
+        """The file set joins the nights: no `session`, or `night` / `nap`."""
+        return self.session is None or self.session in SLEEP_SESSIONS
 
     def describe(self) -> str:
         """`DIY board: Ch1 Ch2 ...`: the device (when known) and the channels, for messages."""
@@ -173,6 +184,8 @@ def to_json(h: Header) -> dict:
     d.update(sample_rate=h.sample_rate, unit=h.unit, record=h.record, counter=h.counter)
     if h.made_by is not None:
         d["made_by"] = h.made_by
+    if h.session is not None:
+        d["session"] = h.session
     return d
 
 
@@ -264,10 +277,13 @@ def parse(obj: object, where: object = "header") -> Header:
     if obj.get("record") != record_format(len(channels)):
         raise _fail(where, f"`record` must be {record_format(len(channels))} for its {len(channels)} channels, "
                            f"not {obj.get('record')!r}")
+    session = _text(obj, "session", where)
+    if session is not None and not (0 < len(session) <= MAX_NAME and session.strip() == session):
+        raise _fail(where, f"`session` must be a word of 1 to {MAX_NAME} characters, not {session!r}")
     return Header(channels, _rate(obj.get("sample_rate"), where), str(_text(obj, "counter", where, required=True)),
                   device=_text(obj, "device", where), layout=_text(obj, "layout", where),
                   reference=_electrode(obj, "reference", where), ground=_electrode(obj, "ground", where),
-                  made_by=_text(obj, "made_by", where))
+                  made_by=_text(obj, "made_by", where), session=session)
 
 
 def checked(h: Header, where: object = "header") -> Header:

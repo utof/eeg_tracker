@@ -9,7 +9,8 @@ Every --every minutes (default 2) this asks the phone for its list (GET /files: 
 the list Export data's manifest holds) and fetches what the laptop lacks, into the layout of scripts/import_phone.py:
 
 - Raw nights (`recordings/<stamp>.f32 .idx .log .markers.jsonl .header.json`) go into `<dest>/recordings/`, next to
-  the laptop's own recordings, so sleep_report.py, morning_check.py and to_bdf.py work on them; the DIY board's
+  the laptop's own recordings, so sleep_report.py, morning_check.py and to_bdf.py work on them; a work session's raw
+  EEG lands there too, and its header (`session: work`, DECISIONS 683) keeps night_files.py from taking it for a night; the DIY board's
   (`recordings-diy/...`) into `<dest>/recordings-diy/`; everything else keeps its place under `<dest>/phone/` (a
   check-in's raw files and its header in `phone/mornings/`). Raw files come first, tonight's before older ones.
   The `.header.json` says what its `.f32` holds (channels, rate; scripts/recording.py) and travels with it.
