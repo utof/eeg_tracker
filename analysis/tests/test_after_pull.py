@@ -65,7 +65,7 @@ def test_a_step_that_hangs_is_stopped(tmp_path: Path, monkeypatch: pytest.Monkey
     assert "book: failed in" in log and "stopped after 1 s" in log
 
 
-def test_the_real_steps_are_packing_the_export_and_the_data_book(tmp_path: Path) -> None:
+def test_the_real_steps_are_packing_the_export_the_data_book_and_the_validation(tmp_path: Path) -> None:
     steps = dict(ap.steps(tmp_path))
     assert steps["pack"][1:] == [str(ROOT / "scripts" / "pack_old.py"), "--local", str(tmp_path)]
     assert steps["export"][1:] == [str(ROOT / "scripts" / "export_events.py"), "--daily", "--local", str(tmp_path),
@@ -74,6 +74,9 @@ def test_the_real_steps_are_packing_the_export_and_the_data_book(tmp_path: Path)
     assert str(ROOT / "scripts" / "data_book.py") in book and "--quiet" in book
     if "systemd-run" in book[0]:
         assert f"MemoryMax={ap.MEMORY_MAX}" in book
+    assert list(steps) == ["pack", "export", "book", "validate"]  # the validation reads the book just built
+    check = steps["validate"]
+    assert str(ROOT / "scripts" / "validate_detectors.py") in check and check[check.index("--local") + 1] == str(tmp_path)
 
 
 def test_when_the_jobs_start(tmp_path: Path) -> None:

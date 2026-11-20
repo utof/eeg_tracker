@@ -1,6 +1,7 @@
-"""The laptop's jobs after files came from the phone: pack old raw recordings, the daily export, the data book.
+"""The laptop's jobs after files came from the phone: pack old raw recordings, the daily export, the data book and
+the detectors scored against the truth labels.
 
-usage: python3 scripts/after_pull.py [--local _local] [--skip pack|export|book ...]
+usage: python3 scripts/after_pull.py [--local _local] [--skip pack|export|book|validate ...]
 
 One step after the other, each its own bounded process; a step that fails does not stop the next (DECISIONS 768):
 
@@ -10,6 +11,9 @@ One step after the other, each its own bounded process; a step that fails does n
   book     uv run --project analysis python scripts/data_book.py --local <local> --quiet
                                                                     the data book in <local>/data (numpy: its own
                                                                     environment, lowered priority, memory capped)
+  validate uv run --project analysis python scripts/validate_detectors.py --local <local> --quiet
+                                                                    every detector against the truth labels:
+                                                                    <local>/data/validation.tsv and .md (DECISIONS 827)
 
 Each step's exit status, time and last lines go to <local>/after-pull.log; <local>/after-pull.json keeps when the last
 run started and ended and how each step ended. One run at a time (<local>/after-pull.lock): a second one says so and
@@ -32,7 +36,7 @@ DEFAULT_LOCAL = ROOT / "_local"
 MIN_GAP_S = 30 * 60  # after a copy that brought something new, at most this often (a night grows every 2 minutes)
 DAILY_S = 24 * 3600  # and at least this often, new files or not
 MEMORY_MAX = "3500M"  # the data book's cap, as the sleep report's (night_files.MEMORY_MAX)
-TIMEOUT_S = {"pack": 60 * 60, "export": 10 * 60, "book": 60 * 60}
+TIMEOUT_S = {"pack": 60 * 60, "export": 10 * 60, "book": 60 * 60, "validate": 10 * 60}
 TAIL_LINES = 12
 STATE, LOG, LOCK = "after-pull.json", "after-pull.log", "after-pull.lock"
 
@@ -50,18 +54,19 @@ def _uv() -> str | None:
 def steps(local: Path) -> list[tuple[str, list[str]]]:
     """The commands, in order."""
     py = sys.executable or "python3"
-    book = None
-    uv = _uv()
-    if uv is not None:
-        book = [uv, "run", "--project", str(ROOT / "analysis"), "python", str(HERE / "data_book.py"), "--local",
-                str(local), "--quiet"]
-        runner = shutil.which("systemd-run")
-        if runner:
-            book = [runner, "--user", "--scope", "-q", "-p", f"MemoryMax={MEMORY_MAX}", *book]
+    uv, runner = _uv(), shutil.which("systemd-run")
+
+    def analysis(script: str, what: str) -> list[str]:
+        if uv is None:
+            return [py, "-c", f"raise SystemExit('uv not found: {what} needs its environment')"]
+        cmd = [uv, "run", "--project", str(ROOT / "analysis"), "python", str(HERE / script), "--local", str(local),
+               "--quiet"]
+        return [runner, "--user", "--scope", "-q", "-p", f"MemoryMax={MEMORY_MAX}", *cmd] if runner else cmd
     return [("pack", [py, str(HERE / "pack_old.py"), "--local", str(local)]),
             ("export", [py, str(HERE / "export_events.py"), "--daily", "--local", str(local), "--root",
                         str(local / "export")]),
-            ("book", book or [py, "-c", "raise SystemExit('uv not found: the data book needs its environment')"])]
+            ("book", analysis("data_book.py", "the data book")),
+            ("validate", analysis("validate_detectors.py", "the validation"))]
 
 
 def _env() -> dict[str, str]:
@@ -97,7 +102,8 @@ def run_steps(local: Path, todo: list[tuple[str, list[str]]], log: Callable[[str
 def main(argv: list[str] | None = None, todo: list[tuple[str, list[str]]] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--local", type=Path, default=DEFAULT_LOCAL, help="the data folder (default: the repo's _local)")
-    ap.add_argument("--skip", nargs="*", default=[], choices=("pack", "export", "book"), help="steps to leave out")
+    ap.add_argument("--skip", nargs="*", default=[], choices=("pack", "export", "book", "validate"),
+                    help="steps to leave out")
     a = ap.parse_args(argv)
     local = a.local.resolve()
     local.mkdir(parents=True, exist_ok=True)

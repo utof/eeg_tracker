@@ -15,6 +15,8 @@ is in docs/data-format.md ("The data book"). It reads `_local/` and writes only 
                  and movement (analysis/epoch_signal.py)
   labels.tsv     append-only, one row per label from eeg_tracker's own stores (Archive tags, auto-start answers,
                  work-session hints and taps, markers, the tray's answers, check-in answers)
+  truth.tsv      what really happened, typed (scripts/truth.py): the hand file, <local>/truth/*.tsv and the Archive
+                 tags marked "This is what I was doing"; scripts/validate_detectors.py scores the detectors against it
   README.md, book.json   what is there, how it was built (versions, row counts, time)
 
 Built from the files alone, so it can always be built again (delete the folder and run this); nothing reads it back
@@ -48,6 +50,7 @@ import packed  # noqa: E402
 import phone_night_check as pnc  # noqa: E402  (the recorders' log lines, batteries, contact)
 import recording  # noqa: E402
 import rem_check as rc  # noqa: E402  (the dream sleep check; standard library part)
+import truth  # noqa: E402  (the truth labels' schema and sources, DECISIONS 820-829)
 
 FORMAT, VERSION = "eeg-tracker-data-book", 1  # VERSION: of the tables' columns (docs/data-format.md)
 NAP_MAX_MIN = 180  # a sleep with under 3 hours asleep (or recorded, when unscored) is a nap (DECISIONS 761)
@@ -56,7 +59,7 @@ STAGE = {"W": "W", "1": "N1", "2": "N2", "3": "N3", "R": "R", "-": "gap"}
 PROB_KEYS = ("p_W", "p_N1", "p_N2", "p_N3", "p_R")
 QUALITY_WORD = {"g": "good", "d": "degraded", "m": "missing"}
 DEFAULT_LOCAL = ROOT / "_local"
-TABLES = ("nights.tsv", "sessions.tsv", "days.tsv", "epochs.tsv.gz", "labels.tsv")
+TABLES = ("nights.tsv", "sessions.tsv", "days.tsv", "epochs.tsv.gz", "labels.tsv", "truth.tsv")
 
 
 # ---- cells and files ------------------------------------------------------------------------------------------------
@@ -208,9 +211,24 @@ def read_reports(local: Path, hashes: Hashes) -> dict[str, list[Report]]:
                 continue
             rel = p.relative_to(local).as_posix()
             out[r["night_of"]].append(Report(r["night_of"], source, rel, r, hashes.sha(rel) or "", rank))
-    for reps in out.values():
-        reps.sort(key=lambda x: (not x.scored, x.rank, x.rel))
+    for reps in out.values():  # two kept by hand for one night: the earlier start counts, so no sample is dropped from
+        reps.sort(key=lambda x: (not x.scored, x.rank, ds.parse_time(x.data["data_start"]), x.rel))  # the 30 s rows
     return out
+
+
+def sleep_json_of(rep: Report, local: Path) -> str | None:
+    """The `<night>.sleep.json` beside a laptop report (path from local): a copy kept by hand under the report's own
+    name first (`2026-11-20-awake-truth.sleep.json` beside `2026-11-20-awake-truth.report.json`), else the one the
+    report names. None when neither is there."""
+    folder = Path(rep.rel).parent
+    names = [Path(rep.rel).name[: -len(".report.json")] + ".sleep.json"]
+    name = rep.data.get("sleep_json")
+    if isinstance(name, str) and "/" not in name:
+        names.append(name)
+    for n in names:
+        if (local / folder / n).is_file():
+            return (folder / n).as_posix()
+    return None
 
 
 def wearer_of(reps: list[Report]) -> str | None:
@@ -227,10 +245,9 @@ def stages_of(rep: Report, local: Path, hashes: Hashes) -> tuple[list[str] | Non
     st = rc.stages_of(rep.data.get("stages"))
     if st is not None:
         return st, rc.decode_probs(rep.data.get("probs")), []
-    name = rep.data.get("sleep_json")
-    if not rep.scored or not isinstance(name, str) or "/" in name:
+    rel = sleep_json_of(rep, local) if rep.scored else None
+    if rel is None:
         return None, None, []
-    rel = (Path(rep.rel).parent / name).as_posix()
     j = _json(local / rel)
     ep = j.get("epochs") if isinstance(j, dict) else None
     if not isinstance(ep, list) or not ep:
@@ -1062,6 +1079,8 @@ Tidy tables of everything eeg_tracker measured on this laptop, made by `scripts/
 | `days.tsv` | day, 04:00 to 04:00 |
 | `epochs.tsv.gz` | 30 s of every recording (gzip; spreadsheets and pandas open it as it is or after `gunzip -k`) |
 | `labels.tsv` | label from the app's own stores (append-only: rows are only ever added) |
+| `truth.tsv` | truth label: what really happened, typed (`active` = 1: not corrected by a later row) |
+| `validation.tsv`, `validation.md` | detector against truth label, and its summary (`scripts/validate_detectors.py`) |
 | `book.json` | how the last build went: versions, row counts, time, problems |
 
 Open a table in any spreadsheet (tab-separated, UTF-8, times ISO 8601 with their UTC offset) or with
@@ -1069,9 +1088,11 @@ Open a table in any spreadsheet (tab-separated, UTF-8, times ISO 8601 with their
 was made from (`inputs_sha256`; nights.tsv lists every source file in `sources`).
 
 Rebuild: `uv run --project analysis python scripts/data_book.py` (only what changed is worked out again; `--full`
-works out everything). The phone link runs it after each copy from the phone (`scripts/after_pull.py`). Never edit
-these files by hand: they are rebuilt. Deleting this folder loses nothing but the labels' `added` times; the next run
-makes it again from `_local/`.
+works out everything). The phone link runs it after each copy from the phone (`scripts/after_pull.py`), then
+`scripts/validate_detectors.py`. Never edit these files by hand: they are rebuilt. A truth label goes into the hand
+file `_local/analyses/truth-labels.tsv` (or a file in `_local/truth/`), in the same columns as `truth.tsv` without its
+last three; check it with `python3 scripts/truth.py check`. Deleting this folder loses nothing but the labels' `added`
+times; the next run makes it again from `_local/`.
 
 Private: this holds sleep, moods and places. It stays on this laptop: never in a pull request, a cloud agent or a
 remote test machine.
@@ -1103,14 +1124,17 @@ def build(local: Path, out: Path, now: datetime, full: bool = False, say: Callab
     drows = day_rows(local, nrows, srows, hashes, now)
     _write(out / "days.tsv", tsv(DAY_COLUMNS, drows).encode())
     n_labels, added, removed = update_labels(out / "labels.tsv", local, now)
+    trows, rejected, from_where = truth.build(local)
+    truth.write_table(out / "truth.tsv", trows)
     hashes.save()
     import epoch_signal as es
     book = dict(format=FORMAT, version=VERSION, built=iso(now), seconds=round(time.time() - t0, 1),
                 local=str(local), signal_version=es.VERSION, measures_version=ds.MEASURES_VERSION,
                 models=sorted({r["model"] for r in nrows if r.get("model")}),
                 rows={"nights.tsv": len(nrows), "sessions.tsv": len(srows), "days.tsv": len(drows),
-                      "epochs.tsv.gz": n_epochs, "labels.tsv": n_labels},
+                      "epochs.tsv.gz": n_epochs, "labels.tsv": n_labels, "truth.tsv": len(trows)},
                 recordings=len(groups), worked_out=worked, labels_added=added, labels_removed=removed,
+                truth_from=from_where, truth_rejected=[r.text() for r in rejected],
                 epoch_columns=len(ep_columns), problems=problems)
     _write(out / "book.json", (json.dumps(book, indent=1) + "\n").encode())
     _write(out / "README.md", README.encode())
@@ -1143,6 +1167,8 @@ def main(argv: list[str] | None = None, out: Callable[[str], object] = print) ->
         f"{book['labels_added']} labels added, {book['seconds']} s")
     for p in book["problems"]:
         out(f"PROBLEM: {p}")
+    for t in book["truth_rejected"]:
+        out(f"TRUTH LEFT OUT: {t}")
     return 1 if book["problems"] else 0
 
 
