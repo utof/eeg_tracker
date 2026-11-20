@@ -9,6 +9,7 @@ import 'dart:isolate';
 import '../detectors/gestures.dart';
 import '../handsfree/store.dart';
 import '../recorder/nights.dart';
+import '../recorder/remove.dart' show RawUse, rawGoneText, removedOfNight;
 import '../sleep/night_signal.dart' show joinLayout;
 import '../sleep/report.dart';
 import 'plan.dart';
@@ -94,7 +95,8 @@ NightSignals searchNight(
 }
 
 /// Searches the night of [record] (run it in a background isolate: it reads the whole night, about 190 MB for 10
-/// hours, packed recordings unpacked as they are read); null when its recordings are gone, or with [onlyIfScored]
+/// hours, packed recordings unpacked as they are read); null when its recordings are gone (or left the phone,
+/// remove.dart: [lucidRawGone] says where), or with [onlyIfScored]
 /// when the night has no scored report yet: a search made before the night was scored is done again only once its
 /// stages exist (DECISIONS 620-629; the page searched again at every open until then).
 NightSignals? searchLastNight(String recordingsDir, LucidNightRecord record, {bool onlyIfScored = false}) {
@@ -104,7 +106,7 @@ NightSignals? searchLastNight(String recordingsDir, LucidNightRecord record, {bo
   final scored = report != null && report.scored;
   if (onlyIfScored && !scored) return null;
   final night = nightsIn(Directory(recordingsDir)).where((n) => n.name == name);
-  if (night.isEmpty || night.first.recordings.isEmpty) return null;
+  if (night.isEmpty || night.first.recordings.isEmpty || night.first.removed.isNotEmpty) return null;
   final cal = calibratedSignals(Directory(recordingsDir).parent);
   return searchNight(
     night.first.recordings,
@@ -116,6 +118,11 @@ NightSignals? searchLastNight(String recordingsDir, LucidNightRecord record, {bo
   );
 }
 
+/// What the page says when the night of [record] has no samples on the phone any more (moved to the laptop or deleted
+/// by hand, remove.dart); null while they are here.
+String? lucidRawGone(String recordingsDir, LucidNightRecord record) =>
+    rawGoneText(removedOfNight(Directory(recordingsDir), dateName(nightOf(DateTime.fromMillisecondsSinceEpoch(record.startMs)))));
+
 /// [searchLastNight] in a background isolate (nothing of it on the screen's thread), keeping the result.
 Future<NightSignals?> searchAndKeep(
   String recordingsDir,
@@ -123,9 +130,13 @@ Future<NightSignals?> searchAndKeep(
   LucidNightRecord record, {
   bool onlyIfScored = false,
 }) async {
-  final out = await Isolate.run(
-    () => searchLastNight(recordingsDir, record, onlyIfScored: onlyIfScored),
-    debugName: 'lucid-signals',
+  // the night's raw files are read meanwhile: nothing in the folder is removed until it ends (remove.dart)
+  final out = await RawUse.hold(
+    [recordingsDir],
+    () => Isolate.run(
+      () => searchLastNight(recordingsDir, record, onlyIfScored: onlyIfScored),
+      debugName: 'lucid-signals',
+    ),
   );
   if (out != null) store.saveSignals(record.stamp, out);
   return out;

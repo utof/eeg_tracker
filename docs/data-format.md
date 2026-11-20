@@ -415,8 +415,9 @@ folder). It never changes or deletes anything in the app's folder, and never run
   `recordings-diy/` (the DIY board's nights, the format of "Raw recording (DIY board)") and `diy-board/settings.json`
   (`useDiy`: which headband; `names`: 4, 6 or 8 names from CH1), and any folder
   a later feature adds. Left on the phone: `models/` (copies of the app's model assets), `export/` (the export's own
-  index), half-written `*.tmp` files, the scorer's `*.scoring` markers, and the two files Android and a plugin keep
-  there for themselves (`profileInstalled`, `flutter_callback_cache.json`; DECISIONS row 160).
+  index), `transfer/` (the laptop's acks and the Storage settings, below), half-written `*.tmp` files, the scorer's
+  `*.scoring` markers, and the two files Android and a plugin keep there for themselves (`profileInstalled`,
+  `flutter_callback_cache.json`; DECISIONS row 160).
 - **Export new** copies files that are new or changed (size or modified time) since the last export to this folder;
   **Export everything** copies every file again. A file is replaced whole; files the app rewrites (a session file
   once you answer its question, a dream note, the alpha-theta journal, a rebuilt sleep report) are copied again.
@@ -428,7 +429,7 @@ folder). It never changes or deletes anything in the app's folder, and never run
 | `exported` | when this export ran (local ISO time with offset) |
 | `mode` | `new` or `everything` |
 | `complete` | `false` when the export stopped before copying everything it meant to |
-| `files` | one object per file, sorted by path: `path` (relative, `/`-separated), `bytes`, `sha256` (of the bytes written, worked out while copying), `modified_ms` (the phone's modified time of that copy, ms since 1970), `written` (the `exported` time of the export that copied it); `on_phone: false` when the app no longer has the file (a `.f32` the phone packed is still on it); `original` (`path`, `bytes`, `sha256` of the `.f32`) for a recording packed after a day, sent as its `.f32.gz` |
+| `files` | one object per file, sorted by path: `path` (relative, `/`-separated), `bytes`, `sha256` (of the bytes written, worked out while copying), `modified_ms` (the phone's modified time of that copy, ms since 1970), `written` (the `exported` time of the export that copied it); `on_phone: false` when the app no longer has the file (a `.f32` the phone packed is still on it), with `removed` (why) for a raw file that left the phone (`<stamp>.removed.json`, below); `original` (`path`, `bytes`, `sha256` of the `.f32`) for a recording packed after a day, sent as its `.f32.gz` |
 | `not_exported` | paths still only on the phone (the export stopped, or the folder failed) |
 | `totals` | `files`, `bytes` of the list |
 
@@ -743,6 +744,12 @@ that send its code (`Authorization: Bearer <code>`, `X-EEG-Token`, or `?token=`)
   `?sha=0` lists without working out missing SHA-256 values.
 - `GET /files/<path>`: the file, with HTTP `Range: bytes=<from>-<to>` (206 and `Content-Range`; 416 with
   `Content-Range: bytes */<size>` when it starts past the end), `X-Modified-Ms`, and HEAD. Read-only.
+- `POST /ack` (DECISIONS 690-699, `docs/phone-link.md` "Acknowledged receipt"): the paired laptop says it holds checked
+  copies: `{"v": 1, "files": [{"path", "sha256"}]}` (a packed `.f32.gz` by its `original`'s SHA-256), header
+  `X-Eeg-Ack` = hex HMAC-SHA256 of `eeg-tracker ack v1|` + the body under the pairing's key; at most 256 KB.
+  200 `{"v": 1, "acked": [paths], "refused": [{"path", "why"}]}`; 403 `not paired` or `wrong proof`; 413 too big.
+  An empty `files` list asks only whether acks are taken. `GET /files` then lists each acked file with
+  `"acked": true` (the phone holds the ack and the file still holds those bytes).
 
 `scripts/pull_phone.py` mirrors these into the layout of `scripts/import_phone.py` (raw nights into
 `_local/recordings/`, the rest into `_local/phone/`). A recording's `<stamp>.header.json` travels with its `.f32` into
@@ -762,6 +769,32 @@ a pairing by code); 410 for a code that expired or was used, 404 `not paired` fo
 wrong proof or a client outside the local network. `_local/phone/link.json` (mode 600): `version` 1, `laptop_key`,
 `paired` and `told` (ISO times), `phone` (`address`, `port`, `token`). On the phone the paired laptop is the field
 `laptop` (`host`, `port`, `key`, `name`, `paired_at_ms`) of the Share on Wi-Fi setting in the app's private settings.
+
+### Raw files that left the phone (`<stamp>.removed.json`, `transfer/`)
+
+DECISIONS 690-699. A recording's samples (`.f32` or `.f32.gz`) and index (`.idx`) may leave the phone once the paired
+laptop acked them (the Storage page, `app/README.md`), or by hand; everything else of the set stays (`.log`,
+`.header.json`, `.markers.jsonl`) and so do every report and summary made from it. Before the first file goes,
+`<stamp>.removed.json` is written beside them (in `recordings/`, `recordings-diy/` or `mornings/`), and it is exported
+and shared like any file:
+
+| Field | Meaning |
+|---|---|
+| `format`, `version` | `eeg-tracker-removed`, 1 |
+| `removed`, `removed_ms` | when (local ISO time; ms since 1970) |
+| `on_laptop` | the paired laptop had acked every file as it was (`false`: deleted on the phone only) |
+| `laptop` | the paired laptop's name, when `on_laptop` |
+| `why` | `cleared on the Storage page`, `deleted from the phone after the laptop had checked it`, `deleted from the phone only (Danger zone)`, or another helper's words |
+| `night` | the night it belonged to (`2026-11-18`), or null |
+| `end_ms` | when its data ended (the last `.idx` row), so the nights keep their shape; null without samples |
+| `files` | per file: `name` and `bytes` and `sha256` of the plain file (a packed one's original; `sha256` null when unknown), `phone_name` and `phone_bytes` as it was on the phone |
+
+The phone's nights list (`recorder/nights.dart`) chains such a set by `end_ms`, lists it as removed, and the sleep
+scoring never scores that night again. Export data's manifest marks such files `removed` (the `why`) besides
+`on_phone: false`. `files/transfer/` holds `acks.json` (the laptop's acks: plain path -> `sha256`, `bytes`,
+`modified_ms`, `acked_ms`, the first time those bytes were acked) and `storage.json` (`keep_days`: category -> days
+after the ack, 0 never, missing 3); it is never exported or shared. On the laptop `_local/phone/acks.jsonl` has one
+line per ack (`acked`, `phone`, `files`) and the catalog's night rows `moved_from_phone`.
 
 ## The catalog of nights (`_local/catalog/`)
 

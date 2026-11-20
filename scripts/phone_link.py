@@ -21,7 +21,8 @@ How it works (DECISIONS rows 530-539; docs/phone-link.md):
   minutes while it is on, the phone tells this laptop where it is now, by the same proof with that key, so a new
   address is picked up by itself.
 - Then it does what scripts/pull_phone.py does (a copy every --every minutes, raw nights first; the same files and
-  rules) and serves the live pages like scripts/page_server.py at http://localhost:8770/ (on this laptop only).
+  rules, and the acks of what this laptop holds, under the pairing's key: DECISIONS 690-699) and serves the live
+  pages like scripts/page_server.py at http://localhost:8770/ (on this laptop only).
 - `--keep` is how the laptop tray runs it whenever a phone is paired (DECISIONS 677): no code unless one is asked for
   on this laptop's page (`http://127.0.0.1:8771/?new=1`, what the tray's "Pair phone…" opens), no window; it waits
   for a home-network address when the laptop has none (Wi-Fi off), listens on the new one when it changes, and ends
@@ -491,7 +492,7 @@ def mirror_pass(link: Link, dest: Path, say: Say, last: list[str | None], raw_on
     host, port, token = t
     now = datetime.now().astimezone()
     try:
-        rep = pp.pull(pp.Phone(f"http://{host}:{port}", token), dest, raw_only=raw_only, now=now)
+        rep = pp.pull(pp.Phone(f"http://{host}:{port}", token), dest, raw_only=raw_only, now=now, key=link.key)
     except pp.Refused as e:
         link.answering = False
         msg = (f"The phone at {host} refused ({e}): it got a new code. It tells this laptop within 5 minutes while "

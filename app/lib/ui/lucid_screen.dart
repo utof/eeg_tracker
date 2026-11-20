@@ -58,6 +58,24 @@ const Duration answerWithin = Duration(hours: 30);
   return (due: due, practised: practised);
 }
 
+/// Last night as the page shows it; [rawGone] is asked only while it has no search yet (DECISIONS 690-699).
+LucidLastNight _lastNight(
+  LucidStore store,
+  LucidNightRecord last,
+  LucidAnswers? answers,
+  bool searching,
+  String? Function(LucidNightRecord record)? rawGone,
+) {
+  final signals = store.signals(last.stamp);
+  return LucidLastNight(
+    record: last,
+    signals: signals,
+    answers: answers,
+    searching: searching,
+    rawGone: signals == null && !searching ? rawGone?.call(last) : null,
+  );
+}
+
 /// What the page needs from the files (pure, for tests).
 LucidViewModel lucidModel({
   required LucidStore store,
@@ -66,6 +84,7 @@ LucidViewModel lucidModel({
   int? runningStartMs,
   LucidDraft draft = const LucidDraft(),
   Set<String> searching = const {},
+  String? Function(LucidNightRecord record)? rawGone,
 }) {
   final s = store.settings();
   final records = store.nights();
@@ -108,12 +127,7 @@ LucidViewModel lucidModel({
     nightRunning: nightRunning,
     last: last == null
         ? null
-        : LucidLastNight(
-            record: last,
-            signals: store.signals(last.stamp),
-            answers: lastAnswers,
-            searching: searching.contains(last.stamp),
-          ),
+        : _lastNight(store, last, lastAnswers, searching.contains(last.stamp), rawGone),
     nights: [
       for (var i = 0; i < count; i++)
         (
@@ -221,6 +235,7 @@ class _LucidScreenState extends State<LucidScreen> {
           runningStartMs: _runningStart,
           draft: _draft,
           searching: _searching,
+          rawGone: _rec == null ? null : (r) => lucidRawGone(_rec!, r),
         );
       } catch (_) {
         _model = const LucidViewModel(on: false, due: LucidDue.turnOn);
@@ -233,7 +248,7 @@ class _LucidScreenState extends State<LucidScreen> {
   /// not read again at every open). Never while a night records, a session runs or last night is being scored.
   void _searchIfDue() {
     final st = _store, rec = _rec, last = _model?.last;
-    if (st == null || rec == null || last == null || _running || _othersBusy) return;
+    if (st == null || rec == null || last == null || _running || _othersBusy || last.rawGone != null) return;
     final have = last.signals;
     if (have != null && have.staged) return;
     final stamp = last.record.stamp;

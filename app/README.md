@@ -1784,7 +1784,8 @@ Off unless you switch it on. With it on, the phone answers the laptop over your 
 contact, battery and drops (the same pages the laptop recorder has), and every file the app keeps, so the laptop has
 a copy of the night within minutes instead of after Stop and Export data. Nothing is sent anywhere by itself (only a
 paired laptop is told where the phone is), nothing goes to the internet, and nothing on the phone can be changed or
-deleted this way.
+deleted this way: the paired laptop can only say that it holds a checked copy of a file, and the phone itself then
+decides what leaves it (Storage, below).
 
 **Safety, in plain words.** It is your brain data, so: every request needs the code the app shows (12 characters);
 only devices on the same local network are answered; it turns itself off 12 hours after you switched it on, and 15
@@ -1898,6 +1899,39 @@ What else it is useful for:
 - **Other EEG tools**: `uv run --no-project --with pylsl python scripts/lsl_bridge.py --url http://<address>/stream
   --token <code>` re-publishes the phone's signal as Lab Streaming Layer streams (MNE-LSL, OpenViBE, LabRecorder).
 - Meditation, the check-in, the dream catcher and sound sessions are served live too while they record.
+
+## Storage (what the app keeps on this phone; More, Storage)
+
+The owner (2026-11-20): "move data off the phone whenever possible… I want to just live my day and have the recording
+saved." Raw recordings are the bulk (about 18 MB an hour of headband, less once packed after a day), so they leave the
+phone once your laptop holds a copy it has **checked**: after it copies a file over Share on Wi-Fi, the paired laptop
+reads its copy again from its own disk and tells the phone the copy is byte for byte the same (`scripts/pull_phone.py`
+and `scripts/phone_link.py` do it by themselves; DECISIONS 690-699, `../docs/phone-link.md`).
+
+- **By itself:** while a laptop is paired, a raw recording leaves the phone **3 days** after the laptop checked it,
+  between nights, never while something records, never before last night's sleep report is made. Per kind (sleep
+  nights, work sessions, check-ins, the DIY board, the dream catcher's spoken answers) you can pick 3 days, 1 week,
+  1 month or Never. **Only deletes recordings your laptop has checked. Nothing that's only on this phone.**
+- **The statistics always stay:** sleep reports (stages and minutes), Trends, check-in results, session summaries,
+  transcripts, every setting and each recording's notes (its log, header and markers). Every page that shows them
+  works as before; a page that needs the raw signal says "This night's raw recording is on the laptop now" (Score
+  again on a report from an older scorer, the lucid cues' search for dream signals, playing a spoken answer).
+- **The page** shows the space as one bar by kind (tap a part to open it), the phone's free space, what the laptop
+  holds checked copies of, the kinds with their sizes, **Clear selected** (only what the laptop has checked; the cache
+  too, which the app makes again) and, at the bottom in red, the **Danger zone**: what is only on this phone, which
+  you can delete there by hand after two questions. Nothing there is ever deleted by itself.
+- On the laptop nothing is ever deleted; `_local/phone/acks.jsonl` lists every file the laptop vouched for, and a
+  night whose raw files left the phone is marked "moved from phone" by `scripts/catalog.py`.
+
+### Owner step: check that a night left the phone (5 minutes, 4 days after pairing)
+
+1. Leave the laptop's `python3 scripts/phone_link.py` running (or the tray, once it hosts the link) with Share on
+   Wi-Fi on; its window prints "told the phone N files are safe here".
+2. Four days later open **More, Storage**: **On the laptop** has grown, and the oldest nights no longer count in
+   **Sleep nights, raw recordings**. Their sleep reports are still on the Night tab and in Trends.
+3. On the laptop: `python3 scripts/catalog.py` lists those nights with "moved from phone"; their `.f32` files are in
+   `_local/recordings/`.
+4. Tell the assistant if a page says something odd where the raw recording used to be.
 
 ## Export a night
 

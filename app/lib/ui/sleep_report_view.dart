@@ -50,6 +50,7 @@ class SleepReportView extends StatelessWidget {
     this.onOpenNight,
     this.onRetry,
     this.onRescore,
+    this.rawGone,
     this.onLicences,
     this.wearer,
     this.onWearerAnswer,
@@ -85,6 +86,9 @@ class SleepReportView extends StatelessWidget {
 
   /// "Score again", offered when the report came from an older scorer (DECISIONS row 580); null otherwise.
   final VoidCallback? onRescore;
+
+  /// Instead of "Score again" when the night's samples left the phone (remove.dart): where they are, in words.
+  final String? rawGone;
   final VoidCallback? onLicences;
 
   /// "Was this you?" for this night (null: switched off or nothing to say), its answers and its "i".
@@ -123,7 +127,8 @@ class SleepReportView extends StatelessWidget {
             const SectionHeading('Past nights'),
             for (final o in others) _NightRow(report: o, onTap: onOpenNight == null ? null : () => onOpenNight!(o)),
           ],
-          if (r != null) _Footer(report: r, onLicences: onLicences, onRescore: scoringStep == null ? onRescore : null),
+          if (r != null)
+            _Footer(report: r, onLicences: onLicences, onRescore: scoringStep == null ? onRescore : null, rawGone: rawGone),
         ],
       ),
     );
@@ -446,7 +451,8 @@ class _NightRow extends StatelessWidget {
 }
 
 class _Footer extends StatelessWidget {
-  const _Footer({required this.report, required this.onLicences, this.onRescore});
+  const _Footer({required this.report, required this.onLicences, this.onRescore, this.rawGone});
+  final String? rawGone;
   final SleepReport report;
   final VoidCallback? onLicences;
   final VoidCallback? onRescore;
@@ -479,6 +485,14 @@ class _Footer extends StatelessWidget {
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton(onPressed: onRescore, child: const Text('Score again')),
+            ),
+          ],
+          if (onRescore == null && rawGone != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              'An earlier version of the app scored this night. $rawGone The phone cannot score it again without '
+              'it; the laptop can (scripts/sleep_report.py).',
+              style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.4),
             ),
           ],
           if (onLicences != null)

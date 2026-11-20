@@ -23,6 +23,7 @@ import '../dream/store.dart';
 import '../dream/text_runner.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
+import '../recorder/remove.dart' show fileGoneText;
 import '../recorder/recorder_service.dart';
 import '../session_keeper.dart';
 import '../sleep/onnx_runs.dart' show modelsDirFor;
@@ -409,6 +410,8 @@ class _DreamScreenState extends State<DreamScreen> {
   void _playAnswer(DreamSession s, DreamRound r) {
     final st = _c.store, f = r.answerFile;
     if (st == null || f == null) return;
+    // a spoken answer cleared on the Storage page (DECISIONS 690-699): its words stay, the sound is elsewhere
+    if (!File('${st.dir.path}/$f').existsSync()) return _say(fileGoneText(st.dir.parent, 'dream-catcher/$f', what: 'This answer\'s recording'));
     unawaited(_play(f, '${st.dir.path}/$f', 1));
   }
 
@@ -563,6 +566,13 @@ class _SessionPageState extends State<_SessionPage> {
     if (_playing == f) {
       setState(() => _playing = null);
       return widget.play.stopClip();
+    }
+    if (!File('${widget.dir.path}/$f').existsSync()) {
+      // cleared on the Storage page (DECISIONS 690-699): the words stay
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(content: Text(fileGoneText(widget.dir.parent, 'dream-catcher/$f', what: 'This answer\'s recording'))),
+      );
+      return;
     }
     setState(() => _playing = f);
     try {

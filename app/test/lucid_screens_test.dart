@@ -333,4 +333,20 @@ void main() {
       expect(lucidModel(store: store, now: DateTime(2026, 11, 28), nightRunning: false).due, LucidDue.practise);
     });
   });
+
+  testWidgets('last night without its raw recording on the phone: not searched, and where it is', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: nightTheme(),
+      home: _view(LucidViewModel(
+        on: true,
+        due: LucidDue.practise,
+        level: 0.031,
+        last: LucidLastNight(record: _record, endMs: _at(8, 5), rawGone: "This night's raw recording is on the laptop now."),
+      )),
+    ));
+    await tester.scrollUntilVisible(find.text('Dream signals'), 400);
+    expect(find.text('not searched: raw not on the phone'), findsOneWidget);
+    expect(find.text("This night's raw recording is on the laptop now."), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

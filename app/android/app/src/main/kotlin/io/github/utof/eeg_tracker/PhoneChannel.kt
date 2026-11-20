@@ -23,6 +23,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.os.Process
+import android.os.StatFs
 import android.provider.Settings
 import android.util.Log
 import com.pravera.flutter_foreground_task.service.RestartReceiver
@@ -116,11 +117,18 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
                 "mediaVolume" -> result.success(mediaVolume())
                 "inCall" -> result.success(inCall())
                 "wifiNets" -> result.success(wifiNets())
+                "storageSpace" -> result.success(storageSpace())
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {
             result.error("phone", e.message, null)
         }
+    }
+
+    /** The storage the app's files live on: its size and what is free (the Storage page's context, DECISIONS 690-699). */
+    private fun storageSpace(): Map<String, Long> {
+        val fs = StatFs(context.filesDir.path)
+        return mapOf("total" to fs.totalBytes, "free" to fs.availableBytes)
     }
 
     /**

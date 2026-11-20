@@ -13,12 +13,16 @@
 //   POST /work           the paired laptop's work signal, {"working": true|false} and optionally "meeting":
 //                        true|false (scripts/laptop_work.py), for automatic recording and the work session's
 //                        meetings (lib/auto/laptop.dart; 503 where nothing takes it: during a night)
+//   POST /ack            the paired laptop's word that it holds checked copies of raw files: {"v":1,"files":[{"path",
+//                        "sha256"}]} with `X-Eeg-Ack`, the HMAC of the body with the pairing's key (recorder/acks.dart,
+//                        DECISIONS 690-699); kept in files/transfer/acks.json, and /files marks those files `acked`
 //   the laptop's own jobs (/sleep-report, /morning-report, /hypnogram.png): 503, as the page server answers
 //   while the recorder is away
 //
 // Every request needs the token and a client inside the phone's Wi-Fi network, or the phone itself (DECISIONS row
 // 562). Nothing here writes, renames or deletes the app's files (the work signal goes to the app, which keeps it); it keeps one list of its own, the SHA-256 of finished
-// files in `files/cache/share-hashes.json` (row 585), so an app update does not read every night again. Plain
+// files in `files/cache/share-hashes.json` (row 585), so an app update does not read every night again, and writes the
+// laptop's acks (`files/transfer/acks.json`; the app, not this server, decides what to delete with them). Plain
 // dart:io with no Flutter import: it runs in an isolate of its own (isolate.dart), and in tests.
 import 'dart:async';
 import 'dart:collection';
@@ -29,6 +33,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 
 import '../export/store.dart';
+import '../recorder/acks.dart';
 import 'protocol.dart';
 
 const List<String> _brainBit = ['O1', 'O2', 'T3', 'T4'];
@@ -41,6 +46,9 @@ const int streamQueueMax = 200;
 
 /// /stream readers at once.
 const int streamReadersMax = 8;
+
+/// The largest `POST /ack` body: about 2000 files.
+const int ackBodyMax = 256 * 1024;
 
 /// A file changed in the last seconds is still being written: listed without a SHA-256, marked `growing`.
 const Duration _settled = Duration(seconds: 20);
@@ -84,6 +92,7 @@ class ShareServer {
     this.hashCache,
     this.onCopying,
     this.onWork,
+    this.ackKey,
     DateTime Function()? clock,
   }) : _now = clock ?? DateTime.now;
 
@@ -110,6 +119,9 @@ class ShareServer {
   /// The paired laptop's work signal (`POST /work`): a work session started ([working]) or ended there (DECISIONS
   /// 603), and whether it is in a meeting (null: not said; DECISIONS 685); null: nothing takes it here (503).
   final void Function(bool working, bool? meeting)? onWork;
+
+  /// The key of the pairing with the laptop (link.dart): `POST /ack` must carry its proof; null: not paired (403).
+  final String? ackKey;
   final DateTime Function() _now;
 
   /// SHA-256 worked out by this server (not taken from the cache or the export's index); for tests.
@@ -335,6 +347,10 @@ class ShareServer {
         if (method != 'POST') return await _json(res, 405, {'error': 'POST {"working": true|false}'});
         return await _work(req);
       }
+      if (path == '/ack' || path == '/ack/') {
+        if (method != 'POST') return await _json(res, 405, {'error': 'POST {"v":1,"files":[...]}'});
+        return await _ack(req);
+      }
       if (method == 'POST') {
         if (name == 'marker') return await _marker(req);
         if (name == 'contact') {
@@ -353,7 +369,7 @@ class ShareServer {
           'app': 'eeg-tracker',
           'share': 1,
           'status': _status,
-          'routes': ['GET /state', 'GET /stream', 'POST /marker', 'GET /files', 'GET /files/<path>', 'POST /work'],
+          'routes': ['GET /state', 'GET /stream', 'POST /marker', 'GET /files', 'GET /files/<path>', 'POST /work', 'POST /ack'],
         });
       }
       return await _json(res, 404, {'error': 'no such route'});
@@ -424,6 +440,65 @@ class ShareServer {
     if (take == null) return _json(req.response, 503, {'error': 'the work signal is not taken now (a night records)'});
     take(working, meeting);
     return _json(req.response, 202, {'ok': true});
+  }
+
+  /// The paired laptop's acks (recorder/acks.dart): refused whole without a pairing, a proof made with its key, or
+  /// a well-formed body; then each file on its own (kept only when it holds what the laptop says it checked).
+  Future<void> _ack(HttpRequest req) async {
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in req) {
+      if (bytes.length <= ackBodyMax) bytes.add(chunk);
+    }
+    final res = req.response;
+    if (bytes.length > ackBodyMax) return _json(res, 413, {'error': 'too many files at once'});
+    final key = ackKey;
+    if (key == null) return _json(res, 403, {'error': 'not paired'});
+    final body = bytes.takeBytes();
+    if (!sameToken(req.headers.value('x-eeg-ack') ?? '', ackProof(key, body))) {
+      return _json(res, 403, {'error': 'wrong proof'});
+    }
+    final asked = <({String path, String sha256})>[];
+    try {
+      final Object? j = jsonDecode(utf8.decode(body));
+      if (j is! Map || j['v'] != 1 || j['files'] is! List) throw const FormatException();
+      for (final f in j['files'] as List) {
+        if (f is! Map || f['path'] is! String || f['sha256'] is! String) throw const FormatException();
+        asked.add((path: f['path'] as String, sha256: f['sha256'] as String));
+      }
+    } catch (_) {
+      return _json(res, 400, {'error': 'send {"v":1,"files":[{"path":...,"sha256":...}]}'});
+    }
+    _readCache();
+    final now = _now();
+    final kept = <String, LaptopCopy>{};
+    final acked = <String>[];
+    final refused = <Map<String, String>>[];
+    for (final a in asked) {
+      final r = await checkAck(filesDir, a.path, a.sha256, now: now, plainSha: _plainSha);
+      if (r.copy != null) {
+        kept[ackPathOf(a.path)] = r.copy!;
+        acked.add(a.path);
+      } else {
+        refused.add({'path': a.path, 'why': r.why ?? 'refused'});
+      }
+    }
+    try {
+      AckStore(filesDir).add(kept);
+    } catch (e) {
+      return _json(res, 500, {'error': 'the acks could not be kept: $e'});
+    }
+    return _json(res, 200, {'v': 1, 'acked': acked, 'refused': refused});
+  }
+
+  /// A plain file's SHA-256 for an ack: the kept one while the file is unchanged, else read now.
+  Future<String?> _plainSha(File file, FileStat st) async {
+    final rel = file.path.substring(filesDir.path.length + 1);
+    final ms = st.modified.millisecondsSinceEpoch;
+    final known = _hashes[rel];
+    if (known != null && known.bytes == st.size && known.modifiedMs == ms) return known.sha256;
+    final sha = await _sha256(StoredFile(rel, file, st.size, ms));
+    if (sha != null) _writeCache(_hashes.keys.toSet());
+    return sha;
   }
 
   /// Server-sent events, as `Page.stream` on the laptop. No chunked framing: the laptop's page server passes the
@@ -544,6 +619,7 @@ class ShareServer {
     _readCache();
     final stored = storedFiles(filesDir);
     final exported = _exportIndex();
+    final acks = AckStore(filesDir).load();
     final nowMs = _now().millisecondsSinceEpoch;
     final files = <Map<String, Object?>>[];
     final before = hashed;
@@ -569,6 +645,8 @@ class ShareServer {
         if (growing) 'growing': true,
         // a recording packed after a day: the .f32 it holds, so the laptop never fetches a night twice (DECISIONS 540-549)
         if (f.originalJson != null) 'original': f.originalJson,
+        // the paired laptop holds a checked copy of it as it is now (DECISIONS 690-699): no need to ack it again
+        if (!growing && isAckable(f.path) && ackedNow(acks, f.path, f.file)) 'acked': true,
       });
     }
     if (hashed > before) _writeCache({for (final f in stored) f.path});

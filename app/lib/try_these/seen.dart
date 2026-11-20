@@ -8,7 +8,8 @@ import 'dart:io';
 import '../cache/file_summaries.dart' show SummaryIndex;
 import '../recorder/header.dart' show recordsIn, tryHeader;
 import '../recorder/nights.dart' show nightLabel;
-import '../recorder/packed.dart' show packedSuffix, plainFileOf;
+import '../recorder/packed.dart' show packedSuffix, plainFileOf, rawOnDisk;
+import '../recorder/remove.dart' show removedRecordOf, removedSuffix;
 
 typedef SeenCheck = String? Function(Directory files);
 
@@ -233,10 +234,14 @@ String? _diyBoard(Directory files) {
   final sets = [
     for (final f in [..._files(files, 'recordings-diy', '.f32'), ..._files(files, 'recordings-diy', '.f32$packedSuffix')])
       plainFileOf(f), // a set packed after a day counts the same
+    for (final f in _files(files, 'recordings-diy', removedSuffix)) // and one whose raw files left the phone
+      File('${f.path.substring(0, f.path.length - removedSuffix.length)}.f32'),
   ]..sort((a, b) => b.path.compareTo(a.path));
   final seconds = sets.fold<double>(0, (s, f) {
     final h = tryHeader(f);
-    return h == null ? s : s + recordsIn(f, h) / h.sampleRate;
+    if (h == null) return s;
+    final gone = rawOnDisk(f) == null ? removedRecordOf(f) : null;
+    return s + (gone == null ? recordsIn(f, h) : gone.samplesBytes ~/ h.recordBytes) / h.sampleRate;
   });
   final minutes = seconds / 60;
   if (minutes < 10) return null;

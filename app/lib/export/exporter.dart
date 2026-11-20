@@ -14,6 +14,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 
+import '../recorder/remove.dart' show removedRawPaths;
 import '../sleep/report.dart' show isoLocal;
 import 'store.dart';
 
@@ -126,13 +127,15 @@ String _why(Object e) => switch (e) {
 };
 
 /// The manifest: every file exported to this folder, sorted by path; a file the phone no longer has stays listed
-/// with `on_phone: false`.
+/// with `on_phone: false`, and a raw file that left it (recorder/remove.dart) with `removed`: why (`moved to the
+/// laptop`, `deleted by hand`).
 Map<String, Object?> buildManifest({
   required ExportState state,
   required Set<String> onPhone,
   required DateTime at,
   required bool everything,
   required List<String> notExported,
+  Map<String, String> removed = const {},
 }) {
   final paths = state.files.keys.toList()..sort();
   final files = [
@@ -145,6 +148,7 @@ Map<String, Object?> buildManifest({
         'written': state.files[p]!.written,
         if (state.files[p]!.original != null) 'original': state.files[p]!.original,
         if (!onPhone.contains(p)) 'on_phone': false,
+        if (!onPhone.contains(p) && removed[p] != null) 'removed': removed[p],
       },
   ];
   return {
@@ -218,6 +222,7 @@ Future<ExportOutcome> runExport({
     at: at,
     everything: everything,
     notExported: notExported,
+    removed: removedRawPaths(filesDir),
   );
   store.appendLog({
     'exported': written,

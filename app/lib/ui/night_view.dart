@@ -175,6 +175,7 @@ class NightView extends StatelessWidget {
     this.morning,
     this.onLightsOff,
     this.onSettings,
+    this.onStorage,
     this.onAlarm,
     this.onAwake,
     this.onHeadbandPage,
@@ -215,6 +216,9 @@ class NightView extends StatelessWidget {
 
   /// Settings (hands-free controls, DECISIONS 248); no gear when null.
   final VoidCallback? onSettings;
+
+  /// The Storage page (More; DECISIONS 690-699); null in tests that do not show it.
+  final VoidCallback? onStorage;
 
   /// The alarm line's button ([NightViewModel.alarmAction]); "I'm awake" while it rings (DECISIONS 235-236).
   final VoidCallback? onAlarm;
@@ -313,6 +317,10 @@ class NightView extends StatelessWidget {
           ],
           // More (the bottom bar): Settings and the licences, here as a section; on one page they are the night
           // screen's gear and the sleep report's link
+          if (onStorage != null && (tab == null || tab == HomeTab.more)) ...[
+            const SectionHeading('Storage'),
+            _Storage(onStorage: onStorage),
+          ],
           if (tab == HomeTab.more) ...[const SectionHeading('Settings'), _More(onSettings: onSettings, onLicences: onLicences)],
           const TabStart(HomeTab.sessions),
           if (tab == HomeTab.sessions && m.running) _Busy(),
@@ -721,6 +729,29 @@ class _More extends StatelessWidget {
             child: TextButton(onPressed: onLicences, child: const Text('Licences')),
           ),
         ],
+      ],
+    );
+  }
+}
+
+/// More: the Storage page, what the app keeps on this phone and what can leave it.
+class _Storage extends StatelessWidget {
+  const _Storage({required this.onStorage});
+  final VoidCallback? onStorage;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'What the app keeps on this phone. Raw recordings leave it once your laptop has checked its copy; '
+          'the statistics always stay.',
+          style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(onPressed: onStorage, icon: const Icon(Icons.storage_outlined), label: const Text('Storage')),
       ],
     );
   }

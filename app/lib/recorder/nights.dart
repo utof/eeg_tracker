@@ -11,13 +11,17 @@
 // the screen's thread at every start and return (DECISIONS 629).
 // A file set whose header names a session that is not sleep (a work session's raw EEG, `session: work`, DECISIONS
 // 683) is no part of any night, with or without samples: never chained, scored, or exported as a night.
+// A set whose raw files left the phone (moved to the laptop, or deleted by hand: remove.dart, DECISIONS 690-699) keeps
+// its place by its `<stamp>.removed.json`, which says when its data ended: it is chained as before and listed in
+// [NightFiles.removed], never in [NightFiles.recordings], so nothing tries to read samples that are not there.
 import 'dart:io';
 import 'dart:typed_data';
 
 import '../cache/file_summaries.dart' show fileKey;
 import 'chunk_writer.dart';
-import 'header.dart' show headerFileOf, legacyHeader, tryHeader;
-import 'packed.dart' show isPackedPath, rawLength;
+import 'header.dart' show RecordingHeader, headerFileOf, legacyHeader, tryHeader;
+import 'packed.dart' show isPackedPath, plainFileOf, rawLength, rawOnDisk;
+import 'remove.dart' show removedRecordOf, removedSuffix;
 
 final RegExp _stem = RegExp(r'^(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})\.');
 
@@ -45,7 +49,7 @@ DateTime nightOf(DateTime t) {
 String dateName(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${_two(d.month)}-${_two(d.day)}';
 
 class NightFiles {
-  NightFiles(this.nightOf, this.files, {this.recordings = const [], this.lastData});
+  NightFiles(this.nightOf, this.files, {this.recordings = const [], this.removed = const [], this.lastData});
 
   /// The evening's date.
   final DateTime nightOf;
@@ -56,6 +60,10 @@ class NightFiles {
   /// The `.f32` files with samples, oldest first: what the sleep report scores. By their plain names, also when
   /// packed (open them with packed.dart's openRaw, measure them with rawLength).
   final List<File> recordings;
+
+  /// The `.f32` names (plain) of the sets whose raw files left the phone (remove.dart), oldest first: their samples
+  /// count for the night's shape, but there is nothing to read.
+  final List<File> removed;
 
   /// Arrival of the night's last data; null without recordings.
   final DateTime? lastData;
@@ -70,7 +78,7 @@ class NightFiles {
   DateTime get end => lastData ?? start;
 
   /// File sets (one per recorder run: a new one after every drop or restart).
-  int get runs => files.where((f) => f.path.endsWith('.f32') || isPackedPath(f.path)).length;
+  int get runs => files.where((f) => f.path.endsWith('.f32') || isPackedPath(f.path)).length + removed.length;
 
   int get bytes => files.fold(0, (sum, f) => sum + f.lengthSync());
 
@@ -104,6 +112,7 @@ List<NightFiles> nightsIn(Directory dir) {
   }
   final data = <_Rec>[];
   final other = <String>[];
+  final gone = <String>{};
   final kept = _keptSets[dir.path] ?? const <String, _SetEnd>{};
   final keep = <String, _SetEnd>{};
   for (final stem in byStem.keys) {
@@ -112,7 +121,8 @@ List<NightFiles> nightsIn(Directory dir) {
     var set = kept[stem];
     if (set == null || key == null || set.key != key) set = _setOf(dir, stem, start, key);
     if (key != null) keep[stem] = set;
-    if (!set.sleep) continue; // a work session's raw EEG: not a night
+    if (!set.sleep) continue; // a work session's raw EEG (also once moved off the phone): not a night
+    if (set.removed) gone.add(stem);
     if (set.end case final end?) {
       data.add(_Rec(stem, start, end));
     } else {
@@ -150,7 +160,8 @@ List<NightFiles> nightsIn(Directory dir) {
       NightFiles(
         c.nightOf,
         [for (final s in c.stems) ...byStem[s]!]..sort(byName),
-        recordings: [for (final s in c.dataStems) File('${dir.path}/$s.f32')]..sort(byName),
+        recordings: [for (final s in c.dataStems) if (!gone.contains(s)) File('${dir.path}/$s.f32')]..sort(byName),
+        removed: [for (final s in c.dataStems) if (gone.contains(s)) File('${dir.path}/$s.f32')]..sort(byName),
         lastData: c.dataStems.isEmpty ? null : c.end,
       ),
   ]..sort((a, b) {
@@ -160,8 +171,9 @@ List<NightFiles> nightsIn(Directory dir) {
 }
 
 /// A file set's samples' end ([_lastData]), or null when it holds no whole sample, and whether it is sleep (its
-/// header names no other session), with the key it was worked out for.
-typedef _SetEnd = ({String? key, DateTime? end, bool sleep});
+/// header names no other session), with the key it was worked out for; [removed]: its raw files left the phone, and
+/// the end is its record's (remove.dart).
+typedef _SetEnd = ({String? key, DateTime? end, bool sleep, bool removed});
 
 /// What [nightsIn] worked out per folder and file set, for this isolate.
 final Map<String, Map<String, _SetEnd>> _keptSets = {};
@@ -183,13 +195,43 @@ String? _setKey(List<File> files) {
 
 /// The set's samples' end, or null when it holds no whole sample, and whether it is sleep. Its header gives the record,
 /// the rate (any number of channels) and the session; a set whose header cannot be used counts as the BrainBit's
-/// night here, for its length only: its readers refuse it in words.
+/// night here, for its length only: its readers refuse it in words. A set whose samples left the phone ends where its
+/// `.removed.json` says (its header stays on the phone, so a work session's still says it is no sleep).
 _SetEnd _setOf(Directory dir, String stem, DateTime start, String? key) {
   final f32 = File('${dir.path}/$stem.f32');
+  final h = _headerOf(f32);
+  if (rawOnDisk(f32) == null && File('${dir.path}/$stem$removedSuffix').existsSync()) {
+    final end = removedRecordOf(f32)?.endMs;
+    return (
+      key: key,
+      end: end == null ? null : DateTime.fromMillisecondsSinceEpoch(end),
+      sleep: h.isSleep,
+      removed: end != null,
+    );
+  }
+  return (key: key, end: _samplesEnd(dir, stem, start, h), sleep: h.isSleep, removed: false);
+}
+
+/// The header that describes [f32]'s set: its own (header file, or an old set's `.log`) when it has samples or a
+/// header file, else the BrainBit's.
+RecordingHeader _headerOf(File f32) =>
+    rawLength(f32) > 0 || headerFileOf(f32).existsSync() ? (tryHeader(f32) ?? legacyHeader) : legacyHeader;
+
+DateTime? _samplesEnd(Directory dir, String stem, DateTime start, [RecordingHeader? header]) {
+  final f32 = File('${dir.path}/$stem.f32');
   final size = rawLength(f32);
-  final h = size > 0 || headerFileOf(f32).existsSync() ? (tryHeader(f32) ?? legacyHeader) : legacyHeader;
-  final end = size >= h.recordBytes ? _lastData(dir, stem, start, size ~/ h.recordBytes, h.sampleRate) : null;
-  return (key: key, end: end, sleep: h.isSleep);
+  final h = header ?? _headerOf(f32);
+  return size >= h.recordBytes ? _lastData(dir, stem, start, size ~/ h.recordBytes, h.sampleRate) : null;
+}
+
+/// When the data of [f32]'s set ended (its last `.idx` row, else its start and length), from the samples on the phone;
+/// null when it holds none or its name is not a recording's.
+DateTime? dataEndOf(File f32) {
+  final plain = plainFileOf(f32);
+  final name = plain.uri.pathSegments.last;
+  final start = stemTime(name);
+  if (start == null) return null;
+  return _samplesEnd(plain.parent, name.substring(0, 17), start);
 }
 
 /// Arrival time of the last batch (the last `.idx` row); start + samples / rate without an index.

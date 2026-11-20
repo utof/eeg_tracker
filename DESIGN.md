@@ -75,6 +75,9 @@ Dark is not a style choice here; it comes from the scene. Source: `app/lib/ui/th
   `problem` red = no data, poor contact, empty half hours. A colour always repeats a word or a shape;
   nothing is told by colour alone.
 - **Strip:** `track` for an empty cell, `saved` for a fully saved half hour (visible, never bright).
+- **Storage tones:** the Storage page's bar gives each kind of data a dim warm tone of its own (sand, sage, heather,
+  slate, tan, mauve, parchment, olive, umber, smoke; `app/lib/ui/storage_bar.dart`), never the trio's green, amber or
+  red, and each repeats as a 12 dp swatch beside its row's name: the colour never stands alone.
 
 ## Typography
 
@@ -142,6 +145,16 @@ to do as numbered lines, the outlined button to its screen, Then tell the assist
 underline note field, then Done (filled, the page's one filled button) and Skip (a text button) at 3 : 2. Done or Skip
 folds the stop into "Done and skipped" (behind Show N stops) and the next one opens and scrolls into view. The note has
 its muted label, "What happened". With every stop done or skipped, an outlined Open Export data sits under the sentence.
+
+Storage (More, its own section and page; DECISIONS 690-699, the owner's "like Telegram's Storage Usage") is one page:
+the app's space as a readout with the phone's free space in one muted line, the storage bar (one stacked 20 dp bar of
+the kinds in their tones, 2 dp gaps, 6 dp radius; a tap opens that kind below), "On the laptop, checked" as a
+label-left / value-right row, then On this phone: one hairline row per kind (checkbox, swatch, name, size in tabular
+figures, chevron), open to its parts indented with their own checkbox only where something may go and "Always kept"
+for the statistics; one muted line on what Clear selected deletes; Automatic, the owner's promise in ink and a 4-stop
+slider per kind (3 days, 1 week, 1 month, Never; the chosen word in ink); the Danger zone last, after a hairline in
+`problem` red, its heading in red, its own rows and an outlined red button that asks twice. **Clear selected · size**
+is pinned, filled, 64 dp.
 
 ## Elevation & Depth
 

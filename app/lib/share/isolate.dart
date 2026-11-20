@@ -116,6 +116,7 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
     hashCache: File('${args[1]! as String}/cache/share-hashes.json'),
     onCopying: (n) => toHost.send(['copying', n]),
     onWork: args.length > 8 && args[8] == true ? (working, meeting) => toHost.send(['work', working, meeting]) : null,
+    ackKey: PairedLaptop.fromJson(args.length > 7 ? args[7] : null)?.key, // POST /ack: the paired laptop only
   );
   Timer? addressTimer;
   Timer? offTimer;

@@ -762,6 +762,25 @@ const List<TryCard> tryCards = [
     proposal: true,
   ),
   TryCard(
+    id: 'storage',
+    group: TryGroup.weeks,
+    title: 'Recordings move to the laptop',
+    what: 'Once your laptop has checked its copy, old raw recordings leave the phone by themselves; the statistics stay.',
+    takes: '5 minutes, four days after pairing',
+    steps: [
+      'Leave python3 scripts/phone_link.py running on the laptop with Share on Wi-Fi on; it says "told the phone N files are safe here".',
+      'Four days later open More, Storage: On the laptop has grown and the oldest nights no longer count on the phone.',
+      'Open last week\'s sleep report on the Night tab and Trends: both still show everything.',
+      'On the laptop run python3 scripts/catalog.py: those nights say "moved from phone".',
+    ],
+    tell: [
+      'How much space did Storage show on the phone before and after?',
+      'Did a page say something odd where a raw recording used to be?',
+    ],
+    opens: TryOpen.nightScreen,
+    readme: [TryRef('Storage', 'check that a night left the phone')],
+  ),
+  TryCard(
     id: 'own-ble',
     group: TryGroup.charged,
     title: 'Our own headband connection',
