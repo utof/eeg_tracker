@@ -9,6 +9,7 @@
 //   files/confirm/armed.json       the batch waiting for its moment (written whole)
 //   files/confirm/settings.json    the switch, how many questions, how many batches a day, the quiet hours
 //   files/confirm/labels.tsv       your Yes and No answers as truth labels (labels.dart), rebuilt whole
+//   files/confirm/estimates.tsv    every estimate with its answer (labels.dart), rebuilt whole
 // Lines are only ever added. The first Yes, No or Not sure for an estimate stands; "undo" takes it back, as if never
 // answered. Times are local with their UTC offset. Export data and Share on Wi-Fi take the folder with everything
 // else, so answers given offline reach the laptop with the next copy. Plain Dart.
@@ -143,6 +144,7 @@ class ConfirmStore {
   File get armedFile => File('${dir.path}/armed.json');
   File get settingsFile => File('${dir.path}/settings.json');
   File get labelsFile => File('${dir.path}/labels.tsv');
+  File get estimatesTable => File('${dir.path}/estimates.tsv');
 
   static List<Object?> _lines(File f) {
     final out = <Object?>[];
@@ -291,6 +293,8 @@ class ConfirmStore {
   }
 
   void writeLabels(String tsv) => _whole(labelsFile, tsv);
+
+  void writeEstimates(String tsv) => _whole(estimatesTable, tsv);
 }
 
 /// A note as kept: one line, single spaces, at most 200 characters.

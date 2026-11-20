@@ -21,7 +21,7 @@ import 'phone.dart';
 import 'sources.dart';
 
 class ConfirmQuestions {
-  ConfirmQuestions(this.filesDir, {this.phone, this.router = const SelfAskRouter(), DateTime Function()? clock})
+  ConfirmQuestions(this.filesDir, {this.phone, DateTime Function()? clock})
     : store = ConfirmStore(filesDir),
       _clock = clock ?? DateTime.now;
 
@@ -30,9 +30,6 @@ class ConfirmQuestions {
 
   /// The notification side; null: no notifications (tests, the stop sheet's own instance).
   final ConfirmPhone? phone;
-
-  /// Who asks (DECISIONS 869): this app today; utof_tracker's check-in once the two are linked.
-  final AskRouter router;
   final DateTime Function() _clock;
 
   /// Called for each Yes with the estimate (record-first's sleep stretches hook in here).
@@ -127,7 +124,13 @@ class ConfirmQuestions {
     await plan();
   }
 
-  void _afterChange() => store.writeLabels(labelsTsv(store.read()));
+  /// Rewrites the two tables another app or a spreadsheet reads (DECISIONS 869): the labels, and every estimate with
+  /// its answer.
+  void _afterChange() {
+    final state = store.read();
+    store.writeLabels(labelsTsv(state));
+    store.writeEstimates(estimatesTsv(state));
+  }
 
   /// Gathers the estimates the detectors left on disk ([collect], default: sleep reports and walk files) and rewrites
   /// the labels file (the notification's buttons write answers while the app is closed). Plain file work, fit for a
@@ -165,8 +168,6 @@ class ConfirmQuestions {
     final ids = [for (final b in batch) b.estimate.id];
     final old = store.armed();
     if (old != null && old.at == at && old.ids.join(' ') == ids.join(' ')) return;
-    // another app may take the questions (not built: the router always says "ask here")
-    if (await router.offer([for (final b in batch) b.estimate], at) == AskDecision.handedOver) return;
     store.saveArmed(Armed(at, ids, {for (final b in batch) b.estimate.id: b.why}));
     // the words as read at the batch's moment ("yesterday" counts from then)
     await p?.arm(at, ids, [for (final b in batch) questionOf(b.estimate, at)]).catchError((Object _) {});

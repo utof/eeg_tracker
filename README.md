@@ -118,7 +118,8 @@ Each line says what it does. In brackets: how well the research backs it **for t
   buttons answer without opening the app. Until answered a detector's output is an estimate; a Yes is a truth label, a
   No a label that it did not happen (`present` 0), Not sure nothing; never asked twice. The laptop takes the answers
   into `truth.tsv`, lists every estimate in `estimates.tsv` and scores the detectors against a No too. The reusable
-  parts are the package `packages/shared_labels/` (vocabulary, model, queue, the question card), for utof_tracker too.
+  parts are the package `packages/shared_labels/` (vocabulary, model, queue, the exports, the question card), for
+  utof_tracker too; eeg_tracker always asks its own questions, and its answers are data another app can read.
   ([docs/data-format.md](docs/data-format.md), "The confirmation questions"; `docs/evidence/confirm-questions.md`)
 - **Every day's numbers for utof_tracker** (`python3 scripts/export_events.py --daily`): one event per day with what
   the phone's Trends page shows, for the owner's life tracker. ([docs/utof-interface.md](docs/utof-interface.md))

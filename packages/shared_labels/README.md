@@ -7,10 +7,9 @@ widgets; nothing here knows a headband, a detector or either app's screens.
 |---|---|---|
 | Vocabulary | `lib/src/vocabulary.dart`, `vocabulary.g.dart` | every label, kind, source and confidence, generated from `scripts/truth_vocabulary.tsv` (`python3 scripts/gen_shared_labels.py`) |
 | Estimate | `lib/src/estimate.dart` | what a detector thinks happened over a stretch of clock time, and its question ("Did you walk 19:08-21:14?") |
-| Store | `lib/src/store.dart` | the files: `estimates.jsonl`, `answers.jsonl`, `asks.jsonl`, `armed.json`, `settings.json`, `labels.tsv` |
-| Labels | `lib/src/labels.dart` | answers as truth rows (the schema of `scripts/truth.py`), tab-separated |
+| Store | `lib/src/store.dart` | the files: `estimates.jsonl`, `answers.jsonl`, `asks.jsonl`, `armed.json`, `settings.json`, `labels.tsv`, `estimates.tsv` |
+| Exports | `lib/src/labels.dart` | answers as truth rows (`labels.tsv`, the schema of `scripts/truth.py`) and every estimate with its answer (`estimates.tsv`), tab-separated: what the laptop, another app or pandas reads |
 | Queue | `lib/src/queue.dart` | which estimates to ask about and when |
-| Who asks | `lib/src/ask_router.dart` | the seam: this app asks, or the questions are handed to another app's check-in |
 | Widgets | `lib/src/widgets.dart` | `ConfirmBatch` (Yes / No / Not sure per question) and `ConfirmCard` |
 
 The golden files in `test/fixtures/confirm/` are checked by this package's tests, by the app's

@@ -1,0 +1,8 @@
+estimate_id	start	end	recording	kind	label	detector	detector_version	confidence	yes_means	made	answer	answered	via	label_id	owner_words
+est:512b2a6f9414dfb1	2026-11-20T15:59:00+03:00	2026-11-20T17:49:00+03:00	2026-11-20-155527	state	nap	sleep-periods	anysleep-v1	0.93	certain	2026-11-21T07:30:00+03:00	yes	2026-11-21T07:31:02+03:00	card	confirm:512b2a6f9414dfb1	
+est:370235ba661d0a72	2026-11-20T19:08:00+03:00	2026-11-20T21:14:00+03:00	2026-11-20-175012	activity	walking	walking	walk-v2	0.9	certain	2026-11-21T07:30:00+03:00	yes	2026-11-21T07:31:05+03:00	card	confirm:370235ba661d0a72	walked to the shop and back
+est:c8f4a3e3700032c6	2026-11-20T19:20:00+03:00	2026-11-20T19:50:00+03:00	2026-11-20-175012	state	asleep	sleep-periods	anysleep-v1	0.555	certain	2026-11-21T07:30:00+03:00	no	2026-11-21T07:31:09+03:00	card	confirm:c8f4a3e3700032c6	I was "walking" then
+est:9cbf54659778bb47	2026-11-20T23:41:10+03:00	2026-11-21T07:05:40+03:00	2026-11-20-233015	state	asleep	sleep-periods	anysleep-v1	0.88	likely	2026-11-21T07:30:00+03:00	yes	2026-11-21T08:02:11+03:00	notification	confirm:9cbf54659778bb47	
+est:f8e104b9b729f43d	2026-11-21T08:10:00+03:00	2026-11-21T08:25:00+03:00	2026-11-21-080000	activity	walking	walking	walk-v2	0.4	certain	2026-11-21T07:30:00+03:00	skip	2026-11-21T08:40:00+03:00	notification		
+est:be2fbb6dc100cedc	2026-11-21T09:00:00+03:00	2026-11-21T09:20:00+03:00	2026-11-21-080000	activity	walking	walking	walk-v2		certain	2026-11-21T07:30:00+03:00	no	2026-11-21T09:45:00+03:00	stop_sheet	confirm:be2fbb6dc100cedc	
+est:ccf7a756acd85bfe	2026-11-21T13:00:00+03:00	2026-11-21T13:40:00+03:00		state	nap	sleep-periods	anysleep-v1		certain	2026-11-21T07:30:00+03:00					

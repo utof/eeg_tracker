@@ -1,4 +1,5 @@
-// The shared labels package by itself: the vocabulary, the golden label export, the who-asks seam and the batch widget.
+// The shared labels package by itself: the vocabulary, the golden exports (labels and estimates) and the batch
+// widget.
 // The app's tests (app/test/confirm_test.dart) cover the queue, the timing and the files through eeg_tracker's door.
 import 'dart:io';
 
@@ -43,16 +44,10 @@ void main() {
     final state = ConfirmStore(files).read();
     expect(state.estimates, hasLength(7));
     expect(labelsTsv(state), File('test/fixtures/confirm/labels.tsv').readAsStringSync());
+    expect(estimatesTsv(state), File('test/fixtures/confirm/estimates.tsv').readAsStringSync());
+    expect((tsvNumber(0.9), tsvNumber(0.555), tsvNumber(1), tsvNumber(0.12345)), ('0.9', '0.555', '1', '0.123'));
     final head = File('test/fixtures/confirm/labels.tsv').readAsLinesSync().first.split('\t');
     expect(head, labelColumns);
-  });
-
-  test('who asks: the app itself; the utof route is a stub that is never linked', () async {
-    final e = [Estimate(detector: 'd', version: 'v', label: Labels.nap, start: DateTime(2026, 11, 20, 15), end: DateTime(2026, 11, 20, 16))];
-    const AskRouter self = SelfAskRouter(), utof = UtofAskRouter();
-    expect(await self.offer(e, DateTime(2026, 11, 20, 17)), AskDecision.askHere);
-    expect((utof.name, await utof.linked(), const UtofAskRouter().why), ('utof', false, 'not linked'));
-    expect(await utof.offer(e, DateTime(2026, 11, 20, 17)), AskDecision.askHere);
   });
 
   testWidgets('the batch works in any theme: three buttons a question, a tap answers', (t) async {

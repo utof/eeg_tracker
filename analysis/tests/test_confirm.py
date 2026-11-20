@@ -42,6 +42,12 @@ def test_the_laptop_makes_the_rows_the_phone_exports(tmp_path: Path) -> None:
     assert truth.to_tsv(rows, truth.COLUMNS) == (FIXTURE / "labels.tsv").read_text(encoding="utf-8")
 
 
+def test_the_laptops_estimates_table_is_the_phones(tmp_path: Path) -> None:
+    phone(tmp_path)
+    assert db.tsv(db.ESTIMATE_COLUMNS, db.estimate_rows(tmp_path)) == (FIXTURE / "estimates.tsv").read_text(
+        encoding="utf-8")
+
+
 def test_the_golden_file_is_a_truth_file_pandas_reads_typed(tmp_path: Path) -> None:
     assert truth.main(["check", str(FIXTURE / "labels.tsv")], out=lambda _s: None) == 0
     df = pd.read_csv(FIXTURE / "labels.tsv", sep="\t", parse_dates=["start", "end", "created"], keep_default_na=False)

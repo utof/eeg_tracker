@@ -62,3 +62,53 @@ String labelsTsv(ConfirmState state) {
   }
   return out.toString();
 }
+
+/// The columns of the estimates table, the laptop's `estimates.tsv` (scripts/data_book.py ESTIMATE_COLUMNS).
+const List<String> estimateColumns = [
+  'estimate_id', 'start', 'end', 'recording', 'kind', 'label', 'detector', 'detector_version', 'confidence',
+  'yes_means', 'made', 'answer', 'answered', 'via', 'label_id', 'owner_words', //
+];
+
+/// A number as the laptop's tables write it: three decimals at most, no trailing zeros.
+String tsvNumber(double v) {
+  final s = v.toStringAsFixed(3).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+  return s == '-0' ? '0' : s;
+}
+
+/// Every estimate with what you answered (`yes`, `no`, `skip` for Not sure, or empty: not answered yet), by start
+/// time, then id: the table another app takes so it does not ask the same thing again.
+String estimatesTsv(ConfirmState state) {
+  final rows = <Map<String, String>>[
+    for (final e in state.estimates.values)
+      () {
+        final a = state.answers[e.id];
+        return {
+          'estimate_id': e.id,
+          'start': isoLocal(e.start),
+          'end': isoLocal(e.end),
+          'recording': e.recording ?? '',
+          'kind': e.label.kind,
+          'label': e.label.id,
+          'detector': e.detector,
+          'detector_version': e.version,
+          'confidence': e.confidence == null ? '' : tsvNumber(e.confidence!),
+          'yes_means': e.yesMeans.name,
+          'made': isoLocal(e.made),
+          'answer': a?.answer.name ?? '',
+          'answered': a == null ? '' : isoLocal(a.at),
+          'via': a?.via ?? '',
+          'label_id': a == null || a.answer == Answer.skip ? '' : 'confirm:${e.id.substring(4)}',
+          'owner_words': a?.note ?? '',
+        };
+      }(),
+  ]..sort((a, b) {
+      final t = a['start']!.compareTo(b['start']!);
+      return t != 0 ? t : a['estimate_id']!.compareTo(b['estimate_id']!);
+    });
+  final out = StringBuffer('${estimateColumns.join('\t')}\n');
+  for (final r in rows) {
+    // the data book's cell rule: text as it is, a tab or a line break inside it a space (no quoting)
+    out.writeln([for (final c in estimateColumns) (r[c] ?? '').replaceAll(RegExp(r'[\t\r\n]'), ' ')].join('\t'));
+  }
+  return out.toString();
+}

@@ -784,6 +784,7 @@ by `ConfirmPrompts.kt`. Lines are only ever added; times are local with their UT
 | `armed.json` | the batch waiting for its moment (written whole) |
 | `settings.json` | `{"version": 1, "on", "per_batch" (3-5), "per_day" (1-6), "quiet_start_min", "quiet_end_min"}` |
 | `labels.tsv` | your Yes and No answers as truth rows in the truth schema below (the 16 columns), rebuilt whole by the app: a file pandas reads without the laptop |
+| `estimates.tsv` | every estimate with its answer, in the columns of the data book's `estimates.tsv` below, rebuilt whole by the app. With `labels.tsv` it is what another app (utof_tracker, once linked) takes as data, so it never asks the same thing again |
 
 A Yes is a truth row over the estimate's stretch (`present` 1); a No is the same row with `present` 0: it did not
 happen, the detector was wrong there. Not sure makes no row, and is never asked again. The laptop does not read
