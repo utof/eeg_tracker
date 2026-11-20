@@ -235,8 +235,10 @@ AVD, the emulator and its adb server at the end. It prints PASS / FAIL / SKIP:
 - **(b) Share on Wi-Fi between nights**: sharing on (More tab), `/state` must answer with the app in front. Then
   Home, Doze forced, standby bucket "rare", past Android's freezer delay: since DECISIONS 678 (no notification, so
   nothing keeps the app running for sharing between nights) the app is a cached process there and need not answer;
-  the run only reports it. Once the app is in front again `/state` must answer within 30 s: a server that stays dead
-  (the Share hang of 2026-11-19, DECISIONS 587) fails.
+  the run only reports it. Once the app is started again `/state` must answer within 2 minutes: a server that stays
+  dead (the Share hang of 2026-11-19, DECISIONS 587) fails. On the emulator Android can take minutes to take the
+  commands right after it froze the app (its ActivityManager stalls on the translated process); that wait is not
+  counted.
 - **(b2) Share on Wi-Fi in the background during a work session** (with (c)): the same background steps while the
   replayed work session runs; its service holds the app, so `/state` must answer within 5 s, three times.
 - **(c) a replayed noisy work session** (with `--replay`; a SKIP without it): the made-up talking recording through
