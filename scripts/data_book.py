@@ -17,6 +17,7 @@ is in docs/data-format.md ("The data book"). It reads `_local/` and writes only 
                  work-session hints and taps, markers, the tray's answers, check-in answers)
   truth.tsv      what really happened, typed (scripts/truth.py): the hand file, <local>/truth/*.tsv and the Archive
                  tags marked "This is what I was doing"; scripts/validate_detectors.py scores the detectors against it
+  spans.tsv      one row per span of every recording: what you were doing in it (scripts/spans.py)
   README.md, book.json   what is there, how it was built (versions, row counts, time)
 
 Built from the files alone, so it can always be built again (delete the folder and run this); nothing reads it back
@@ -50,6 +51,7 @@ import packed  # noqa: E402
 import phone_night_check as pnc  # noqa: E402  (the recorders' log lines, batteries, contact)
 import recording  # noqa: E402
 import rem_check as rc  # noqa: E402  (the dream sleep check; standard library part)
+import spans  # noqa: E402  (what you were doing in a recording, Record first)
 import truth  # noqa: E402  (the truth labels' schema and sources, DECISIONS 820-829)
 
 FORMAT, VERSION = "eeg-tracker-data-book", 1  # VERSION: of the tables' columns (docs/data-format.md)
@@ -59,7 +61,7 @@ STAGE = {"W": "W", "1": "N1", "2": "N2", "3": "N3", "R": "R", "-": "gap"}
 PROB_KEYS = ("p_W", "p_N1", "p_N2", "p_N3", "p_R")
 QUALITY_WORD = {"g": "good", "d": "degraded", "m": "missing"}
 DEFAULT_LOCAL = ROOT / "_local"
-TABLES = ("nights.tsv", "sessions.tsv", "days.tsv", "epochs.tsv.gz", "labels.tsv", "truth.tsv")
+TABLES = ("nights.tsv", "sessions.tsv", "days.tsv", "epochs.tsv.gz", "labels.tsv", "truth.tsv", "spans.tsv")
 
 
 # ---- cells and files ------------------------------------------------------------------------------------------------
@@ -815,6 +817,24 @@ def session_rows(local: Path, hashes: Hashes) -> list[dict]:
     return sorted(rows, key=lambda r: (r["start"] or "", r["session"]))
 
 
+# ---- spans.tsv ------------------------------------------------------------------------------------------------------
+
+SPAN_COLUMNS = ["span_id", "recording", "kind", "label", "start", "end", "minutes", "source", "started_recording",
+                "ended_by", "session", "paused_minutes", "estimate"]
+
+
+def span_rows(local: Path) -> list[dict]:
+    """One row per span of every spans file in `<local>/phone/spans/`, oldest recording first, spans in file order."""
+    rows = []
+    for rec_id, f in spans.all(local).items():
+        for s in f.spans:
+            rows.append(dict(span_id=s.span, recording=rec_id, kind=s.kind, label=s.label, start=iso(s.start_unix),
+                             end=iso(s.end_unix), minutes=_r(s.minutes), source=s.source,
+                             started_recording=s.started_recording, ended_by=s.ended_by, session=s.session,
+                             paused_minutes=_r(s.paused_minutes) if s.paused else None, estimate=s.estimate))
+    return rows
+
+
 # ---- days.tsv -------------------------------------------------------------------------------------------------------
 
 DAY_COLUMNS = [
@@ -1080,6 +1100,7 @@ Tidy tables of everything eeg_tracker measured on this laptop, made by `scripts/
 | `epochs.tsv.gz` | 30 s of every recording (gzip; spreadsheets and pandas open it as it is or after `gunzip -k`) |
 | `labels.tsv` | label from the app's own stores (append-only: rows are only ever added) |
 | `truth.tsv` | truth label: what really happened, typed (`active` = 1: not corrected by a later row) |
+| `spans.tsv` | span: what you were doing in a recording (Record first): sleep, nap, work, meditate, ... |
 | `validation.tsv`, `validation.md` | detector against truth label, and its summary (`scripts/validate_detectors.py`) |
 | `book.json` | how the last build went: versions, row counts, time, problems |
 
@@ -1124,6 +1145,8 @@ def build(local: Path, out: Path, now: datetime, full: bool = False, say: Callab
     drows = day_rows(local, nrows, srows, hashes, now)
     _write(out / "days.tsv", tsv(DAY_COLUMNS, drows).encode())
     n_labels, added, removed = update_labels(out / "labels.tsv", local, now)
+    sprows = span_rows(local)
+    _write(out / "spans.tsv", tsv(SPAN_COLUMNS, sprows).encode())
     trows, rejected, from_where = truth.build(local)
     truth.write_table(out / "truth.tsv", trows)
     hashes.save()
@@ -1132,7 +1155,8 @@ def build(local: Path, out: Path, now: datetime, full: bool = False, say: Callab
                 local=str(local), signal_version=es.VERSION, measures_version=ds.MEASURES_VERSION,
                 models=sorted({r["model"] for r in nrows if r.get("model")}),
                 rows={"nights.tsv": len(nrows), "sessions.tsv": len(srows), "days.tsv": len(drows),
-                      "epochs.tsv.gz": n_epochs, "labels.tsv": n_labels, "truth.tsv": len(trows)},
+                      "epochs.tsv.gz": n_epochs, "labels.tsv": n_labels, "truth.tsv": len(trows),
+                      "spans.tsv": len(sprows)},
                 recordings=len(groups), worked_out=worked, labels_added=added, labels_removed=removed,
                 truth_from=from_where, truth_rejected=[r.text() for r in rejected],
                 epoch_columns=len(ep_columns), problems=problems)
