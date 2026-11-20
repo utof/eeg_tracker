@@ -28,7 +28,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 
 import '../logs/activity.dart' show Activity;
-import '../logs/log.dart' show AppLog;
+import '../logs/app_log.dart' show AppLog;
 import 'nights.dart' show stemTime;
 
 final AppLog _appLog = AppLog('packing');
