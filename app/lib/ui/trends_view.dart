@@ -9,6 +9,7 @@ import '../trends/pressure.dart';
 import '../trends/trends.dart';
 import '../trends/usual.dart';
 import 'fortnight.dart';
+import 'evidence_sheet.dart' show showEvidence;
 import 'form_parts.dart' show Para;
 import 'parts.dart';
 import 'pressure_chart.dart';
@@ -19,12 +20,17 @@ const int earlierDays = 7;
 
 String _plural(int n, String one, String many) => n == 1 ? '1 $one' : '$n $many';
 
-/// The measures with no value in 14 days, lower case, for "Nothing yet for ...". The sharp-hours and work-session
-/// numbers are left out: they exist only once the owner uses the log or the session, so their absence is not news;
+/// The measures with no value in 14 days, lower case, for "Nothing yet for ...". The sharp-hours, work-session and
+/// walking numbers are left out: they exist only once the owner uses the log, the session or walks with the headband,
+/// so their absence is not news;
 /// so are the ones that need a tap (falling asleep after Lights off, the rating at the check-in).
 List<String> missingMeasures(TrendsModel m) => [
   for (final r in m.rows)
-    if (!r.hasData && !r.spec.askedFor && r.spec.group != TrendGroup.day && r.spec.group != TrendGroup.work)
+    if (!r.hasData &&
+        !r.spec.askedFor &&
+        r.spec.group != TrendGroup.day &&
+        r.spec.group != TrendGroup.work &&
+        r.spec.group != TrendGroup.activity)
       r.spec.label.toLowerCase(),
 ];
 
@@ -253,6 +259,13 @@ class MeasureEntry extends StatelessWidget {
             textBaseline: TextBaseline.alphabetic,
             children: [
               Expanded(child: Text(r.spec.label, style: text.bodyLarge)),
+              if (r.spec.evidence != null)
+                IconButton(
+                  onPressed: () => showEvidence(context, r.spec.evidence!),
+                  tooltip: 'What the research says',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.info_outline, size: 20),
+                ),
               const SizedBox(width: 12),
               if (arrow != Arrow.none) ...[
                 Icon(arrow == Arrow.up ? Icons.north_rounded : Icons.south_rounded, size: 20, color: Night.ink),
@@ -268,7 +281,7 @@ class MeasureEntry extends StatelessWidget {
             const SizedBox(height: 2),
             Text(words, style: (arrow == Arrow.none ? muted : text.bodyMedium?.copyWith(height: 1.35))),
           ],
-          if (r.spec.note != null) ...[const SizedBox(height: 2), Text(r.spec.note!, style: muted)],
+          if ((r.note ?? r.spec.note) case final note?) ...[const SizedBox(height: 2), Text(note, style: muted)],
         ],
       ),
     );

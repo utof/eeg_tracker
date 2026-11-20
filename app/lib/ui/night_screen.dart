@@ -973,7 +973,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _trends() =>
-      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TrendsScreen(recordingsDir: _dir)));
+      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TrendsScreen(recordingsDir: _dir, walkPending: true)));
 
   /// Sound for states: with the headband between nights, by its timer alone during one (DECISIONS row 130).
   Future<void> _sound() async {
@@ -1165,7 +1165,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     return HomeTabs(
       page: (context, tab) => switch (tab) {
         HomeTab.signal => SignalScreen(feed: _signal ??= SignalFeed(phoneSignal()), recordingsDir: _dir),
-        HomeTab.trends => TrendsScreen(recordingsDir: _dir),
+        HomeTab.trends => TrendsScreen(recordingsDir: _dir, walkPending: true),
         _ => page(tab),
       },
     );

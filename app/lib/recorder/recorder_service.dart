@@ -34,6 +34,7 @@ import 'chunk_writer.dart' show ChunkWriter;
 import 'headband.dart';
 import 'live_drift.dart';
 import 'night_recorder.dart';
+import 'phone_steps.dart' show StepSettings, stepsDirFor;
 import 'status.dart';
 import 'wifi_watch.dart';
 
@@ -263,6 +264,8 @@ class RecorderTaskHandler extends TaskHandler {
       dir: Directory(dir),
       store: _PrefsNightStore(),
       probe: ChannelPhoneProbe(),
+      // the phone's step counter in the log once a minute, when the owner switched it on (DECISIONS 800-809)
+      stepProbe: ChannelStepProbe(StepSettings(stepsDirFor(rec))),
       onStatus: _onStatus,
       onStuck: _restartProcess,
       timing: diy == null ? const RecorderTiming() : diyRecorderTiming,

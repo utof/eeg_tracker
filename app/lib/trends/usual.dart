@@ -46,6 +46,10 @@ enum Scale {
   /// Counts an hour (jaw muscle bursts an hour asleep): 2 spreads and at least a quarter of the usual.
   rate(relChange: 0.25),
 
+  /// An amount that swings a lot from day to day (steps, DECISIONS 800-809): 2 spreads and at least a quarter of the
+  /// usual.
+  amount(relChange: 0.25),
+
   /// Powers and ratios: on a log scale, 2 spreads.
   log(logScale: true),
 

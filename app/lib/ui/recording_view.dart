@@ -10,6 +10,7 @@ import '../archive/tags.dart';
 import '../recorder/nights.dart' show nightLabel;
 import 'archive_timeline.dart';
 import 'archive_view.dart' show sizeWords, lengthText, spanText;
+import 'evidence_sheet.dart' show showEvidence;
 import 'form_parts.dart' show Para;
 import 'parts.dart';
 import 'theme.dart';
@@ -45,7 +46,9 @@ const String howGood =
     'Found by the app, with planning values nobody has checked against what you were doing: asleep comes from the sleep '
     'report (a model not yet validated on this headband); eyes closed and drowsy are read against this recording\'s own '
     'first minutes, so they work best when it starts awake with eyes open; talking is jaw muscle, so chewing counts too; '
-    'moving is three electrodes jumping at once. Your tags are the check: tag what you did.';
+    'moving is three electrodes jumping at once; walking is the rhythm your steps leave in the signal, so its steps are '
+    'an estimate (the phone\'s own step counter checks it when you switch that on). Your tags are the check: tag what '
+    'you did.';
 
 class RecordingView extends StatelessWidget {
   const RecordingView({
@@ -129,6 +132,14 @@ class RecordingView extends StatelessWidget {
                 onTap: onLane == null ? null : () => onLane!(l),
               ),
           const Para(howGood, color: Night.inkMuted),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => showEvidence(context, 'walking'),
+              icon: const Icon(Icons.info_outline),
+              label: const Text('How walking is found'),
+            ),
+          ),
           const SectionHeading('Your tags'),
           if (i.manualTags.isEmpty)
             const Para('None yet. Tag what you were doing: sleep, work, a walk, a meeting.', color: Night.inkMuted, top: 0)
@@ -281,6 +292,7 @@ class _LaneRow extends StatelessWidget {
     Lane.sleep: 'Asleep',
     Lane.talking: 'Talking or chewing',
     Lane.signal: 'No signal or noisy',
+    Lane.walking: 'Walking or running',
     Lane.work: 'Work session',
     Lane.sessions: 'Sessions',
   };

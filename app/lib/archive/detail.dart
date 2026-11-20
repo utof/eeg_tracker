@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import '../recorder/header.dart' show RecordingHeader, tryHeader;
 import '../recorder/packed.dart' show openRaw;
 import '../sleep/night_signal.dart' show Run, runsOf;
+import '../walking/pass.dart' show WalkResult, keptWalk, walkFileFor;
 import 'bands.dart';
 import 'items.dart';
 import 'seen.dart';
@@ -67,8 +68,19 @@ ReportStages? readStages(File report) {
 }
 
 /// Everything the page draws, but the detectors' pass when none is kept for the recording's files as they are.
+/// The walk file of recording [id] as it is (also one made from raw files since packed or removed); null: none.
+WalkResult? readWalk(Directory filesDir, String id) {
+  try {
+    return WalkResult.fromJson(jsonDecode(walkFileFor(filesDir, id).readAsStringSync()));
+  } on FileSystemException {
+    return null;
+  } on FormatException {
+    return null;
+  }
+}
+
 class RecordingDetail {
-  const RecordingDetail({required this.input, required this.rawPaths, required this.passKept});
+  const RecordingDetail({required this.input, required this.rawPaths, required this.passKept, this.walkKept = true});
   final TimelineInput input;
 
   /// The `.f32` files with samples on the phone (plain names), for the pass and the raw view.
@@ -76,6 +88,9 @@ class RecordingDetail {
 
   /// The pass is kept for these files (or there is nothing to pass over).
   final bool passKept;
+
+  /// The walking pass is kept for these files and this detector (or there is nothing to pass over).
+  final bool walkKept;
 }
 
 /// The page's data for [item]; [sessions]: every session the list knows (those in its time are drawn).
@@ -99,9 +114,11 @@ RecordingDetail loadDetail(Directory filesDir, ArchiveItem item, List<SessionFil
       work: work,
       sessions: inTime,
       tags: TagStore(filesDir).tags(item.id),
+      walk: readWalk(filesDir, item.id),
     ),
     rawPaths: [for (final f in raw) f.path],
     passKept: raw.isEmpty || kept != null,
+    walkKept: raw.isEmpty || keptWalk(filesDir, item.id, raw) != null,
   );
 }
 

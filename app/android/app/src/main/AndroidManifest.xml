@@ -73,7 +73,13 @@
     <uses-permission android:name="android.permission.REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND" />
     <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE" />
 
+    <!-- The phone's own step counter, written into the night's log once a minute when the owner switches it on
+         (Settings; StepCounter.kt, DECISIONS 800-809). Android 10+ asks "Physical activity" at run time; the app
+         works without the sensor or the permission. -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+    <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
     <uses-feature android:name="android.software.companion_device_setup" android:required="false" />
 
     <!-- No backup of any kind: recordings and night state are EEG (DECISIONS row 57). -->

@@ -8,6 +8,7 @@ import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/night_recorder.dart';
 import 'package:eeg_tracker/recorder/packets.dart';
+import 'package:eeg_tracker/recorder/phone_steps.dart';
 import 'package:eeg_tracker/recorder/status.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -179,6 +180,26 @@ class FakePhone implements PhoneProbe {
 
   @override
   Future<List<String>> exitReasons(int sinceMs) async => const [];
+}
+
+/// A step counter that has counted [steps] more at every read; [state] is what start() says, [noValue] no sensor event yet.
+class FakeSteps implements StepProbe {
+  FakeSteps({this.state = 'on', this.noValue = false});
+  final String state;
+  final bool noValue;
+  int starts = 0, reads = 0, stops = 0;
+
+  @override
+  Future<String> start() async {
+    starts++;
+    return state;
+  }
+
+  @override
+  Future<int?> read() async => noValue ? null : 5000 + 7 * reads++;
+
+  @override
+  Future<void> stop() async => stops++;
 }
 
 const fast = RecorderTiming(
@@ -590,6 +611,69 @@ void main() {
     final log = files('log').single.readAsStringSync();
     expect(log, contains('phone battery summary: no readings'));
     expect(log, contains('total samples ${broken.emitted}')); // recording went on
+  });
+
+  Future<String> logWithSteps(StepProbe steps) async {
+    // The recorder's clock runs 3600 times faster than the wall clock: 0.4 s is 24 minutes.
+    final t0 = DateTime(2026, 11, 18, 23);
+    final sw = Stopwatch()..start();
+    final r = NightRecorder(
+      finder: FakeFinder([FakeBand('a')]),
+      stepProbe: steps,
+      clock: () => t0.add(Duration(milliseconds: sw.elapsedMilliseconds * 3600)),
+      dir: dir,
+      store: store,
+      onStatus: statuses.add,
+      onStuck: (r) async => stuck.add(r),
+      timing: fast,
+      watch: null,
+    );
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await r.stop();
+    await running;
+    return files('log').single.readAsStringSync();
+  }
+
+  test('phone steps: the counter is set up once, then one line per clock minute, in the format the readers parse', () async {
+    final steps = FakeSteps();
+    final log = await logWithSteps(steps);
+    expect('phone step counter: on'.allMatches(log), hasLength(1));
+    final lines = RegExp(r'^\S+ phone steps (\d+)\s*$', multiLine: true).allMatches(log).toList();
+    expect(lines.length, greaterThanOrEqualTo(3));
+    expect(lines.length, steps.reads);
+    expect(int.parse(lines.first.group(1)!), 5000);
+    expect(RegExp(r'^\S+ phone step counter: (.+?)\s*$', multiLine: true).firstMatch(log)!.group(1), 'on');
+    expect(steps.starts, 1);
+    expect(steps.stops, 1);
+  });
+
+  test('phone steps: no sensor event yet, no lines', () async {
+    final log = await logWithSteps(FakeSteps(noValue: true));
+    expect(log, contains('phone step counter: on'));
+    expect(log, isNot(contains('phone steps')));
+  });
+
+  test('phone steps: no permission and the switch off are said once and read nothing', () async {
+    for (final state in ['no permission', 'off', 'no sensor']) {
+      final steps = FakeSteps(state: state);
+      final log = await logWithSteps(steps);
+      expect(log, contains('phone step counter: $state'));
+      expect(log, isNot(contains('phone steps')));
+      expect(steps.reads, 0);
+      for (final f in dir.listSync()) {
+        f.deleteSync();
+      }
+    }
+  });
+
+  test('phone steps: without a step probe the log says nothing about it', () async {
+    final r = recorder(FakeFinder([FakeBand('a')]));
+    final running = r.run(restartedBySystem: false);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await r.stop();
+    await running;
+    expect(files('log').single.readAsStringSync(), isNot(contains('phone step')));
   });
 
   test('packet accounting: counted over the night, logged every 10 minutes, at run end and night end', () async {
