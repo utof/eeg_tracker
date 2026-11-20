@@ -340,6 +340,7 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
         val pm = context.getSystemService(PowerManager::class.java)
         val m = HashMap<String, Any?>()
         m["sdkInt"] = Build.VERSION.SDK_INT
+        m["targetSdk"] = context.applicationInfo.targetSdkVersion
         m["ignoringBatteryOptimizations"] = pm?.isIgnoringBatteryOptimizations(context.packageName)
         m["powerSaveMode"] = pm?.isPowerSaveMode
         m["deviceIdle"] = pm?.isDeviceIdleMode

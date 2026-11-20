@@ -32,6 +32,9 @@ class PhoneSnapshot {
   final Map<Object?, Object?> _m;
 
   int get sdkInt => (_m['sdkInt'] as num?)?.toInt() ?? 0;
+
+  /// The SDK this app was built to target (what Android 17's local-network rule looks at); 0 when unknown.
+  int get targetSdkInt => (_m['targetSdk'] as num?)?.toInt() ?? 0;
   bool get ignoringBatteryOptimizations => _m['ignoringBatteryOptimizations'] == true;
   bool get backgroundRestricted => _m['backgroundRestricted'] == true;
   bool get notificationsEnabled => _m['notificationsEnabled'] != false;
