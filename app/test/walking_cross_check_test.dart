@@ -1,5 +1,6 @@
-// Cross-check: made-up recordings (four channels walking, stopping and running with a hole and the phone's step
-// counter; eight channels of another layout with a dead and a railed electrode; four channels at 500 a second) run
+// Cross-check: made-up recordings (four channels walking, stopping with a small pulse, and running with a hole and the
+// phone's step counter; eight channels of another layout with a dead and a railed electrode and a large pulse-like
+// rhythm; four channels at 500 a second) run
 // through the Python reference (analysis/walking.py; fixture made by analysis/make_walking_fixture.py) and through the
 // Dart port. Every window's reading, every stretch, walk and minute must match: numbers within 1e-9 (the transforms
 // round differently in the last bits), every decision exactly.
@@ -84,6 +85,8 @@ void main() {
         _near(w.read ? w.pace : null, p[3], 'window $i pace (the same rate)', tol: 1e-12);
         _near(w.amp, p[4], 'window $i amp');
         expect(w.channels, p[5], reason: 'window $i channels');
+        _near(w.read ? w.thirds : null, p[6], 'window $i thirds');
+        expect(w.walks, p[7], reason: 'window $i walks');
       }
 
       final found = findWalks(det.windows);

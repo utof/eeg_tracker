@@ -37,9 +37,10 @@ def test_a_walk_a_stop_and_a_run_on_four_channels():
     assert kinds == ["walking", "running"]
     walk, run = found.moving
     assert abs(walk.pace - 112) <= 2 and abs(run.pace - 162) <= 2
-    # steps within 10 % of the drawn ones; running is told apart by its pace held over 150 a minute
+    # steps within 10 % of the drawn ones (the run 15 %: its 3 s hole and one window read at the stride are not
+    # counted); running is told apart by its pace held over 150 a minute
     assert abs(walk.steps - info["walked"]) <= 0.1 * info["walked"]
-    assert abs(run.steps - info["ran"]) <= 0.1 * info["ran"]
+    assert abs(run.steps - info["ran"]) <= 0.15 * info["ran"]
     (w,) = found.walks  # 65 s apart: one walk with a stop between
     assert [s.kind for s in w.stretches] == ["walking", "stopped", "running"]
     assert w.stopped_s >= wk.MIN_STOP_S and w.walking_s == walk.seconds() + run.seconds()
@@ -82,19 +83,36 @@ def test_rest_alone_never_walks():
 
 def test_a_single_channel_works_too():
     x = mwf.background(1, 90, 250, seed=6)
-    mwf.add_steps(x, 250, 10, 80, 116, 6, seed=7)
+    mwf.add_steps(x, 250, 10, 80, 116, 400, seed=7)
     found = wk.find(wk.windows(x, 250))
     assert [s.kind for s in found.moving] == ["walking"] and abs(found.moving[0].pace - 116) <= 2
 
 
-def test_short_runs_are_not_walking_and_walks_split_after_ten_minutes():
+def test_a_pulse_is_not_walking_however_rhythmic():
+    """A sleeping heart (about 57 a minute) shows as a family at 57, 115 and 172 a minute; the score's grid starts at
+    72, so it reads the pulse as 115 or 172 (the sleep false positives of walk-v1, DECISIONS 801)."""
+    x = mwf.background(4, 120, 250, seed=8)
+    mwf.add_pulse(x, 250, 0, 120, 57, 40)  # a small pulse: rhythmic, but no walking-sized shake
+    ws = wk.windows(x, 250)
+    strong = [w for w in ws if w.score >= wk.SCORE_WALK and wk.PACE_MIN_SPM <= w.pace <= wk.PACE_MAX_SPM]
+    assert len(strong) > len(ws) // 2 and all(w.amp < wk.MIN_SHAKE_UV for w in strong)
+    assert wk.find(ws).moving == []
+    y = mwf.background(4, 120, 250, seed=9)
+    mwf.add_pulse(y, 250, 0, 120, 58, 150)  # large, read at 3 times its rate: the family at a third and two thirds
+    ws = wk.windows(y, 250)
+    big = [w for w in ws if w.score >= wk.SCORE_WALK and w.amp >= wk.MIN_SHAKE_UV]
+    assert big and all(abs(w.pace - 174) <= 2 and w.thirds >= wk.MAX_THIRDS for w in big)
+    assert wk.find(ws).moving == []
+
+
+def test_short_runs_are_not_walking_and_walks_split_after_fifteen_minutes():
     def win(walks: bool) -> wk.Window:
-        return wk.Window(0, 6.0 if walks else 1.5, 110.0, 10.0, 4, True)
+        return wk.Window(0, 6.0 if walks else 1.5, 110.0, 400.0, 4, True, 0.1)
 
     # 5 walking windows (25 s): under 30 s, nothing
     assert wk.find([win(False)] * 10 + [win(True)] * 5 + [win(False)] * 10).moving == []
-    # two 1-minute stretches 11 minutes apart: two walks; 5 minutes apart: one walk with a stop
-    far = [win(True)] * 12 + [win(False)] * 132 + [win(True)] * 12
+    # two 1-minute stretches 16 minutes apart: two walks; 5 minutes apart: one walk with a stop
+    far = [win(True)] * 12 + [win(False)] * 192 + [win(True)] * 12
     assert len(wk.find(far).walks) == 2
     near = [win(True)] * 12 + [win(False)] * 60 + [win(True)] * 12
     (w,) = wk.find(near).walks
@@ -107,8 +125,8 @@ def test_short_runs_are_not_walking_and_walks_split_after_ten_minutes():
 
 
 def test_steps_count_only_windows_whose_own_rhythm_is_clear():
-    ws = [wk.Window(i * 5.0, 6.0, 120.0, 10.0, 4, True) for i in range(12)]
-    ws[5] = wk.Window(25.0, 3.0, 120.0, 10.0, 4, True)  # a weak window inside the stretch
+    ws = [wk.Window(i * 5.0, 6.0, 120.0, 400.0, 4, True, 0.1) for i in range(12)]
+    ws[5] = wk.Window(25.0, 3.0, 120.0, 400.0, 4, True, 0.1)  # a weak window inside the stretch
     (s,) = wk.find(ws).moving
     assert s.first == 0 and s.last == 11
     assert s.steps == pytest.approx(11 * 120 / 60 * 5)  # 11 clear windows of 5 s at 120 a minute
@@ -132,7 +150,7 @@ def test_phone_minutes_go_to_the_minute_of_the_middle_never_split():
 
 
 def test_the_phones_steps_win_where_it_counted_and_each_minute_says_its_source():
-    ws = [wk.Window(2.5 + 5.0 * i, 6.0, 114.0, 10.0, 4, True) for i in range(36)]  # 3 minutes of walking
+    ws = [wk.Window(2.5 + 5.0 * i, 6.0, 114.0, 400.0, 4, True, 0.1) for i in range(36)]  # 3 minutes of walking
     found = wk.find(ws)
     start = 1795190400.0 - 2.5 + 2.5  # window centres at 2.5 + 5 i: minute k holds windows 12 k .. 12 k + 11
     rows = wk.minutes(found, start, {1795190400: 118.0, 1795190460: 0.0, 1795190580: 30.0})
@@ -229,3 +247,7 @@ def test_the_fixture_matches_the_python_reference():
     assert {len(c["channels"]) for c in have["cases"]} == {4, 8}
     assert any(s["kind"] == "running" for c in have["cases"] for s in c["moving"])
     assert any(m[7] == "phone" for c in have["cases"] for m in c["minutes"])
+    # windows with a strong rhythm in the pace range turned down as a pulse: by their size, and by the family alone
+    strong = [w for c in have["cases"] for w in c["windows"] if w[1] and w[2] >= 4 and 90 <= w[3] <= 200]
+    assert any(not w[7] and w[4] < wk.MIN_SHAKE_UV for w in strong)
+    assert any(not w[7] and w[4] >= wk.MIN_SHAKE_UV and w[6] >= wk.MAX_THIRDS for w in strong)

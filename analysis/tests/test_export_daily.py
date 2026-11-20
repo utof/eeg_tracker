@@ -359,10 +359,85 @@ def test_the_sleep_rating_is_the_first_of_the_days_check_ins_with_one_in_1_to_5(
     assert "slept" not in d["2026-11-21"]["numbers"]
 
 
-def test_the_measure_set_is_version_2_and_names_the_new_numbers():
+def test_the_measure_set_is_version_3_and_names_the_new_numbers():
     m = ds.measure_set()
-    assert m["version"] == 2 == ds.MEASURES_VERSION
+    assert m["version"] == 3 == ds.MEASURES_VERSION
     ids = {x["id"]: x for x in m["measures"]}
-    assert {"efficiency", "regularity", "slept"} <= set(ids)
+    assert {"efficiency", "regularity", "slept", "walk_min", "walk_steps"} <= set(ids)
+    assert ids["walk_steps"]["evidence_note"] == "docs/evidence/walking.md" and ids["walk_min"]["unit"] == "min"
     assert ids["slept"]["source"] == "self-report" and ids["slept"]["unit"] == "1-5"
     assert "Lights off" in ids["efficiency"]["rule"] and "recording" in ids["efficiency"]["rule"]
+
+
+# ------------------------------------------------------------------------------------------------------- walking
+# DECISIONS 800-809: the walk files' minutes once each, someone else's nights left out, the phone's steps first, the
+# headband's left out once its pace failed the check; worked out here by hand.
+
+def _walk_file(rec: str, windows: int, rows: list[list], walks: list[dict] | None = None) -> dict:
+    return dict(format="eeg-tracker-walking", version=1, detector="walk-v1", recording=rec, windows=windows,
+                start="2026-11-20T19:00:00+03:00", channels=["O1", "O2", "T3", "T4"], sample_rate=250,
+                minutes=rows, walks=walks or [])
+
+
+def _t(hhmm: str, day: str = "2026-11-20") -> int:
+    return int(datetime.fromisoformat(f"{day}T{hhmm}:00+03:00").timestamp())
+
+
+def _row(t: int, hb: float = 114.0, phone: float | None = None, walk: float = 60.0) -> list:
+    src = "phone" if phone else ("headband" if hb > 0 else "")
+    return [t, walk, 0.0, hb, 114.0 if hb else None, phone, phone if src == "phone" else hb, src,
+            60.0 if phone and phone >= 60 else walk]
+
+
+def test_walking_minutes_and_steps_per_day_with_their_source_and_the_walks(tmp_path):
+    loc = tmp_path / "_local"
+    walk = dict(start="2026-11-20T19:00:00+03:00", end="2026-11-20T19:03:00+03:00", walking_min=3.0, stopped_min=0.0,
+                stops=0, pace=114.0, steps=342,
+                stretches=[dict(kind="walking", start="2026-11-20T19:00:00+03:00", end="2026-11-20T19:03:00+03:00",
+                                min=3.0, steps=342, pace=114.0, score=8.0, confidence="sure")])
+    _w(loc / "walking/A.walk.json", _walk_file("A", 500, [_row(_t("19:00")), _row(_t("19:01"), phone=120.0),
+                                                           _row(_t("19:02"))], [walk]))
+    # the phone's copy of a shorter recording over the same minute: its minute and its walk are not counted twice
+    _w(loc / "phone/walking/B.walk.json", _walk_file("B", 20, [_row(_t("19:00"), hb=999.0)], [dict(walk, steps=999)]))
+    # a walk in a night someone else wore the headband for: left out
+    _w(loc / "phone/nights/2026-11-21.report.json", _report(
+        "2026-11-21", "2026-11-21T23:00:00+03:00", "2026-11-22T07:00:00+03:00", 400.0, 200.0, 80.0, 120.0, 1, 10.0,
+        wearer="someone else"))
+    _w(loc / "walking/C.walk.json", _walk_file("C", 100, [_row(_t("01:00", "2026-11-22"))]))
+    days = {d["day"]: d for d in ds.day_events(loc, NOW)}
+    d = days["2026-11-20"]
+    assert d["measures"] == 3
+    assert d["numbers"]["walk_min"] == 3.0
+    assert d["numbers"]["walk_steps"] == 114 + 120 + 114
+    w = d["walking"]
+    assert (w["minutes"], w["steps"], w["steps_phone"], w["steps_headband"]) == (3.0, 348, 120, 228)
+    assert w["source"] == "phone and headband" and w["headband_counted"] is True
+    assert w["check"] == dict(status="unchecked", paired=1, right=1) and w["detector"] == ["walk-v1"]
+    (one,) = w["walks"]
+    assert one["recording"] == "A" and one["origin"] == "laptop" and one["steps"] == 348
+    assert one["stretches"][0]["kind"] == "walking" and one["headband_steps"] == 342
+    assert "walk_min" not in days.get("2026-11-21", {}).get("numbers", {})
+    assert "walking" not in days.get("2026-11-21", {})
+
+
+def test_once_the_headband_failed_the_check_only_the_phones_steps_count(tmp_path):
+    loc = tmp_path / "_local"
+    wrong = [[_t(f"19:{k:02d}"), 60.0, 0.0, 57.0, 57.0, 112.0, 112.0, "phone", 60.0] for k in range(10)]
+    _w(loc / "walking/A.walk.json", _walk_file("A", 500, wrong + [_row(_t("20:00"), hb=110.0)]))
+    d = {x["day"]: x for x in ds.day_events(loc, NOW)}["2026-11-20"]
+    assert d["walking"]["check"]["status"] == "failed" and d["walking"]["headband_counted"] is False
+    assert d["numbers"]["walk_steps"] == 1120 and d["numbers"]["walk_min"] == 11.0
+    assert d["walking"]["source"] == "phone"
+
+
+def test_the_daily_export_carries_walking_for_utof(tmp_path):
+    loc = tmp_path / "_local"
+    _w(loc / "walking/A.walk.json", _walk_file("A", 500, [_row(_t("19:00")), _row(_t("19:01"))]))
+    folder = ex.Folder(tmp_path / "export")
+    ex.export_daily(folder, loc, NOW)
+    evs = [e for e in folder.events if e["type"] == "eeg_day"]
+    (day,) = [e for e in evs if e["data"]["day"] == "2026-11-20"]
+    assert day["data"]["numbers"] == {"walk_min": 2.0, "walk_steps": 228.0}
+    assert day["data"]["walking"]["source"] == "headband"
+    sets = [e for e in folder.events if e["type"] == "eeg_measure_set"]
+    assert sets[-1]["data"]["version"] == 3

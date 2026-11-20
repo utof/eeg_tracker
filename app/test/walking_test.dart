@@ -45,7 +45,7 @@ String writeWalk(
       final s = walkFrom + k * period;
       if (k < 0 || s >= walkTo) continue;
       final d = t - s;
-      if (d.abs() < 0.2) v += 6 * (k.isEven ? 1 : 0.7) * math.exp(-0.5 * (d / 0.04) * (d / 0.04));
+      if (d.abs() < 0.2) v += 400 * (k.isEven ? 1 : 0.7) * math.exp(-0.5 * (d / 0.04) * (d / 0.04));
     }
     return v;
   }

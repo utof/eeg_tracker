@@ -12,17 +12,22 @@ Every step shakes the headband a little, and that shows in the EEG as a rhythm a
 3. The harmonic score of each candidate step rate f from 1.2 to 3.4 Hz (72-204 steps a minute, 0.02 Hz apart):
    W(f) + 0.5 W(2f), averaged over the usable channels. The best rate is the window's pace; the score is its value
    over the median of all candidates (about 1-2 when nothing walks, 6-12 on the owner's walk of 2026-11-20).
-4. A window walks when its score is at least 4 and its pace 90-200 steps a minute. A majority of 7 windows (35 s)
+4. A window walks when its score is at least 4, its pace 90-200 steps a minute, and it is no pulse: the shake is
+   walking-sized (the channels' median band-passed range at least 300 µV; the owner's walk had 420-1100, a sleeping
+   pulse 60-450) and the rate is not the 2nd or 3rd harmonic of a slower one (the whitened power at a third and two
+   thirds of the pace, the pulse's own family, under 2.5). A majority of 7 windows (35 s)
    smooths that; runs of at least 30 s are walking stretches, and a stretch whose pace holds at 150 or more for at
    least a minute is running there. Gaps of at least 1 minute between stretches are stops; stretches less than
-   10 minutes apart are one walk.
+   15 minutes apart are one walk.
 5. Steps: each window of a stretch whose own rhythm is clear adds pace x 5 s; the others add nothing (an honest
    floor, not a guess). A confidence word per stretch from its median score.
 6. Per clock minute, the phone's own step counter (logged in the recording's `.log` while recording) wins wherever
    it counted steps; each minute says where its steps came from.
 
 Every threshold is a planning value (DECISIONS 800-809), set on the owner's one walk; the phone's minutes check the
-pace and the totals (`check`) before the app calls headband steps anything but "not yet checked".
+pace and the totals (`check`) before the app calls headband steps anything but "not yet checked". The minute rules
+(the phone's steps per minute, the check, the day numbers) are in walk_minutes.py, standard library only, so the
+laptop's export (scripts/day_summary.py) uses the very same ones.
 The phone has a line-by-line port in app/lib/walking/ (walking_cross_check_test.dart compares them).
 Pure functions on arrays: nothing here reads files, clocks or devices.
 """
@@ -36,8 +41,10 @@ import numpy as np
 from numpy.typing import NDArray
 
 import eeg_detectors as det
+from walk_minutes import (CHECK_MIN_MINUTES, CHECK_PACE_SHARE, CHECK_RIGHT_SHARE, CHECK_TOTAL_SHARE,  # noqa: F401
+                          PHONE_MAX_GAP_S, PHONE_WALK_STEPS, Check, Minute, check, phone_minutes)
 
-VERSION = "walk-v1"
+VERSION = "walk-v2"  # v2: a walking-sized shake and no pulse family (sleep false positives; DECISIONS 801)
 
 WINDOW_S = 10.0
 HOP_S = 5.0
@@ -49,23 +56,19 @@ WHITEN_HZ = 41 * BIN_HZ  # the whitening's mean spans this (41 bins at 250 Hz)
 PACE_LO_HZ, PACE_STEP_HZ, PACE_RATES = 1.2, 0.02, 111  # candidate step rates 1.2, 1.22, ... 3.4 Hz
 HARMONIC = 0.5  # weight of the second harmonic
 SCORE_WALK = 4.0  # a window walks from this score...
-PACE_MIN_SPM, PACE_MAX_SPM = 90.0, 200.0  # ... at a pace in this range (steps a minute)
+PACE_MIN_SPM, PACE_MAX_SPM = 90.0, 200.0  # ... at a pace in this range (steps a minute)...
+MIN_SHAKE_UV = 300.0  # ... with a walking-sized shake: the channels' median band-passed range at least this...
+MAX_THIRDS = 2.5  # ... and no pulse family: the whitened power at a third and two thirds of the pace under this
 SMOOTH_WINDOWS = 7  # majority over this many windows (35 s)
 MIN_STRETCH_S = 30.0  # shorter runs are not walking
 MIN_STOP_S = 60.0  # a gap of at least this between two stretches of one walk is a stop
-WALK_GAP_S = 600.0  # stretches closer than this are one walk
+WALK_GAP_S = 900.0  # stretches closer than this are one walk (a long bench stop is still the same walk)
 RUN_SPM = 150.0  # running: a pace at or over this...
 MIN_RUN_S = 60.0  # ... held this long (the same 7-window majority inside a stretch)
 MAX_MISSING_S = 1.0  # a window with more missing time than this is not read
 FLAT_UV = 1.0  # a channel whose band-passed window spans less than this is not used (dead or flat)
 RAIL_UV = 390_000.0  # nor one at the converter's or the file's limit (eeg_detectors.RAIL_UV)
 SURE_SCORE, LIKELY_SCORE = 6.0, 5.0  # a stretch's median score: sure from 6, likely from 5, else unsure
-PHONE_WALK_STEPS = 60  # a minute in which the phone counted this many steps is a walking minute
-PHONE_MAX_GAP_S = 180.0  # step counter readings further apart than this say nothing about the time between
-CHECK_MIN_MINUTES = 10  # paired minutes (both walked the whole minute) before the check says anything
-CHECK_PACE_SHARE = 0.05  # a minute's pace is right within this share of the phone's
-CHECK_RIGHT_SHARE = 0.8  # right in at least this share of the paired minutes (8 of 10)...
-CHECK_TOTAL_SHARE = 0.15  # ... and the totals within this share of the phone's
 
 Floats = NDArray[np.float64]
 Bools = NDArray[np.bool_]
@@ -122,25 +125,28 @@ class Window:
     amp: float  # median band-passed range of the usable channels, µV
     channels: int  # usable channels
     read: bool  # False: too much missing time, or no usable channel
+    thirds: float = math.nan  # mean whitened power at a third and two thirds of the pace (a pulse's family)
 
     @property
     def walks(self) -> bool:
-        return self.read and self.score >= SCORE_WALK and PACE_MIN_SPM <= self.pace <= PACE_MAX_SPM
+        return (self.read and self.score >= SCORE_WALK and PACE_MIN_SPM <= self.pace <= PACE_MAX_SPM
+                and self.amp >= MIN_SHAKE_UV and self.thirds < MAX_THIRDS)
 
 
-def window_score(y: Floats, raw: Floats, fs: float) -> tuple[float, int, float, int]:
-    """(score, best rate's index, median range, usable channels) of one window: y the band-passed samples and raw
-    the samples as recorded, channels x window. Score nan without a usable channel."""
+def window_score(y: Floats, raw: Floats, fs: float) -> tuple[float, int, float, int, float]:
+    """(score, best rate's index, median range, usable channels, thirds) of one window: y the band-passed samples and
+    raw the samples as recorded, channels x window. Score nan without a usable channel."""
     win = y.shape[1]
     nfft = nfft_for(fs)
     bin_hz = fs / nfft
     wb = whiten_bins(fs)
     half = wb // 2
     rates = pace_rates()
-    need_lo = int(math.floor(rates[0] / bin_hz)) - half  # the bins the score reads, with their whitening
-    need_hi = int(math.floor(2 * rates[-1] / bin_hz)) + 1 + half
+    lo = max(0, int(math.floor(rates[0] / 3 / bin_hz)))  # the bins whitened: from a third of the slowest rate...
+    hi = int(math.floor(2 * rates[-1] / bin_hz)) + 1  # ... to twice the fastest
     h = hann(win)
     tot = np.zeros(PACE_RATES)
+    wsum = np.zeros(hi + 1)
     ranges: list[float] = []
     for c in range(y.shape[0]):
         seg = y[c]
@@ -149,17 +155,20 @@ def window_score(y: Floats, raw: Floats, fs: float) -> tuple[float, int, float, 
             continue
         spec = np.fft.rfft((seg - seg.sum() / win) * h, n=nfft)
         p = spec.real * spec.real + spec.imag * spec.imag
-        w = np.zeros(len(p))
-        for k in range(need_lo + half, need_hi - half + 1):
-            w[k] = p[k] / (p[k - half:k + half + 1].sum() / wb)
+        w = np.zeros(hi + 1)
+        for k in range(lo, hi + 1):  # each bin over the mean of the wb around it (zeros below bin 0)
+            w[k] = p[k] / (p[max(0, k - half):k + half + 1].sum() / wb)
         for i, f in enumerate(rates):
             tot[i] += interp(f, bin_hz, w) + HARMONIC * interp(2 * f, bin_hz, w)
+        wsum += w
         ranges.append(rng)
     if not ranges:
-        return math.nan, -1, math.nan, 0
+        return math.nan, -1, math.nan, 0, math.nan
     tot /= len(ranges)
     k = int(np.argmax(tot))
-    return float(tot[k] / np.median(tot)), k, det.median(ranges), len(ranges)
+    f0 = rates[k]
+    thirds = (interp(f0 / 3, bin_hz, wsum) + interp(2 * f0 / 3, bin_hz, wsum)) / 2 / len(ranges)
+    return float(tot[k] / np.median(tot)), k, det.median(ranges), len(ranges), thirds
 
 
 def windows(x: Floats, fs: float, missing: Bools | None = None) -> list[Window]:
@@ -177,11 +186,11 @@ def windows(x: Floats, fs: float, missing: Bools | None = None) -> list[Window]:
         if cum[s + win] - cum[s] > MAX_MISSING_S * fs:
             out.append(Window(t, math.nan, math.nan, math.nan, 0, False))
             continue
-        score, k, amp, used = window_score(y[:, s:s + win], x[:, s:s + win], fs)
+        score, k, amp, used, thirds = window_score(y[:, s:s + win], x[:, s:s + win], fs)
         if used == 0:
             out.append(Window(t, math.nan, math.nan, math.nan, 0, False))
             continue
-        out.append(Window(t, score, float(rates[k] * 60), amp, used, True))
+        out.append(Window(t, score, float(rates[k] * 60), amp, used, True, thirds))
     return out
 
 
@@ -315,42 +324,7 @@ def find(ws: list[Window]) -> Found:
     return found
 
 
-# --------------------------------------------------------------------------------------- the phone's step counter
-
-
-def phone_minutes(readings: list[tuple[float, int]]) -> dict[int, float]:
-    """Steps per clock minute (key: unix seconds of the minute's start) from the step counter's readings (unix
-    seconds, steps since the phone started; one a minute while recording). The steps between two readings at most
-    PHONE_MAX_GAP_S apart go to the minute holding the middle of that time (a longer time in equal minute-long parts,
-    each to the minute of its middle), so a minute is never split into fractions of a step. A counter that went down
-    (the phone restarted) says nothing until the next reading. Minutes no reading covers are absent (not known)."""
-    rs = sorted(readings)
-    steps: dict[int, float] = {}
-    for (t0, c0), (t1, c1) in zip(rs, rs[1:]):
-        if t1 <= t0 or t1 - t0 > PHONE_MAX_GAP_S or c1 < c0:
-            continue
-        parts = max(1, round((t1 - t0) / 60))
-        for j in range(parts):
-            mid = t0 + (j + 0.5) * (t1 - t0) / parts
-            m = int(math.floor(mid / 60)) * 60
-            steps[m] = steps.get(m, 0.0) + (c1 - c0) / parts
-    return {m: steps[m] for m in sorted(steps)}
-
-
 # ---------------------------------------------------------------------------------------------------- per minute
-
-
-@dataclass
-class Minute:
-    t: int  # unix seconds of the clock minute's start
-    walk_s: float  # headband walking seconds (running included)
-    run_s: float  # of them running
-    hb_steps: float  # the headband's steps (clear windows of its stretches)
-    hb_pace: float | None  # median pace of those windows
-    phone: float | None  # the phone's steps; None: no step counter for that minute
-    steps: float  # the minute's steps: the phone's when it counted any, else the headband's
-    source: str  # "phone", "headband" or "" (no steps)
-    walking_s: float  # the minute's walking seconds: 60 when the phone counted PHONE_WALK_STEPS, else walk_s
 
 
 def minutes(found: Found, start_unix: float, phone: dict[int, float] | None = None) -> list[Minute]:
@@ -385,30 +359,3 @@ def minutes(found: Found, start_unix: float, phone: dict[int, float] | None = No
         out.append(Minute(m, r["walk"], r["run"], r["steps"], det.median(r["paces"]) if r["paces"] else None, p,
                           steps, source, walking))
     return out
-
-
-# --------------------------------------------------------------------------------------------- the phone's check
-
-
-@dataclass
-class Check:
-    paired: int  # minutes both walked the whole of: the headband all 60 s, the phone PHONE_WALK_STEPS or more
-    right: int  # of them with the headband's pace within CHECK_PACE_SHARE of the phone's steps
-    hb_steps: float  # the paired minutes' totals
-    phone_steps: float
-    status: str  # "unchecked" (under CHECK_MIN_MINUTES), "passed" or "failed"
-
-
-def check(rows: list[Minute]) -> Check:
-    """Does the headband's pace hold against the phone's step counter (the research note's gate)?"""
-    paired = [r for r in rows if r.walk_s >= 60 and r.hb_pace is not None and r.phone is not None
-              and r.phone >= PHONE_WALK_STEPS]
-    right = sum(1 for r in paired if abs(r.hb_pace - r.phone) <= CHECK_PACE_SHARE * r.phone)
-    hb, ph = sum(r.hb_steps for r in paired), sum(r.phone for r in paired)
-    if len(paired) < CHECK_MIN_MINUTES:
-        status = "unchecked"
-    elif right >= CHECK_RIGHT_SHARE * len(paired) and abs(hb - ph) <= CHECK_TOTAL_SHARE * ph:
-        status = "passed"
-    else:
-        status = "failed"
-    return Check(len(paired), right, hb, ph, status)

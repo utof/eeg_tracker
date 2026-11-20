@@ -8,9 +8,12 @@
 //      around it ("whitened");
 //   3. the harmonic score of each step rate from 1.2 to 3.4 Hz (0.02 Hz apart): W(f) + 0.5 W(2f), averaged over the
 //      channels; the best rate is the pace, its score over the median of all rates the window's score;
-//   4. a window walks at a score of 4 or more and a pace of 90-200 a minute; a majority of 7 windows smooths that, runs
-//      of 30 s or more are walking stretches, a pace held at 150 or more for a minute is running; gaps of a minute or
-//      more between stretches are stops, stretches under 10 minutes apart one walk;
+//   4. a window walks at a score of 4 or more and a pace of 90-200 a minute, when it is no pulse: a walking-sized shake
+//      (the channels' median band-passed range at least 300 µV) and no family at a third and two thirds of the pace
+//      (the whitened power there under 2.5: a sleeping pulse of about 57 a minute reads 115 or 172 otherwise); a
+//      majority of 7 windows smooths that, runs of 30 s or more are walking stretches, a pace held at 150 or more for
+//      a minute is running; gaps of a minute or more between stretches are stops, stretches under 15 minutes apart
+//      one walk;
 //   5. steps: pace x 5 s for each window of a stretch whose own rhythm is clear; a confidence word from the median
 //      score; per clock minute the phone's step counter wins wherever it counted steps.
 // Plain Dart; walking_cross_check_test.dart checks it against the reference on made-up recordings.
@@ -22,7 +25,7 @@ import '../feedback/features.dart' show median;
 import '../sleep/dsp.dart' show Fft;
 
 /// The detector's version: a walk file of another one is made again.
-const String walkDetector = 'walk-v1';
+const String walkDetector = 'walk-v2';
 
 /// The planning values (DECISIONS 800-809), the same as analysis/walking.py.
 abstract final class WalkRule {
@@ -36,8 +39,9 @@ abstract final class WalkRule {
   static const double harmonic = 0.5;
   static const double scoreWalk = 4;
   static const double paceMinSpm = 90, paceMaxSpm = 200;
+  static const double minShakeUv = 300, maxThirds = 2.5;
   static const int smoothWindows = 7;
-  static const double minStretchS = 30, minStopS = 60, walkGapS = 600;
+  static const double minStretchS = 30, minStopS = 60, walkGapS = 900;
   static const double runSpm = 150, minRunS = 60;
   static const double maxMissingS = 1;
   static const double flatUv = 1, railUv = 390000;
@@ -86,7 +90,7 @@ double _interp(double x, double bin, Float64List w) {
 
 /// One 10 s window.
 class WalkWindow {
-  const WalkWindow(this.t, this.score, this.pace, this.amp, this.channels, this.read);
+  const WalkWindow(this.t, this.score, this.pace, this.amp, this.channels, this.read, [this.thirds = double.nan]);
 
   /// Its centre, seconds from the recording's first sample.
   final double t;
@@ -100,7 +104,16 @@ class WalkWindow {
   /// False: over 1 s of it missing, or no usable channel.
   final bool read;
 
-  bool get walks => read && score >= WalkRule.scoreWalk && pace >= WalkRule.paceMinSpm && pace <= WalkRule.paceMaxSpm;
+  /// The mean whitened power at a third and two thirds of the pace: high for a pulse caught at its 2nd or 3rd harmonic.
+  final double thirds;
+
+  bool get walks =>
+      read &&
+      score >= WalkRule.scoreWalk &&
+      pace >= WalkRule.paceMinSpm &&
+      pace <= WalkRule.paceMaxSpm &&
+      amp >= WalkRule.minShakeUv &&
+      thirds < WalkRule.maxThirds;
 }
 
 /// The windows of a recording, sample by sample (every channel of its rows, µV): [push] each row, then [windows].
@@ -122,9 +135,8 @@ class WalkWindows {
     _x = [for (var c = 0; c < channels; c++) Float64List(win)];
     _miss = Uint8List(win);
     _bin = rate / nfft;
-    final half = wb ~/ 2;
-    _needLo = (walkRates.first / _bin).floor() - half;
-    _needHi = (2 * walkRates.last / _bin).floor() + 1 + half;
+    _lo = math.max(0, (walkRates.first / 3 / _bin).floor());
+    _hi = (2 * walkRates.last / _bin).floor() + 1;
     _hann = Float64List.fromList([for (var i = 0; i < win; i++) 0.5 - 0.5 * math.cos(2 * math.pi * i / win)]);
     _fft = Fft(nfft);
     _re = Float64List(nfft);
@@ -138,7 +150,8 @@ class WalkWindows {
   late final List<Float64List> _y, _x;
   late final Uint8List _miss;
   late final double _bin;
-  late final int _needLo, _needHi;
+  /// The bins whitened: from a third of the slowest rate to twice the fastest.
+  late final int _lo, _hi;
   late final Float64List _hann;
   late final Fft _fft;
   late final Float64List _re, _im;
@@ -180,6 +193,7 @@ class WalkWindows {
     }
     if (used.isEmpty) return WalkWindow(t, double.nan, double.nan, double.nan, 0, false);
     final tot = Float64List(WalkRule.paceRates);
+    final wsum = Float64List(_hi + 1);
     // two channels in one complex transform: the first in the real part, the second in the imaginary part
     for (var u = 0; u < used.length; u += 2) {
       final a = used[u], b = u + 1 < used.length ? used[u + 1] : -1;
@@ -188,13 +202,13 @@ class WalkWindows {
       _load(_y[a], from, _re);
       if (b >= 0) _load(_y[b], from, _im);
       _fft.transform(_re, _im);
-      _score(tot, (k) {
+      _score(tot, wsum, (k) {
         final j = k == 0 ? 0 : nfft - k;
         final xr = (_re[k] + _re[j]) / 2, xi = (_im[k] - _im[j]) / 2;
         return xr * xr + xi * xi;
       });
       if (b >= 0) {
-        _score(tot, (k) {
+        _score(tot, wsum, (k) {
           final j = k == 0 ? 0 : nfft - k;
           final yr = (_im[k] + _im[j]) / 2, yi = -(_re[k] - _re[j]) / 2;
           return yr * yr + yi * yi;
@@ -209,7 +223,9 @@ class WalkWindows {
       if (tot[k] > tot[best]) best = k;
     }
     final score = tot[best] / median(tot);
-    return WalkWindow(t, score, walkRates[best] * 60, median(ranges), used.length, true);
+    final f0 = walkRates[best];
+    final thirds = (_interp(f0 / 3, _bin, wsum) + _interp(2 * f0 / 3, _bin, wsum)) / 2 / used.length;
+    return WalkWindow(t, score, walkRates[best] * 60, median(ranges), used.length, true, thirds);
   }
 
   /// The ring's window from [from], its mean removed and the Hann window on, into [out] (zero-padded).
@@ -224,20 +240,22 @@ class WalkWindows {
     }
   }
 
-  /// Adds one channel's harmonic score to [tot], its power at bin k from [power].
-  void _score(Float64List tot, double Function(int k) power) {
+  /// Adds one channel's harmonic score to [tot] and its whitened spectrum to [wsum], its power at bin k from [power].
+  void _score(Float64List tot, Float64List wsum, double Function(int k) power) {
     final half = wb ~/ 2;
-    final p = Float64List(_needHi + 1);
-    for (var k = math.max(0, _needLo); k <= _needHi && k <= nfft ~/ 2; k++) {
+    final p = Float64List(_hi + half + 1);
+    for (var k = 0; k <= _hi + half && k <= nfft ~/ 2; k++) {
       p[k] = power(k);
     }
-    final w = Float64List(_needHi + 1);
-    for (var k = _needLo + half; k <= _needHi - half; k++) {
+    final w = Float64List(_hi + 1);
+    for (var k = _lo; k <= _hi; k++) {
+      // each bin over the mean of the wb around it (zeros below bin 0)
       var s = 0.0;
-      for (var j = k - half; j <= k + half; j++) {
+      for (var j = math.max(0, k - half); j <= k + half; j++) {
         s += p[j];
       }
       w[k] = p[k] / (s / wb);
+      wsum[k] += w[k];
     }
     for (var i = 0; i < WalkRule.paceRates; i++) {
       final f = walkRates[i];

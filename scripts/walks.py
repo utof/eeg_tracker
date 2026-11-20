@@ -4,8 +4,9 @@ the Python reference (analysis/walking.py), writing the same `<id>.walk.json` (d
   uv run --project analysis python scripts/walks.py REC.f32 [REC2.f32 ...] [--out _local/walking]
       the files are one recording (joined on the clock, every channel its header names); id = the first's stem
   uv run --project analysis python scripts/walks.py --all [--local _local]
-      every recording in <local>/recordings/ without an up-to-date walk file, grouped as the phone's Archive groups
-      them (a set starting under 15 minutes after the one before ended, up to 24 hours from the first)
+      every recording in <local>/recordings/ and recordings-diy/ without an up-to-date walk file, grouped as the
+      phone's Archive groups them (a set starting under 15 minutes after the one before ended, up to 24 hours from
+      the first)
 
 The phone's step counter lines in the recordings' `.log` files (`phone steps N`, written once a minute while
 recording) give the phone's steps per minute; where it counted, its steps win. Reads only; writes the walk files.
@@ -106,10 +107,10 @@ def result(rec_id: str, start_unix: float, names: list[str], fs: float, found: w
         pace=r1(wk.det.median([ws[i].pace for i in clear]) if clear else None),
         confidence=None if score is None else wk.confidence(score),
         steps=round(by["phone"] + by["headband"]), steps_phone=round(by["phone"]), steps_headband=round(by["headband"]),
-        check=dict(paired=chk.paired, right=chk.right, headband_steps=r1(chk.hb_steps), phone_steps=r1(chk.phone_steps)),
+        check=dict(paired=chk.paired, right=chk.right, headband_steps=r1(chk.hb_steps),
+                   phone_steps=r1(chk.phone_steps)),
         walks=walks,
-        minutes=[[r.t, r1(r.walk_s), r1(r.run_s), r1(r.hb_steps), r1(r.hb_pace), r1(r.phone), r1(r.steps), r.source,
-                  r1(r.walking_s)] for r in rows],
+        minutes=[r.row() for r in rows],
     )
 
 
@@ -195,7 +196,7 @@ def summary_line(d: dict) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("files", nargs="*", type=Path)
-    ap.add_argument("--all", action="store_true", help="every recording in <local>/recordings/")
+    ap.add_argument("--all", action="store_true", help="every recording in <local>/recordings/ and recordings-diy/")
     ap.add_argument("--local", type=Path, default=ROOT / "_local")
     ap.add_argument("--out", type=Path, help="where the walk files go (default <local>/walking)")
     a = ap.parse_args()
@@ -207,7 +208,7 @@ def main() -> None:
         return
     if not a.all:
         ap.error("give the .f32 files of one recording, or --all")
-    for g in groups(a.local / "recordings"):
+    for g in [g for folder in ("recordings", "recordings-diy") for g in groups(a.local / folder)]:
         paths = [r.path for r in g]
         key = key_of(paths)
         f = out / f"{paths[0].stem}.walk.json"
