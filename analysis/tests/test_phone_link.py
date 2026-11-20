@@ -668,3 +668,42 @@ def _reachable(url: str) -> bool:
         return True
     except OSError:
         return False
+
+
+def test_keep_starts_the_after_pull_jobs_after_a_copy_that_brought_something(
+        tmp_path: Path, clock: Clock, fake_phone: FakePhone, monkeypatch: pytest.MonkeyPatch) -> None:
+    """--keep, as the tray runs it, against a phone with a new recording: the copy fetches it, then the after-pull jobs
+    are asked with `changed` (DECISIONS 768); --no-after-pull asks nothing."""
+    import time
+
+    import after_pull
+    fake_phone.key = _paired(tmp_path, clock)  # the copy is signed with the pairing's key (DECISIONS 751)
+    asked: list[tuple[Path, bool]] = []
+
+    class Kicker:
+        def __init__(self, local: Path) -> None:
+            self.local = local
+
+        def __call__(self, changed: bool) -> bool:
+            asked.append((self.local, changed))
+            return False
+
+    monkeypatch.setattr(after_pull, "Kicker", Kicker)
+    for name, extra in (("2026-11-19-010000", []), ("2026-11-19-020000", ["--no-after-pull"])):
+        asked.clear()
+        fake_phone.put(f"recordings/{name}.f32", b"\x02" * 64)
+        a = pl.parse(["--keep", "--dest", str(tmp_path), "--port", str(_free_port()), "--no-pages", "--every", "0.01",
+                      "--phone-at", fake_phone.base, *extra])
+        stop = threading.Event()
+        t = threading.Thread(target=lambda: pl.keep(a, lambda _x: None, find=lambda: None, stop=stop), daemon=True)
+        t.start()
+        try:
+            _until(lambda: (tmp_path / "recordings" / f"{name}.f32").exists())
+            if not extra:
+                _until(lambda: (tmp_path, True) in asked)
+            else:
+                time.sleep(0.5)
+                assert asked == []
+        finally:
+            stop.set()
+            t.join(5)

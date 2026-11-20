@@ -81,6 +81,11 @@ An unpaired phone shares as before: anyone on the Wi-Fi with the code, for 12 ho
   which then listens on the Wi-Fi for that code's 5 minutes), copies the files, serves the live pages on
   `http://localhost:8770/`, and writes what it says to `_local/phone/link-keep.log` (file names and counts, never an
   address, the token or the key).
+- **After a copy** (DECISIONS 768): the kept link starts `scripts/after_pull.py` in the background after a copy that
+  brought something new (at most once every 30 minutes) and once a day without one: it packs raw recordings older
+  than a day, writes the day numbers utof_tracker imports (`export_events.py --daily`) and updates the data book in
+  `_local/data/` (docs/data-format.md). It says how each step went in `_local/after-pull.log`; `--no-after-pull`
+  leaves it out.
 - **Forget the phone…** in the tray's menu deletes `link.json`; the kept link ends by itself.
 
 ## Updating from the first version (re-pair once)
