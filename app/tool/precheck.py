@@ -329,6 +329,20 @@ def find(text: str, exact: bool = False, scrolls: int = 12) -> tuple[str, int, i
     return hit
 
 
+def find_on_tab(tab: str, text: str, exact: bool = False, limit: float = 150) -> tuple[str, int, int] | None:
+    """[text] on the bottom bar's [tab], tried again from the top until [limit] s: a section can come only once the
+    screen's first read of the app's folder is done, which takes a while after a cold start on the emulator."""
+    t0 = time.time()
+    while True:
+        open_tab(tab)
+        for _ in range(4):
+            emu.scroll("up")
+        hit = find(text, exact)
+        if hit is not None or time.time() - t0 > limit:
+            return hit
+        time.sleep(5)
+
+
 def report_hashes() -> dict[str, str]:
     out = sh(f"cd {FILES}/nights 2>/dev/null && sha256sum *.report.json", check=False)
     return {l.split()[1]: l.split()[0] for l in out.splitlines() if len(l.split()) == 2}
@@ -473,8 +487,7 @@ def check_share() -> Result:
     if not wait_main():
         return Result(name, "FAIL", "the app's main screen did not come up within 2 minutes", screen_words("b-start"))
     if share_token() is None:
-        open_tab("More")
-        hit = find("Share on Wi-Fi")
+        hit = find_on_tab("More", "Share on Wi-Fi")
         if hit is None:
             return Result(name, "FAIL", "the Share on Wi-Fi switch was not found on the More tab", screen_words("b-share"))
         _, x, y = hit
@@ -567,8 +580,7 @@ def check_talking(replay: Path, stage: Path) -> Result:
     start_app()
     if not wait_main():
         return Result(name, "FAIL", "the app's main screen did not come up within 2 minutes", screen_words("c-start"))
-    open_tab("Sessions")
-    hit = find("Work session", exact=True)
+    hit = find_on_tab("Sessions", "Work session", exact=True)
     if hit is None:
         return Result(name, "FAIL", "the Work session button was not found on the Sessions tab", screen_words("c-tab"))
     sh(f"input tap {hit[1]} {hit[2]}")
@@ -627,6 +639,12 @@ def collect(out: Path, started_ms: int) -> Result:
     (out / "app-starts.log").write_text(starts)
     problems = []
     lines = log.splitlines()
+    # the app's Dart errors nobody caught (the only Flutter app on the emulator); a missing plugin is a broken build
+    # (2026-11-20: an APK without its GeneratedPluginRegistrant answered every plugin call so)
+    unhandled = [l.split("Unhandled Exception:", 1)[1].strip()[:160] for l in lines
+                 if " flutter " in l and "Unhandled Exception:" in l]
+    for u in sorted({u for u in unhandled if u.startswith("MissingPluginException")}):
+        problems.append(u)
     for i, l in enumerate(lines):
         if f"ANR in {PKG}" in l:
             problems.append(l.strip())
@@ -657,12 +675,15 @@ def collect(out: Path, started_ms: int) -> Result:
             problems.append(f"ANR trace of the app: {f.name}")
     starts_ok = starts.count("start: screen engine") >= 2 and "previous process ended:" in starts
     details = [f"exit reasons this run: {', '.join(reasons) or 'none'}", f"/data/anr: {', '.join(anrs) or 'empty'}",
-               f"app-starts.log: {len(starts.splitlines())} lines"] + [f"app-starts: {l}" for l in starts.splitlines()[-8:]]
+               f"uncaught Dart errors: {len(unhandled)}"]
+    details += [f"uncaught: {u}" for u in sorted(set(unhandled))[:8]]
+    details += [f"app-starts.log: {len(starts.splitlines())} lines"] + [f"app-starts: {l}" for l in starts.splitlines()[-8:]]
     if problems:
         return Result(name, "FAIL", "; ".join(sorted(set(problems)))[:300], details)
     if not starts_ok:
         return Result(name, "FAIL", "files/app-starts.log did not record the starts and Android's exit reasons", details)
-    return Result(name, "PASS", f"no crash or ANR; {len(reasons)} exit reasons, all in files/app-starts.log too", details)
+    return Result(name, "PASS", f"no crash or ANR; {len(reasons)} exit reasons, all in files/app-starts.log too"
+                  f"{f'; {len(unhandled)} uncaught Dart errors (details)' if unhandled else ''}", details)
 
 
 # ---- the run -------------------------------------------------------------------------------------------------------
