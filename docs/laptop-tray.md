@@ -51,7 +51,7 @@ Clicking it opens the menu:
   break)", or "On a break since 10:51", "In a meeting (zoom) since 11:02", or "Not in a work session" and how long
   you have been in work apps.
 - **The phone's lines** once one is paired: "Phone: paired, reachable" (with "· copying its files" while the link
-  copies), or "Phone: not reachable (Share on Wi-Fi off?)"; then the headband: "Headband: recording on the phone
+  copies), or "Phone: not reachable (app asleep, or Share on Wi-Fi off?)"; then the headband: "Headband: recording on the phone
   (work session since 12:26, signal good, alert)", "Headband: connected, not on the head (…)", "Headband: no data
   for 2 min (…)", "Headband: recording a night on the phone, 6h10 so far", "Headband: not recording on the phone",
   or "Headband: —"; and a break line from the phone when there is one: "Break hint on the phone since 12:50

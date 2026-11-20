@@ -166,7 +166,7 @@ def test_unreachable_and_refused(tmp_path, phone):
     lk = lw.look_at_phone(tmp_path, T0, ask=lambda *t: lw.phone_state(*t, timeout=0.5), probe=lambda: None)
     assert lk.result == "unreachable" and lk.address == "127.0.0.1"
     assert lw.phone_view(lk, None, 1) == lw.PhoneView(
-        "unreachable", "dashed", ("Phone: not reachable (Share on Wi-Fi off?)", "Headband: —"))
+        "unreachable", "dashed", ("Phone: not reachable (app asleep, or Share on Wi-Fi off?)", "Headband: —"))
     assert TOKEN not in repr(lk)
 
 
@@ -264,7 +264,7 @@ def test_a_paired_phone_that_does_not_answer_at_the_start_is_said_once(tmp_path,
     a.menu.phone_tick()
     assert [k for k, _ in a.notes.shown] == ["phone"]
     assert a.menu.ind.icon.endswith("eeg-tray-idle-dashed.svg")
-    assert a.phone_lines() == ["Phone: not reachable (Share on Wi-Fi off?)", "Headband: —"]
+    assert a.phone_lines() == ["Phone: not reachable (app asleep, or Share on Wi-Fi off?)", "Headband: —"]
     a.look(); a.look()
     assert [k for k, _ in a.notes.shown] == ["phone"]           # once, not every look
     quiet = Tray(tmp_path / "q", notifications=False)

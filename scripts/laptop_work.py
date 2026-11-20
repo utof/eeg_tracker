@@ -1067,7 +1067,7 @@ def phone_view(last: PhoneLook | None, ok: PhoneLook | None, misses: int) -> Pho
         return PhoneView("unpaired", "none", ())
     if last.result != "ok" and (ok is None or misses >= PHONE_MISSES):
         if last.result == "unreachable":
-            return PhoneView("unreachable", "dashed", ("Phone: not reachable (Share on Wi-Fi off?)", "Headband: —"))
+            return PhoneView("unreachable", "dashed", ("Phone: not reachable (app asleep, or Share on Wi-Fi off?)", "Headband: —"))
         why = {401: "does not take this laptop's token any more (Pair phone… again)",
                403: "answers, but not to this network (a VPN on the phone?)"}.get(
             last.code or 0, f"answers, but not as the app does ({last.code or 'not the app'})")
@@ -1283,8 +1283,9 @@ class WorkTray:
         if first and look.result in ("unreachable", "refused"):
             self.log.append(f"{hm(now)} the paired phone does not answer ({look.result})")
             if self.s.notifications:
-                body = (f"Paired with the phone at {look.address}, but it does not answer. Is Share on Wi-Fi on in the "
-                        "app? Until it is, the tray cannot see whether the headband records."
+                body = (f"Paired with the phone at {look.address}, but it does not answer: the app asleep (open it, or "
+                        "start a session) or Share on Wi-Fi off. Until then the tray cannot see whether the headband "
+                        "records."
                         if look.result == "unreachable" else
                         f"The phone at {look.address} does not take this laptop's token any more. Pair phone… in "
                         "the tray's menu pairs them again.")
