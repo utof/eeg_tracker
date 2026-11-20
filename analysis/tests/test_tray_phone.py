@@ -273,6 +273,68 @@ def test_a_paired_phone_that_does_not_answer_at_the_start_is_said_once(tmp_path,
     assert quiet.notes.shown == [] and quiet.phone_lines()[0].startswith("Phone: not reachable")
 
 
+# ---------- the headband notices the phone made (state["alert"]) ----------
+
+def alert(kind: str = "lost", ago_s: float = 60, **kw) -> dict:
+    return {"kind": kind, "at": int(T0.timestamp()) + 45 - ago_s, "title": f"Headband {kind}",
+            "text": "Plain words.", **kw}
+
+
+def shown(a: Tray) -> list[str]:
+    return [k for k, _ in a.notes.shown if k == "headband-alert"]
+
+
+def test_a_new_headband_alert_shows_once_and_back_replaces_lost(tmp_path, phone):
+    pair(tmp_path, phone.port)
+    a = Tray(tmp_path)
+    phone.state = {**work(), "alert": alert("lost")}
+    a.look()
+    assert shown(a) == ["headband-alert"]
+    a.look(); a.look()
+    assert shown(a) == ["headband-alert"]                        # the same alert on the next looks: nothing
+    phone.state = {**work(), "alert": {**alert("back", ago_s=-90)}}
+    a.look()
+    assert shown(a) == ["headband-alert"] * 2                    # same key: the newer replaces the older
+
+
+def test_headband_alert_respects_notifications_and_never_replays(tmp_path, phone):
+    pair(tmp_path, phone.port)
+    a = Tray(tmp_path, notifications=False)
+    phone.state = {**work(), "alert": alert("battery")}
+    a.look()
+    assert shown(a) == []
+    a.ctl.s = lw.replace(a.ctl.s, notifications=True)
+    a.look()
+    assert shown(a) == []                                        # switching on later does not replay it
+
+
+def test_stale_malformed_and_unreachable_headband_alerts_show_nothing(tmp_path, phone):
+    pair(tmp_path, phone.port)
+    a = Tray(tmp_path)
+    for bad in (alert(ago_s=31 * 60), alert("other"), {**alert(), "title": 5}, {**alert(), "text": ""},
+                {**alert(), "at": "now"}, {**alert(), "at": True}, "lost", [], {"kind": "lost"}):
+        phone.state = {**work(), "alert": bad}
+        a.look()
+    assert shown(a) == []
+    phone.state = {**work(), "alert": alert("lost", ago_s=20 * 60)}
+    a.look()
+    assert shown(a) == ["headband-alert"]                        # 20 minutes old is still shown
+    port = phone.port
+    phone.close()
+    b = Tray(tmp_path / "b"); pair(tmp_path / "b", port)
+    b.look()
+    assert shown(b) == []
+    c = Tray(tmp_path / "c")                                     # not paired
+    c.look()
+    assert shown(c) == []
+
+
+def test_headband_alert_texts_are_capped():
+    got = lw.headband_alert({"alert": {"kind": "lost", "at": int(T0.timestamp()), "title": "t" * 200,
+                                       "text": "x" * 900}})
+    assert got is not None and len(got[2]) == 80 and len(got[3]) == 300
+
+
 def test_forget_the_phone(tmp_path, phone):
     pair(tmp_path, phone.port)
     a = Tray(tmp_path)

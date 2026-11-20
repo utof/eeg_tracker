@@ -11,6 +11,7 @@ import 'diy_board_view.dart';
 import 'form_parts.dart' show Para, PinnedAction;
 import 'meditation_view.dart' show MarkShape, StateMark;
 import 'parts.dart';
+import 'lost_notice_setting.dart';
 import 'theme.dart';
 
 class OwnBleViewModel {
@@ -239,6 +240,8 @@ class _Idle extends StatelessWidget {
           const SectionHeading('Headband'),
           DeviceChoice(diy: false, onChanged: free ? v.onDevice : null),
         ],
+        const SectionHeading('If the headband is lost'),
+        const LostNoticeSetting(),
         const SectionHeading('Which connection'),
         _SwitchRow(
           title: 'Use our own connection (test)',
