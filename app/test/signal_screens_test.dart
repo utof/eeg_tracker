@@ -247,7 +247,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     expect(tester.widget<HeadView>(head).selected, 'O2');
     // the electrode rows pick too
-    await _reveal(tester, find.text('T4'));
+    await _reveal(tester, find.text('T4').last); // the electrode's row (the headband card above names T4 too)
     await tester.tap(find.text('T4').last);
     await tester.pump(const Duration(milliseconds: 400));
     expect(tester.widget<HeadView>(head).selected, 'T4');

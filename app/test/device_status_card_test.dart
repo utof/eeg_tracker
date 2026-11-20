@@ -20,7 +20,7 @@ import 'package:eeg_tracker/ui/dream_view.dart';
 import 'package:eeg_tracker/ui/lost_notice_setting.dart';
 import 'package:eeg_tracker/ui/meditation_view.dart';
 import 'package:eeg_tracker/ui/nap_view.dart';
-import 'package:eeg_tracker/ui/night_view.dart';
+import 'package:eeg_tracker/ui/night_view.dart' as night;
 import 'package:eeg_tracker/ui/signal_view.dart';
 import 'package:eeg_tracker/ui/states_view.dart';
 import 'package:eeg_tracker/ui/theme.dart';
@@ -189,8 +189,8 @@ void main() {
     testWidgets('Night (Sleep)', (tester) async {
       await seen(
         tester,
-        NightView(
-          model: const NightViewModel(title: 'Ready', sentence: 'Tap Start night.', tone: Tone.calm, running: false),
+        night.NightView(
+          model: const night.NightViewModel(title: 'Ready', sentence: 'Tap Start night.', tone: night.Tone.calm, running: false),
           onStart: () {},
           onStop: () {},
           onFix: (_) {},
