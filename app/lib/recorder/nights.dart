@@ -6,9 +6,13 @@
 // night as the sleep before it. Files of a run without samples (a `.log` alone) join the night they fall in.
 // A `.f32` packed after a day (`<stamp>.f32.gz`, packed.dart) counts as the plain one: [NightFiles.recordings] keep
 // the plain name, and the readers open either form.
+// What a file set gives the list (its samples' end, from its index, its header or an old set's `.log`) is kept for the
+// isolate while none of the set's files changed: the sleep scoring's plan and the bedtime checks ask for the nights on
+// the screen's thread at every start and return (DECISIONS 629).
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../cache/file_summaries.dart' show fileKey;
 import 'chunk_writer.dart';
 import 'header.dart' show legacyHeader, tryHeader;
 import 'packed.dart' show isPackedPath, rawLength;
@@ -98,19 +102,21 @@ List<NightFiles> nightsIn(Directory dir) {
   }
   final data = <_Rec>[];
   final other = <String>[];
+  final kept = _keptSets[dir.path] ?? const <String, _SetEnd>{};
+  final keep = <String, _SetEnd>{};
   for (final stem in byStem.keys) {
-    final f32 = File('${dir.path}/$stem.f32');
-    final size = rawLength(f32);
     final start = stemTime('$stem.')!;
-    // its header's record and rate (any number of channels); a set whose header cannot be used counts as the BrainBit's
-    // here, for its length only: its readers refuse it in words
-    final h = size > 0 ? (tryHeader(f32) ?? legacyHeader) : legacyHeader;
-    if (size >= h.recordBytes) {
-      data.add(_Rec(stem, start, _lastData(dir, stem, start, size ~/ h.recordBytes, h.sampleRate)));
+    final key = _setKey(byStem[stem]!); // taken before reading: a file changed meanwhile is read again next time
+    var set = kept[stem];
+    if (set == null || key == null || set.key != key) set = (key: key, end: _setEnd(dir, stem, start));
+    if (key != null) keep[stem] = set;
+    if (set.end case final end?) {
+      data.add(_Rec(stem, start, end));
     } else {
       other.add(stem);
     }
   }
+  _keptSets[dir.path] = keep;
   data.sort((a, b) {
     final c = a.start.compareTo(b.start);
     return c != 0 ? c : a.stem.compareTo(b.stem);
@@ -148,6 +154,37 @@ List<NightFiles> nightsIn(Directory dir) {
     final c = b.nightOf.compareTo(a.nightOf);
     return c != 0 ? c : b.start.compareTo(a.start);
   });
+}
+
+/// A file set's samples' end ([_lastData]), or null when it holds no whole sample, with the key it was worked out for.
+typedef _SetEnd = ({String? key, DateTime? end});
+
+/// What [nightsIn] worked out per folder and file set, for this isolate.
+final Map<String, Map<String, _SetEnd>> _keptSets = {};
+
+/// Forgets what [nightsIn] keeps (tests: a new process).
+void forgetNightSets() => _keptSets.clear();
+
+/// The size and modified time of every file of a set (its `.f32` or `.f32.gz`, `.idx`, `.header.json`, `.log`, ...),
+/// by name; null when one is gone meanwhile.
+String? _setKey(List<File> files) {
+  final parts = <String>[];
+  for (final f in files) {
+    final k = fileKey(f);
+    if (k == null) return null;
+    parts.add('${f.uri.pathSegments.last} ${k.size} ${k.modifiedUs}');
+  }
+  return (parts..sort()).join('\n');
+}
+
+/// The set's samples' end, or null when it holds no whole sample. Its header gives the record and the rate (any number
+/// of channels); a set whose header cannot be used counts as the BrainBit's here, for its length only: its readers
+/// refuse it in words.
+DateTime? _setEnd(Directory dir, String stem, DateTime start) {
+  final f32 = File('${dir.path}/$stem.f32');
+  final size = rawLength(f32);
+  final h = size > 0 ? (tryHeader(f32) ?? legacyHeader) : legacyHeader;
+  return size >= h.recordBytes ? _lastData(dir, stem, start, size ~/ h.recordBytes, h.sampleRate) : null;
 }
 
 /// Arrival time of the last batch (the last `.idx` row); start + samples / rate without an index.

@@ -6,6 +6,7 @@
 // the moments armed are the same as before.
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:eeg_tracker/cache/file_summaries.dart';
 import 'package:eeg_tracker/dream/store.dart';
@@ -14,10 +15,14 @@ import 'package:eeg_tracker/lucid/store.dart';
 import 'package:eeg_tracker/morning/store.dart';
 import 'package:eeg_tracker/nap/rules.dart' show NapEnd;
 import 'package:eeg_tracker/nap/store.dart';
-import 'package:eeg_tracker/recorder/nights.dart' show dateName, nightLabel, nightOf;
+import 'package:eeg_tracker/recorder/chunk_writer.dart' show fileStem;
+import 'package:eeg_tracker/recorder/header.dart' show HeaderChannel, RecordingHeader, writeHeader;
+import 'package:eeg_tracker/recorder/nights.dart'
+    show NightFiles, dateName, forgetNightSets, nightLabel, nightOf, nightsIn;
 import 'package:eeg_tracker/sharp/page.dart' show recentNights;
 import 'package:eeg_tracker/sharp/store.dart';
 import 'package:eeg_tracker/sleep/live_stager.dart' show LiveMode;
+import 'package:eeg_tracker/sleep/scorer.dart' show SleepScorer;
 import 'package:eeg_tracker/study/arm.dart';
 import 'package:eeg_tracker/sleep/report.dart';
 import 'package:eeg_tracker/study/store.dart';
@@ -111,6 +116,67 @@ void main() {
       final bad = File('${dreamDirFor(rec).path}/2026-11-20-010000.dream.json')..writeAsStringSync('{cut');
       addTearDown(bad.deleteSync);
       expect(nightLines(rec, now).dream, contains('Thu 19 Nov 23:10'));
+    });
+  });
+
+  group('the nights\' list on the screen\'s thread (the sleep scoring and the bedtime checks)', () {
+    // The night screen's list is worked out in a background isolate (row 621), but the sleep scoring's plan (three
+    // times a go, at every start and return) and the bedtime checks still ask for the nights on the screen's thread.
+    // Since the recording header (rows 630-639) each set's header, or an old set's `.log`, is opened as well as its
+    // index: what a set gives is kept while none of its files changed (DECISIONS 629).
+    List<(String, int, DateTime?)> facts(List<NightFiles> nights) => [
+      for (final n in nights) (n.name, n.recordings.length, n.lastData),
+    ];
+
+    test('asked again while nothing changed: no recording file is opened again, the same nights', () {
+      forgetNightSets(); // a new process
+      final counts = countReads(addTearDown);
+      final first = nightsIn(Directory(rec));
+      expect(counts.of('/files/recordings/'), greaterThanOrEqualTo(300), reason: 'every run once');
+      counts.clear();
+      final again = nightsIn(Directory(rec));
+      expect(counts.of('/files/recordings/'), 0, reason: '$counts');
+      expect(facts(again), facts(first));
+      forgetNightSets();
+      expect(facts(nightsIn(Directory(rec))), facts(first), reason: 'the same as working everything out again');
+    });
+
+    test('the sleep scoring\'s plan, asked again, opens no recording again', () {
+      final scorer = SleepScorer(
+        recordingsDir: Directory(rec),
+        store: NightReportStore(nightsDirFor(rec)),
+        openRun: (run) => throw StateError('no model in this test'),
+      );
+      scorer.blocked();
+      final counts = countReads(addTearDown);
+      scorer.blocked();
+      scorer.due();
+      expect(counts.of('/files/recordings/'), 0, reason: '$counts');
+    });
+
+    test('a header written, changed or damaged afterwards is noticed, and so is an old set\'s .log', () {
+      final dir = Directory.systemTemp.createTempSync('nights_header');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final start = DateTime(2026, 11, 19, 23);
+      final stem = fileStem(start);
+      final f32 = File('${dir.path}/$stem.f32')..writeAsBytesSync(Uint8List(40)); // no index: its length gives the end
+      NightFiles only() => nightsIn(dir).single;
+      expect((only().recordings.length, only().lastData), (1, start.add(const Duration(milliseconds: 8))));
+      // 16 channels: a record is 68 bytes, so 40 bytes hold none
+      writeHeader(f32, RecordingHeader(channels: [for (var c = 1; c <= 16; c++) HeaderChannel('Ch$c')]));
+      expect(only().recordings, isEmpty, reason: 'the new header');
+      // 8 channels at 500 Hz: one 36-byte record, 2 ms
+      final eight = [for (var c = 1; c <= 8; c++) HeaderChannel('Ch$c')];
+      writeHeader(f32, RecordingHeader(channels: eight, sampleRate: 500));
+      expect((only().recordings.length, only().lastData), (1, start.add(const Duration(milliseconds: 2))));
+      File('${dir.path}/$stem.header.json').writeAsStringSync('{cut');
+      expect(only().lastData, start.add(const Duration(milliseconds: 8)), reason: 'a damaged header: the BrainBit\'s');
+      File('${dir.path}/$stem.header.json').deleteSync();
+      // an old DIY set: the format line of its .log, 8 channels at 250 Hz (one record, 4 ms)
+      File('${dir.path}/$stem.log').writeAsStringSync(
+        'format .f32 records <I8f: board sequence number, then Ch1 Ch2 Ch3 Ch4 Ch5 Ch6 Ch7 Ch8 in volts; 250 Hz\n',
+      );
+      expect(only().lastData, start.add(const Duration(milliseconds: 4)), reason: 'the .log\'s format line');
     });
   });
 

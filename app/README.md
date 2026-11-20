@@ -181,7 +181,9 @@ edges, the beat in the sound or only between the ears) without an audio device.
 `analysis/make_wearer_fixture.py` from made-up signals and histories).
 `test/heavy_reads_test.dart` counts the files the app opens on the screen's thread (DECISIONS 620-629) on a made-up
 folder with 60 days of history (`test/support/app_folder.dart`, `test/support/read_count.dart` wraps every `File` the
-code makes): the night screen's lines, the study reminders, "Was this you?", Trends, Try these and the Lucid page.
+code makes): the night screen's lines, the study reminders, "Was this you?", Trends, Try these, the Lucid page and the
+nights' list the sleep scoring and the bedtime checks ask for (each file set opened again only when one of its files,
+its header included, changed).
 Work that reads more than a few KB belongs in a background isolate, and a file shown again and again is read once
 (`lib/cache/file_summaries.dart`: newest by name, kept JSON, kept summaries in `files/cache/`).
 `test/sleep_prep_test.dart` checks the sleep model's input against a fixture made by the laptop's Python
