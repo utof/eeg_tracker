@@ -170,8 +170,8 @@ def read_report(nights_dir: Path, name: str) -> dict | None:
 
 def is_stale(night: Night, report: dict | None) -> bool:
     """True when the night has no report, an older kind of report (another version, or version 2 from before
-    `drift_off`), or 10+ minutes of samples the report lacks."""
-    if report is None or report.get("version") != VERSION or "drift_off" not in report:
+    `drift_off` or the dream sleep check `rem_check`), or 10+ minutes of samples the report lacks."""
+    if report is None or report.get("version") != VERSION or "drift_off" not in report or "rem_check" not in report:
         return True
     done = {i.get("file"): int(i.get("bytes", 0)) for i in report.get("inputs", []) if isinstance(i, dict)}
     now = {r.path.name: r.size for r in night.recs}

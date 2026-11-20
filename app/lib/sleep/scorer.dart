@@ -338,6 +338,7 @@ class SleepScorer {
       model: model,
       stages: s.stages,
       confidence: s.confidence,
+      probabilities: probs,
       seen: found,
       extrasError: whyNot,
     );

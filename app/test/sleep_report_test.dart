@@ -120,6 +120,7 @@ void main() {
         'version': version,
         'inputs': [for (final e in inputs.entries) {'file': e.key, 'bytes': e.value}],
         'drift_off': null,
+        'rem_check': null,
       });
       const min = 60 * 250 * 20; // bytes per minute
       final files = {'a.f32': 60 * min, 'b.f32': 30 * min};
@@ -129,11 +130,13 @@ void main() {
       expect(isStale(files, report({'a.f32': 60 * min, 'b.f32': 20 * min})), isTrue);
       expect(isStale(files, report({'a.f32': 60 * min})), isTrue); // b.f32 is new
       expect(isStale(files, report({...files, 'gone.f32': 20})), isTrue);
-      // DECISIONS row 580: an older version, a report from before drift_off and another model are kept as they are
+      // DECISIONS row 580: an older version, a report from before drift_off or the dream sleep check (rem_check) and
+      // another model are kept as they are
       final phone = SleepReport({...report(files).json, 'scored': true, 'model': phoneModelId});
       final older = [
         report(files, version: 0),
         SleepReport({...phone.json}..remove('drift_off')),
+        SleepReport({...phone.json}..remove('rem_check')),
         SleepReport({...phone.json, 'model': 'old pieces'}),
       ];
       for (final r in older) {

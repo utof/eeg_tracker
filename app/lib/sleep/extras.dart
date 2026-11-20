@@ -9,12 +9,15 @@
 // background isolate while the sleep model runs. Plain Dart: no Flutter.
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import '../detectors/detectors.dart';
+import '../recorder/header.dart' show readHeader;
 import '../wearer/check.dart' show NightWindow, NightWindowSampler;
 import 'drift.dart';
 import 'night_signal.dart';
 import 'periods.dart' show asleepStages;
+import 'rem_check.dart';
 
 /// Of the report's `extras` object (its own number: the report's `version` covers the whole file).
 const int extrasVersion = 1;
@@ -34,8 +37,9 @@ const Map<BurstKind, String> _kindKey = {
 
 /// What the detectors saw over a night: quality per whole epoch from the first sample, muscle bursts and movement
 /// spans (first and last second), the drift-off detector from lights off (drift.dart; null with [driftError]
-/// when it failed), and the back channels of the 10 minutes after a Lights off marker for "Was this you?"
-/// ([wearer], wearer/check.dart; null without a marker).
+/// when it failed), the back channels of the 10 minutes after a Lights off marker for "Was this you?"
+/// ([wearer], wearer/check.dart; null without a marker), and the side-to-side eye movements per epoch for the dream
+/// sleep check ([eye], rem_check.dart; null when this pass did not look).
 class NightSeen {
   const NightSeen({
     required this.quality,
@@ -44,6 +48,7 @@ class NightSeen {
     this.drift,
     this.driftError,
     this.wearer,
+    this.eye,
   });
   final List<EpochQuality> quality;
   final List<Burst> bursts;
@@ -51,21 +56,46 @@ class NightSeen {
   final DriftSeen? drift;
   final String? driftError;
   final NightWindow? wearer;
+  final EyeSeen? eye;
 }
 
 typedef SeeFn = Future<NightSeen?> Function(List<File> recordings);
 
 /// The night's recordings (oldest first) joined on the clock as the sleep model reads them and fed through the
-/// detectors, the drift-off detector running from the night's lights off (drift.dart); null when there are no samples.
+/// detectors, the drift-off detector running from the night's lights off (drift.dart), and the eye-movement counter
+/// on the night's eye pair (rem_check.dart: T3-T4 on the BrainBit; read in the same pass); null when there are no
+/// samples.
 NightSeen? seeNight(List<File> f32Files) {
-  final layout = joinLayout(f32Files);
+  final (pair, why) = nightEyePair(f32Files);
+  final names = [...channelNames];
+  var li = -1, ri = -1;
+  if (pair != null) {
+    final h = readHeader(f32Files.first);
+    int column(String name) {
+      final at = h.indexOf(name);
+      for (var k = 0; k < channelNames.length; k++) {
+        if (h.indexOf(channelNames[k]) == at) return k;
+      }
+      names.add(name);
+      return names.length - 1;
+    }
+
+    li = column(pair.leftName);
+    ri = column(pair.rightName);
+  }
+  final layout = joinLayout(f32Files, names: names);
   if (layout.samples == 0) return null;
   final drift = NightDrift(f32Files, layout.startUnix);
   final det = Detectors(onSecond: drift.second);
   final wearer = NightWindowSampler(drift.markedLightsOffS);
+  final eye = pair == null ? null : EyeMoveCounter(sampleRate: sampleRate);
+  final four = Float64List(4);
+  final wide = names.length > 4;
   layout.forEachRow((row, missing) {
-    det.push(row, missing: missing);
-    wearer.push(row, missing);
+    final r = wide ? (four..setRange(0, 4, row)) : row;
+    det.push(r, missing: missing);
+    wearer.push(r, missing);
+    eye?.push(row[li], row[ri], missing: missing);
   });
   det.finish();
   return NightSeen(
@@ -75,7 +105,23 @@ NightSeen? seeNight(List<File> f32Files) {
     drift: drift.seen,
     driftError: drift.error,
     wearer: wearer.window,
+    eye: eye == null ? EyeSeen.not(why ?? noEyePair) : EyeSeen.measured(pair!.label, eye.finish()),
   );
+}
+
+/// The eye pair of a night (rem_check.dart [eyePairOf]) by its first recording's header, when every recording holds
+/// both channels; else null and why.
+(EyePair?, String?) nightEyePair(List<File> f32Files) {
+  if (f32Files.isEmpty) return (null, noEyePair);
+  final pair = eyePairOf(readHeader(f32Files.first));
+  if (pair == null) return (null, noEyePair);
+  for (final f in f32Files.skip(1)) {
+    final h = readHeader(f);
+    if (h.indexOf(pair.leftName) == null || h.indexOf(pair.rightName) == null) {
+      return (null, "not measured: the night's recordings do not all hold ${pair.label}");
+    }
+  }
+  return (pair, null);
 }
 
 Future<NightSeen?> seeInBackground(List<File> recordings) =>
