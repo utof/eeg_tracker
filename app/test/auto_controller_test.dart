@@ -12,6 +12,7 @@ import 'package:eeg_tracker/auto/probe.dart';
 import 'package:eeg_tracker/auto/rules.dart';
 import 'package:eeg_tracker/auto/store.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart' show ChunkWriter, Sample;
+import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 List<Sample> batch(int first) => [
@@ -43,6 +44,89 @@ class FakeCheck implements HeadbandCheck {
   Future<void> release() async {
     if (_sink != null) releases++;
     _sink = null;
+  }
+}
+
+/// A check that holds the headband until released, then takes a moment to let go (as BLE does): [letGo] says when.
+class SlowCheck implements HeadbandCheck {
+  final Completer<void> _cut = Completer<void>();
+  bool inCheck = false, letGo = false;
+  int checks = 0;
+
+  @override
+  bool get holding => inCheck && !letGo;
+
+  @override
+  Future<ProbeResult> check({required bool keepIfWorn, required void Function(DateTime, List<Sample>) onBatch}) async {
+    checks++;
+    inCheck = true;
+    await _cut.future;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    letGo = true;
+    return const ProbeResult(near: true, name: 'BB Black');
+  }
+
+  /// Like [BandCheck.release]: it marks the check released and returns; the check in flight lets go by itself.
+  @override
+  Future<void> release() async {
+    if (!_cut.isCompleted) _cut.complete();
+  }
+}
+
+/// A headband that connects and answers, but whose contact readings never come (the check would wait them out).
+class QuietBand implements Headband {
+  final List<String> calls = [];
+  final _signal = StreamController<List<Sample>>.broadcast();
+  final _resist = StreamController<Map<String, double>>.broadcast();
+
+  @override
+  String get name => 'BB Black';
+  @override
+  String get address => 'AA:BB';
+  @override
+  String get serial => '1';
+  @override
+  int? get rssi => -60;
+  @override
+  BandId get id => const BandId(name: 'BB Black', address: 'AA:BB', family: 'leBrainBitBlack');
+  @override
+  Stream<List<Sample>> get signal => _signal.stream;
+  @override
+  Stream<Map<String, double>> get resistance => _resist.stream;
+  @override
+  Stream<bool> get rangeChanges => const Stream.empty();
+  @override
+  Future<void> startSignal() async => calls.add('startSignal');
+  @override
+  Future<void> stopSignal() async => calls.add('stopSignal');
+  @override
+  Future<void> startResist() async => calls.add('startResist');
+  @override
+  Future<void> stopResist() async => calls.add('stopResist');
+  @override
+  Future<bool> isInRange() async => true;
+  @override
+  Future<int> battery() async => 80;
+  @override
+  Future<void> disconnectAndDispose() async => calls.add('disconnect');
+}
+
+class OneFinder implements HeadbandFinder {
+  OneFinder(this.band);
+  final Headband band;
+
+  @override
+  Future<Headband?> find(Duration scanFor, {void Function(String name, int rssi)? onFound}) async => band;
+
+  @override
+  Future<Headband> connectDirect(BandId id) async => band;
+}
+
+Future<void> until(bool Function() done, {Duration limit = const Duration(seconds: 5)}) async {
+  final sw = Stopwatch()..start();
+  while (!done()) {
+    if (sw.elapsed > limit) fail('not reached in $limit');
+    await Future<void>.delayed(const Duration(milliseconds: 2));
   }
 }
 
@@ -424,6 +508,46 @@ void main() {
       await w.handle(const AutoTrigger('bedtime'));
       expect(phone.asked, isEmpty);
       expect(starter.nights, isEmpty);
+    });
+  });
+
+  group('sharing the headband (a start by hand, a session, the Signal tab)', () {
+    test('released during a check: release returns only once the check has let go of the headband', () async {
+      final slow = SlowCheck();
+      w = AutoWatch(recordings: rec, check: slow, phone: phone, starter: starter, clock: () => now, waitFor: (_) => askTimeout.future);
+      final handling = w.handle(const AutoTrigger('presence'));
+      await until(() => slow.inCheck);
+      await w.release();
+      expect(slow.letGo, isTrue, reason: 'the Signal tab or a session would search while the watcher still held the headband');
+      await handling;
+      expect(phone.asked, isEmpty);
+      expect(events(), contains('released'));
+    });
+
+    test('released while it reads the phone, before the check: no check at all', () async {
+      phone.ctx = (t) {
+        unawaited(w.release());
+        return PhoneContext(now: t);
+      };
+      await w.handle(const AutoTrigger('presence'));
+      expect(check.checks, 0);
+      expect(phone.asked, isEmpty);
+      expect(last('skipped')['why'], 'let go: a start by hand');
+    });
+
+    test('the real check, released while it reads the contact: it stops at once and lets go', () async {
+      final band = QuietBand();
+      final c = BandCheck(OneFinder(band));
+      final sw = Stopwatch()..start();
+      final going = c.check(keepIfWorn: true, onBatch: (_, _) {});
+      await until(() => band.calls.contains('startResist'));
+      await c.release();
+      final r = await going;
+      expect(sw.elapsed, lessThan(const Duration(seconds: 3)), reason: 'it waited out the contact reading');
+      expect(band.calls.last, 'disconnect');
+      expect(band.calls, isNot(contains('startSignal')), reason: 'no 20 s signal judgement after a release');
+      expect(r.worn, isNull);
+      expect(c.holding, isFalse);
     });
   });
 }

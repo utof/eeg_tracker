@@ -131,6 +131,11 @@ class BandCheck implements HeadbandCheck {
   StreamSubscription<List<Sample>>? _sub;
   bool _released = false;
 
+  /// Completes on [release]: the check's waits (the contact reading, the signal) end at once.
+  Completer<void> _cut = Completer<void>();
+
+  Future<void> _pause(Duration d) => Future.any([Future<void>.delayed(d), _cut.future]);
+
   @override
   bool get holding => _held != null;
 
@@ -140,6 +145,7 @@ class BandCheck implements HeadbandCheck {
   @override
   Future<ProbeResult> check({required bool keepIfWorn, required void Function(DateTime, List<Sample>) onBatch}) async {
     _released = false;
+    _cut = Completer<void>();
     Headband? band;
     try {
       band = await BandLink.within(
@@ -161,9 +167,12 @@ class BandCheck implements HeadbandCheck {
       } catch (_) {
         battery = null;
       }
-      final ohms = band is OtherBoard ? const <String, double?>{} : await _contact(band);
+      // released (a start by hand, a session, the Signal tab): no further step, the headband is let go below
+      final ohms = band is OtherBoard || _released ? const <String, double?>{} : await _contact(band);
       if (ohms.isNotEmpty) {
         result = ProbeResult(near: true, worn: wornFromOhms(ohms), how: 'resistance', ohms: ohms, battery: battery, name: band.name);
+      } else if (_released) {
+        result = ProbeResult(near: true, battery: battery, name: band.name, error: 'let go: a start by hand');
       } else {
         streaming = true;
         final worn = await _signalJudge(band);
@@ -199,14 +208,15 @@ class BandCheck implements HeadbandCheck {
     final sub = band.resistance.listen(last.addAll);
     try {
       await _sdk(band.startResist(), 'contact check');
-      await Future<void>.delayed(WornRule.contactFor);
+      await _pause(WornRule.contactFor);
       await _sdk(band.stopResist(), 'contact check end');
     } catch (_) {
       // no contact on this route: the signal decides
     } finally {
       await sub.cancel();
     }
-    await Future<void>.delayed(const Duration(seconds: 1)); // the stream starts cleanly after a check
+    if (_released) return const {}; // not judged: the headband is let go at once
+    await _pause(const Duration(seconds: 1)); // the stream starts cleanly after a check
     return {for (final e in last.entries) e.key: e.value.isFinite && !e.value.isNaN ? e.value : null};
   }
 
@@ -223,7 +233,7 @@ class BandCheck implements HeadbandCheck {
     });
     try {
       await _sdk(band.startSignal(), 'start signal');
-      await Future<void>.delayed(WornRule.signalFor);
+      await _pause(WornRule.signalFor);
     } finally {
       await sub.cancel();
     }
@@ -233,6 +243,7 @@ class BandCheck implements HeadbandCheck {
   @override
   Future<void> release() async {
     _released = true;
+    if (!_cut.isCompleted) _cut.complete();
     final band = _held;
     _held = null;
     await _sub?.cancel();

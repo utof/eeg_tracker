@@ -131,6 +131,9 @@ class AutoWatch {
   late final LaptopStore laptop = LaptopStore(store.dir);
 
   HeadbandCheck? _check;
+
+  /// The check in flight, until it has let go of the headband or kept it.
+  Future<ProbeResult>? _inCheck;
   Completer<String>? _answer;
   String? _questionId;
   bool _releasing = false;
@@ -150,12 +153,23 @@ class AutoWatch {
     if (a != null && !a.isCompleted && id == _questionId) a.complete(answer);
   }
 
-  /// A start by hand needs the headband: let go of it now, withdraw the question, keep nothing.
+  /// A check in flight that is released stops at its next step (probe.dart); a start by hand waits at most this long
+  /// for it to let go (Android's side answers the start by hand after 8 s whatever happens).
+  static const Duration releaseWait = Duration(seconds: 6);
+
+  /// A start by hand (or the Signal tab) needs the headband: let go of it now, withdraw the question, keep nothing.
+  /// Returns once a check in flight has let go too, so the caller's search does not meet the watcher's connection.
   Future<void> release() async {
     _releasing = true;
     final a = _answer;
     if (a != null && !a.isCompleted) a.complete('released');
+    final going = _inCheck;
     await _check?.release();
+    if (going != null) {
+      try {
+        await going.timeout(releaseWait);
+      } catch (_) {}
+    }
   }
 
   /// The answer to the "start it automatically?" offer.
@@ -201,8 +215,15 @@ class AutoWatch {
     final keep = choice == AutoChoice.ask && !handled && kind != WearKind.work;
     final fake = t.fake, sim = simulate;
     final probe = _check = fake != null && sim != null ? sim(fake) : check;
+    if (_releasing) return _skip(now, t, 'let go: a start by hand'); // it came while the phone was read
     final preroll = Preroll();
-    final result = await probe.check(keepIfWorn: keep, onBatch: preroll.add);
+    final checking = _inCheck = probe.check(keepIfWorn: keep, onBatch: preroll.add);
+    final ProbeResult result;
+    try {
+      result = await checking;
+    } finally {
+      _inCheck = null;
+    }
     log.add(now, 'check', {
       'trigger': t.reason,
       ...result.toLog(),
