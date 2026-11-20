@@ -7,6 +7,7 @@ import secrets
 import stat
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -434,49 +435,69 @@ def test_keep_needs_a_paired_phone(tmp_path: Path) -> None:
     assert pl.keep(a, out.append) == 3 and "without --keep" in out[0]
 
 
-def test_keep_runs_quietly_follows_the_laptops_address_and_ends_when_forgotten(tmp_path: Path, clock: Clock) -> None:
-    """No window and no code until this laptop asks for one; the laptop's address can go (Wi-Fi off) and come back,
-    or change, and the phone's announcement still reaches it; deleting link.json ends it."""
-    key = _paired(tmp_path, clock)
+def _post(url: str, origin: str | None = None, host: str | None = None) -> int:
+    import http.client
+    u = urllib.parse.urlsplit(url)
+    c = http.client.HTTPConnection(u.hostname, u.port, timeout=3)
+    headers = {"Content-Length": "0", **({"Origin": origin} if origin else {}), **({"Host": host} if host else {})}
+    try:
+        c.request("POST", u.path, body=b"", headers=headers)
+        return c.getresponse().status
+    finally:
+        c.close()
+
+
+def test_a_new_code_only_by_post_from_this_laptop(link: pl.Link, server: Server) -> None:
+    """DECISIONS 750: a plain link (or another site's page) cannot make a code; this laptop's page and the tray can."""
+    port = server.srv.server_address[1]
+    assert server.get("/?new=1")[0] == 200 and not link.code_valid()  # a GET changes nothing
+    assert _post(server.base + "/new", origin="https://evil.example") == 403 and not link.code_valid()
+    assert _post(server.base + "/new", origin="null") == 403 and not link.code_valid()
+    assert _post(server.base + "/new", host=f"evil.example:{port}") == 403 and not link.code_valid()
+    assert _post(server.base + "/new", origin=f"http://127.0.0.1:{port}") == 303 and link.code_valid()  # its page
+    code = link.code
+    assert _post(server.base + "/new") == 303 and link.code == code  # the tray (no Origin): the shown one stays
+    page = server.get("/")[1]
+    assert '<form method="post" action="/new"' in page and "?new=1" not in page
+    # DNS rebinding: a page naming itself cannot read this laptop's own page (the code) or its status
+    import http.client
+    for path in ("/", "/status", f"/p?s={code}"):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+        c.request("GET", path, headers={"Host": f"rebind.example:{port}"})
+        assert c.getresponse().status == 403, path
+        c.close()
+
+
+def test_keep_listens_on_the_wifi_only_while_a_code_is_shown(tmp_path: Path, clock: Clock) -> None:
+    """No window and no code until this laptop asks for one; the pairing port answers on the home network only while
+    that code is shown (DECISIONS 750), follows the laptop's address, and deleting link.json ends it."""
+    _paired(tmp_path, clock)
     port = _free_port()
     wifi: list[str | None] = ["127.0.0.2"]   # this laptop's home-network address now (127.0.0.x stand in)
-
-    def find() -> str | None:
-        return wifi[0]
-
     a = pl.parse(["--keep", "--dest", str(tmp_path), "--port", str(port), "--no-pages", "--no-mirror"])
     out: list[str] = []
     stop = threading.Event()
     done: list[int] = []
-    t = threading.Thread(target=lambda: done.append(pl.keep(a, out.append, find=find, stop=stop, look_s=0.15)),
-                         daemon=True)
+    t = threading.Thread(target=lambda: done.append(pl.keep(a, out.append, find=lambda: wifi[0], stop=stop,
+                                                             look_s=0.15, clock=clock)), daemon=True)
     t.start()
     try:
         _until(lambda: _get(f"http://127.0.0.1:{port}/status")[0] == 200)
         status = json.loads(_get(f"http://127.0.0.1:{port}/status")[1])
-        assert status["code_valid"] is False and status["phone"] == "192.168.1.23:8765"
+        assert status["code_valid"] is False
         assert "No code right now" in _get(f"http://127.0.0.1:{port}/")[1]
-        # "Pair phone…" in the tray opens /?new=1: a code, then the plain page (a reload does not make another)
-        code, page = _get(f"http://127.0.0.1:{port}/?new=1")
-        assert code == 200 and "<svg" in page and json.loads(_get(f"http://127.0.0.1:{port}/status")[1])["code_valid"]
-
-        class At(Server):
-            def __init__(self, host: str) -> None:  # the phone's announcement to wherever the laptop listens now
-                self.client, self.base = "192.168.1.23", f"http://{host}:{port}"
-
-        _until(lambda: _get(f"http://127.0.0.2:{port}/noapp")[0] == 200)   # on the address, not just loopback
-        assert phone_handshake(At("127.0.0.2"), "key", key, token="newtoken2345")[0] == 200
-        wifi[0] = None                                                        # Wi-Fi off a moment
-        _until(lambda: any("No home-network address now" in x for x in out))
-        wifi[0] = "127.0.0.2"                                                 # back at the same address
-        _until(lambda: sum("Listening for the phone at 127.0.0.2" in x for x in out) == 2)
-        assert phone_handshake(At("127.0.0.2"), "key", key, token="newtoken2345")[0] == 200
+        with pytest.raises(OSError):  # nothing on the Wi-Fi while no code is shown
+            urllib.request.urlopen(f"http://127.0.0.2:{port}/noapp", timeout=1)
+        # "Pair phone…" in the tray: a POST for a code, then the page
+        assert _post(f"http://127.0.0.1:{port}/new") == 303
+        assert "<svg" in _get(f"http://127.0.0.1:{port}/")[1]
+        _until(lambda: _get(f"http://127.0.0.2:{port}/noapp")[0] == 200)   # now on the address too
         wifi[0] = "127.0.0.3"                                                 # the router gave it a new one
         _until(lambda: _get(f"http://127.0.0.3:{port}/noapp")[0] == 200)
-        assert phone_handshake(At("127.0.0.3"), "key", key, token="newtoken6789")[0] == 200
-        saved = json.loads((tmp_path / "phone" / "link.json").read_text())
-        assert saved["phone"]["token"] == "newtoken6789"   # a new code on the phone needs no new scan
-        assert not any(key in x or "newtoken" in x for x in out)
+        clock.t += pl.CODE_LIFE + 1                                           # the code ran out
+        _until(lambda: not _reachable(f"http://127.0.0.3:{port}/noapp"))
+        assert _get(f"http://127.0.0.1:{port}/status")[0] == 200            # this laptop's own port stays
+        assert not any("127.0.0." in x for x in out)                        # no addresses in its log
         (tmp_path / "phone" / "link.json").unlink()        # the tray's "Forget the phone"
         _until(lambda: bool(done), 5)
         assert done == [0] and "forgotten" in out[-1]
@@ -485,3 +506,11 @@ def test_keep_runs_quietly_follows_the_laptops_address_and_ends_when_forgotten(t
     finally:
         stop.set()
         t.join(5)
+
+
+def _reachable(url: str) -> bool:
+    try:
+        _get(url)
+        return True
+    except OSError:
+        return False

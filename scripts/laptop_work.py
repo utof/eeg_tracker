@@ -820,18 +820,39 @@ def link_status_probe(url: str = "http://127.0.0.1:8771/status") -> dict | None:
 PAIR_PAGE = "http://127.0.0.1:8771/"  # phone_link.py's own page on this laptop: the code, bigger
 
 
+def post_new_code(url: str = PAIR_PAGE + "new") -> bool:
+    """Asks the running phone_link.py for a one-time code: a POST to its own port on this laptop (a plain link makes
+    none, so no web page can: DECISIONS 750). True when it answered."""
+    req = urllib.request.Request(url, data=b"", method="POST")
+
+    class Stay(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *_a, **_k):  # its 303 to the page: the browser opens that, not this
+            return None
+
+    try:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({}), Stay()).open(req, timeout=2) as r:
+            return r.status < 400
+    except urllib.error.HTTPError as e:
+        return e.code == 303
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
 def pair_command(repo: Path = REPO, python: str = sys.executable, *, local: Path | None = None,
                  probe: Callable[[], dict | None] | None = None,
-                 which: Callable[[str], str | None] = shutil.which) -> list[str] | None:
+                 which: Callable[[str], str | None] = shutil.which,
+                 new_code: Callable[[str], object] = post_new_code) -> list[str] | None:
     """The command "Pair phone…" runs. While phone_link.py already runs (its status answers on this laptop; the tray
-    runs it with --keep while a phone is paired): its page, with a new code made for it (`?new=1`), in the browser. Else phone_link.py in a terminal window (it shows the QR code and wants Enter for a
-    new one), copying the phone's files into [local] (the tray's `_local`). None while the script is not in this
-    checkout, or there is no terminal program."""
+    runs it with --keep while a phone is paired): a code asked for by POST, then its page in the browser. Else
+    phone_link.py in a terminal window (it shows the QR code and wants Enter for a new one), copying the phone's files
+    into [local] (the tray's `_local`). None while the script is not in this checkout, or there is no terminal
+    program."""
     script = repo / "scripts" / "phone_link.py"
     if not script.exists():
         return None
     if (probe or link_status_probe)() is not None:
-        return ["xdg-open", PAIR_PAGE + "?new=1"]
+        new_code(PAIR_PAGE + "new")
+        return ["xdg-open", PAIR_PAGE]
     args = [python, str(script)] + (["--dest", str(local)] if local is not None else [])
     term = which("x-terminal-emulator")
     if term is not None:

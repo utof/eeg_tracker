@@ -479,6 +479,29 @@ def test_autostart_path_follows_xdg(monkeypatch, tmp_path):
 
 # ---------- the phone hook ----------
 
+def test_new_code_posts_to_this_laptops_own_port():
+    import http.server, threading
+    got: list[tuple[str, str, str | None]] = []
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_a):
+            pass
+
+        def do_POST(self):
+            got.append((self.command, self.path, self.headers.get("Origin")))
+            self.send_response(303); self.send_header("Location", "/"); self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        assert lw.post_new_code(f"http://127.0.0.1:{srv.server_address[1]}/new") is True
+        assert got == [("POST", "/new", None)]
+        assert lw.post_new_code("http://127.0.0.1:9/new") is False      # nobody there: no exception
+    finally:
+        srv.shutdown(); srv.server_close()
+
+
 def test_pair_command(tmp_path):
     assert lw.pair_command(tmp_path, probe=lambda: None) is None      # no scripts/phone_link.py here
     (tmp_path / "scripts").mkdir(); (tmp_path / "scripts" / "phone_link.py").write_text("")
@@ -499,8 +522,11 @@ def test_pair_phone_runs_the_merged_phone_link(tmp_path):
     assert lw.pair_command(python="py", probe=lambda: None, which=only_gnome) == [
         "/usr/bin/gnome-terminal", "--", "py", str(script)]
     assert lw.pair_command(probe=lambda: None, which=lambda _: None) is None   # no terminal program
-    running = lw.pair_command(local=tmp_path, probe=lambda: {"connected": False}, which=lambda _: None)
-    assert running == ["xdg-open", "http://127.0.0.1:8771/?new=1"]   # its page makes a code for it (DECISIONS 677)
+    posted: list[str] = []
+    running = lw.pair_command(local=tmp_path, probe=lambda: {"connected": False}, which=lambda _: None,
+                              new_code=posted.append)
+    # a code is asked for by POST (a plain link makes none: DECISIONS 750), then its page opens
+    assert posted == ["http://127.0.0.1:8771/new"] and running == ["xdg-open", "http://127.0.0.1:8771/"]
     import phone_link
     assert lw.PAIR_PAGE == f"http://127.0.0.1:{phone_link.PORT}/"
     assert 'add_argument("--dest"' in script.read_text(encoding="utf-8")

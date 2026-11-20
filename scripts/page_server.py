@@ -2,6 +2,9 @@
 
 usage: python3 scripts/page_server.py [--port 8770] [--recorder http://127.0.0.1:8765] [--token <t>]
 
+On this laptop only: it listens on 127.0.0.1 (open http://localhost:8770/), answers only requests that name it in
+`Host` and carry no other site's `Origin` (scripts/local_http.py, DECISIONS 750).
+
 The recorder (scripts/record_night.py) restarts its whole process after every Bluetooth drop and for every contact
 re-check, and its page server goes with it for 20-40 s. This small server never restarts: it serves the pages
 itself (scripts/live_page.html at "/", anything in scripts/web/ by file name) and passes every other request
@@ -17,11 +20,12 @@ reaches the browser), and the pages work on the phone's recording unchanged. The
 EEG_PHONE_TOKEN environment variable, which keeps it out of the shell history.
 """
 import argparse, http.client, json, os, sys
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # find night_files.py even under `python3 -I`
+import local_http  # noqa: E402
 try:
     import night_files as nf  # scripts/night_files.py: the results jobs (standard library only)
 except Exception:
@@ -50,7 +54,7 @@ def make_handler(rec_host: str, rec_port: int, rec_dir: Path = HERE.parent / "_l
             name = path.rstrip("/").rsplit("/", 1)[-1]
             if path in ("", "/"):
                 f = HERE / "live_page.html"
-            elif name == "findings.html":  # the private research findings page (never committed), LAN only
+            elif name == "findings.html":  # the private research findings page (never committed), this laptop only
                 f = HERE.parent / "_local" / "research" / "2026-11-18-findings.html"
                 if not f.is_file():
                     return False
@@ -128,14 +132,20 @@ def make_handler(rec_host: str, rec_port: int, rec_dir: Path = HERE.parent / "_l
                 c.close()
 
         def do_GET(self) -> None:
-            if not self._page() and not self._report("GET"):
+            if local_http.guard(self) and not self._page() and not self._report("GET"):
                 self._forward("GET")
 
         def do_POST(self) -> None:
-            if not self._report("POST"):
+            if local_http.guard(self) and not self._report("POST"):
                 self._forward("POST")
 
     return H
+
+
+def make_server(port: int, rec_host: str, rec_port: int, rec_dir: Path = HERE.parent / "_local" / "recordings",
+                token: str | None = None) -> local_http.LocalServer:
+    """The page server on 127.0.0.1:[port] (0: any free port), passing on to the recorder at rec_host:rec_port."""
+    return local_http.LocalServer(("127.0.0.1", port), make_handler(rec_host, rec_port, rec_dir, token))
 
 
 def main() -> None:
@@ -148,10 +158,8 @@ def main() -> None:
                     help="the phone app's Share on Wi-Fi token, when --recorder is the phone (or set EEG_PHONE_TOKEN)")
     a = ap.parse_args()
     u = urlsplit(a.recorder)
-    srv = ThreadingHTTPServer(("0.0.0.0", a.port),
-                              make_handler(u.hostname or "127.0.0.1", u.port or 80, a.recordings, a.token))
-    srv.daemon_threads = True
-    print(f"pages on port {a.port}, recorder at {a.recorder}", flush=True)
+    srv = make_server(a.port, u.hostname or "127.0.0.1", u.port or 80, a.recordings, a.token)
+    print(f"pages at http://localhost:{a.port}/ (this laptop only), recorder at {u.hostname}:{u.port or 80}", flush=True)
     srv.serve_forever()
 
 

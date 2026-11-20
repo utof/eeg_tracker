@@ -38,13 +38,14 @@ from __future__ import annotations
 import argparse, hashlib, hmac, html, ipaddress, json, os, re, secrets, socket, sys, threading, time
 from dataclasses import dataclass
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, quote, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # find the other scripts even under `python3 -I`
 import import_phone as ip  # noqa: E402
+import local_http  # noqa: E402
 import page_server  # noqa: E402
 import pull_phone as pp  # noqa: E402
 import qr_code  # noqa: E402
@@ -365,12 +366,18 @@ def local_page(link: Link) -> bytes:
         parts.append("<p>Open the phone's camera, point it at the code, tap the link, then <b>Open EEG Tracker</b>, "
                      "then <b>Connect</b>.</p>")
         parts.append(f'<div class="qr">{qr_code.svg(qr_code.encode(link.web_link(code)), scale=10)}</div>')
-        parts.append('<p class="small">The code works once, for 5 minutes. Then <a href="/?new=1" '
-                     'style="color:#e9e4d8">show a new one</a>.</p>')
+        parts.append(f'<p class="small">The code works once, for 5 minutes. Then {_NEW_BUTTON.format("show a new one")}'
+                     '</p>')
     else:
-        parts.append('<p class="small">No code right now: <a href="/?new=1" style="color:#e9e4d8">show one</a> '
-                     "(only to pair a phone for the first time, or another phone).</p>")
-    return _page("EEG Tracker: connect", "".join(parts), refresh=3)
+        parts.append(f'<p class="small">No code right now: {_NEW_BUTTON.format("show one")} (only to pair a phone for '
+                     "the first time, or another phone).</p>")
+    return _page("EEG Tracker: connect", "".join(parts), refresh=None if code is None else 3)
+
+
+# A new code only by POST from this laptop's own page (or the tray): a link or another site's page cannot make one.
+_NEW_BUTTON = ('<form method="post" action="/new" style="display:inline"><button type="submit" style="font:inherit;'
+               'color:#e9e4d8;background:none;border:0;padding:0;text-decoration:underline;cursor:pointer">{}</button>'
+               "</form>")
 
 
 def make_handler(link: Link, client_of: Callable[[BaseHTTPRequestHandler], str] | None = None):
@@ -396,6 +403,8 @@ def make_handler(link: Link, client_of: Callable[[BaseHTTPRequestHandler], str] 
             self._send(code, json.dumps(obj).encode(), "application/json")
 
         def _client(self) -> str | None:
+            if not local_http.guard(self):  # its own Host, no other site's Origin (DECISIONS 750)
+                return None
             c = client_of(self) if client_of else self.client_address[0]
             if not allowed_client(c):
                 self._json(403, {"error": "local network only"})
@@ -411,13 +420,6 @@ def make_handler(link: Link, client_of: Callable[[BaseHTTPRequestHandler], str] 
                 self._send(200, landing_page(link, parse_qs(u.query).get("s", [""])[0]), "text/html; charset=utf-8")
             elif u.path == "/noapp":
                 self._send(200, noapp_page(), "text/html; charset=utf-8")
-            elif u.path == "/" and is_loopback(c) and parse_qs(u.query).get("new") == ["1"]:
-                if not link.code_valid():  # the tray's "Pair phone…" (DECISIONS 677): a code, then the plain page
-                    link.new_code()
-                self.send_response(303)
-                self.send_header("Location", "/")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
             elif u.path == "/" and is_loopback(c):  # the code itself: never to another device
                 self._send(200, local_page(link), "text/html; charset=utf-8")
             elif u.path == "/status" and is_loopback(c):
@@ -441,13 +443,22 @@ def make_handler(link: Link, client_of: Callable[[BaseHTTPRequestHandler], str] 
                 self.close_connection = True
                 self._json(413, {"error": "too big"})
                 return
+            raw = self.rfile.read(n)
+            path = urlsplit(self.path).path
             try:
-                body = json.loads(self.rfile.read(n).decode("utf-8"))
+                body = None if path == "/new" else json.loads(raw.decode("utf-8"))
             except (ValueError, UnicodeDecodeError):
                 self._json(400, {"error": "bad request"})
                 return
-            path = urlsplit(self.path).path
-            if path == "/link/hello":
+            if path == "/new" and is_loopback(c):  # "show a code": this laptop's page or the tray (DECISIONS 750)
+                if not link.code_valid():
+                    link.new_code()
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.send_header("Content-Length", "0")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+            elif path == "/link/hello":
                 self._json(*link.hello(body))
             elif path == "/link/finish":
                 self._json(*link.finish(body, c))
@@ -457,18 +468,41 @@ def make_handler(link: Link, client_of: Callable[[BaseHTTPRequestHandler], str] 
     return H
 
 
-def serve(link: Link, addresses: list[str], port: int, handler=None) -> list[ThreadingHTTPServer]:
-    """One server per address (the Wi-Fi address and loopback); never 0.0.0.0."""
+def serve(link: Link, addresses: list[str], port: int, handler=None) -> list[local_http.LocalServer]:
+    """One server per address (loopback, and the Wi-Fi address while a code is shown); never 0.0.0.0."""
     out = []
     for a in dict.fromkeys(addresses):
         try:
-            srv = ThreadingHTTPServer((a, port), handler or make_handler(link))
+            srv = local_http.LocalServer((a, port), handler or make_handler(link))
         except OSError:
             continue
-        srv.daemon_threads = True
         threading.Thread(target=srv.serve_forever, args=(0.1,), daemon=True, name=f"link {a}").start()
         out.append(srv)
     return out
+
+
+class LanListener:
+    """The pairing port on this laptop's home-network address, only while a one-time code is shown (DECISIONS 750):
+    the rest of the time nothing of this laptop's link answers on the Wi-Fi. `sync` is called twice a second."""
+
+    def __init__(self, link: Link, port: int, handler=None) -> None:
+        self.link, self.port, self.handler = link, port, handler
+        self.servers: list[local_http.LocalServer] = []
+        self.bound: str | None = None
+
+    def sync(self, address: str | None) -> None:
+        want = address if address and address != "127.0.0.1" and self.link.code_valid() else None
+        if want == self.bound and (want is None or self.servers):
+            return
+        self.close()
+        if want is not None:
+            self.servers = serve(self.link, [want], self.port, self.handler)
+            self.bound = want if self.servers else None
+
+    def close(self) -> None:
+        for srv in self.servers:
+            srv.shutdown(); srv.server_close()
+        self.servers, self.bound = [], None
 
 
 # --- what runs after the pairing
@@ -525,7 +559,7 @@ def mirror_loop(link: Link, dest: Path, every_min: float, say: Say, stop: thread
         link.changed.clear()
 
 
-def start_pages(link: Link, port: int, rec_dir: Path, say: Say) -> ThreadingHTTPServer | None:
+def start_pages(link: Link, port: int, rec_dir: Path, say: Say) -> local_http.LocalServer | None:
     """page_server.py's pages on this laptop only, pointed at wherever the phone is now."""
     def handler():
         t = link.target()
@@ -533,12 +567,11 @@ def start_pages(link: Link, port: int, rec_dir: Path, say: Say) -> ThreadingHTTP
         return page_server.make_handler(host, p, rec_dir, token)
 
     try:
-        srv = ThreadingHTTPServer(("127.0.0.1", port), handler())
+        srv = local_http.LocalServer(("127.0.0.1", port), handler())
     except OSError as e:
         say(f"The live pages are not started: port {port} is taken ({e.strerror}). Close the other page server, "
             "or use --pages-port.")
         return None
-    srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True, name="pages").start()
     link.listeners.append(lambda *_: setattr(srv, "RequestHandlerClass", handler()))  # new requests go there
     return srv
@@ -559,14 +592,15 @@ KEEP_LOOK_S = 30.0  # --keep: how often this laptop's home-network address is lo
 
 
 def keep(a: argparse.Namespace, out: Callable[[str], object], *, find: Callable[[], str | None] = lan_address,
-         stop: threading.Event | None = None, look_s: float = KEEP_LOOK_S) -> int:
-    """--keep, the laptop tray's way (DECISIONS 677): a remembered phone, kept with no window and no code. The pages
-    and the copy as usual; this laptop's own port on 127.0.0.1 at once and on its home-network address once it has
-    one (Wi-Fi off: it waits), again on a new address when it changes or comes back; it ends when `link.json` is
-    deleted (the tray's "Forget the phone"). 3: no phone is paired; 2: the port is taken."""
+         stop: threading.Event | None = None, look_s: float = KEEP_LOOK_S,
+         clock: Callable[[], float] = time.monotonic) -> int:
+    """--keep, the laptop tray's way (DECISIONS 677, 750): a remembered phone, kept with no window and no code. The pages
+    and the copy as usual; this laptop's own port on 127.0.0.1 only, and on its home-network address only while a code
+    asked for on this laptop is shown; it ends when `link.json` is deleted (the tray's "Forget the phone").
+    3: no phone is paired; 2: the port is taken."""
     name = re.sub(r"[^\w .-]", "", a.name or socket.gethostname())[:40] or "laptop"
     store = a.dest / "phone" / "link.json"
-    link = Link(store, name=name, host="127.0.0.1", port=a.port, phone_at=a.phone_at)
+    link = Link(store, name=name, host="127.0.0.1", port=a.port, phone_at=a.phone_at, clock=clock)
     if link.target() is None:
         out("No phone is paired here: run phone_link.py without --keep to pair one.")
         return 3
@@ -576,38 +610,28 @@ def keep(a: argparse.Namespace, out: Callable[[str], object], *, find: Callable[
         return 2
     say = Say(out)
     stop = stop or threading.Event()
-    wifi: list[ThreadingHTTPServer] = []
-    bound: list[str | None] = [None]   # the address the phone can reach now, or None while there is none
-
-    def listen_on(addr: str) -> None:
-        for srv in wifi:
-            srv.shutdown(); srv.server_close()
-        wifi[:] = [] if addr == "127.0.0.1" else serve(link, [addr], a.port)   # loopback is served already
-        link.host = addr
-        bound[0] = addr if wifi or addr == "127.0.0.1" else None
-        say(f"Listening for the phone at {addr}." if bound[0] else f"Could not listen at {addr}: trying again.")
+    lan = LanListener(link, a.port)
+    home: list[str | None] = [None]   # this laptop's home-network address now, or None while there is none
 
     def look() -> None:
         addr = a.address or find()
         if not addr or not allowed_client(addr):
-            if bound[0] is not None:
+            if home[0] is not None:
                 say("No home-network address now (Wi-Fi off?): the phone is copied from again when it is back.")
-            bound[0] = None  # listened on again when it comes back, even at the same address
+            home[0] = None
             return
-        if addr != bound[0]:
-            listen_on(addr)
+        home[0] = addr
+        link.host = addr  # what a new code's QR link names
 
     look()
-    if bound[0] is None:
+    if home[0] is None:
         say("No home-network address yet (Wi-Fi off?): waiting for one.")
     if not a.no_pages:
         start_pages(link, a.pages_port, a.recordings or a.dest / "recordings", say)
     if not a.no_mirror:
         threading.Thread(target=mirror_loop, args=(link, a.dest, a.every, say, stop, a.raw_only), daemon=True,
                          name="mirror").start()
-    t = link.target()
-    if t is not None:
-        say(f"Remembered phone at {t[0]}: copying whenever it answers.")
+    say("Remembered phone: copying whenever it answers.")
     next_look = time.monotonic() + look_s
     try:
         while not stop.wait(0.5):
@@ -620,11 +644,17 @@ def keep(a: argparse.Namespace, out: Callable[[str], object], *, find: Callable[
             if time.monotonic() >= next_look:
                 next_look = time.monotonic() + look_s
                 look()
+            was = lan.bound
+            lan.sync(home[0])
+            if lan.bound != was:
+                say("Listening for a phone to pair on the home network while the code is shown." if lan.bound else
+                    "Not listening on the home network: no code is shown.")
         return 0
     finally:
         stop.set()
         link.changed.set()
-        for srv in loop + wifi:
+        lan.close()
+        for srv in loop:
             srv.shutdown(); srv.server_close()
 
 
@@ -663,15 +693,12 @@ def main(argv: list[str] | None = None, out: Callable[[str], object] = _print) -
         return 2
     name = re.sub(r"[^\w .-]", "", a.name or socket.gethostname())[:40] or "laptop"
     link = Link(a.dest / "phone" / "link.json", name=name, host=address, port=a.port, phone_at=a.phone_at)
-    servers = serve(link, [address, "127.0.0.1"], a.port)
-    if not any(s.server_address[0] == "127.0.0.1" for s in servers):
+    servers = serve(link, ["127.0.0.1"], a.port)
+    if not servers:
         out(f"Port {a.port} is taken: is phone_link.py already running in another window?")
-        for s in servers:
-            s.shutdown()
         return 2
     say = Say(out)
-    if not any(s.server_address[0] == address for s in servers):
-        say(f"(Listening on this laptop only: {address} is not one of its addresses.)", stamp=False)
+    lan = LanListener(link, a.port)
 
     def told(phone: PhoneAt, via: str, moved: bool) -> None:
         if via == "code":
@@ -693,6 +720,9 @@ def main(argv: list[str] | None = None, out: Callable[[str], object] = _print) -
         say(f"Remembered phone at {t[0]}: copying whenever it answers.", stamp=False)
     color = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
     show_code(link, say, a.qr, color)
+    lan.sync(address)
+    if lan.bound is None:
+        say(f"(Listening on this laptop only: {address} is not one of its addresses.)", stamp=False)
     asked = threading.Event()
     if sys.stdin is not None and sys.stdin.isatty():
         def keys() -> None:
@@ -715,11 +745,13 @@ def main(argv: list[str] | None = None, out: Callable[[str], object] = _print) -
                 link.code = None
                 if not link.answering:
                     say("No code shown any more: press Enter for a new one.")
+            lan.sync(address)  # the home network hears this laptop only while a code is shown (DECISIONS 750)
     except KeyboardInterrupt:
         return 0
     finally:
         stop.set()
         link.changed.set()
+        lan.close()
         for s in servers:
             s.shutdown()
 
