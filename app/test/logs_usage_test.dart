@@ -16,6 +16,7 @@ import 'package:eeg_tracker/session_keeper.dart';
 import 'package:eeg_tracker/ui/home_tabs.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show FrameTiming;
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_test/flutter_test.dart';
 
 class FooScreen extends StatelessWidget {
@@ -178,7 +179,11 @@ void main() {
       expect(f.last, allOf(containsPair('on', false), containsPair('s', 180)));
     });
 
-    testWidgets('a session held and let go marks its feature and the headband; the keeper logs it', (tester) async {
+    test('a session held and let go marks its feature and the headband; the keeper logs it', () async {
+      const channel = MethodChannel('eeg_tracker/session');
+      final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async => call.method == 'hold' ? <String>['headband'] : null);
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
       final k = PhoneSessionKeeper();
       await k.hold(const KeepSpec(title: 'Meditation', headband: true));
       expect(Activity.active, ['headband', 'session:Meditation']);
