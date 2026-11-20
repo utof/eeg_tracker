@@ -59,6 +59,8 @@ class FakePhone:
         self.signed: list[tuple[str, str, bool]] = []  # (method, path, home) of every signed request taken
         self.bearer = 0  # requests that carried the token
         self.ignore_auth = False  # a stranger that answers anything, and cannot prove a key
+        self.asks: list[dict] = []  # the phone's questions before deleting (GET /recheck)
+        self.rechecks: list[dict] = []  # every answer taken (POST /recheck), with "ok"
         self.no_ack = False  # an app older than acks (404)
         self.acks: dict[str, str] = {}  # path -> the SHA-256 the laptop acked
         self.ack_posts: list[list[dict]] = []  # every /ack body's files, as taken
@@ -108,10 +110,15 @@ class FakePhone:
                 fake.requests.append(("GET", self.path, self.headers.get("Range")))
                 if fake.down:
                     self._send(500, b""); return
-                if self._who() is None:
+                who = self._who()
+                if who is None:
                     return
                 if self.path == "/who":
                     self._send(200, json.dumps(dict(app="eeg-tracker", v=2, here=fake.here)).encode()); return
+                if self.path == "/recheck":
+                    if who != "laptop":
+                        self._send(403, b'{"error": "the paired laptop signs this"}'); return
+                    self._send(200, json.dumps(dict(v=1, asks=fake.asks)).encode()); return
                 if self.path == "/files":
                     rows = [dict(path=p, bytes=len(b), sha256=None if p in fake.growing else sha(b),
                                  modified_ms=fake.modified.get(p, T0), **({"growing": True} if p in fake.growing else {}),
@@ -122,6 +129,8 @@ class FakePhone:
                 if self.path == "/state":
                     self._send(200, json.dumps(dict(status="recording", via="phone")).encode()); return
                 p = urllib.request.unquote(self.path.removeprefix("/files/"))
+                if any(a["path"] == p for a in fake.asks):  # asked about before deleting: held back
+                    self._send(409, b'{"error": "being re-checked"}'); return
                 if not self.path.startswith("/files/") or p not in fake.files:
                     self._send(404, b"{}"); return
                 body = fake.files[p]
@@ -143,6 +152,19 @@ class FakePhone:
                 who = self._who(body)
                 if who is None:
                     return
+                if self.path == "/recheck":
+                    if who != "laptop":
+                        self._send(403, b'{"error": "the paired laptop signs this"}'); return
+                    proven, failed = [], []
+                    for a in json.loads(body)["proofs"]:
+                        q = next((x for x in fake.asks if x["path"] == a["path"] and x["nonce"] == a["nonce"]), None)
+                        data = fake.files.get(a["path"], b"")
+                        rs = [(s, n) for s, n in q["ranges"]] if q else []
+                        ok = (q is not None and not a.get("missing") and a.get("mac") == pa.recheck_mac(
+                            fake.key or "", q["path"], q["nonce"], q["bytes"], rs, (data[s:s + n] for s, n in rs)))
+                        fake.rechecks.append(dict(a, ok=ok))
+                        (proven.append(a["path"]) if ok else failed.append(dict(path=a["path"], why="no")))
+                    self._send(200, json.dumps(dict(v=1, proven=proven, failed=failed)).encode()); return
                 if self.path != "/ack":
                     self._send(200, b"ok"); return
                 if fake.no_ack:

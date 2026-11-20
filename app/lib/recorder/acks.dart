@@ -131,6 +131,21 @@ class AckStore {
   }
 }
 
+extension AckRemove on AckStore {
+  /// Forgets the acks of [paths] (plain paths): the laptop could not prove it still holds them (recheck.dart).
+  void remove(Iterable<String> paths) {
+    final gone = paths.toSet();
+    final all = load();
+    if (!all.keys.any(gone.contains)) return;
+    all.removeWhere((k, _) => gone.contains(k));
+    file.parent.createSync(recursive: true);
+    final tmp = File('${file.path}.$pid.${identityHashCode(this)}.tmp');
+    final keys = all.keys.toList()..sort();
+    tmp.writeAsStringSync(jsonEncode({'format': acksFormat, 'version': 1, 'files': {for (final k in keys) k: all[k]!.toJson()}}), flush: true);
+    tmp.renameSync(file.path);
+  }
+}
+
 /// Whether the laptop holds a checked copy of the phone's raw [file] (relative [path] in `files/`) as it is now.
 bool ackedNow(Map<String, LaptopCopy> acks, String path, File file) => acks[ackPathOf(path)]?.matches(file) ?? false;
 

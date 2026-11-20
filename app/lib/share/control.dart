@@ -93,6 +93,9 @@ class ShareControl extends ChangeNotifier {
 
   ShareConfig get config => _config;
 
+  /// Counts the laptop's proofs before deleting (recheck.dart): the night screen deletes what is now proven.
+  final ValueNotifier<int> proofs = ValueNotifier(0);
+
   /// The laptop is copying files from the app's own server (between nights).
   bool get copying => _host?.copying ?? false;
   ShareStatus get status => _status;
@@ -236,6 +239,7 @@ class ShareControl extends ChangeNotifier {
       _status = s;
       notifyListeners();
     }, wifiLock);
+    host.onProved = (n) => proofs.value += n;
     host.setLive(const {});
     host.setSession(_session.value);
     await host.start(_config);
@@ -306,6 +310,7 @@ class ShareControl extends ChangeNotifier {
 
   @override
   void dispose() {
+    proofs.dispose();
     _session.removeListener(_sessionChanged);
     unawaited(_network?.cancel());
     unawaited(_stopHost());

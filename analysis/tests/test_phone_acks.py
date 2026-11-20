@@ -152,3 +152,47 @@ def test_the_catalog_marks_a_night_moved_from_the_phone(local):
     moved = [n for n in cat["nights"] if n["moved_from_phone"]]
     assert len(moved) == 1 and any(f["path"].endswith(".removed.json") for f in moved[0]["file_list"])
     assert any("moved from phone" in line for line in catalog.table(cat, local, []))
+
+
+def test_before_the_phone_deletes_the_laptop_proves_it_still_holds_the_bytes_from_its_own_disk(phone, tmp_path):
+    """DECISIONS 756: the phone asks about random byte ranges with a fresh nonce; the laptop answers with an HMAC over
+    those bytes of its own copy (a packed .f32.xz unpacked), never fetching them from the phone; a copy it lost is said
+    plainly ("missing"), and a damaged one cannot prove anything."""
+    import phone_auth as pa
+    dest = tmp_path / "_local"
+    body = bytes(range(256)) * 400  # 102400 bytes
+    phone.put(f"{STEM}.f32", body)
+    phone.put(f"{STEM}.idx", b"\x02" * 48)
+    phone.put("recordings/2026-11-18-230000.f32", b"\x05" * 5000)
+    run(phone, dest)  # copied and acked
+    (dest / "recordings" / "2026-11-18-230000.f32").unlink()  # the laptop lost this one since
+    f = dest / f"{STEM}.idx"
+    st = f.stat()
+    f.write_bytes(b"\x09" * 48)  # and this one is damaged on its disk (its size and time as they were)
+    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
+    phone.asks = [
+        {"path": f"{STEM}.f32", "nonce": "cmVjaGVjay0wMDAwMDAwMQ", "bytes": len(body), "sha256": sha(body),
+         "ranges": [[0, 16], [4096, 4096], [len(body) - 10, 10]]},
+        {"path": f"{STEM}.idx", "nonce": "cmVjaGVjay0wMDAwMDAwMg", "bytes": 48, "sha256": sha(b"\x02" * 48),
+         "ranges": [[0, 48]]},
+        {"path": "recordings/2026-11-18-230000.f32", "nonce": "cmVjaGVjay0wMDAwMDAwMw", "bytes": 5000,
+         "sha256": sha(b"\x05" * 5000), "ranges": [[0, 5000]]},
+    ]
+    phone.fetched()
+    rep = run(phone, dest)
+    got = {r["path"]: r for r in phone.rechecks}
+    assert got[f"{STEM}.f32"]["ok"] is True
+    assert got[f"{STEM}.idx"]["ok"] is False and "mac" in got[f"{STEM}.idx"]   # other bytes: no proof
+    assert got["recordings/2026-11-18-230000.f32"]["missing"] is True       # lost: said plainly
+    assert rep.proven == [f"{STEM}.f32"] and len(rep.unproven) == 2
+    assert all(p != f"{STEM}.f32" for p, _ in phone.fetched())  # never from the phone itself
+    assert ("GET", "/recheck", False) in phone.signed or ("GET", "/recheck", True) in phone.signed
+    # a copy the laptop packed (.f32.xz) answers by its plain bytes
+    phone.rechecks.clear()
+    packed.pack(dest / f"{STEM}.f32")
+    assert not (dest / f"{STEM}.f32").exists()
+    phone.asks = phone.asks[:1]
+    phone.asks[0]["nonce"] = "cmVjaGVjay0wMDAwMDAwNA"
+    run(phone, dest)
+    assert phone.rechecks[0]["ok"] is True
+    assert pa.ranges_text([(0, 16), (4096, 4096)]) == "0+16,4096+4096"

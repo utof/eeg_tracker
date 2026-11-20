@@ -15,6 +15,7 @@ import 'package:eeg_tracker/recorder/acks.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart' show fileStem;
 import 'package:eeg_tracker/recorder/nights.dart';
 import 'package:eeg_tracker/recorder/packed.dart' show packRaw, packedFileOf;
+import 'package:eeg_tracker/recorder/recheck.dart';
 import 'package:eeg_tracker/recorder/remove.dart';
 import 'package:eeg_tracker/sleep/report.dart';
 import 'package:eeg_tracker/sleep/scorer.dart';
@@ -258,6 +259,14 @@ void main() {
       expect(File('${rec.path}/${stems[0]}.f32').existsSync(), isTrue);
       expect(StorageStore(files).load().keepDays('nights'), 3);
       expect(await autoClear(files, busy: () async => true, paired: true, clock: () => now), isNull, reason: 'busy');
+      // due, but the laptop must prove again that it holds the bytes (DECISIONS 756): asked now, deleted once proven
+      final asked = (await autoClear(files, busy: () async => false, paired: true, laptop: 'desk', clock: () => now))!;
+      expect(asked.removed, isEmpty);
+      final store = RecheckStore(files);
+      expect(store.asks().keys, everyElement(startsWith('recordings/${stems[0]}.')));
+      for (final a in store.asks().values) {
+        store.prove(a.path, a.nonce, ok: true, why: null, at: now);
+      }
       final r = (await autoClear(files, busy: () async => false, paired: true, laptop: 'desk', clock: () => now))!;
       expect(r.removed, ['2026-11-15']);
       expect(removedRecordOf(File('${rec.path}/${stems[0]}.f32'))!.why, whyKeepTime);

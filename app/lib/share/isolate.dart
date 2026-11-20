@@ -61,8 +61,9 @@ List<Object?> shareIsolateArgs(
 /// `['port', SendPort]`, `['up', addresses, port, why]` (why: empty, or what each source returned when no Wi-Fi
 /// address was found), `['marker', id, text]`, `['copying', n]` file requests being answered, `['work', working,
 /// meeting]` the laptop's work signal, `['here', state]` what the phone says of its Wi-Fi (server.dart
-/// `sharingStates`), `['copied', by]` a file was sent (`laptop`, `code` or `cable`), `['error', text]` an error that
-/// did not stop it, `['log', line]`, `['down', why]`.
+/// `sharingStates`), `['copied', by]` a file was sent (`laptop`, `code` or `cable`), `['proved', n]` the laptop proved
+/// it still holds n files asked about before deleting (recheck.dart), `['error', text]` an error that did not stop it,
+/// `['log', line]`, `['down', why]`.
 ///
 /// Every error inside it is caught (DECISIONS row 587): before the server listens it ends the isolate the orderly way
 /// (`['down', ...]`); after, it is reported and the server goes on answering. An uncaught error (running out of memory
@@ -128,6 +129,7 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
     hereNet: args.length > 10 && args[10] is String ? args[10]! as String : null,
     onHere: (h) => toHost.send(['here', h, lanSignature(server.lanNets)]),
     onCopied: (by) => toHost.send(['copied', by]),
+    onProved: (n) => toHost.send(['proved', n]),
   );
   Timer? addressTimer;
   Timer? offTimer;
@@ -354,6 +356,9 @@ class ShareHost {
   /// Tests replace the server with one that throws.
   final Future<void> Function(List<Object?> args) entry;
 
+  /// The laptop proved it still holds files asked about before deleting (recheck.dart): the app may delete them now.
+  void Function(int proven)? onProved;
+
   Isolate? _isolate;
   ReceivePort? _events;
   SendPort? _port;
@@ -548,6 +553,11 @@ class ShareHost {
             if (words != null) _say('sharing on Wi-Fi: $words');
             onChange?.call(_status);
           }
+        case 'proved':
+          _say('sharing on Wi-Fi: the laptop proved it still holds ${m[1]} files asked about before deleting');
+          try {
+            onProved?.call(m[1] as int);
+          } catch (_) {}
         case 'copied':
           final now = DateTime.now().millisecondsSinceEpoch, by = m[1] as String;
           final again = now - _status.copiedAtMs < 60000 && by == _status.copiedBy;

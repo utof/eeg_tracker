@@ -78,6 +78,11 @@ class NotThePhone(Refused):
     """What answered at the phone's address did not prove the pairing's key: nothing it says is used."""
 
 
+class Held(Exception):
+    """The phone holds this file back for now (409): it asked this laptop to prove it still holds it before deleting it
+    (DECISIONS 756). The answer must come from this laptop's own copy; the file is copied again later if needed."""
+
+
 class Paused(PhoneError):
     """The phone does not share on this Wi-Fi: not its home network and not allowed there by hand (DECISIONS 752)."""
 
@@ -123,6 +128,8 @@ class Pass:
     removed: list[str] = field(default_factory=list)  # raw sets that left the phone, their files here
     lost: list[str] = field(default_factory=list)  # raw files the phone removed that this laptop does not hold
     here: str | None = None  # what the paired phone says of its Wi-Fi: home, here (allowed by hand) or paused
+    proven: list[str] = field(default_factory=list)  # asked about before deleting: proven from this laptop's own copy
+    unproven: list[str] = field(default_factory=list)  # asked about: not held here as acked (missing or other bytes)
 
     @property
     def problems(self) -> bool:
@@ -197,6 +204,8 @@ class Phone:
                               "the phone refused the token") from e
             if e.code == 403 and why == "not sharing on this Wi-Fi":
                 raise Paused(why) from e
+            if e.code == 409:
+                raise Held(why or "being re-checked") from e
             if e.code in (401, 403):
                 raise Refused(f"the phone refused ({why or 'local network only'})") from e
             raise PhoneError(f"the phone answered {e.code} for {path}") from e
@@ -456,71 +465,75 @@ def pull(phone: Phone, dest: Path, *, raw_only: bool = False, now: datetime | No
     replaced = dest / "phone" / "replaced" / ip._stamp(now)
     try:
         for e in order(listed):
-            if raw_only and not is_raw(e.path):
-                continue
-            key, dst = str(e.path), ip.target_for(dest, e.path)
-            if e.sha256 is None:
-                rep.growing += 1
-            if e.original is not None or packed.is_packed(ip.on_laptop(dst) or dst):
-                _pull_packed(phone, e, dest, index, state, rep, replaced)
-                continue
-            if not dst.is_file():
-                if _whole(phone, e, dst):
-                    rep.new.append(key); rep.fetched += e.bytes
-                    if e.sha256 is None:
-                        state.partial[key] = e.bytes
+            try:
+                if raw_only and not is_raw(e.path):
+                    continue
+                key, dst = str(e.path), ip.target_for(dest, e.path)
+                if e.sha256 is None:
+                    rep.growing += 1
+                if e.original is not None or packed.is_packed(ip.on_laptop(dst) or dst):
+                    _pull_packed(phone, e, dest, index, state, rep, replaced)
+                    continue
+                if not dst.is_file():
+                    if _whole(phone, e, dst):
+                        rep.new.append(key); rep.fetched += e.bytes
+                        if e.sha256 is None:
+                            state.partial[key] = e.bytes
+                        else:
+                            state.checked(e); index.put(dst, e.sha256)
                     else:
-                        state.checked(e); index.put(dst, e.sha256)
-                else:
-                    rep.damaged.append(key)
-                continue
-            have = dst.stat().st_size
-            if e.sha256 is not None and have == e.bytes and index.sha(dst) == e.sha256:
-                if key in state.partial:
-                    rep.checked.append(key)
-                else:
-                    rep.same += 1
-                state.checked(e)
-                continue
-            if state.raw.get(key) == have and have < e.bytes:
-                state.partial[key] = have  # our checked copy, and the phone added to the file since
-            if key in state.partial and have <= e.bytes:
-                # our own partial copy of a file the phone only ever adds to: fetch the new end
-                if have < e.bytes:
-                    with dst.open("ab") as out:
-                        got = phone.fetch(e.path, have, e.bytes, out)
-                        out.flush()
-                        os.fsync(out.fileno())
-                    rep.fetched += got
-                    if got:
-                        rep.grown.append(key)
-                    _set_time(dst, e.modified_ms)
-                    have = dst.stat().st_size
-                state.partial[key] = have
-                if e.sha256 is None or have != e.bytes:
-                    if e.sha256 is None and have == e.bytes and key not in rep.grown:
+                        rep.damaged.append(key)
+                    continue
+                have = dst.stat().st_size
+                if e.sha256 is not None and have == e.bytes and index.sha(dst) == e.sha256:
+                    if key in state.partial:
+                        rep.checked.append(key)
+                    else:
                         rep.same += 1
+                    state.checked(e)
                     continue
-                if ip.hash_file(dst) == e.sha256:
-                    state.checked(e); index.put(dst, e.sha256); rep.checked.append(key)
+                if state.raw.get(key) == have and have < e.bytes:
+                    state.partial[key] = have  # our checked copy, and the phone added to the file since
+                if key in state.partial and have <= e.bytes:
+                    # our own partial copy of a file the phone only ever adds to: fetch the new end
+                    if have < e.bytes:
+                        with dst.open("ab") as out:
+                            got = phone.fetch(e.path, have, e.bytes, out)
+                            out.flush()
+                            os.fsync(out.fileno())
+                        rep.fetched += got
+                        if got:
+                            rep.grown.append(key)
+                        _set_time(dst, e.modified_ms)
+                        have = dst.stat().st_size
+                    state.partial[key] = have
+                    if e.sha256 is None or have != e.bytes:
+                        if e.sha256 is None and have == e.bytes and key not in rep.grown:
+                            rep.same += 1
+                        continue
+                    if ip.hash_file(dst) == e.sha256:
+                        state.checked(e); index.put(dst, e.sha256); rep.checked.append(key)
+                        continue
+                    # the partial copy does not add up to the phone's file: keep it aside, fetch the file whole
+                    state.partial.pop(key); state.raw.pop(key, None)
+                    if _replace(phone, e, dst, replaced / dst.relative_to(dest), rep, index):
+                        state.checked(e)
                     continue
-                # the partial copy does not add up to the phone's file: keep it aside, fetch the file whole
-                state.partial.pop(key); state.raw.pop(key, None)
+                # a different copy that is not ours to continue: import_phone.py's rule
+                if e.modified_ms <= dst.stat().st_mtime_ns // 1_000_000:
+                    rep.kept.append(key)  # the laptop's copy is as new or newer
+                    continue
+                if e.sha256 is None:
+                    rep.waiting.append(key)  # replace only with a copy that can be checked
+                    continue
                 if _replace(phone, e, dst, replaced / dst.relative_to(dest), rep, index):
                     state.checked(e)
-                continue
-            # a different copy that is not ours to continue: import_phone.py's rule
-            if e.modified_ms <= dst.stat().st_mtime_ns // 1_000_000:
-                rep.kept.append(key)  # the laptop's copy is as new or newer
-                continue
-            if e.sha256 is None:
-                rep.waiting.append(key)  # replace only with a copy that can be checked
-                continue
-            if _replace(phone, e, dst, replaced / dst.relative_to(dest), rep, index):
-                state.checked(e)
+            except Held:  # asked about before the phone deletes it: not handed out now (DECISIONS 756)
+                rep.waiting.append(str(e.path))
         _check_removed(dest, rep)
         if pairing:
             acknowledge(phone, dest, listed, pairing, rep, state, raw_only=raw_only, budget=ack_budget, now=now)
+            answer_rechecks(phone, dest, rep)
         else:
             rep.ack_note = "not paired: no acks (scripts/phone_link.py pairs)"
     finally:
@@ -640,6 +653,85 @@ def acknowledge(phone: Phone, dest: Path, listed: list[Listed], key: str, rep: P
                           + "\n")
 
 
+RECHECK_MAX = 4000  # questions answered in one pass (each reads 8 x 4 KB, or a whole small file)
+
+
+def _ranges(dst: Path, ranges: list[tuple[int, int]]):
+    """The bytes of [ranges] of this laptop's copy (a raw .f32 plain or packed .f32.xz, unpacked as it is read), in
+    order. Ranges in order and not overlapping are read in one pass; others reopen the copy."""
+    raw = dst.name.endswith(packed.RAW)
+    f = packed.open_raw(dst) if raw else open(ip.on_laptop(dst) or dst, "rb")
+    try:
+        pos = 0
+        for start, n in ranges:
+            if start < pos:  # not in order: from the start again
+                f.close()
+                f = packed.open_raw(dst) if raw else open(ip.on_laptop(dst) or dst, "rb")
+                pos = 0
+            while pos < start:  # forward: an unpacking reader cannot jump
+                skipped = len(f.read(min(start - pos, 1 << 20)))
+                if not skipped:
+                    break
+                pos += skipped
+            b = f.read(n)
+            pos += len(b)
+            yield b
+    finally:
+        f.close()
+
+
+def answer_rechecks(phone: Phone, dest: Path, rep: Pass) -> None:
+    """The phone's questions before it deletes raw recordings by itself (DECISIONS 756): for each, an HMAC with the
+    phone's nonce over the asked byte ranges of THIS laptop's own copy (phone_auth.recheck_mac; a packed .f32.xz
+    unpacked), never over bytes fetched from the phone; "missing" when this laptop does not hold those bytes (no copy,
+    or one of another length). The phone deletes only on a fresh proof. An app without /recheck: nothing to answer."""
+    if not phone.key:
+        return
+    try:
+        with phone._open("/recheck", timeout=FILE_TIMEOUT) as r:
+            m = json.loads(r.read(4_000_000).decode("utf-8"))
+    except (PhoneError, Refused, OSError, ValueError):
+        return
+    asks = m.get("asks") if isinstance(m, dict) else None
+    if not isinstance(asks, list):
+        return
+    proofs: list[dict] = []
+    for a in asks[:RECHECK_MAX]:
+        if not isinstance(a, dict):
+            continue
+        nonce, size, ranges = a.get("nonce"), a.get("bytes"), a.get("ranges")
+        try:
+            path = ip.safe_path(a.get("path"))
+        except ip.ManifestError:
+            continue
+        if not (isinstance(nonce, str) and pa.NONCE.fullmatch(nonce) and isinstance(size, int) and size >= 0
+                and isinstance(ranges, list) and 0 < len(ranges) <= 64
+                and all(isinstance(x, list) and len(x) == 2 and all(isinstance(v, int) and not isinstance(v, bool)
+                                                                       for v in x)
+                        and x[0] >= 0 and 0 <= x[1] <= 1 << 20 and x[0] + x[1] <= size for x in ranges)):
+            continue
+        rs = [(x[0], x[1]) for x in ranges]
+        dst = ip.target_for(dest, path)
+        try:
+            held = ip.on_laptop(dst) is not None and ip.size_of(dst) == size
+            mac = pa.recheck_mac(phone.key, str(path), nonce, size, rs, _ranges(dst, rs)) if held else None
+        except (OSError, EOFError, ValueError):
+            mac = None
+        proofs.append({"path": str(path), "nonce": nonce, "mac": mac} if mac else
+                      {"path": str(path), "nonce": nonce, "missing": True})
+    if not proofs:
+        return
+    body = json.dumps({"v": 1, "proofs": proofs}, separators=(",", ":")).encode()
+    try:
+        with phone._open("/recheck", {"Content-Type": "application/json"}, FILE_TIMEOUT, body) as r:
+            m = json.loads(r.read().decode("utf-8"))
+    except (PhoneError, Refused, OSError, ValueError):
+        return
+    if isinstance(m, dict):
+        rep.proven += [p for p in m.get("proven") or [] if isinstance(p, str)]
+        rep.unproven += [f"{f.get('path')} ({f.get('why')})" for f in m.get("failed") or [] if isinstance(f, dict)]
+
+
 def _record(rep: Pass, dest: Path, how: str, now: datetime) -> None:
     """One line of pulls.jsonl: how the phone was reached (paired, or by code), never its address (DECISIONS 757)."""
     line = dict(pulled=now.isoformat(timespec="seconds"), phone=how, listed=rep.listed, bytes=rep.fetched,
@@ -683,6 +775,12 @@ def summary(rep: Pass, dest: Path, now: datetime) -> list[str]:
                    "again on this disk); its Storage settings decide when old raw recordings leave the phone")
     if rep.ack_refused:
         out.append(f"  {len(rep.ack_refused)} not acked (the phone's copy changed meanwhile): {ip._names(rep.ack_refused)}")
+    if rep.proven:
+        out.append(f"  proved to the phone that {len(rep.proven)} file{'s are' if len(rep.proven) != 1 else ' is'} still "
+                   "here, byte for byte: it may remove them now")
+    if rep.unproven:
+        out.append(f"  {len(rep.unproven)} the phone asked about are not here as acked: it keeps them, and they are "
+                   f"copied again: {ip._names(rep.unproven)}")
     if rep.removed:
         out.append(f"  {len(rep.removed)} recording{'s' if len(rep.removed) != 1 else ''} left the phone; "
                    f"the raw files stay here: {ip._names(rep.removed)}")

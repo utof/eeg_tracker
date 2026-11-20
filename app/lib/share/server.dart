@@ -43,6 +43,7 @@ import 'package:crypto/crypto.dart';
 
 import '../export/store.dart';
 import '../recorder/acks.dart';
+import '../recorder/recheck.dart';
 import 'auth.dart';
 import 'protocol.dart';
 
@@ -77,6 +78,152 @@ const List<String> sharingStates = ['open', 'home', 'here', 'waiting'];
 
 /// Who a request comes from, once it is let in.
 typedef _Caller = ({bool laptop, String? nonce, bool home});
+
+/// Connections held at once from one address, and in all (DECISIONS 755): one more is closed before HTTP reads it.
+const int serverConnectionsPerClient = 16;
+const int serverConnectionsMax = 32;
+
+/// Wrong tries (a wrong token or signature, a replay) from one address within [triesWindow] before that address
+/// waits [triesWait] (429): guessing the 59-bit token is hopeless anyway, and a flood of tries costs the phone work.
+const int triesMax = 10;
+const Duration triesWindow = Duration(minutes: 1);
+const Duration triesWait = Duration(minutes: 1);
+
+/// The phone's listening socket with a cap on connections: at most [perClient] from one address and [total] in all;
+/// one more is closed at once.
+class _CappedSocket extends Stream<Socket> implements ServerSocket {
+  _CappedSocket(this._inner, {required this.total, required this.perClient});
+  final ServerSocket _inner;
+  final int total, perClient;
+  final Map<String, int> _open = {};
+  int _all = 0;
+
+  @override
+  StreamSubscription<Socket> listen(void Function(Socket event)? onData, {Function? onError, void Function()? onDone, bool? cancelOnError}) =>
+      _inner.map(_admit).where((s) => s != null).cast<Socket>().listen(onData, onError: onError, onDone: onDone, cancelOnError: cancelOnError);
+
+  /// The socket, counted, or null (closed at once: too many, or already gone).
+  Socket? _admit(Socket s) {
+    final String who;
+    try {
+      who = s.remoteAddress.address;
+    } catch (_) {
+      s.destroy();
+      return null;
+    }
+    if (_all >= total || (_open[who] ?? 0) >= perClient) {
+      s.destroy();
+      return null;
+    }
+    _all++;
+    _open[who] = (_open[who] ?? 0) + 1;
+    return _CountedSocket(s, who, _gone);
+  }
+
+  /// One connection from [who] ended (HttpServer destroys every socket it is done with).
+  void _gone(String who) {
+    _all--;
+    final n = (_open[who] ?? 1) - 1;
+    if (n <= 0) {
+      _open.remove(who);
+    } else {
+      _open[who] = n;
+    }
+  }
+
+  @override
+  int get port => _inner.port;
+
+  @override
+  InternetAddress get address => _inner.address;
+
+  @override
+  Future<ServerSocket> close() async {
+    await _inner.close();
+    return this;
+  }
+}
+
+/// An accepted socket that says once when it ends: destroyed (as HttpServer ends each connection) or its output
+/// done. Socket.done alone does not complete on destroy().
+class _CountedSocket extends StreamView<Uint8List> implements Socket {
+  _CountedSocket(this._s, this._who, this._onGone) : super(_s) {
+    _s.done.then((_) => _end(), onError: (Object _) => _end());
+  }
+  final Socket _s;
+  final String _who;
+  final void Function(String who) _onGone;
+  bool _ended = false;
+
+  void _end() {
+    if (_ended) return;
+    _ended = true;
+    _onGone(_who);
+  }
+
+  @override
+  void destroy() {
+    _end();
+    _s.destroy();
+  }
+
+  @override
+  Encoding get encoding => _s.encoding;
+
+  @override
+  set encoding(Encoding value) => _s.encoding = value;
+
+  @override
+  void write(Object? object) => _s.write(object);
+
+  @override
+  void writeln([Object? object = '']) => _s.writeln(object);
+
+  @override
+  void writeAll(Iterable<Object?> objects, [String separator = '']) => _s.writeAll(objects, separator);
+
+  @override
+  void writeCharCode(int charCode) => _s.writeCharCode(charCode);
+
+  @override
+  void add(List<int> data) => _s.add(data);
+
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) => _s.addError(error, stackTrace);
+
+  @override
+  Future<void> addStream(Stream<List<int>> stream) => _s.addStream(stream);
+
+  @override
+  Future<void> flush() => _s.flush();
+
+  @override
+  Future<void> close() => _s.close();
+
+  @override
+  Future<void> get done => _s.done;
+
+  @override
+  bool setOption(SocketOption option, bool enabled) => _s.setOption(option, enabled);
+
+  @override
+  Uint8List getRawOption(RawSocketOption option) => _s.getRawOption(option);
+
+  @override
+  void setRawOption(RawSocketOption option) => _s.setRawOption(option);
+
+  @override
+  int get port => _s.port;
+
+  @override
+  int get remotePort => _s.remotePort;
+
+  @override
+  InternetAddress get address => _s.address;
+
+  @override
+  InternetAddress get remoteAddress => _s.remoteAddress;
+}
 
 /// A file changed in the last seconds is still being written: listed without a SHA-256, marked `growing`.
 const Duration _settled = Duration(seconds: 20);
@@ -125,6 +272,7 @@ class ShareServer {
     this.hereNet,
     this.onHere,
     this.onCopied,
+    this.onProved,
     DateTime Function()? clock,
   }) : _now = clock ?? DateTime.now;
 
@@ -168,12 +316,17 @@ class ShareServer {
   /// A file or the list was sent: `laptop` (the paired one, signed) or `code` (someone with the token), or `cable`
   /// (the phone itself: adb forward).
   final void Function(String by)? onCopied;
+
+  /// The laptop proved it still holds files the phone asked about before deleting them (recheck.dart): how many now.
+  final void Function(int proven)? onProved;
   final DateTime Function() _now;
 
   /// The Wi-Fi network on which the paired laptop last said it is home (`lanSignature`); null: none yet.
   String? _home;
   String _hereWas = '';
   final Map<String, int> _nonces = {}; // nonce -> until (ms), oldest first
+  final Map<String, List<int>> _tries = {}; // address -> times (ms) of its wrong tries in the last minute
+  final Map<String, int> _waitUntil = {}; // address -> until when (ms) it waits
 
   /// SHA-256 worked out by this server (not taken from the cache or the export's index); for tests.
   int hashed = 0;
@@ -238,21 +391,28 @@ class ShareServer {
   /// Wi-Fi address, and a new lease needs no new socket. Throws when the port is taken.
   Future<void> listen() async {
     if (_server != null) return;
-    final s = await HttpServer.bind(InternetAddress.anyIPv4, port, shared: false);
-    s.idleTimeout = const Duration(seconds: 60);
+    final socket = await ServerSocket.bind(InternetAddress.anyIPv4, port, shared: false);
+    final s = HttpServer.listenOn(_CappedSocket(socket, total: serverConnectionsMax, perClient: serverConnectionsPerClient));
+    s.idleTimeout = const Duration(seconds: 30);
     s.defaultResponseHeaders.clear();
     s.listen(_handle, onError: (Object _) {});
     _server = s;
+    _socket = socket;
   }
+
+  /// The listening socket: an HttpServer made by listenOn does not close it.
+  ServerSocket? _socket;
 
   Future<void> close() async {
     for (final r in _readers.toList()) {
       r.closed = true;
       r.wake();
     }
-    final s = _server;
+    final s = _server, socket = _socket;
     _server = null;
+    _socket = null;
     await s?.close(force: true);
+    await socket?.close();
   }
 
   // ---- live data in ------------------------------------------------------------------------------------------
@@ -405,6 +565,11 @@ class ShareServer {
         await req.drain<void>();
         return await _json(res, 403, {'error': 'only the local network may connect'});
       }
+      final who = client.address, nowMs = _now().millisecondsSinceEpoch;
+      if ((_waitUntil[who] ?? 0) > nowMs) {
+        await req.drain<void>();
+        return await _json(res, 429, {'error': 'too many wrong tries: wait a minute'});
+      }
       final method = req.method;
       if (method != 'GET' && method != 'POST' && method != 'HEAD') {
         await req.drain<void>();
@@ -413,7 +578,7 @@ class ShareServer {
       final body = await _body(req);
       if (body == null) return await _json(res, 413, {'error': 'too big'});
       final caller = await _caller(req, body);
-      if (caller == null) return; // answered
+      if (caller == null) return _wrongTry(who, nowMs); // answered
       final nonce = caller.nonce;
       if (nonce != null) res.headers.set(replyHeader, replyProof(key!, nonce)); // the laptop knows it is this phone
       final path = req.uri.path;
@@ -436,7 +601,12 @@ class ShareServer {
       final name = trimmed.substring(trimmed.lastIndexOf('/') + 1);
       if (path == '/work' || path == '/work/') {
         if (method != 'POST') return await _json(res, 405, {'error': 'POST {"working": true|false}'});
+        if (!caller.laptop) return await _json(res, 403, {'error': 'the paired laptop signs this'});
         return await _work(res, body);
+      }
+      if (path == '/recheck' || path == '/recheck/') {
+        if (!caller.laptop) return await _json(res, 403, {'error': 'the paired laptop signs this'});
+        return method == 'POST' ? await _recheck(res, body) : await _json(res, 200, _questions());
       }
       if (path == '/ack' || path == '/ack/') {
         if (method != 'POST') return await _json(res, 405, {'error': 'POST {"v":1,"files":[...]}'});
@@ -444,7 +614,10 @@ class ShareServer {
         return await _ack(res, body);
       }
       if (method == 'POST') {
-        if (name == 'marker') return await _marker(res, body);
+        if (name == 'marker') {
+          if (!caller.laptop) return await _json(res, 403, {'error': 'the paired laptop signs this'});
+          return await _marker(res, body);
+        }
         if (name == 'contact') return await _json(res, 503, {'error': 'the phone checks contact once, at the start of the night'});
         if (_laptopOnly.contains(name)) return await _json(res, 503, {'error': 'recorder reconnecting'});
         return await _json(res, 404, {'error': 'no such route'});
@@ -457,7 +630,18 @@ class ShareServer {
           'app': 'eeg-tracker',
           'share': 1,
           'status': _status,
-          'routes': ['GET /state', 'GET /stream', 'POST /marker', 'GET /files', 'GET /files/<path>', 'POST /work', 'POST /ack', 'GET /who'],
+          'routes': [
+            'GET /state',
+            'GET /stream',
+            'POST /marker',
+            'GET /files',
+            'GET /files/<path>',
+            'POST /work',
+            'POST /ack',
+            'GET /who',
+            'GET /recheck',
+            'POST /recheck',
+          ],
         });
       }
       return await _json(res, 404, {'error': 'no such route'});
@@ -468,6 +652,21 @@ class ShareServer {
       try {
         await res.close();
       } catch (_) {}
+    }
+  }
+
+  /// One more wrong try from [who]: the tenth within a minute makes it wait a minute. Kept small: the oldest
+  /// addresses are forgotten past 1000.
+  void _wrongTry(String who, int nowMs) {
+    final t = _tries.putIfAbsent(who, () => [])..add(nowMs);
+    t.removeWhere((x) => x <= nowMs - triesWindow.inMilliseconds);
+    if (t.length >= triesMax) {
+      _waitUntil[who] = nowMs + triesWait.inMilliseconds;
+      _tries.remove(who);
+    }
+    _waitUntil.removeWhere((_, until) => until <= nowMs);
+    while (_tries.length > 1000) {
+      _tries.remove(_tries.keys.first);
     }
   }
 
@@ -619,6 +818,61 @@ class ShareServer {
       return _json(res, 500, {'error': 'the acks could not be kept: $e'});
     }
     return _json(res, 200, {'v': 1, 'acked': acked, 'refused': refused});
+  }
+
+  /// GET /recheck: the open questions before deleting (recheck.dart), for the paired laptop.
+  Map<String, Object?> _questions() => {
+    'v': 1,
+    'asks': [for (final a in RecheckStore(filesDir).open().values) a.toJson()..remove('asked_ms')],
+  };
+
+  /// POST /recheck: the laptop's answers. Each is checked against the phone's own bytes; a laptop that does not hold a
+  /// file, or holds other bytes, loses that file's ack (nothing is deleted on it; the laptop copies and acks it again).
+  Future<void> _recheck(HttpResponse res, List<int> body) async {
+    final List<Map<Object?, Object?>> answers;
+    try {
+      final Object? j = jsonDecode(utf8.decode(body));
+      if (j is! Map || j['v'] != 1 || j['proofs'] is! List) throw const FormatException();
+      answers = [for (final a in j['proofs'] as List) if (a is Map) a else throw const FormatException()];
+    } catch (_) {
+      return _json(res, 400, {'error': 'send {"v":1,"proofs":[{"path","nonce","mac"}]}'});
+    }
+    final store = RecheckStore(filesDir), open = store.open(), now = _now();
+    final proven = <String>[], failed = <Map<String, String>>[], lost = <String>[];
+    for (final a in answers) {
+      final path = a['path'], nonce = a['nonce'];
+      final q = path is String ? open[path] : null;
+      if (q == null || nonce != q.nonce) {
+        failed.add({'path': '${path ?? ''}', 'why': 'not asked'});
+        continue;
+      }
+      String? why;
+      if (a['missing'] == true) {
+        why = 'the laptop does not hold it';
+      } else {
+        final mac = a['mac'];
+        final mine = phoneRanges(filesDir, q);
+        if (mine == null) {
+          why = 'not on the phone as acked';
+        } else if (mac is! String || !sameSecret(mac, recheckMac(key!, q.path, q.nonce, q.bytes, q.ranges, mine))) {
+          why = 'different bytes';
+        }
+      }
+      store.prove(q.path, q.nonce, ok: why == null, why: why, at: now);
+      if (why == null) {
+        proven.add(q.path);
+      } else {
+        failed.add({'path': q.path, 'why': why});
+        if (why != 'not on the phone as acked') lost.add(q.path);
+      }
+    }
+    if (lost.isNotEmpty) AckStore(filesDir).remove(lost);
+    if (proven.isNotEmpty) {
+      try {
+        onProved?.call(proven.length);
+      } catch (_) {}
+    }
+    return _json(res, 200, {'v': 1, 'proven': proven, 'failed': failed});
   }
 
   /// A plain file's SHA-256 for an ack: the kept one while the file is unchanged, else read now.
@@ -826,6 +1080,8 @@ class ShareServer {
     final res = req.response;
     // Only what Export data would copy, by the same rule; never a link, never a path that climbs out.
     if (!isExported(path)) return _json(res, 404, {'error': 'no such file'});
+    // asked about before deleting: not handed out until answered, so the answer comes from the laptop's own copy
+    if (RecheckStore(filesDir).open().containsKey(ackPathOf(path))) return _json(res, 409, {'error': 'being re-checked'});
     final file = File('${filesDir.path}/$path');
     if (FileSystemEntity.typeSync(file.path, followLinks: false) != FileSystemEntityType.file) {
       return _json(res, 404, {'error': 'no such file'});
