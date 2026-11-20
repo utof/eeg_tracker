@@ -15,6 +15,9 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 | The phone over Wi-Fi | `GET /files`, `GET /files/<path>` on the phone; mirrored into `_local/recordings/` and `_local/phone/`, with `_local/phone/pull-state.json` and `pulls.jsonl` | the phone app's Share on Wi-Fi (`app/lib/share/`); read by `scripts/pull_phone.py` |
 | The laptop's work sessions | `_local/laptop/work/<stamp>.work.json`, `labels.jsonl` (below) | the laptop tray (`scripts/tray.py`, `scripts/laptop_work.py`) from ActivityWatch |
 | Catalog of nights | `_local/catalog/catalog.json`, `<date>.sha256`, `catalog.txt`, `history.log` | `scripts/catalog.py` (below) |
+| The data book | `_local/data/nights.tsv`, `sessions.tsv`, `days.tsv`, `epochs.tsv.gz`, `labels.tsv`, `truth.tsv`, `book.json`, `README.md` | `scripts/data_book.py`, after each copy from the phone through `scripts/after_pull.py` (below) |
+| Truth labels | `_local/analyses/truth-labels.tsv` (the hand file), `_local/truth/*.tsv`, the Archive's tags marked "This is what I was doing"; the vocabulary `scripts/truth_vocabulary.tsv` | the assistant from chat, the owner by hand or on the phone; checked by `scripts/truth.py` (below) |
+| Detectors against the truth | `_local/data/validation.tsv`, `validation.md` | `scripts/validate_detectors.py`, after each data book build (below) |
 | Raw recordings packed after a day | `<stamp>.f32.xz` on the laptop, `<stamp>.f32.gz` on the phone, in place of `<stamp>.f32`; `_local/packing.jsonl`, `files/packing.jsonl` | `scripts/pack_old.py` (daily), the phone app between nights (`app/lib/recorder/packed.dart`); below |
 | Events for other apps | `<root>/events/<dev>/eeg-YYYY-MM.jsonl`, `<root>/events/<dev>/breaks-YYYY-MM.jsonl` | `scripts/export_events.py`, `scripts/break_hints.py` and the laptop tray |
 
@@ -463,7 +466,7 @@ folder). It never changes or deletes anything in the app's folder, and never run
   `mornings/`, `meditations/`, `alpha-theta/` (sessions and `journal.json`), `replay-check/<kind>/` and
   `settings.json`, `experiments/<made at>/` (self-experiments, below), `wearer/` ("Was this you?", below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers and their `<stamp>-r<n>.text.json` words, below, `prompts/`), `sound-states/`, `hands-free/` (below), `unusual/` (below), `lucid/` (below), `try-these/` (below), `own-ble/`
   (`settings.json`: which headband connection is in use; `probe/<stamp>/`: the probe's result, docs/own-ble-driver.md),
-  `recordings-diy/` (the DIY board's nights, the format of "Raw recording (DIY board)"), `archive/` (your tags, below) and `diy-board/settings.json`
+  `recordings-diy/` (the DIY board's nights, the format of "Raw recording (DIY board)"), `archive/` (your tags, below), `walking/` and `steps/` (walk files and the step counter switch, below) and `diy-board/settings.json`
   (`useDiy`: which headband; `names`: 4, 6 or 8 names from CH1), and any folder
   a later feature adds. Left on the phone: `models/` (copies of the app's model assets), `export/` (the export's own
   index), `transfer/` (the laptop's acks and the Storage settings, below), half-written `*.tmp` files, the scorer's
@@ -743,6 +746,29 @@ A night the watcher started has a first line in its first run's `.log`: `started
 "Yes" ...`, and the minutes kept while asking are the night's first run, whose `.log` begins `auto-start: the headband
 was found on ...`.
 
+### Pulse (`pulse/`)
+
+The pulse pass (DECISIONS 810-819; the method: [detectors.md](detectors.md#pulse-heart-rate-from-the-headband-decisions-810-819))
+keeps one file per recording, `pulse/<id>.pulse.json` (`<id>`: the recording's first file set's stem, as the
+Archive's). The laptop's `scripts/compare_pulse.py --out FILE` writes the same fields (without `key`); the phone's
+arrive in `_local/phone/pulse/` with Export data. Written whole under a temporary name, then renamed. It stays when the
+raw signal leaves the phone: it is a result, like a sleep report (Storage counts it with the notes, always kept); a
+pass that could not run keeps only `format`, `version`, `detector`, `recording`, `why` and `key`.
+
+| Field | Content |
+|---|---|
+| `format`, `version`, `detector` | `eeg-tracker-pulse`, 1, the detector's version (`pulse-v1`); a file of another detector is made again while the raw signal is there |
+| `recording`, `start`, `start_ms` | the id; the joined signal's first sample (a whole second): local ISO time with offset, and unix ms |
+| `epoch_s`, `epochs` | 30; whole 30 s epochs from the first sample (a last part is not one) |
+| `channels`, `sample_rate` | every channel the header names (all of them are read), the rate |
+| `read`, `coverage`, `median_bpm` | epochs with a reading, their share, the readings' median a minute (`null` without one) |
+| `codes` | one letter per epoch: `r` a reading, `n` a reading with its neighbours; no reading: `g` over 1 s missing, `x` no usable channel, `m` moving, `s` steps, `u` unclear, `o` the odd one out |
+| `bpm`, `conf`, `channel` | per epoch: the pulse a minute (0.1), its confidence (0.01) and the index of the channel read; `null` without a reading |
+| `key` | what it was made from: the detector and every raw file's and index's name, size and modified time |
+
+A sleep report's night is read on its own clock: each reading goes to the report's 30 s epoch holding its middle. The
+Archive's list keeps a summary of every pulse file in `files/cache/pulse-index.json` (never exported).
+
 ### Your tags on a recording (`archive/`)
 
 The Archive (DECISIONS 700-709): one file per recording you tagged, `archive/<id>.tags.json`, where `<id>` is the
@@ -752,7 +778,7 @@ under a temporary name, then renamed; removed when no tag is left; a damaged fil
 | Field | Content |
 |---|---|
 | `version`, `id` | 1, the recording's id (the file's name) |
-| `tags` | `start`, `end` (local ISO time with offset), `label` (a word: `sleep`, `work`, `walk`, `meeting`, `meditation`, `rest`, or typed, up to 40 characters; the preset words in lower case), `made` (when you tagged it) |
+| `tags` | `start`, `end` (local ISO time with offset), `label` (a word: `sleep`, `work`, `walk`, `meeting`, `meditation`, `rest`, or typed, up to 40 characters; the preset words in lower case), `made` (when you tagged it), `truth` (`true` when you ticked "This is what I was doing": the laptop takes the tag as a truth label, DECISIONS 824; left out otherwise) |
 
 A recording is the raw file sets of one folder joined by the recorder's own reconnects or a start under 15 minutes after
 the last data, with the sets one sleep report scored together; the tags' times are clock times, so they still place
@@ -767,6 +793,39 @@ Deleting by hand writes the same record as moving to the laptop: `<stamp>.remove
 `night`, `end_ms`, `files`: `name`, `bytes`, `sha256` or `null`, `phone_name`, `phone_bytes`), then removes the set's
 samples and index; its `.log`, `.header.json` and `.markers.jsonl` stay. "Everything" (the Danger zone) removes every
 file of the recording, its record included, the session files, the report and the tags.
+
+### Walking (`walking/`, `steps/`)
+
+The walking pass (DECISIONS 800-809; the method: [detectors.md](detectors.md#walking-pace-and-estimated-steps-decisions-800-809))
+keeps one file per recording, `walking/<id>.walk.json` (`<id>`: the recording's first file set's stem, as the
+Archive's). The laptop's `scripts/walks.py` writes the same file into `_local/walking/`; the phone's arrive in
+`_local/phone/walking/` with Export data. Written whole under a temporary name, then renamed. It stays when the raw
+signal leaves the phone: it is a result, like a sleep report; a pass that could not run keeps only `format`,
+`version`, `detector`, `recording`, `why` and `key`.
+
+| Field | Content |
+|---|---|
+| `format`, `version`, `detector` | `eeg-tracker-walking`, 1, the detector's version (`walk-v2`); a file of another detector is made again while the raw signal is there |
+| `recording`, `start`, `end` | the id; the joined signal's first sample (a whole second) and the last window's end, local ISO time with offset |
+| `channels`, `sample_rate` | every channel the header names (all of them are read), the rate |
+| `windows`, `read_windows` | 10 s windows every 5 s, and those read (not over 1 s missing, a usable channel) |
+| `phone_counter` | the step counter's last state line in the logs: `on`, `off`, `no permission`, `no sensor`; `null` without one (a recording from before the switch) |
+| `walking_min`, `running_min`, `headband_steps`, `pace`, `confidence` | the headband's totals: minutes of walking and running stretches, its steps, the median pace of their clear windows (steps a minute), `sure`/`likely`/`unsure` |
+| `steps`, `steps_phone`, `steps_headband` | the minutes' steps, and by where they came from |
+| `check` | `paired`, `right`, `headband_steps`, `phone_steps`: this recording's minutes for the check against the phone |
+| `walks` | stretches under 10 minutes apart: `start`, `end`, `walking_min`, `stopped_min`, `steps` (the headband's), `pace`, `stops`, `stretches` (`kind` `walking`/`running`/`stopped`, `start`, `end`, `min`, `steps`, `pace`, `score`, `confidence`) |
+| `minutes` | one row per clock minute with walking or phone steps: `[t, walk_s, run_s, hb_steps, hb_pace, phone, steps, source, walking_s]`: `t` unix seconds of the minute's start; the headband's walking and running seconds, steps and median pace (null without a clear window); the phone's steps (`null`: no counter that minute); the minute's steps and their `source` (`phone` where the phone counted any, else `headband`, else empty); its walking seconds (60 where the phone counted 60 or more) |
+| `key` | what it was made from: the detector and every raw file's, index's and log's name, size and modified time |
+
+**The phone's step counter in the recording's `.log`** (optional, Settings: "Count steps with the phone while
+recording", off until switched on; DECISIONS 800-809): at the start of each file set `phone step counter: on`
+(or `off`, `no permission`, `no sensor`), then once per clock minute while on `phone steps <N>`, N being Android's
+`TYPE_STEP_COUNTER` (steps since the phone started; a restart starts it from 0 again). The steps between two lines at
+most 3 minutes apart go to the minute holding the middle of that time. The switch is `steps/settings.json`
+(`{"on": true, "changed": "<ISO time>"}`; missing or damaged: off); the recorder's engine reads it at each file set's
+start.
+
+The Archive's list keeps a summary of every walk file in `files/cache/walking-index.json` (never exported).
 
 ### Try these (`try-these/`)
 
@@ -793,12 +852,16 @@ original's SHA-256).
 
 ## The phone over Wi-Fi (Share on Wi-Fi)
 
-With **Share on Wi-Fi** on (DECISIONS rows 220-229), the phone app answers on port 8765, to local-network clients
-that send its code (`Authorization: Bearer <code>`, `X-EEG-Token`, or `?token=`):
+With **Share on Wi-Fi** on (DECISIONS rows 220-229, 750-759), the phone app answers on port 8765 to local-network
+clients that send its code in `Authorization: Bearer <code>` (never `?token=` or another header), and to the paired
+laptop's signed requests (`X-Eeg-Time`, `X-Eeg-Nonce`, `X-Eeg-Home`, `X-Eeg-Sign`; each answer carries
+`X-Eeg-Reply`: `docs/phone-link.md` "Signed requests"). A paired phone answers only on its home Wi-Fi or one allowed
+for 12 hours, else 403 `not sharing on this Wi-Fi` (the cable always works). 401 `token missing or wrong`,
+`not paired`, `signature`, `replayed` or `clock`; 429 after ten wrong tries in a minute from one address:
 
 - The laptop recorder's live routes with the same JSON: `GET /state`, `GET /stream` (server-sent events: a hello,
-  batches `{"i", "t", "uv"}`, markers), `POST /marker` (a line `{"t", "i", "text"}` in the run's `.markers.jsonl`;
-  503 while nothing records). `i` counts samples within the run being recorded. `status` is `recording`,
+  batches `{"i", "t", "uv"}`, markers), `POST /marker` (signed by the paired laptop only, else 403: a line
+  `{"t", "i", "text"}` in the run's `.markers.jsonl`; 503 while nothing records). `i` counts samples within the run being recorded. `status` is `recording`,
   `reconnecting`, `checking contact`, `stopping`, `not recording`, or `session` (a meditation, check-in, dream
   catcher or sound session is recording). The field lists both recorders are tested against:
   `app/test/fixtures/share_api.json`. The phone's `/state` has one more key, `session` (DECISIONS 671): null, or
@@ -807,8 +870,8 @@ that send its code (`Authorization: Bearer <code>`, `X-EEG-Token`, or `?token=`)
   "lost" | "off", "on_break": bool, "hint": null | {"reason": "stretch" | "drowsy" | "eyes_closed" | "snooze", "at"},
   "age": <seconds since the headband's last data, by the phone's clock, or null>}` (the laptop tray's ring and
   headband line; `status` alone does not say which session records).
-- `POST /work` with `{"working": true}` or `{"working": false}`, optionally with `"meeting": true|false`: the paired
-  laptop's tray says a work session started or ended there, and whether it is in a meeting (`scripts/laptop_work.py`;
+- `POST /work` (signed by the paired laptop only, else 403) with `{"working": true}` or `{"working": false}`,
+  optionally with `"meeting": true|false`: the paired laptop's tray says a work session started or ended there, and whether it is in a meeting (`scripts/laptop_work.py`;
   automatic recording, DECISIONS 603; meetings 666 and 685: sent at the session's start and end and at each
   meeting's start and end inside it): 202, kept in `auto-start/laptop.json`; a word that only changes the meeting
   asks for no headband check; the phone's work session labels its meeting minutes by it. 400 for any other body; 503
@@ -819,13 +882,22 @@ that send its code (`Authorization: Bearer <code>`, `X-EEG-Token`, or `?token=`)
   being written: `"sha256": null, "growing": true`.
   `?sha=0` lists without working out missing SHA-256 values.
 - `GET /files/<path>`: the file, with HTTP `Range: bytes=<from>-<to>` (206 and `Content-Range`; 416 with
-  `Content-Range: bytes */<size>` when it starts past the end), `X-Modified-Ms`, and HEAD. Read-only.
-- `POST /ack` (DECISIONS 690-699, `docs/phone-link.md` "Acknowledged receipt"): the paired laptop says it holds checked
-  copies: `{"v": 1, "files": [{"path", "sha256"}]}` (a packed `.f32.gz` by its `original`'s SHA-256), header
-  `X-Eeg-Ack` = hex HMAC-SHA256 of `eeg-tracker ack v1|` + the body under the pairing's key; at most 256 KB.
-  200 `{"v": 1, "acked": [paths], "refused": [{"path", "why"}]}`; 403 `not paired` or `wrong proof`; 413 too big.
-  An empty `files` list asks only whether acks are taken. `GET /files` then lists each acked file with
-  `"acked": true` (the phone holds the ack and the file still holds those bytes).
+  `Content-Range: bytes */<size>` when it starts past the end; as shelf_static 1.2.0, a suffix that selects nothing,
+  `bytes=-0`, is ignored, and a number too big for an int is never a 500: a start that big is 416, an end or a
+  suffix that big reaches the end of the file), `X-Modified-Ms`, and HEAD.
+  Read-only. 409 `being re-checked` while the phone waits for the laptop's proof before deleting it (below).
+- `POST /ack` (DECISIONS 690-699, `docs/phone-link.md` "Acknowledged receipt"; signed by the paired laptop only): it
+  says it holds checked copies: `{"v": 1, "files": [{"path", "sha256"}]}` (a packed `.f32.gz` by its `original`'s
+  SHA-256); at most 256 KB. 200 `{"v": 1, "acked": [paths], "refused": [{"path", "why"}]}`; 413 too big. An empty
+  `files` list asks only whether acks are taken. `GET /files` then lists each acked file with `"acked": true`.
+- `GET /recheck` and `POST /recheck` (DECISIONS 756; signed only): the questions before the phone deletes acked raw
+  files, `{"v": 1, "asks": [{"path", "nonce", "ranges": [[start, length], ...], "bytes", "sha256"}]}`, and the
+  laptop's answers, `{"v": 1, "proofs": [{"path", "nonce", "mac"} | {"path", "nonce", "missing": true}]}` with `mac` =
+  hex HMAC-SHA256 under the key of `eeg-tracker recheck v1|<sha256 of path>|<nonce>|<bytes>|<start>+<length>,...|`
+  followed by those bytes of the laptop's own copy (a packed one unpacked) -> `{"v": 1, "proven": [paths], "failed":
+  [{"path", "why"}]}` (`different bytes`, `the laptop does not hold it`, `not on the phone as acked`, `not asked`).
+- `GET /who` (signed only): `{"app": "eeg-tracker", "v": 2, "here": "home" | "here" | "waiting" | "open"}`, how the
+  laptop finds the phone at a new address and learns whether it shares there.
 
 `scripts/pull_phone.py` mirrors these into the layout of `scripts/import_phone.py` (raw nights into
 `_local/recordings/`, the rest into `_local/phone/`). A recording's `<stamp>.header.json` travels with its `.f32` into
@@ -838,13 +910,15 @@ the phone's file ended when it was listed; readers should ignore an incomplete l
 recording that is still running. A packed `.f32.gz` is fetched whole, never in pieces, and lands as the plain `.f32`
 (unless the laptop holds that `.f32`, plain or packed: then nothing is fetched).
 
-**Pairing** (`scripts/phone_link.py`, DECISIONS rows 530-539, `docs/phone-link.md`): the laptop answers on port 8771
-`POST /link/hello` (`{"v": 1, "via": "code" | "key", "nonce"}` -> `{"v": 1, "nonce", "proof", "name"}`) and
-`POST /link/finish` (`{"v": 1, "via", "nonce", "proof", "port", "token"}` -> `{"v": 1, "name"}`, plus `"key"` after
-a pairing by code); 410 for a code that expired or was used, 404 `not paired` for a key it does not have, 403 for a
-wrong proof or a client outside the local network. `_local/phone/link.json` (mode 600): `version` 1, `laptop_key`,
-`paired` and `told` (ISO times), `phone` (`address`, `port`, `token`). On the phone the paired laptop is the field
-`laptop` (`host`, `port`, `key`, `name`, `paired_at_ms`) of the Share on Wi-Fi setting in the app's private settings.
+**Pairing** (`scripts/phone_link.py`, DECISIONS rows 530-539 and 753, `docs/phone-link.md`): while it shows a code
+the laptop answers on port 8771 `POST /link/hello` (`{"v": 2, "nonce"}` -> `{"v": 2, "nonce", "proof", "name"}`) and
+`POST /link/finish` (`{"v": 2, "nonce", "proof", "port"}` -> `{"v": 2, "name", "confirm"}`); both sides derive the
+key, which is never sent. 400 `old app` for a first-version hello, 410 for a code that expired or was used, 403 for
+a wrong proof, a second try or a client outside the local network. `_local/phone/link.json` (mode 600): `version` 2,
+`key`, `paired` (ISO time), `home` (`<router address> <router hardware address>`, or null), `phone` (`address`,
+`port`); no token. A `version` 1 file is not used (re-pair once). On the phone the paired laptop is the field
+`laptop` (`v` 2, `host`, `port`, `key`, `name`, `paired_at_ms`) of the Share on Wi-Fi setting in the app's private
+settings, beside `here_until_ms` and `here_net` (Share here for 12 hours).
 
 ### Raw files that left the phone (`<stamp>.removed.json`, `transfer/`)
 
@@ -868,8 +942,12 @@ and shared like any file:
 The phone's nights list (`recorder/nights.dart`) chains such a set by `end_ms`, lists it as removed, and the sleep
 scoring never scores that night again. Export data's manifest marks such files `removed` (the `why`) besides
 `on_phone: false`. `files/transfer/` holds `acks.json` (the laptop's acks: plain path -> `sha256`, `bytes`,
-`modified_ms`, `acked_ms`, the first time those bytes were acked) and `storage.json` (`keep_days`: category -> days
-after the ack, 0 never, missing 3); it is never exported or shared. On the laptop `_local/phone/acks.jsonl` has one
+`modified_ms`, `acked_ms`, the first time those bytes were acked), `storage.json` (`keep_days`: category -> days
+after the ack, 0 never, missing 3), `recheck.json` (`format` `eeg-tracker-recheck`: the open questions before
+deleting, plain path -> `nonce`, `ranges`, `bytes`, `sha256`, `asked_ms`), `proofs.json` (`format`
+`eeg-tracker-proofs`: plain path -> `nonce`, `ok`, `why`, `at_ms`; a file goes only with `ok` for its current
+question less than 15 minutes old) and `copied.json` (when the laptop last copied and by which way, for the Share
+sheet); it is never exported or shared. On the laptop `_local/phone/acks.jsonl` has one
 line per ack (`acked`, `phone`, `files`) and the catalog's night rows `moved_from_phone`.
 
 ## The catalog of nights (`_local/catalog/`)
@@ -894,6 +972,295 @@ line per ack (`acked`, `phone`, `files`) and the catalog's night rows `moved_fro
 - `<id>.sha256`: the night's files (and its missing ones) in `sha256sum` format, so
   `cd _local && sha256sum -c catalog/<date>.sha256` checks them without the script (a packed file by its own bytes).
 - `catalog.txt`: the printed summary; `history.log`: one entry per run with what changed.
+
+## The data book (`_local/data/`)
+
+`scripts/data_book.py` (DECISIONS 760-769) turns everything eeg_tracker measured on the laptop into six tidy tables, so
+hundreds of days can be read in one place and every number traced to the files it came from. It reads `_local/` and
+writes only into `_local/data/` (or `--out`); nothing reads the book back as input, and it can always be built again
+from `_local/` (`uv run --project analysis python scripts/data_book.py`; `--full` works out everything again). The
+phone link runs it after each copy from the phone (`scripts/after_pull.py`, below). It holds sleep, moods and work
+times: it never leaves the laptop (no pull request, cloud agent or remote test machine).
+
+The tables are tab-separated text (`.tsv`), UTF-8, with a header row; `epochs.tsv.gz` is the same, gzipped (several
+gzip members, which every gzip reader reads as one file). A spreadsheet or `pandas.read_csv(path, sep="\t")` opens them.
+Times are ISO 8601 with their UTC offset, to the second. An empty cell is "not known" or "not measured"; flags are `1`
+or `0`; each column has one unit, named by its suffix: `_min` minutes, `_h` hours, `_pct` percent (0-100), `_ohm`
+ohms, `_s` seconds, `_mah_h` mAh an hour, `_pct_h` percent an hour.
+
+Rules, for every table:
+
+- **Where it came from.** Every derived row names the model or detector that made it and `inputs_sha256`: the SHA-256
+  of its source files' `path sha256` lines, sorted (the same files give the same hash). A raw `.f32` is listed by its
+  plain name with the SHA-256 of its samples, packed (`.f32.xz`, `.f32.gz`) or not, so packing changes nothing.
+  `nights.tsv` lists every source file with its SHA-256 in `sources`.
+- **No mixed versions.** A recording's 30 s rows are worked out again when its files, its sleep report (the stages and
+  the model) or the signal pass's version change; otherwise they are copied from `.cache/`. Each row says its model
+  and `signal_version`; a stage and its probabilities always come from the same report.
+- **Any layout.** Channels are the recording's own, from its `<stamp>.header.json` (above): per-channel columns are
+  named after the channel (`O1_alpha_pct`, `E5_quality`, `Fz_beta_pct`), and `channels` says the layout of each row
+  (`name:site`, or `name:(x,y,z)` for an electrode placed by hand). The same name in two layouts is the same column.
+- **Never edited by hand, nothing deleted.** The tables are rebuilt whole each run, except `labels.tsv`, to which rows
+  are only ever added. Raw data in `_local/` is never touched. A truth label goes into its source (the hand file,
+  below), never into `truth.tsv`.
+
+Also in the folder: `README.md` (what is there, how to rebuild it), `book.json` (`format` `eeg-tracker-data-book`,
+`version` 1, `built`, `seconds`, `local`, `signal_version`, `measures_version`, the `models` the nights name, `rows`
+per table, `recordings` and `worked_out` this run, `labels_added`, `labels_removed`, `truth_from` (truth rows from
+the `hand` file, other `files` and the `archive`), `truth_rejected` (truth rows left out, each `origin:line id: why`),
+`epoch_columns`, `problems`),
+`.cache/` (the 30 s rows per recording, file hashes kept by size and modified time, the logs' numbers per night; safe
+to delete: the next run makes them again, slower) and `.lock` (one run at a time).
+
+### `nights.tsv`
+
+One row per night or nap and per sleep report of it (the laptop's, the phone's); a night recorded but never scored has
+one row without report numbers, and a report whose raw night is not on the laptop a row from the report alone. Nights
+are cut by `night_files.py`'s chain rule and named by the evening date, as the catalog names them (DIY board nights
+`<date>-diy`).
+
+| Column | Meaning |
+|---|---|
+| `night` | the night's id: its evening date (`2026-11-19`), `<date>-diy` for the DIY board |
+| `kind` | `nap` when under 3 hours asleep (or recorded, when unscored), else `night` (DECISIONS 761) |
+| `source` | whose report the row holds: `laptop` (`nights/<date>.report.json`, or a laptop report kept in `analyses/`), `phone` (`phone/nights/`), or for a night with no report the catalog's `laptop`, `phone`, `laptop+phone`, `diy` |
+| `counts` | 1 for the one row per night that counts (days.tsv adds it up): scored before unscored, then the laptop's in `nights/`, a laptop report in `analyses/`, the phone's |
+| `scored` | 1 when the report scored stages (under 5 minutes recorded: 0) |
+| `wearer` | `me` or `someone else` from "Was this you?" in either report; empty when not answered |
+| `start`, `end` | the report's `data_start` and `data_end` (the catalog's first and last data without a report) |
+| `sleep_start`, `sleep_end` | the first sleep period's start, the last one's end |
+| `recorded_min`, `missing_min` | scored minutes and minutes lost to gaps (the report's `total`) |
+| `in_bed_min` | from lights off (a tap or a marker, else the recording's start, never after the first sleep) to the last wake-up, the Trends' rule (DECISIONS 654) |
+| `asleep_min`, `light_min`, `deep_min`, `dream_min` | inside the sleep periods: N1 N2 N3 R, N1 + N2, N3, R |
+| `awake_in_sleep_min`, `wake_ups`, `periods` | minutes scored awake inside the periods; awake stretches of over 5 minutes; sleep periods |
+| `efficiency_pct` | `asleep_min` over `in_bed_min`, at most 100; empty under 30 minutes in bed |
+| `fall_asleep_min`, `lights_off_from` | minutes from lights off to the sleep model's onset, and where lights off came from (`button`, `dream catcher`, `sound`, or `night start` when nobody gave it: then the minutes count from the first sample) |
+| `drift_detector_min`, `drift_agree` | the drift-off detector's onset in minutes from lights off; 1 when it and the model agree within 5 minutes |
+| `rem_share_pct` | dream sleep's share of the time asleep inside the periods (the dream sleep check, above) |
+| `first_rem_min` | minutes from the first period's first asleep epoch to the first R epoch |
+| `rem_third1_min`, `rem_third2_min`, `rem_third3_min` | R minutes in the first, middle and last third of the sleep |
+| `rem_prob_min` | the model's p(R) added up, in minutes (empty when the report has no probabilities) |
+| `eye_pair`, `eye_in_rem_pct`, `eye_rem_epochs_pct`, `eye_rem_per_min`, `eye_other_per_min` | the check's eye movements: the channel pair, their share in R against R's share of the measured epochs, and eye-movement seconds a minute in R and in other sleep |
+| `rem_check_from` | `report`; `stage-only, worked out from the report` for a report from before the check (no eye movements); `stage-only, from the sleep.json` for an older laptop report without `stages` |
+| `good_pct`, `degraded_pct`, `missing_pct` | the whole recording's 30 s epochs by the detectors' quality (`extras.night`) |
+| `asleep_noisy_pct` | degraded and missing minutes over the minutes asleep (over 50 %: the night is left out of days.tsv's sleep, as from the Trends) |
+| `jaw_per_h`, `moves_per_h` | jaw bursts and movements an hour asleep (`extras.asleep`) |
+| `extras_from` | `report`, or `worked out here (...)` when the report has no `extras`: the same night_extras rules over the book's own signal pass (only where O1 O2 T3 T4 at 250 Hz exist) |
+| `contact_at`, `contact_<channel>_ohm` | the contact check at the start (the first of a run that recorded 10 minutes or more), ohms per channel; empty: no contact, or no reading |
+| `band_battery_start_pct`, `band_battery_end_pct` | the headband's first and last believable gauge readings (the stuck rule, DECISIONS 766) |
+| `band_stuck_at` | the gauge values left out as stuck (`0 1 2 100`, and any value unchanged for 60 minutes of streaming) |
+| `band_end_est_pct`, `band_streamed_h` | the charge at the night's last reading by wear time, an estimate: the reading it counts from (a full one: 95 % or more, first or after 30 minutes off the stream; or a believable one over 3 points above the one before: charged in between) minus 11 % an hour streamed since; and those hours |
+| `phone_battery_start_pct`, `phone_battery_end_pct` | the phone's first and last readings |
+| `phone_cost_mah_h`, `phone_cost_pct_h`, `phone_steady_h` | the phone's own cost over its steady hours (DECISIONS 767: not the first hour after unplugging, not hours with the screen on) and how many hours that was |
+| `battery_rule` | the battery rules these numbers were made with (`battery-v1: ...; phone-cost-v1: ...`): a change of rule makes them again |
+| `slept_rating` | "How did you sleep?" (1-5) at the check-in after the night (the catalog's attachment) |
+| `checkin` | that check-in's file |
+| `model`, `second_opinion` | the sleep model and version; the second model (laptop reports) |
+| `agree_5_stage_pct`, `agree_w_nrem_rem_pct` | how often the two models agree, five stages and wake / NREM / REM |
+| `report_file`, `report_sha256` | the report this row holds, from `_local/`, and its SHA-256 |
+| `raw_files` | the night's raw `.f32` files with samples |
+| `inputs_sha256`, `sources` | the hash of the sources (above) and every one as `path=sha256`, space-separated: the report, a `sleep.json` it was read from, the raw files, the logs, the check-in |
+
+### `sessions.tsv`
+
+One row per session file: the phone's work sessions (`phone/work-sessions/`), the laptop's (`laptop/work/`),
+meditation and alpha-theta (`phone/meditations/`, `phone/alpha-theta/`), the nap coach (`phone/naps/`) and sound for
+states (`phone/sound-states/`). A column that does not apply to a kind is empty.
+
+| Column | Meaning |
+|---|---|
+| `session`, `kind` | the file's stamp; `work`, `laptop_work`, `meditation`, `alpha_theta`, `nap_coach`, `sound` |
+| `start`, `end`, `minutes` | the session's span (from `runS` or `endS` where the file counts seconds) |
+| `ended`, `started_by` | how it ended (the file's word: `stopped`, `away`, `time`, ...); the laptop's `manual`, `asked`, `auto` |
+| `wearer` | `me` or `someone else`, when answered |
+| `worn_min` | the phone's minutes with the headband on the head outside breaks |
+| `usable_min`, `drowsy_min` | half minutes read as alert, getting drowsy or drowsy outside breaks and closed eyes (the Trends' work time), and those at getting drowsy or drowsy |
+| `talking_min` | the detectors' muscle seconds (talking, chewing) outside breaks, in minutes |
+| `meeting_min`, `eyes_closed_min`, `active_min` | minutes in meetings; read as closed eyes; the laptop's keyboard-or-mouse (or meeting) minutes, the phone's own count |
+| `settled_min` | meditation and alpha-theta: minutes settled (`drowsy_min` there: the session's drowsy seconds) |
+| `asleep_min` | the nap coach: minutes asleep by its live stages |
+| `breaks`, `break_min`, `hints`, `hints_taken`, `sharp_mean` | breaks and their minutes, break hints and those a break followed, the mean "how sharp" tap (1-5) |
+| `rating`, `plan` | sound for states: the answer (1-5) and the plan's state, bed and beat |
+| `raw` | the stem of the session's raw EEG in `recordings/` (its 30 s rows in epochs.tsv.gz) |
+| `detector_version` | the writer and its version (and the laptop's hint threshold) |
+| `file`, `file_sha256` | the session file and its SHA-256 |
+
+### `days.tsv`
+
+One row per day, 04:00 to 04:00 local time (a night counts for the day you woke from it), with anything in it.
+Sleep comes from the nights.tsv rows that count (not "someone else", not noisy); the check-in, work, sharpness and
+practice numbers are the Trends' (`scripts/day_summary.py`, the same as the `eeg_day` export); a day with a laptop
+report kept by hand in `analyses/` can therefore have sleep the export lacks.
+
+| Column | Meaning |
+|---|---|
+| `day`, `complete` | `YYYY-MM-DD`; 0 for the day still going on |
+| `nights`, `naps` | how many of each counted |
+| `asleep_min`, `nap_asleep_min`, `light_min`, `deep_min`, `dream_min`, `wake_ups` | added up over the day's nights and naps; the naps' share of `asleep_min` |
+| `efficiency_pct` | minutes asleep over minutes in bed, the day's stays of 30 minutes or more together |
+| `fall_asleep_min` | the first night's, when lights off was given |
+| `kss`, `mood`, `tension`, `slept`, `reaction_ms`, `caffeine_cups`, `alcohol_drinks` | the day's first check-in (Karolinska 1-9, 1-5, 1-5, 1-5, tap-test median, the day before) |
+| `iaf_hz`, `alpha_uv2`, `alpha_rise`, `checkin_clean_pct` | the check-in's alpha speed, eyes-closed alpha (µV²), eyes-closed rise (ratio), and its clean signal |
+| `work_sessions`, `work_min`, `work_drowsy_pct`, `work_first_drowsy_min`, `break_hints`, `hints_followed`, `work_breaks`, `work_sharp` | the phone's work sessions by the Trends' rules (no numbers under 30 readable minutes) |
+| `laptop_work_min`, `meeting_min` | the laptop sessions' active minutes (not "not work"); meeting minutes of both |
+| `sharp`, `day_reaction_ms`, `recall`, `practice_min`, `settled_pct` | sharp-hours ratings (mean) and tap tests (median), study recall, meditation and alpha-theta minutes, the settled share |
+| `focus_sessions`, `focus_min`, `focus_rule` | the laptop's ActivityWatch focus sessions that started that day, their active minutes, the rule (`focus-*.jsonl`, `scripts/aw_focus.py`); empty: the laptop had no data that day |
+| `excluded` | what was left out and why (`night 2026-11-20: someone else`, `work: under 30 readable minutes`) |
+| `measures_version`, `inputs_sha256` | the Trends' measure list version; the hash of the day's sources |
+
+### `epochs.tsv.gz`
+
+One row per 30 s of every recording: each night (epochs from its counting report's `data_start`, so row `epoch` k is
+the report's stage k), each work session's raw EEG and each check-in visit (from its first sample). The signal pass is
+`analysis/epoch_signal.py`.
+
+| Column | Meaning |
+|---|---|
+| `recording`, `kind` | the night's id or the file set's stem; `night`, `nap`, `diy`, `work`, `checkin` |
+| `epoch`, `start` | the epoch's number from the start and its clock time |
+| `stage` | `W N1 N2 N3 R`, `gap` (over 5 s of it missing), empty when not scored |
+| `p_W`, `p_N1`, `p_N2`, `p_N3`, `p_R` | the model's probabilities (0-1, from the report's `probs` or an older laptop report's `sleep.json`); empty in reports from before they were kept |
+| `model` | the model that gave the stage |
+| `quality` | `g` good, `d` degraded, `m` missing: the shared detectors' epoch quality where the recording holds O1 O2 T3 T4 at 250 Hz, else the same rule without muscle |
+| `jaw`, `moves` | jaw bursts and movements starting in the epoch (summed over a night's asleep epochs they give the report's counts); `jaw` empty without T3 and T4 |
+| `movement_s`, `muscle_s` | seconds of movement and of muscle in the epoch |
+| `channels` | the layout: `device: name:site ...`, `name:(x,y,z)` for an electrode placed by hand |
+| `signal_version`, `inputs_sha256` | the signal pass's version (`epoch-signal-v1`); the hash of the recording's raw files and report |
+| `<channel>_delta_pct`, `_theta_pct`, `_alpha_pct`, `_beta_pct` | the band mix: 1-4, 4-8, 8-12 and 12-30 Hz as shares of 1-30 Hz after a 0.5 Hz high-pass (Welch, 4 s windows); empty when over 5 s is missing or the channel is flat |
+| `<channel>_quality` | `g` good; `b` bad (over 3 s flat, at the rail, or over 500 µV in a second after a 2 Hz high-pass); `m` missing (over 5 s) |
+
+### `labels.tsv`
+
+Every label in eeg_tracker's own stores, one row each, added once and never changed: the Archive's tags
+(`phone/archive/`), the headband watcher's questions and answers (`phone/auto-start/log.jsonl`), work-session hints and
+"how sharp" taps (`phone/work-sessions/`, `laptop/work/`), markers (`*.markers.jsonl`), the tray's answers
+(`laptop/work/labels.jsonl`) and check-in answers (`*.morning.json`). A label gone from a store that was read (a tag
+taken back) gets a row of kind `removed` whose `replaces` names it. Labels are stretches of clock time, never tied to
+an electrode. utof_tracker's labels are not here (its opt-in feed comes later).
+
+| Column | Meaning |
+|---|---|
+| `id` | `<store>:` and 16 hex of the SHA-1 of the source record: the same record always has the same id |
+| `start`, `end` | the stretch the label is about (a point: `end` = `start`) |
+| `kind`, `value`, `unit` | `activity` (a word: `sleep`, `work`, `not work`, `not night`, `no answer`, a typed tag ...), `marker` (its text), `break hint` (the answer: `onBreak`, `snoozed`, `notNow`, `no answer`), `sharp`, `kss`, `mood`, `tension`, `slept`, `caffeine`, `alcohol` (numbers), `removed`; `unit` `word`, `text`, `1-5`, `1-9`, `cups`, `drinks` |
+| `source` | the store: `archive`, `auto-start`, `tray`, `work-session`, `laptop-work`, `marker`, `check-in` |
+| `how_asked` | `own tap` (the owner started it), `question` (the app asked), `started by itself` (the tray's session nobody asked about), `hint notification` / `hint tray` / `hint on the phone`, `check-in`, `detector`, `app` |
+| `app_guess` | what the app guessed when it asked (the watcher's `guess`, the tray's family and app, the hint's reason) |
+| `detector_version` | the rule that asked or wrote it (`laptop-detect-v1 ask=5 ...`, `threshold 60 min`, the drift-off detector) |
+| `answered` | when the owner answered (the tag made, the answer given) |
+| `origin` | the store's file, from `_local/` |
+| `replaces` | for `removed`: the label taken back |
+| `added` | when the data book first saw it |
+
+### `truth.tsv` (truth labels, DECISIONS 820-829)
+
+What really happened, so the detectors can be scored against it: "awake from 17:50 to 22:07", "walking 19:08-21:14",
+a watch's pulse at 21:30. Rebuilt whole each run by `scripts/truth.py` (standard library) from three sources, which
+keep the history; `truth.tsv` adds three columns and drops the rows that break the schema (listed in `book.json`'s
+`truth_rejected` and in `validation.md`):
+
+- **the hand file** `_local/analyses/truth-labels.tsv`: rows the assistant writes from what the owner says in chat
+  (`owner_chat`), or the owner by hand (`owner_note`); only ever added to;
+- **`_local/truth/*.tsv`**: any other file in the same columns, for example a watch's pulse readings converted to one
+  row each (`measurement` `pulse`, `value` in `bpm`, `source` `device_watch`, `start` = `end` for a reading);
+- **the Archive's tags marked "This is what I was doing"** (`phone/archive/*.tags.json`, `truth` true, above): one row
+  each with `source` `owner_app_tag`, `confidence` `certain`, the typed word in `owner_words`, its id the tag's
+  `labels.tsv` id (`archive:` and 16 hex). The word is matched to a label by its id or one of the vocabulary's `also`
+  words (`walk` is `walking`, `sleep` is `asleep`, `rest` is `resting`, `work` is `working`); another word is left out
+  with a reason (add it to `also`).
+
+Check a file before relying on it: `python3 scripts/truth.py check` (the hand file and `_local/truth/`, or the files
+named; exit 1 on any bad row), `python3 scripts/truth.py vocabulary` prints the words.
+
+| Column | Meaning |
+|---|---|
+| `label_id` | a stable id, unique over every source: letters, digits, `. _ : -`, up to 80 (`tl-20261120-001` in the hand file) |
+| `start`, `end` | ISO 8601 with the UTC offset (`2026-11-20T17:50:21+03:00`); a time without an offset is refused; `end` = `start` for a moment |
+| `recording` | the recording it happened in (a file set's stem or a night's id); empty when it spans several or none. Labels are tied to clock time, never to a channel or a layout |
+| `kind` | the label's kind in the vocabulary: `state`, `activity`, `posture`, `event`, `device`, `rating`, `measurement`, `correction` |
+| `label` | a label id from `scripts/truth_vocabulary.tsv` (below) |
+| `value`, `unit` | a number and the label's own unit: required for `rating` (a whole number on its scale, `kss` `1-9`) and `measurement` (`pulse` `bpm`, `steps` `steps`); allowed for `drinking_coffee` (`cups`) and `drinking_alcohol` (`drinks`); empty for every other label |
+| `source` | who or what said it: `owner_chat`, `owner_note`, `owner_app_tag`, `owner_checkin`, `owner_mark_button`, `owner_tray`, `device_watch`, `device_phone`, `device_laptop`, `observer` |
+| `confidence` | `certain` (the label holds for the whole span, the times to about a minute) or `likely` (rough times, or not every minute fits) |
+| `created` | when the row was made, ISO with offset |
+| `supersedes` | the `label_id` this row corrects (from any source): rows are never edited, a correction is a new row; `withdrawn` (kind `correction`) takes a row back with nothing in its place |
+| `owner_words` | free text: what the owner said or typed, verbatim (`I was sleeping for 1 or 2 hours`) |
+| `context` | free text: whoever recorded the row describes it (`walk outside with bench stops; phone in front right pocket`) |
+| `origin` | `truth.tsv` only: the source file from `_local/` |
+| `active` | `truth.tsv` only: 1 when no later row supersedes it (the one to use), else 0 |
+| `superseded_by` | `truth.tsv` only: the row that supersedes it (two corrections of one row: the first made) |
+
+The hand file and `_local/truth/*.tsv` have the first fourteen columns (any order). Free text is never required and
+never a key; programs filter on the typed columns. **Quoting:** a cell holding a tab, a newline or a double quote is
+wrapped in double quotes and its double quotes doubled (Python's `csv` minimal quoting, which `pandas.read_csv(path,
+sep="\t")` reads by default); a cell that starts with a double quote must be quoted the same way. A row with the wrong
+number of cells, an unknown label, kind, source or confidence, a time without an offset, an end before its start, a
+value outside its scale or in another unit, a repeated id, a `supersedes` naming no known id, or a chain of
+corrections that loops is left out with its reason. To read the active labels:
+
+    t = pandas.read_csv("_local/data/truth.tsv", sep="\t", parse_dates=["start", "end", "created"])
+    t = t[t.active == 1]
+
+**The vocabulary** (`scripts/truth_vocabulary.tsv`, one table: `field` `kind`, `label`, `source` or `confidence`; `id`,
+the label's `kind` and `unit`, `also` (space-separated words that name it), `description`). 36 labels: `state` asleep,
+awake, nap, in_bed, eyes_closed, headache, ill; `activity` walking, running, stairs, cycling, vehicle, eating, talking,
+meeting, focused_work, working, exercise, meditating, sound_session, resting; `event` drinking_coffee, drinking_alcohol;
+`posture` sitting, standing, lying; `device` headband_off, headband_adjusted; `rating` kss, mood, tension,
+sleep_quality, sharp; `measurement` pulse, steps; `correction` withdrawn. A new label is a new row there (never a
+renamed one: ids are stable).
+
+### `validation.tsv` and `validation.md` (the detectors against the truth, DECISIONS 826-828)
+
+`scripts/validate_detectors.py` runs after each data book build and rebuilds both whole from `truth.tsv`,
+`epochs.tsv.gz`, the sleep reports (and the `sleep.json` beside a laptop report) and the phone's work sessions. Each
+detector answers per 30 s epoch yes, no or "not read"; for each truth label it expects yes, no, mostly yes (`mostly`:
+only the share is given) or nothing. An epoch counts for a truth row when its middle lies inside the row's span (a
+moment: the epoch holding it). Only active truth rows count. Where two sources of one detector version cover the same
+minutes (a nap scored twice by hand), the first in the book's counting order is used.
+
+| Detector | Yes means | Read from | Truth: yes / mostly / no |
+|---|---|---|---|
+| `anysleep`, `yasa`, `drift_off` | asleep (N1 N2 N3 R; drift-off: "probably asleep") | every scored report's stages; the laptop's `sleep.json` `yasa`; the report's `drift_off.epochs` | asleep / nap / awake, walking, running, stairs, cycling, exercise, eating, drinking_coffee, drinking_alcohol, talking, meeting, focused_work, working, standing |
+| `talking` | 2 or more jaw bursts in 30 s (the Archive's rule) | `epochs.tsv.gz` `jaw` | talking, eating / meeting / meditating |
+| `moving` | 3 or more seconds of movement in 30 s (the Archive's rule) | `epochs.tsv.gz` `movement_s` | walking, running, stairs, exercise / - / meditating |
+| `no_signal` | quality `m` | `epochs.tsv.gz` `quality` | headband_off / - / - |
+| `eyes_closed` | eyes closed | the phone's work sessions' epochs | eyes_closed / meditating / focused_work, working, meeting, walking, running, cycling |
+
+One row per detector version and truth row it overlaps (`scope` `label`), and per detector version and label over all
+its rows (`scope` `all`):
+
+| Column | Meaning |
+|---|---|
+| `detector`, `detector_version`, `yes_means` | the detector, the version that made the answers (the sleep model, the signal pass and the rule, the work session app), what its yes means |
+| `label`, `truth_expects` | the truth label and what the detector should say during it: `yes`, `no`, `mostly`, or `value` (a measurer) |
+| `scope`, `label_id`, `periods` | `label` (one truth row, its id) or `all` (every row of that label; `periods` of them) |
+| `start`, `end`, `recording`, `truth_source`, `truth_confidence` | the truth row's (for `all`: the first start and the last end) |
+| `sources` | the detector's files the epochs came from |
+| `epochs` | epochs compared (read by the detector) |
+| `truth_min` | the truth span's minutes |
+| `yes_min`, `no_min`, `not_read_min` | the detector's answers inside the span |
+| `agreement_pct` | the share of compared epochs where it said what the truth expects (`mostly`: the share of yes) |
+| `false_pos_min`, `false_neg_min` | minutes of yes where the truth says no, of no where it says yes (0 when the truth cannot make that error; empty for `mostly`) |
+| `values`, `mean_abs_error`, `mean_error`, `unit` | a measurer (a pulse against a watch's): the detector's values averaged, the error detector minus truth, in the label's unit |
+| `validation_version` | the rules above (`validate-v1`) |
+
+`validation.md` says the same in words: a sentence per detector and label, the totals, each truth row, and what could
+not be compared (truth rows no detector covers, detectors with no truth in their time, rows left out of `truth.tsv`).
+
+The extension point (`DETECTORS`, `MEASURERS` in the script): a new detector gives its answers per epoch (`Output`; a
+detector that gives stretches, such as walking, through `from_spans`) and names the truth labels it expects yes and
+no for; a measurer (the pulse detector) gives `(time, value)` pairs and is scored against `measurement` rows of its
+label within `within_s` seconds.
+
+### After each copy from the phone (`scripts/after_pull.py`)
+
+`scripts/phone_link.py --keep` (how the laptop tray keeps the phone linked) starts `scripts/after_pull.py` in the
+background after a copy that brought something new, at most once every 30 minutes, and once a day without one. It runs
+`pack_old.py`, `export_events.py --daily` (the `eeg_day` events utof_tracker imports), the data book and
+`validate_detectors.py` (the detectors against the truth labels, below), one after the other; a failed step does not
+stop the next. Each step's exit status, time and last lines go to `_local/after-pull.log`;
+`_local/after-pull.json` keeps `started`, `finished` and each step's `exit`, `seconds`, `at` and `last` line. One run at
+a time (`_local/after-pull.lock`).
 
 ## The laptop's work sessions (`_local/laptop/work/`)
 
@@ -1021,13 +1388,14 @@ The numbers follow the phone's Trends rules (`app/lib/trends/`), so they match w
 |---|---|
 | `day` | `YYYY-MM-DD` |
 | `schema` | 1 (of this event) |
-| `measures` | the `eeg_measure_set` version the ids below mean (2) |
+| `measures` | the `eeg_measure_set` version the ids below mean (4) |
 | `complete` | `false` while the day is still going on when exported; a later event replaces it |
 | `numbers` | measure id -> value, to 2 decimals; only measures with a value that day (an absent id = no data, never 0) |
 | `counts` | what went into them: `nights`, `checkins`, `work_sessions`, `practice_sessions`, `sharp_ratings`, `sharp_tests` (absent = 0) |
 | `quality` | `night_noisy_share` (time asleep read as noisy or missing, over the day's scored nights, the left-out ones too), `checkin_clean_share` (the first check-in's back channels) |
 | `excluded` | `{what, id, why, ...}` per recording left out (utof-interface.md has the rules): `what` `night`, `check-in`, `work session`, `work`; `why` `someone else`, `unscored: under 5 minutes recorded`, `noisy` (+ `noisy_share`), `noisy: headband numbers left out` (+ `clean_share`), `under 30 readable minutes` (+ `minutes`) |
 | `sources` | `laptop` and/or `phone`: whose files gave numbers |
+| `walking` | only on a day with walking or steps (DECISIONS 800-809; added with measure set 3, schema still 1: an extra field readers may ignore): `minutes` (as `walk_min`), `steps` (as `walk_steps`), `steps_phone`, `steps_headband` (the headband's estimate, also when left out), `headband_counted` (false once the check failed), `source` (`phone`, `headband`, `phone and headband`), `check` (`status` `unchecked`/`passed`/`failed`, `paired`, `right`: over every minute so far), `detector` (the walk files' versions), `walks` (that day's walks, each once: `start`, `end`, `walking_min`, `stopped_min`, `stops`, `pace`, `recording`, `origin` `laptop`/`phone`, `headband_steps`, `steps_phone`, `steps_headband`, `steps` (counted), `stretches` as in the walk file) |
 | `replaces` | the `id` of the earlier event of the same day |
 
 ### `eeg_measure_set`
@@ -1037,8 +1405,8 @@ event that `replaces` the old one. `ts` is when it was first exported.
 
 | Field | Meaning |
 |---|---|
-| `version` | 2 (1 lacked `efficiency`, `regularity` and `slept`; DECISIONS row 658) |
-| `measures` | one per id: `id`, `label`, `unit`, `group` (`sleep morning day work practice`), `about` (`night before`, `morning`, `day before`, `day`), `source` (`headband`, `self-report`, `tap test`, `app`, `laptop`), `evidence_note` (`docs/evidence/<name>.md`), `evidence` (`strong some weak none`, `null` = not a headband measure), `status` (`seen together`), `rule` (how the day's number is made, one line) |
+| `version` | 3 (1 lacked `efficiency`, `regularity` and `slept`, DECISIONS row 658; 2 lacked `walk_min` and `walk_steps`, DECISIONS 800-809) |
+| `measures` | one per id: `id`, `label`, `unit`, `group` (`sleep morning day work practice activity`), `about` (`night before`, `morning`, `day before`, `day`), `source` (`headband`, `self-report`, `tap test`, `app`, `laptop`), `evidence_note` (`docs/evidence/<name>.md`), `evidence` (`strong some weak none`, `null` = not a headband measure), `status` (`seen together`), `rule` (how the day's number is made, one line) |
 | `day_rule`, `status_rule`, `grades` | the rules in words |
 
 ### `break_hint`

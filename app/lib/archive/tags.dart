@@ -4,10 +4,11 @@
 // stamp for a session without raw signal.
 //
 //   {"version": 1, "id": "2026-11-18-231200",
-//    "tags": [{"start": iso, "end": iso, "label": "walk", "made": iso}]}
+//    "tags": [{"start": iso, "end": iso, "label": "walk", "made": iso, "truth": true}]}
 //
 // A tag is a span of clock time with a word ("sleep", "work", "walk", "meeting", "meditation" or anything typed); times
-// are local with their UTC offset. Written whole under a temporary name, then renamed; a file with no tags left is
+// are local with their UTC offset. `truth` (written only when true): you ticked "This is what I was doing", so the
+// laptop takes the tag as a truth label to check the detectors against (DECISIONS 824); a file without it reads as before. Written whole under a temporary name, then renamed; a file with no tags left is
 // removed. A missing or damaged file reads as no tags, and a damaged file is never overwritten.
 import 'dart:convert';
 import 'dart:io';
@@ -29,7 +30,7 @@ Directory archiveDirFor(Directory filesDir) => Directory('${filesDir.path}/$arch
 
 /// A span you tagged by hand.
 class ManualTag {
-  ManualTag({required this.start, required this.end, required String label, DateTime? made})
+  ManualTag({required this.start, required this.end, required String label, DateTime? made, this.truth = false})
     : label = cleanTag(label),
       made = made ?? DateTime.now();
 
@@ -37,12 +38,26 @@ class ManualTag {
   final String label;
   final DateTime made;
 
+  /// "This is what I was doing": the laptop counts the tag as a truth label (DECISIONS 824).
+  final bool truth;
+
   Duration get length => end.difference(start);
 
-  ManualTag copyWith({DateTime? start, DateTime? end, String? label}) =>
-      ManualTag(start: start ?? this.start, end: end ?? this.end, label: label ?? this.label, made: made);
+  ManualTag copyWith({DateTime? start, DateTime? end, String? label, bool? truth}) => ManualTag(
+    start: start ?? this.start,
+    end: end ?? this.end,
+    label: label ?? this.label,
+    made: made,
+    truth: truth ?? this.truth,
+  );
 
-  Map<String, Object?> toJson() => {'start': isoLocal(start), 'end': isoLocal(end), 'label': label, 'made': isoLocal(made)};
+  Map<String, Object?> toJson() => {
+    'start': isoLocal(start),
+    'end': isoLocal(end),
+    'label': label,
+    'made': isoLocal(made),
+    if (truth) 'truth': true,
+  };
 
   /// Null for anything that is not a tag this version can read (no times, end before start, no word).
   static ManualTag? fromJson(Object? j) {
@@ -50,15 +65,26 @@ class ManualTag {
     final s = DateTime.tryParse('${j['start']}'), e = DateTime.tryParse('${j['end']}'), l = j['label'];
     if (s == null || e == null || l is! String || e.isBefore(s) || cleanTag(l).isEmpty) return null;
     final made = DateTime.tryParse('${j['made']}');
-    return ManualTag(start: s.toLocal(), end: e.toLocal(), label: l, made: made?.toLocal() ?? s.toLocal());
+    return ManualTag(
+      start: s.toLocal(),
+      end: e.toLocal(),
+      label: l,
+      made: made?.toLocal() ?? s.toLocal(),
+      truth: j['truth'] == true,
+    );
   }
 
   @override
   bool operator ==(Object other) =>
-      other is ManualTag && other.start == start && other.end == end && other.label == label && other.made == made;
+      other is ManualTag &&
+      other.start == start &&
+      other.end == end &&
+      other.label == label &&
+      other.made == made &&
+      other.truth == truth;
 
   @override
-  int get hashCode => Object.hash(start, end, label, made);
+  int get hashCode => Object.hash(start, end, label, made, truth);
 }
 
 /// A tag's word as kept: trimmed, inner spaces single, lower case for the preset words, at most [maxTagLength].

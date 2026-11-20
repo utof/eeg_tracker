@@ -1,8 +1,8 @@
 // The laptop's checked copies of the phone's files (DECISIONS 690-699): what the paired laptop said it holds, byte for
 // byte.
 //
-// After the laptop has copied a file and hashed its copy on its own disk again, it tells the phone so (`POST /ack`,
-// share/server.dart; scripts/pull_phone.py): the file's path and the SHA-256 of what it holds (the plain `.f32`'s for
+// After the laptop has copied a file and hashed its copy on its own disk again, it tells the phone so (`POST /ack` in
+// a request signed with the pairing's key, share/server.dart; scripts/pull_phone.py): the file's path and the SHA-256 of what it holds (the plain `.f32`'s for
 // a recording the phone packed after a day). The phone keeps each one that matches its own file in
 // `files/transfer/acks.json`, under the plain name (`recordings/<stamp>.f32`, `recordings/<stamp>.idx`,
 // `nights/<date>.report.json`), with the size and modified time the file had then. A later look trusts an ack only while the file still holds those bytes:
@@ -15,8 +15,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:crypto/crypto.dart';
-
 import '../export/store.dart' show isExported;
 import 'packed.dart' show isPackedPath, packedInfo, packedSuffix;
 
@@ -27,19 +25,12 @@ const List<String> movableFolders = ['recordings', 'recordings-diy', 'mornings']
 const String transferFolder = 'transfer';
 
 const String acksFormat = 'eeg-tracker-acks';
-const String _ackTag = 'eeg-tracker ack v1';
 
 /// A file changed this recently is still being written: never acked (the share list's own rule).
 const Duration ackSettled = Duration(seconds: 20);
 
 final RegExp _sha = RegExp(r'^[0-9a-f]{64}$');
 final RegExp _rawName = RegExp(r'^\d{4}-\d{2}-\d{2}-\d{6}\.(f32|f32\.gz|idx)$');
-
-/// The proof the paired laptop sends with `POST /ack`: HMAC-SHA256 of `eeg-tracker ack v1|` and the request's body,
-/// keyed with the key of the pairing (link.dart), in hex. scripts/pull_phone.py computes the same
-/// (app/test/fixtures/phone_ack.json).
-String ackProof(String key, List<int> body) =>
-    Hmac(sha256, utf8.encode(key)).convert([...utf8.encode('$_ackTag|'), ...body]).toString();
 
 bool isSha256(Object? v) => v is String && _sha.hasMatch(v);
 
@@ -136,6 +127,21 @@ class AckStore {
       }),
       flush: true,
     );
+    tmp.renameSync(file.path);
+  }
+}
+
+extension AckRemove on AckStore {
+  /// Forgets the acks of [paths] (plain paths): the laptop could not prove it still holds them (recheck.dart).
+  void remove(Iterable<String> paths) {
+    final gone = paths.toSet();
+    final all = load();
+    if (!all.keys.any(gone.contains)) return;
+    all.removeWhere((k, _) => gone.contains(k));
+    file.parent.createSync(recursive: true);
+    final tmp = File('${file.path}.$pid.${identityHashCode(this)}.tmp');
+    final keys = all.keys.toList()..sort();
+    tmp.writeAsStringSync(jsonEncode({'format': acksFormat, 'version': 1, 'files': {for (final k in keys) k: all[k]!.toJson()}}), flush: true);
     tmp.renameSync(file.path);
   }
 }

@@ -7,6 +7,7 @@ import '../archive/bands.dart';
 import '../archive/delete.dart';
 import '../archive/items.dart';
 import '../archive/tags.dart';
+import '../logs/own_text.dart';
 import 'archive_view.dart' show sizeWords, hm, lengthText, spanText;
 import 'theme.dart';
 
@@ -14,6 +15,9 @@ import 'theme.dart';
 enum BandAction { signal, tag, edit }
 
 TextStyle? _muted(BuildContext c) => Theme.of(c).textTheme.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4);
+
+/// A band's word: your own tag's word is yours, so the usage log never reads it (own_text.dart).
+Widget _word(Band b, Text word) => b.tag == null ? word : OwnText(child: word);
 
 /// A band: its word, its span, where it comes from; Show the signal, Tag this span (or Change, for your own tag).
 Future<BandAction?> showBandSheet(BuildContext context, Band b, {required bool hasSignal}) =>
@@ -32,7 +36,7 @@ Future<BandAction?> showBandSheet(BuildContext context, Band b, {required bool h
               children: [
                 Text(b.lane.word, style: text.bodyMedium?.copyWith(color: Night.inkMuted)),
                 const SizedBox(height: 4),
-                Text(b.label, style: text.titleLarge),
+                _word(b, Text(b.label, style: text.titleLarge)),
                 const SizedBox(height: 8),
                 Text(
                   '${spanText(b.start, b.end)} · ${lengthText(b.length)}',
@@ -98,7 +102,12 @@ Future<Band?> showLaneSheet(BuildContext context, Lane lane, List<Band> bands) =
               ListTile(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 24),
                 title: Text(spanText(b.start, b.end), style: text.titleMedium?.copyWith(fontFeatures: tabular)),
-                subtitle: Text('${b.label} · ${lengthText(b.length)}', style: text.bodyMedium?.copyWith(color: Night.inkMuted)),
+                subtitle: Row(
+                  children: [
+                    Flexible(child: _word(b, Text(b.label, style: text.bodyMedium?.copyWith(color: Night.inkMuted)))),
+                    Text(' · ${lengthText(b.length)}', style: text.bodyMedium?.copyWith(color: Night.inkMuted)),
+                  ],
+                ),
                 trailing: const Icon(Icons.chevron_right, color: Night.inkMuted),
                 onTap: () => Navigator.pop(c, b),
               ),
@@ -157,6 +166,7 @@ class _TagEditor extends StatefulWidget {
 class _TagEditorState extends State<_TagEditor> {
   late String _word = widget.tag?.label ?? widget.label ?? '';
   late DateTime _start = widget.start, _end = widget.end;
+  late bool _truth = widget.tag?.truth ?? false;
   late final TextEditingController _typed = TextEditingController(
     text: presetTags.contains(_word) ? '' : _word,
   );
@@ -239,11 +249,23 @@ class _TagEditorState extends State<_TagEditor> {
                 padding: const EdgeInsets.only(top: 8),
                 child: Text('The end comes before the start.', style: text.bodyMedium?.copyWith(color: Night.caution)),
               ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 8),
+            CheckboxListTile(
+              value: _truth,
+              onChanged: (v) => setState(() => _truth = v ?? false),
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: const Text('This is what I was doing'),
+              subtitle: Text(
+                'Sure of the word and the times? The laptop then checks its detectors against it.',
+                style: _muted(context),
+              ),
+            ),
+            const SizedBox(height: 12),
             FilledButton(
               onPressed: ok
                   ? () => Navigator.pop(context, (
-                      save: ManualTag(start: _start, end: _end, label: word, made: widget.tag?.made),
+                      save: ManualTag(start: _start, end: _end, label: word, made: widget.tag?.made, truth: _truth),
                       remove: false,
                     ))
                   : null,

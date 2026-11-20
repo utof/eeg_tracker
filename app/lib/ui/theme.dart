@@ -17,6 +17,7 @@ abstract final class Night {
   static const onLiveFill = Color(0xFFE8F3EC); // 5.6:1 on liveFill
   static const caution = Color(0xFFE0AE5C); // amber
   static const problem = Color(0xFFE57A63); // port red, dimmed
+  static const pulse = Color(0xFFDB5C4D); // the pulse line (DECISIONS 815): a deeper red, only ever beside the word Pulse
 }
 
 const List<FontFeature> tabular = [FontFeature.tabularFigures()];

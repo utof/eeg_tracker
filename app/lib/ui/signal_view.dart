@@ -5,6 +5,7 @@
 // 5 minutes, the counters (samples, times, missing packets) and the latest values. Any number of channels.
 import 'package:flutter/material.dart';
 
+import '../logs/own_text.dart';
 import '../signal/head3d.dart';
 import '../signal/layout.dart';
 import '../signal/live_signal.dart';
@@ -503,6 +504,10 @@ class _SignalViewState extends State<SignalView> {
     ];
   }
 
+  /// A site's name is a 10-10 name (the same word for everyone) or the owner's own: a helmet's site given on the
+  /// Positions page, a DIY board's channel name. The usage log reads the first kind and never the second.
+  Widget _siteName(Site s, Text name) => !s.custom && standardPosition(s.name) != null ? name : OwnText(child: name);
+
   Widget _siteRow(BuildContext context, Site s, SiteMark? mark, bool picked) {
     final text = Theme.of(context).textTheme;
     final muted = text.bodyMedium?.copyWith(color: Night.inkMuted);
@@ -546,11 +551,14 @@ class _SignalViewState extends State<SignalView> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        s.name,
-                        style: text.titleMedium?.copyWith(
-                          color: picked ? Night.ink : null,
-                          fontWeight: picked ? FontWeight.w600 : null,
+                      _siteName(
+                        s,
+                        Text(
+                          s.name,
+                          style: text.titleMedium?.copyWith(
+                            color: picked ? Night.ink : null,
+                            fontWeight: picked ? FontWeight.w600 : null,
+                          ),
                         ),
                       ),
                       if (where.isNotEmpty) Text(where, style: muted),

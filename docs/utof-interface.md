@@ -28,7 +28,7 @@ Nothing leaves the laptop.
 
 **`eeg_day` is the interface for analysis.** The night and check-in events are the detail behind it.
 
-### The numbers (`eeg_measure_set` version 2)
+### The numbers (`eeg_measure_set` version 4)
 
 A night counts for the day you **woke** from it ("night before" below); a check-in's number is the first of the day
 that has it; the rest are the day's own. Grades are the evidence notes' (`docs/evidence/`): how well the evidence
@@ -41,6 +41,7 @@ laptop count; the note then grades the feature, not a measurement).
 | sleep | `deep`, `light` (min) | night before | weak (the five-stage detail) |
 | sleep | `efficiency` (%), `regularity` (min) | night before | weak (see below) |
 | sleep | `jaw` (bursts an hour asleep) | night before | strong (a trend, not a bruxism test) |
+| sleep | `pulse` (a minute, while asleep; version 4) | night before | weak (an experiment, not yet checked against a watch) |
 | morning | `iaf` (Hz), `alpha` (µV²), `rise` (ratio) | morning | strong |
 | morning | `kss` (1-9), `mood` (1-5), `tension` (1-5), `slept` (1-5), `caffeine`, `alcohol` (day before) | morning | null: your ratings |
 | morning | `reaction` (ms) | morning | null: tap test |
@@ -49,12 +50,24 @@ laptop count; the note then grades the feature, not a measurement).
 | work | `worktime` (min), `workdrowsy` (%), `workfirst` (min) | day | some |
 | work | `workhints`, `workfollowed`, `workbreaks` (counts), `worksharp` (1-5) | day | null: app counts, taps |
 | practice | `practice` (min), `settled` (%) | day | weak |
+| activity | `walk_min` (min), `walk_steps` (count) | day | weak (from the headband's step rhythm; the phone's step counter where it counted) |
+
+**Walking** (version 3, DECISIONS 800-809): `walk_min` is the minutes of steady walking or running the headband's
+step rhythm showed while it recorded, plus minutes the phone's own step counter counted 60 steps or more; `walk_steps`
+is the phone's count where it counted, else the headband's estimate (pace x time), and only the phone's once the
+headband's pace failed the check against the phone. Only days with walking have them; minutes inside a night marked
+"someone else" are left out. The day's `eeg_day.walking` holds the detail for a chart or a day view: the steps by
+source, the check, and each walk with its stretches (walking, running, stopped) and paces
+([data-format.md](data-format.md#eeg_day)). These are the "steps (estimated)" utof_tracker can show beside its own
+Health Connect steps; one minute is never counted twice inside eeg_tracker, but utof's phone steps of the same time are
+a separate source (utof decides which to show).
 
 `efficiency` is the minutes asleep over the minutes from Lights off (a tap or a marker) to the last wake-up, or from the
 recording's start on a night with no Lights off, at most 100. `regularity` is how far the last 7 days' first-sleep times
 and last wake-up times moved (each a circular standard deviation, the two averaged, in minutes; 5 nights of the 7
 needed; smaller is steadier). `slept` is the optional "How did you sleep?" tap of the phone's check-in, 1 very badly to
-5 very well. DECISIONS rows 650-659.
+5 very well. DECISIONS rows 650-659. `pulse` is the median of the pulse readings (the phone's or the laptop's pulse
+files, docs/data-format.md "Pulse") in the asleep 30 s epochs of the day's nights, from 10 readings (DECISIONS 817).
 
 ### Status: seen together, not tested
 
@@ -93,6 +106,9 @@ reader can be stricter.
 
 Add a measure: a new `eeg_measure_set` version and a new row in the tables above; existing ids never change meaning.
 Version 2 (2026-11-20) added `efficiency`, `regularity` and `slept`; since every `eeg_day` names its set's version, the
-first run after that wrote a replacing event for each past day (`replaces` = the earlier one) beside the new set.
+first run after that wrote a replacing event for each past day (`replaces` = the earlier one) beside the new set. Version 3
+(2026-11-20) added `walk_min` and `walk_steps`, and `eeg_day` gained the optional `walking` field (schema still 1:
+nothing existing changed meaning; a reader that does not know the field ignores it). Version 4 (2026-11-21) added
+`pulse`. The first run after a new version again replaces each past day once.
 Change a field of `eeg_day`: raise `schema` (now 1) and say how readers of 1 should cope. utof_tracker's importer skips
 events of a schema it does not know and says so.

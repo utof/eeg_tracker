@@ -270,6 +270,30 @@ void main() {
       expect([for (final t in store.tags('y')) t.label], ['rest']);
     });
 
+    test('"This is what I was doing" is kept as `truth`, written only when ticked; older files read as before', () {
+      final store = TagStore(files);
+      final walk = ManualTag(start: at(9, 0), end: at(9, 40), label: 'walk', made: at(10, 0), truth: true);
+      final rest = ManualTag(start: at(11, 0), end: at(11, 30), label: 'rest', made: at(12, 0));
+      expect(store.saveTags('t', [walk, rest]), isTrue);
+      final j = jsonDecode(store.fileFor('t').readAsStringSync()) as Map<String, Object?>;
+      final written = (j['tags']! as List).cast<Map<String, Object?>>();
+      expect(written.first['truth'], isTrue);
+      expect(written.last.containsKey('truth'), isFalse);
+      expect(store.tags('t'), [walk, rest]);
+      expect(walk == walk.copyWith(truth: false), isFalse);
+      expect(store.replace('t', walk, walk.copyWith(truth: false)), isTrue);
+      expect(store.tags('t').first.truth, isFalse);
+      store.fileFor('old').writeAsStringSync(jsonEncode({
+        'version': 1,
+        'id': 'old',
+        'tags': [
+          {'start': isoLocal(at(3, 0)), 'end': isoLocal(at(4, 0)), 'label': 'sleep', 'made': isoLocal(at(5, 0))},
+          {'start': isoLocal(at(5, 0)), 'end': isoLocal(at(6, 0)), 'label': 'walk', 'truth': 'yes'},
+        ],
+      }));
+      expect([for (final t in store.tags('old')) t.truth], [false, false]);
+    });
+
     test('the list shows a recording\'s tags', () {
       final s = writeSet(rec, at(8, 0), seconds: 10);
       TagStore(files).add(s, ManualTag(start: at(8, 0), end: at(8, 1), label: 'walk'));

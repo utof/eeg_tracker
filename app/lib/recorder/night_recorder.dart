@@ -43,6 +43,7 @@ import 'headband.dart';
 import 'live_drift.dart';
 import 'nights.dart';
 import 'packets.dart';
+import 'phone_steps.dart';
 import 'status.dart';
 import 'watch_guard.dart';
 
@@ -145,6 +146,7 @@ class NightRecorder {
     required this.onStatus,
     required this.onStuck,
     this.probe,
+    StepProbe? stepProbe,
     this.timing = const RecorderTiming(),
     this.watch = LiveDrift.new,
     this.scorer,
@@ -155,7 +157,8 @@ class NightRecorder {
     this.startNotes = const [],
     this.bandBattery,
     DateTime Function()? clock,
-  }) : _now = clock ?? DateTime.now;
+  }) : _now = clock ?? DateTime.now,
+       _steps = stepProbe == null ? null : StepLog(stepProbe, clock ?? DateTime.now);
 
   /// The headband's battery track shared with the screens (headband/battery_estimate.dart): every gauge reading goes
   /// in. Null: none kept.
@@ -173,6 +176,10 @@ class NightRecorder {
   /// Called after the data is saved when an SDK call is stuck: restart the app process.
   final Future<void> Function(String reason) onStuck;
   final PhoneProbe? probe;
+
+  /// The phone's step counter, once a minute into the `.log` (lib/recorder/phone_steps.dart); null: none,
+  /// nothing logged.
+  final StepLog? _steps;
   final RecorderTiming timing;
 
   /// Makes the live drift-off detector; null: none.
@@ -309,6 +316,7 @@ class NightRecorder {
       await _loop();
       if (_stopping && _endNight) await _logNightEnd();
     } finally {
+      await _steps?.stop();
       _set(_status.copyWith(phase: Phase.idle));
       if (!_done.isCompleted) _done.complete();
     }
@@ -632,6 +640,7 @@ class NightRecorder {
       }
       await _logPhone(w);
       await _logBattery(w);
+      await _steps?.setup(w.log);
       _set(
         _status.copyWith(
           phase: Phase.connecting,
@@ -1305,6 +1314,7 @@ class NightRecorder {
       if (_now().millisecondsSinceEpoch - _batteryLoggedMs >= timing.phoneLogEvery.inMilliseconds) {
         await _logBattery(w);
       }
+      await _steps?.tick(w.log);
       if (_now().millisecondsSinceEpoch - _packetsLoggedMs >= timing.packetLogEvery.inMilliseconds) {
         _logPackets(w);
       }

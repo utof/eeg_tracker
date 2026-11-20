@@ -244,7 +244,7 @@ class _MorningScreenState extends State<MorningScreen> {
   }
 
   Future<void> _trends() async {
-    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TrendsScreen(recordingsDir: _recordings)));
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TrendsScreen(recordingsDir: _recordings, walkPending: true)));
   }
 
   void _say(String message) {

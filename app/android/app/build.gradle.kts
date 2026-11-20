@@ -6,7 +6,9 @@ plugins {
 
 android {
     namespace = "io.github.utof.eeg_tracker"
-    compileSdk = flutter.compileSdkVersion
+    // 37: permission_handler_android 14 (Android 17's local-network permission) refuses to build against less. This
+    // only changes which Android APIs the code may call; the target (runtime behaviour) stays flutter.targetSdkVersion.
+    compileSdk = maxOf(flutter.compileSdkVersion, 37)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

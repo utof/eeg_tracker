@@ -1,12 +1,13 @@
-// Pairing with a laptop by one scan (lib/share/link.dart, DECISIONS rows 530-539): the pair link, the proofs (the
-// same numbers as scripts/phone_link.py, app/test/fixtures/phone_link.json), the handshake against a fake laptop
-// (the token leaves only after the laptop proved the code), the remembered laptop in the setting, the announcer in
-// the real share isolate, and ShareControl.pair.
+// Pairing with a laptop by one scan (lib/share/link.dart, DECISIONS rows 530-539, 753): the pair link, the proofs
+// and the key both sides work out (the same numbers as scripts/phone_auth.py, app/test/fixtures/phone_link.json),
+// the pairing against a fake laptop (nothing secret is sent: not the code, the key or the token), the remembered
+// laptop in the setting (an old pairing is not used), and ShareControl.pair.
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math';
 
+import 'package:eeg_tracker/share/auth.dart';
 import 'package:eeg_tracker/share/control.dart';
 import 'package:eeg_tracker/share/isolate.dart';
 import 'package:eeg_tracker/share/link.dart';
@@ -16,19 +17,22 @@ import 'package:flutter_test/flutter_test.dart';
 import 'share_control_test.dart' show fakeServer;
 
 const code = 'AbCdEfGhIjKlMnOpQrStUv';
-const key = 'a-key-of-forty-three-characters-0123456789';
+const key = '7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544';
 
 /// The laptop's side as scripts/phone_link.py answers it, on loopback. [proveWith] stands for a laptop that holds
-/// another code.
+/// another code; [oldScripts] for scripts that speak the first version.
 class FakeLaptop {
   FakeLaptop._(this._server);
   final HttpServer _server;
   String? code;
-  String? key;
   String? proveWith;
+  bool confirmWrong = false;
+  bool oldScripts = false;
   int status = 200;
+  final List<String> wire = []; // every body both ways, as it crossed
   final List<Map<String, Object?>> finishes = [];
-  final Map<String, (String, String)> _nonces = {}; // laptop nonce -> (phone nonce, via)
+  final Map<String, String> _nonces = {}; // laptop nonce -> phone nonce
+  String? key; // the key it worked out
   int hellos = 0;
 
   int get port => _server.port;
@@ -44,35 +48,42 @@ class FakeLaptop {
     // like Python's http.server: the body is read by its Content-Length, never chunked
     expect(r.headers.chunkedTransferEncoding, isFalse);
     expect(r.headers.contentLength, greaterThan(0));
-    final body = jsonDecode(await utf8.decodeStream(r)) as Map;
-    final via = body['via'] as String;
-    final secret = via == 'code' ? code : key;
+    final raw = await utf8.decodeStream(r);
+    wire.add(raw);
+    final body = jsonDecode(raw) as Map;
     Object answer;
     var st = status;
-    if (st != 200) {
-      answer = {'error': st == 410 ? 'expired' : (st == 404 ? 'not paired' : 'no')};
-    } else if (secret == null) {
-      st = via == 'code' ? 410 : 404;
-      answer = {'error': via == 'code' ? 'expired' : 'not paired'};
+    final c = code;
+    if (oldScripts) {
+      st = 400;
+      answer = {'error': 'bad request'};
+    } else if (st != 200) {
+      answer = {'error': st == 410 ? 'expired' : 'no'};
+    } else if (c == null) {
+      st = 410;
+      answer = {'error': 'expired'};
     } else if (r.uri.path == '/link/hello') {
       hellos++;
       final mine = newNonce();
-      _nonces[mine] = (body['nonce'] as String, via);
-      answer = {'v': 1, 'nonce': mine, 'proof': linkProof(proveWith ?? secret, 'laptop', via, body['nonce'] as String, mine), 'name': 'my-laptop'};
+      _nonces[mine] = body['nonce'] as String;
+      answer = {'v': 2, 'nonce': mine, 'proof': linkProof(proveWith ?? c, 'laptop', body['nonce'] as String, mine), 'name': 'my-laptop'};
     } else {
-      final n = _nonces.remove(body['nonce']);
-      if (n == null || body['proof'] != linkProof(secret, 'phone', via, body['nonce'] as String, n.$1)) {
+      final theirs = _nonces.remove(body['nonce']);
+      if (theirs == null || body['proof'] != linkProof(c, 'phone', body['nonce'] as String, theirs)) {
         st = 403;
         answer = {'error': 'wrong proof'};
       } else {
         finishes.add(body.cast<String, Object?>());
-        answer = {'v': 1, 'name': 'my-laptop', if (via == 'code') 'key': key ?? 'k' * 43};
-        if (via == 'code') code = null; // used
+        final k = key = deriveKey(c, theirs, body['nonce'] as String);
+        answer = {'v': 2, 'name': 'my-laptop', 'confirm': confirmWrong ? '0' * 64 : confirmProof(k, theirs, body['nonce'] as String)};
+        code = null; // used
       }
     }
+    final out = jsonEncode(answer);
+    wire.add(out);
     r.response.statusCode = st;
     r.response.headers.contentType = ContentType.json;
-    r.response.write(jsonEncode(answer));
+    r.response.write(out);
     await r.response.close();
   }
 
@@ -119,11 +130,13 @@ void main() {
       }
     });
 
-    test('the proofs are the laptop script\'s (shared vectors)', () {
+    test('the proofs and the key are the laptop script\'s (shared vectors)', () {
       for (final c in (fixture['proofs'] as List).cast<Map<String, Object?>>()) {
-        final s = c['secret'] as String, via = c['via'] as String, p = c['phone_nonce'] as String, l = c['laptop_nonce'] as String;
-        expect(linkProof(s, 'laptop', via, p, l), c['laptop_proof']);
-        expect(linkProof(s, 'phone', via, l, p), c['phone_proof']);
+        final s = c['code'] as String, p = c['phone_nonce'] as String, l = c['laptop_nonce'] as String;
+        expect(linkProof(s, 'laptop', p, l), c['laptop_proof']);
+        expect(linkProof(s, 'phone', l, p), c['phone_proof']);
+        expect(deriveKey(s, p, l), c['key']);
+        expect(confirmProof(c['key'] as String, p, l), c['confirm']);
       }
       expect(newNonce(), matches(RegExp(r'^[A-Za-z0-9_-]{22}$')));
     });
@@ -142,131 +155,91 @@ void main() {
       expect(c.withLaptop(null).laptop, isNull);
       expect(ShareConfig.decode(const ShareConfig().encode()).laptop, isNull);
       for (final bad in [
-        {'host': '8.8.8.8', 'port': 8771, 'key': key},
-        {'host': '192.168.1.10', 'port': 8771, 'key': 'short'},
-        {'host': '192.168.1.10', 'port': '8771', 'key': key},
+        {'v': 2, 'host': '8.8.8.8', 'port': 8771, 'key': key},
+        {'v': 2, 'host': '192.168.1.10', 'port': 8771, 'key': 'short'},
+        {'v': 2, 'host': '192.168.1.10', 'port': '8771', 'key': key},
+        {'v': 2, 'host': '192.168.1.10', 'port': 8771, 'key': 'K' * 64},
         'not a map',
       ]) {
         expect(PairedLaptop.fromJson(bad), isNull);
       }
     });
 
-    test('the share isolate gets it', () {
+    test('a pairing made the first way (its key crossed the Wi-Fi) is not used: one new scan pairs again', () {
+      final old = {'host': '192.168.1.10', 'port': 8771, 'key': 'a-key-of-forty-three-characters-0123456789', 'name': 'my-laptop'};
+      expect(PairedLaptop.fromJson(old), isNull);
+      final c = ShareConfig.fromJson({'on': true, 'token': 'abcdefghjkmn', 'off_at_ms': 5, 'laptop': old});
+      expect((c.laptop, c.oldLaptop, c.paired), (null, 'my-laptop', false));
+      expect(c.activeAt(10), isFalse); // without a pairing sharing has its old end time: long past
+      expect(ShareConfig.decode(c.encode()).oldLaptop, 'my-laptop'); // said until the new scan
+      expect(c.withLaptop(laptop).oldLaptop, isNull);
+      expect(c.withLaptop(null).oldLaptop, isNull); // Forget too
+    });
+
+    test('the share isolate gets it, and "Share here"', () {
       final rp = ReceivePort();
-      final c = const ShareConfig(on: true, token: 'abcdefghjkmn', offAtMs: 9).withLaptop(laptop);
-      expect(shareIsolateArgs(rp.sendPort, '/files', c)[7], laptop.toJson());
+      final c = const ShareConfig(on: true, token: 'abcdefghjkmn', offAtMs: 9).withLaptop(laptop).sharedHere(100, '10.0.0.0/24');
+      final args = shareIsolateArgs(rp.sendPort, '/files', c);
+      expect(args[7], laptop.toJson());
+      expect((args[9], args[10]), (100 + shareHereFor.inMilliseconds, '10.0.0.0/24'));
       expect(shareIsolateArgs(rp.sendPort, '/files', const ShareConfig())[7], isNull);
+      expect(c.notHere().hereNet, isNull);
+      expect(c.sharedHere(5, '').hereUntilMs, 0); // no Wi-Fi: nothing to allow
+      expect(c.switchedOff().hereUntilMs, 0);
       rp.close();
     });
   });
 
-  group('the handshake', () {
+  group('the pairing', () {
     late FakeLaptop laptop;
     setUp(() async => laptop = await FakeLaptop.start());
     tearDown(() => laptop.close());
 
-    Future<LinkAnswer> pair({String secret = code, String via = 'code'}) => LinkClient(timeout: const Duration(seconds: 2))
-        .handshake(host: '127.0.0.1', port: laptop.port, via: via, secret: secret, sharePort: 8765, token: 'abcdefghjkmn');
+    Future<LinkAnswer> pair({String c = code}) =>
+        LinkClient(timeout: const Duration(seconds: 2)).pair(host: '127.0.0.1', port: laptop.port, code: c, sharePort: 8765);
 
-    test('the laptop proves the code, then the phone sends its port and token, and gets a key', () async {
+    test('the laptop proves the code; both work out the same key; nothing secret crosses the Wi-Fi', () async {
       laptop.code = code;
-      laptop.key = key;
       final a = await pair();
-      expect((a.name, a.key), ('my-laptop', key));
-      expect(laptop.finishes.single, containsPair('token', 'abcdefghjkmn'));
+      expect(a.name, 'my-laptop');
+      expect(a.key, laptop.key);
+      expect(a.key, matches(keyShape));
       expect(laptop.finishes.single, containsPair('port', 8765));
-      expect(laptop.finishes.single.containsKey('code'), isFalse); // the code itself never travels back
+      final wire = laptop.wire.join('\n');
+      expect(wire.contains(a.key), isFalse); // the key never travels
+      expect(wire.contains(code), isFalse); // nor the code
+      expect(wire.contains('token'), isFalse); // nor the token: the laptop never needs it
     });
 
-    test('a laptop that cannot prove the code gets nothing', () async {
+    test('a laptop that cannot prove the code gets nothing; a wrong confirm is no pairing', () async {
       laptop.code = code;
       laptop.proveWith = 'another-code-entirely-x';
       await expectLater(pair(), throwsA(isA<LinkError>().having((e) => e.why, 'why', LinkFailure.wrongLaptop)));
       expect(laptop.hellos, 1);
-      expect(laptop.finishes, isEmpty); // the token never left
+      expect(laptop.finishes, isEmpty);
+      laptop.proveWith = null;
+      laptop.confirmWrong = true;
+      await expectLater(pair(), throwsA(isA<LinkError>().having((e) => e.why, 'why', LinkFailure.bad)));
     });
 
-    test('expired, not paired, refused, no answer', () async {
+    test('expired, refused, old scripts, no answer, not a local address', () async {
       await expectLater(pair(), throwsA(isA<LinkError>().having((e) => e.why, 'why', LinkFailure.expired)));
-      await expectLater(pair(via: 'key', secret: key), throwsA(isA<LinkError>().having((e) => e.why, 'why', LinkFailure.notPaired)));
       laptop.code = code;
       laptop.status = 403;
       await expectLater(pair(), throwsA(isA<LinkError>().having((e) => e.why, 'why', LinkFailure.refused)));
+      laptop.status = 200;
+      laptop.oldScripts = true;
+      await expectLater(pair(), throwsA(isA<LinkError>().having((e) => e.why, 'why', LinkFailure.oldLaptop)));
       final port = laptop.port;
       await laptop.close();
       await expectLater(
-        LinkClient(timeout: const Duration(seconds: 2))
-            .handshake(host: '127.0.0.1', port: port, via: 'code', secret: code, sharePort: 8765, token: 'abcdefghjkmn'),
+        LinkClient(timeout: const Duration(seconds: 2)).pair(host: '127.0.0.1', port: port, code: code, sharePort: 8765),
         throwsA(isA<LinkError>().having((e) => e.why, 'why', LinkFailure.noAnswer)),
       );
       await expectLater(
-        LinkClient().handshake(host: '8.8.8.8', port: port, via: 'code', secret: code, sharePort: 8765, token: 'x'),
+        LinkClient().pair(host: '8.8.8.8', port: port, code: code, sharePort: 8765),
         throwsA(isA<LinkError>().having((e) => e.why, 'why', LinkFailure.bad)),
       );
-    });
-  });
-
-  group('telling the laptop where this phone is', () {
-    late FakeLaptop laptop;
-    setUp(() async => laptop = await FakeLaptop.start());
-    tearDown(() => laptop.close());
-
-    test('at once, then every few minutes; a failure is said once and tried again sooner', () async {
-      laptop.key = key;
-      final lines = <String>[];
-      final a = LaptopAnnouncer(
-        laptop: PairedLaptop(host: '127.0.0.1', port: laptop.port, key: key, name: 'my-laptop'),
-        sharePort: 8765,
-        token: 'abcdefghjkmn',
-        client: LinkClient(timeout: const Duration(seconds: 2)),
-        onLine: lines.add,
-        every: const Duration(milliseconds: 150),
-        retries: const [Duration(milliseconds: 50)],
-      )..start();
-      await until(() => laptop.finishes.length >= 3);
-      expect(laptop.finishes.first, containsPair('via', 'key'));
-      expect(laptop.finishes.first, containsPair('token', 'abcdefghjkmn'));
-      expect(lines, ['the laptop my-laptop knows where this phone is']); // once, not per try
-      laptop.key = 'another-key-after-pairing-another-phone-xx'; // the laptop paired again: this key proves nothing
-      await until(() => lines.length == 2);
-      expect(lines.last, contains('no longer knows this phone'));
-      final before = laptop.finishes.length;
-      await Future<void>.delayed(const Duration(milliseconds: 400));
-      expect(lines, hasLength(2)); // tried again, not said again
-      expect(laptop.finishes.length, before); // and the token went nowhere
-      laptop.key = key;
-      await until(() => lines.length == 3);
-      a.stop();
-      final n = laptop.finishes.length;
-      await Future<void>.delayed(const Duration(milliseconds: 400));
-      expect(laptop.finishes.length, n);
-    });
-
-    test('the real share isolate tells it as soon as it serves, and the night log gets one line', () async {
-      laptop.key = key;
-      final files = Directory.systemTemp.createTempSync('share_link_test');
-      final log = <String>[];
-      final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      final port = s.port;
-      await s.close();
-      final host = ShareHost(filesDir: files.path, onLog: log.add);
-      try {
-        await host.start(
-          ShareConfig(
-            on: true,
-            token: 'abcdefghjkmn',
-            port: port,
-            offAtMs: DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch,
-            laptop: PairedLaptop(host: '127.0.0.1', port: laptop.port, key: key, name: 'my-laptop'),
-          ),
-        );
-        await until(() => laptop.finishes.isNotEmpty, ms: 10000);
-        expect(laptop.finishes.single, containsPair('port', port));
-        await until(() => log.any((l) => l.contains('knows where this phone is')));
-      } finally {
-        await host.stop();
-        files.deleteSync(recursive: true);
-      }
     });
   });
 
@@ -299,13 +272,13 @@ void main() {
 
     final link = PairLink.parse('eegtracker://pair?h=192.168.1.10&p=8771&s=$code&n=my-laptop')!;
 
-    test('Connect with sharing off: the handshake with a token, then sharing on and the laptop remembered', () async {
+    test('Connect with sharing off: the pairing, then sharing on and the laptop remembered', () async {
       await c.sync(night: false, filesDir: files.path);
       final client = RecordingClient();
       final out = await c.pair(link, client: client);
       expect(out.failure, isNull);
       expect(out.laptop!.name, 'my-laptop');
-      expect(client.calls.single, (host: '192.168.1.10', port: 8771, via: 'code', secret: code, sharePort: 8765, token: saved.token));
+      expect(client.calls.single, (host: '192.168.1.10', port: 8771, code: code, sharePort: 8765));
       expect(saved.token, hasLength(12));
       expect(saved.on, isTrue);
       expect(saved.laptop, out.laptop);
@@ -322,7 +295,7 @@ void main() {
       expect(sent.last['kind'], 'share');
       final config = ShareConfig.fromJson(sent.last['config']);
       expect(config.laptop!.host, '192.168.1.10');
-      expect(config.token, before.token); // the same token the laptop got: no new code
+      expect(config.token, before.token); // the same code: pairing does not change it
       expect(config.offAtMs, before.offAtMs); // already on: its time is not moved
     });
 
@@ -341,22 +314,15 @@ void main() {
   });
 }
 
-/// Records the handshakes asked for; answers with [key], or fails.
+/// Records the pairings asked for; answers with [key], or fails.
 class RecordingClient extends LinkClient {
   RecordingClient({this.fail});
   final LinkFailure? fail;
-  final calls = <({String host, int port, String via, String secret, int sharePort, String token})>[];
+  final calls = <({String host, int port, String code, int sharePort})>[];
 
   @override
-  Future<LinkAnswer> handshake({
-    required String host,
-    required int port,
-    required String via,
-    required String secret,
-    required int sharePort,
-    required String token,
-  }) async {
-    calls.add((host: host, port: port, via: via, secret: secret, sharePort: sharePort, token: token));
+  Future<LinkAnswer> pair({required String host, required int port, required String code, required int sharePort}) async {
+    calls.add((host: host, port: port, code: code, sharePort: sharePort));
     if (fail != null) throw LinkError(fail!);
     return (name: 'my-laptop', key: key);
   }

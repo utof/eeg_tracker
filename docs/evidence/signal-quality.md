@@ -26,7 +26,8 @@ headband's own readings, and the battery number is an estimate because the headb
   loose electrode shows up on its own channel only. This split is the most useful one for a wearer.
 - Consumer headbands that judge quickly (Muse) ask you to wait 30 to 60 seconds after each adjustment. A bench study
   of dry electrodes found the most drift in the first 10 minutes.
-- BrainBit is rated "up to 10 hours" on a charge, about 10 % an hour.
+- BrainBit is rated "up to 10 hours" on a charge. This headband went from 99 % to 79 % in 1.8 hours of signal:
+  about 11 % an hour.
 
 ## Where the data does not support it
 
@@ -35,7 +36,7 @@ headband's own readings, and the battery number is an estimate because the headb
 - No study follows dry-electrode contact through a whole waking day.
 - "Good" contact does not promise a good result: in a 2026 home sleep study, quality scores caught failed nights but
   did not predict scoring accuracy on the adequate ones.
-- The battery estimate assumes the rated drain. A headband that drains faster or slower than 10 % an hour makes the
+- The battery estimate assumes the rated drain. A headband that drains faster or slower than 11 % an hour makes the
   number wrong until the gauge moves again.
 
 ## How the app uses this
@@ -59,7 +60,7 @@ headband's own readings, and the battery number is an estimate because the headb
   connection, with no new search and no new contact check.
 - A warning is worth sending only after 2 minutes of trouble on an electrode, and never for "busy".
 - Battery: the headband's gauge sticks while it streams (it showed 6 % for nine hours, and 100 % for hours). The app
-  keeps the last reading it believes and takes off 10 % for every hour of signal since. A reading is believed when the
+  keeps the last reading it believes and takes off 11 % for every hour of signal since. A reading is believed when the
   gauge moved and landed within 8 points of the estimate, when it is the first one, or when a new connection reads
   higher (it was charged). The card says "about 62 %", and when the gauge disagrees it shows the gauge's number too.
 - Headband lost: during a recording or session, no data for 5 minutes (5 to 10, your choice) gives one notice on the

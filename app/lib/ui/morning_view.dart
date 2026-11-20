@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 
 import '../alphatheta/rules.dart' show ReactionTest;
+import '../logs/own_text.dart';
 import '../morning/controller.dart';
 import '../recorder/contact.dart';
 import '../trends/trends.dart';
@@ -328,7 +329,7 @@ class MorningView extends StatelessWidget {
         color: Night.inkMuted,
       ),
       if (m.saveNote != null) Para(m.saveNote!, color: Night.caution),
-      if (m.experimentLine != null) Para(m.experimentLine!),
+      if (m.experimentLine != null) OwnText(child: Para(m.experimentLine!)),
       if (m.wearer != null && !wearerLeads(m.wearer))
         WearerRemark(line: m.wearer!, onAnswer: onWearerAnswer, onInfo: onWearerInfo),
       const SizedBox(height: 12),

@@ -3,20 +3,26 @@
 // a lighter `saved` (weaker: getting drowsy, noisy, a break), `caution` amber (no signal, like the watch strip's gaps)
 // and `ink` (your tags), with their word inside when it fits. Hour rules and tabular clock ticks under the lanes.
 // Zoom with two fingers or the buttons, drag sideways to move; a tap on a band opens it, a tap anywhere else opens the
-// signal at that moment. One finger dragging up or down scrolls the page as usual.
+// signal at that moment. One finger dragging up or down scrolls the page as usual. Under the lanes, when the recording's
+// pulse was read, the Pulse lane on the same clock: a red line where a reading exists, gaps elsewhere (pulse_lane.dart,
+// DECISIONS 815).
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../archive/bands.dart';
 import 'archive_view.dart' show hm, lengthText;
+import 'pulse_lane.dart';
 import 'theme.dart';
 
 class TimelineView extends StatefulWidget {
-  const TimelineView({super.key, required this.timeline, this.onBand, this.onTime});
+  const TimelineView({super.key, required this.timeline, this.onBand, this.onTime, this.pulse});
   final Timeline timeline;
   final ValueChanged<Band>? onBand;
   final ValueChanged<DateTime>? onTime;
+
+  /// The recording's pulse (pulse/pass.dart); null or without a reading: no Pulse lane.
+  final PulseTrack? pulse;
 
   @override
   State<TimelineView> createState() => TimelineViewState();
@@ -113,7 +119,10 @@ class TimelineViewState extends State<TimelineView> {
     double height(TextStyle s) =>
         (TextPainter(text: TextSpan(text: '0', style: s), textScaler: scaler, textDirection: TextDirection.ltr)..layout()).height;
     final laneH = math.max(26.0, height(labelStyle) + 6);
-    final g = _Geometry(laneH: laneH, gap: 6, lanes: lanes.length);
+    final scaleStyle = text.labelSmall!.copyWith(color: Night.inkMuted, fontFeatures: tabular);
+    final pulse = widget.pulse != null && widget.pulse!.hasReading ? widget.pulse : null;
+    final pulseH = pulse == null ? 0.0 : math.max(2 * laneH, 2 * height(scaleStyle) + 10);
+    final g = _Geometry(laneH: laneH, gap: 6, lanes: lanes.length, pulseH: pulseH);
     final labelW = scaler.scale(96).clamp(96.0, 140.0);
     final tickH = height(tickStyle) + 8;
     final end = _from.add(_len);
@@ -165,6 +174,14 @@ class TimelineViewState extends State<TimelineView> {
                           child: Text(l.word, style: labelStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
                         ),
                       ),
+                    if (pulseH > 0)
+                      SizedBox(
+                        height: pulseH,
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(pulseLaneWord, style: labelStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -191,6 +208,8 @@ class TimelineViewState extends State<TimelineView> {
                             tickStyle: tickStyle,
                             bandStyle: bandStyle,
                             scaler: scaler,
+                            pulse: pulse,
+                            scaleStyle: scaleStyle,
                           ),
                         ),
                       ),
@@ -210,17 +229,24 @@ class TimelineViewState extends State<TimelineView> {
       for (final l in lanes)
         if (tl.of(l).isNotEmpty) '${l.word}: ${tl.of(l).length} ${tl.of(l).length == 1 ? 'stretch' : 'stretches'}, ${lengthText(tl.total(l))}',
     ];
-    return 'Timeline from ${hm(tl.start)} to ${hm(tl.end)}. ${parts.isEmpty ? 'Nothing found yet.' : parts.join('. ')}. '
+    final p = widget.pulse;
+    final read = [for (final b in p?.bpm ?? const <double?>[]) ?b]..sort();
+    final pulse = read.isEmpty ? '' : ' Pulse: about ${read[read.length ~/ 2].round()} a minute where it could be read.';
+    return 'Timeline from ${hm(tl.start)} to ${hm(tl.end)}. ${parts.isEmpty ? 'Nothing found yet.' : parts.join('. ')}.$pulse '
         'The Found section below lists the same.';
   }
 }
 
 class _Geometry {
-  const _Geometry({required this.laneH, required this.gap, required this.lanes});
+  const _Geometry({required this.laneH, required this.gap, required this.lanes, this.pulseH = 0});
   final double laneH, gap;
   final int lanes;
 
-  double get height => lanes * (laneH + gap);
+  /// The Pulse lane's height with its gap (0: none), under the lanes.
+  final double pulseH;
+
+  double get lanesHeight => lanes * (laneH + gap);
+  double get height => lanesHeight + pulseH;
   double top(int i) => i * (laneH + gap) + gap / 2;
 
   Lane? laneAt(double y) {
@@ -247,9 +273,13 @@ class _LanesPainter extends CustomPainter {
     required this.tickStyle,
     required this.bandStyle,
     required this.scaler,
+    this.pulse,
+    required this.scaleStyle,
   });
 
   final Timeline timeline;
+  final PulseTrack? pulse;
+  final TextStyle scaleStyle;
   final DateTime from;
   final Duration length;
   final _Geometry g;
@@ -309,9 +339,32 @@ class _LanesPainter extends CustomPainter {
       }
     }
     canvas.restore();
+    final p = pulse;
+    if (p != null && g.pulseH > 0) {
+      final r = Rect.fromLTWH(0, g.lanesHeight + g.gap / 2, w, g.pulseH - g.gap);
+      // the scale of what is shown, so a zoomed stretch fills the lane
+      final first = math.max(0, (from.difference(p.start).inMilliseconds / 1000 / p.epochS).floor());
+      final last = math.min(p.bpm.length, (end.difference(p.start).inMilliseconds / 1000 / p.epochS).ceil());
+      final shown = first < last ? p.bpm.sublist(first, last) : const <double?>[];
+      paintPulseLane(
+        canvas,
+        r,
+        p.bpm,
+        (e) => _x(p.start.add(Duration(milliseconds: (e * p.epochS * 1000).round())), w),
+        scaleStyle: scaleStyle,
+        scaler: scaler,
+        scale: pulseScale(shown.any((b) => b != null) ? shown : p.bpm),
+      );
+    }
   }
 
   @override
   bool shouldRepaint(_LanesPainter old) =>
-      old.timeline != timeline || old.from != from || old.length != length || old.g.laneH != g.laneH || old.scaler != scaler;
+      old.timeline != timeline ||
+      old.from != from ||
+      old.length != length ||
+      old.g.laneH != g.laneH ||
+      old.g.pulseH != g.pulseH ||
+      old.pulse != pulse ||
+      old.scaler != scaler;
 }

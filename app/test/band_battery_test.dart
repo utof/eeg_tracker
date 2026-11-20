@@ -15,24 +15,24 @@ void main() {
     }
   }
 
-  test('a new connection\'s first reading is believed; then 10 % an hour of streaming comes off', () {
+  test('a new connection\'s first reading is believed; then 11 % an hour of streaming comes off', () {
     final t = BandBatteryTrack()..note(100, t0, streaming: false);
     expect(t.now.estimate, 100);
     expect(t.now.stuck, isFalse);
     stream(t, t0, 120, 100); // the gauge sits at 100 % for two hours
-    expect(t.now.estimate, 80);
+    expect(t.now.estimate, 78);
     expect(t.now.gauge, 100);
     expect(t.now.stuck, isTrue);
-    expect(t.now.words, 'about 80 %');
+    expect(t.now.words, 'about 78 %');
     expect(t.now.note, contains('100 %'));
-    expect(t.now.hoursLeft, 8);
+    expect(t.now.hoursLeft, closeTo(7.1, 0.05));
   });
 
   test('the gauge that moved in line with the estimate is believed again (99 -> 79 on 2026-11-20)', () {
     final t = BandBatteryTrack()..note(99, t0, streaming: false);
-    stream(t, t0, 115, 99);
-    expect(t.now.estimate, 80);
-    t.note(79, t0.add(const Duration(minutes: 116)), streaming: true);
+    stream(t, t0, 108, 99); // 1.8 hours
+    expect(t.now.estimate, 79);
+    t.note(79, t0.add(const Duration(minutes: 109)), streaming: true);
     expect(t.now.estimate, 79);
     expect(t.now.stuck, isFalse);
     expect(t.now.note, isNull);
@@ -42,11 +42,11 @@ void main() {
     final t = BandBatteryTrack()..note(99, t0, streaming: false);
     stream(t, t0, 4 * 60, 6);
     expect(t.now.gauge, 6);
-    expect(t.now.estimate, 59, reason: '99 % minus four hours at 10 % an hour');
+    expect(t.now.estimate, 55, reason: '99 % minus four hours at 11 % an hour');
     expect(t.now.stuck, isTrue);
     expect(t.now.note, contains('6 %'));
     stream(t, t0.add(const Duration(hours: 4)), 5 * 60, 6);
-    expect(t.now.estimate, 9, reason: 'nine hours in all');
+    expect(t.now.estimate, 0, reason: 'nine hours in all: the stream outlasted the estimate');
     // by now the gauge and the estimate agree again: a new connection's 6 % is in line, and taken
     t.note(6, t0.add(const Duration(hours: 9, minutes: 3)), streaming: false);
     expect(t.now.estimate, 6);
@@ -56,7 +56,7 @@ void main() {
   test('a new connection that reads higher was charged; 0-2 % is never believed over a fuller estimate', () {
     final t = BandBatteryTrack()..note(60, t0, streaming: false);
     stream(t, t0, 60, 60);
-    expect(t.now.estimate, 50);
+    expect(t.now.estimate, 49);
     t.note(100, t0.add(const Duration(hours: 5)), streaming: false);
     expect(t.now.estimate, 100);
     t.note(1, t0.add(const Duration(hours: 5, minutes: 1)), streaming: true);
@@ -81,10 +81,10 @@ void main() {
 
   test('estimated empty is told once per charge, and only after counting down from a real charge', () {
     final t = BandBatteryTrack()..note(40, t0, streaming: false);
-    stream(t, t0, 200, 40);
+    stream(t, t0, 180, 40);
     expect(t.now.empty, isFalse);
     expect(t.takeEmpty(), isFalse);
-    stream(t, t0.add(const Duration(minutes: 200)), 20, 40);
+    stream(t, t0.add(const Duration(minutes: 180)), 20, 40);
     expect(t.now.estimate, lessThanOrEqualTo(5));
     expect(t.takeEmpty(), isTrue);
     expect(t.takeEmpty(), isFalse, reason: 'once');

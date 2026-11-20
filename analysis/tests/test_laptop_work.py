@@ -479,6 +479,29 @@ def test_autostart_path_follows_xdg(monkeypatch, tmp_path):
 
 # ---------- the phone hook ----------
 
+def test_new_code_posts_to_this_laptops_own_port():
+    import http.server, threading
+    got: list[tuple[str, str, str | None]] = []
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_a):
+            pass
+
+        def do_POST(self):
+            got.append((self.command, self.path, self.headers.get("Origin")))
+            self.send_response(303); self.send_header("Location", "/"); self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        assert lw.post_new_code(f"http://127.0.0.1:{srv.server_address[1]}/new") is True
+        assert got == [("POST", "/new", None)]
+        assert lw.post_new_code("http://127.0.0.1:9/new") is False      # nobody there: no exception
+    finally:
+        srv.shutdown(); srv.server_close()
+
+
 def test_pair_command(tmp_path):
     assert lw.pair_command(tmp_path, probe=lambda: None) is None      # no scripts/phone_link.py here
     (tmp_path / "scripts").mkdir(); (tmp_path / "scripts" / "phone_link.py").write_text("")
@@ -499,8 +522,11 @@ def test_pair_phone_runs_the_merged_phone_link(tmp_path):
     assert lw.pair_command(python="py", probe=lambda: None, which=only_gnome) == [
         "/usr/bin/gnome-terminal", "--", "py", str(script)]
     assert lw.pair_command(probe=lambda: None, which=lambda _: None) is None   # no terminal program
-    running = lw.pair_command(local=tmp_path, probe=lambda: {"connected": False}, which=lambda _: None)
-    assert running == ["xdg-open", "http://127.0.0.1:8771/?new=1"]   # its page makes a code for it (DECISIONS 677)
+    posted: list[str] = []
+    running = lw.pair_command(local=tmp_path, probe=lambda: {"connected": False}, which=lambda _: None,
+                              new_code=posted.append)
+    # a code is asked for by POST (a plain link makes none: DECISIONS 750), then its page opens
+    assert posted == ["http://127.0.0.1:8771/new"] and running == ["xdg-open", "http://127.0.0.1:8771/"]
     import phone_link
     assert lw.PAIR_PAGE == f"http://127.0.0.1:{phone_link.PORT}/"
     assert 'add_argument("--dest"' in script.read_text(encoding="utf-8")
@@ -526,19 +552,26 @@ def test_the_phone_hears_when_a_work_session_starts_and_ends(tmp_path):
     assert tray2.session is not None
 
 
-def test_the_work_signal_goes_to_the_paired_phone_with_its_token(tmp_path):
-    """POST /work on the phone's Share on Wi-Fi server, with the token from phone_link.py's link.json; an answer in
-    words for the log; the token is never part of it."""
+def test_the_work_signal_goes_to_the_paired_phone_signed(tmp_path):
+    """POST /work on the phone's Share on Wi-Fi server, signed with the key from phone_link.py's link.json
+    (DECISIONS 755: the phone takes it from nobody else); an answer in words for the log; no secret in it."""
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    got: list[tuple[str, str | None, bytes]] = []
+    from test_pull_phone import signed_ok
+    key = "6" * 64
+    got: list[tuple[str, str | None, bytes, bool]] = []
     code = [202]
 
     class Phone(BaseHTTPRequestHandler):
         def do_POST(self):
             n = int(self.headers.get("Content-Length") or 0)
-            got.append((self.path, self.headers.get("Authorization"), self.rfile.read(n)))
-            self.send_response(code[0]); self.send_header("Content-Length", "0"); self.end_headers()
+            body = self.rfile.read(n)
+            reply = signed_ok(self, key, body)
+            got.append((self.path, self.headers.get("Authorization"), body, reply is not None))
+            self.send_response(code[0] if reply else 401)
+            if reply:
+                self.send_header("X-Eeg-Reply", reply)
+            self.send_header("Content-Length", "0"); self.end_headers()
 
         def log_message(self, *a):
             pass
@@ -549,17 +582,19 @@ def test_the_work_signal_goes_to_the_paired_phone_with_its_token(tmp_path):
         assert lw.phone_work_signal(tmp_path, True) == "not paired"
         (tmp_path / "phone").mkdir()
         (tmp_path / "phone" / "link.json").write_text(json.dumps(
-            {"version": 1, "phone": {"address": "127.0.0.1", "port": srv.server_port, "token": "abcdefgh1234"}}))
+            {"version": 2, "key": key, "phone": {"address": "127.0.0.1", "port": srv.server_port}}))
         assert lw.phone_work_signal(tmp_path, True) == "sent"
         assert lw.phone_work_signal(tmp_path, False) == "sent"
-        assert got == [("/work", "Bearer abcdefgh1234", b'{"working": true}'),
-                       ("/work", "Bearer abcdefgh1234", b'{"working": false}')]
+        assert got == [("/work", None, b'{"working": true}', True), ("/work", None, b'{"working": false}', True)]
         code[0] = 503                                     # a night records: the phone does not take it
         out = lw.phone_work_signal(tmp_path, True)
-        assert out == "refused (503)" and "abcdefgh1234" not in out
+        assert out == "refused (503)" and key not in out
     finally:
         srv.shutdown(); srv.server_close()
     assert lw.phone_work_signal(tmp_path, True, timeout=0.5) == "not reachable"
     (tmp_path / "phone" / "link.json").write_text(json.dumps(
-        {"version": 1, "phone": {"address": "8.8.8.8", "port": 8765, "token": "abcdefgh1234"}}))
+        {"version": 2, "key": key, "phone": {"address": "8.8.8.8", "port": 8765}}))
     assert lw.phone_work_signal(tmp_path, True) == "not paired"   # only a local-network phone is ever called
+    (tmp_path / "phone" / "link.json").write_text(json.dumps(
+        {"version": 1, "laptop_key": "k" * 43, "phone": {"address": "127.0.0.1", "port": 8765, "token": "abcdefgh1234"}}))
+    assert lw.phone_work_signal(tmp_path, True) == "not paired"   # an old pairing: one new scan first

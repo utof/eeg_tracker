@@ -223,7 +223,7 @@ class _TryTheseScreenState extends State<TryTheseScreen> {
     final rec = widget.recordingsDir ?? (_files == null ? null : '$_files/recordings');
     return switch (o) {
       TryOpen.morning => const MorningScreen(),
-      TryOpen.trends => TrendsScreen(recordingsDir: rec),
+      TryOpen.trends => TrendsScreen(recordingsDir: rec, walkPending: true),
       TryOpen.export => const ExportScreen(),
       TryOpen.meditation => const MeditationScreen(),
       TryOpen.alphaTheta => const AlphaThetaScreen(),

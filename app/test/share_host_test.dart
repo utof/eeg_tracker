@@ -12,13 +12,18 @@ import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/night_recorder.dart';
 import 'package:eeg_tracker/recorder/recorder_service.dart' show notificationText, shareMessage, shareStatusFrom;
 import 'package:eeg_tracker/recorder/status.dart';
+import 'package:eeg_tracker/share/auth.dart';
 import 'package:eeg_tracker/share/isolate.dart';
+import 'package:eeg_tracker/share/link.dart';
 import 'package:eeg_tracker/share/protocol.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'night_recorder_test.dart' show FakeBand, FakeFinder, f32Records, fast;
 
 const token = 'abcdefghjkmn';
+
+/// The paired laptop's key: /work and /marker take only its signed requests (DECISIONS 755).
+const key = '7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544';
 
 /// A server that throws before it does anything.
 Future<void> throwsAtOnce(List<Object?> args) async => throw StateError('boom at start');
@@ -99,11 +104,12 @@ void main() {
     files.deleteSync(recursive: true);
   });
 
-  ShareConfig config(int port, {Duration onFor = const Duration(hours: 1)}) => ShareConfig(
+  ShareConfig config(int port, {Duration onFor = const Duration(hours: 1), bool paired = false}) => ShareConfig(
     on: true,
     token: token,
     port: port,
     offAtMs: DateTime.now().add(onFor).millisecondsSinceEpoch,
+    laptop: paired ? const PairedLaptop(host: '192.168.1.10', port: 8771, key: key, name: 'my-laptop') : null,
   );
 
   NightRecorder recorder(FakeBand band) => NightRecorder(
@@ -140,11 +146,21 @@ void main() {
     expect(ok(), isTrue);
   }
 
-  Future<({int code, String body})> ask(int port, String path, {String method = 'GET', String? body}) async {
+  /// [sign]: as the paired laptop (the host must have been started with a config paired with [key]).
+  Future<({int code, String body})> ask(int port, String path, {String method = 'GET', String? body, bool sign = false}) async {
     final client = HttpClient();
     try {
       final req = await client.openUrl(method, Uri.parse('http://127.0.0.1:$port$path'));
-      req.headers.set('Authorization', 'Bearer $token');
+      if (sign) {
+        final n = newNonce(), t = DateTime.now().millisecondsSinceEpoch;
+        req.headers
+          ..set(timeHeader, '$t')
+          ..set(nonceHeader, n)
+          ..set(homeHeader, '1')
+          ..set(signHeader, requestSign(key, method: method, path: path, query: '', timeMs: t, nonce: n, home: true, body: utf8.encode(body ?? '')));
+      } else {
+        req.headers.set('Authorization', 'Bearer $token');
+      }
       if (body != null) req.add(utf8.encode(body));
       final res = await req.close();
       return (code: res.statusCode, body: await utf8.decodeStream(res));
@@ -240,7 +256,7 @@ void main() {
     final band = FakeBand('a');
     final r = recorder(band);
     final port = await freePort();
-    await makeHost(r).start(config(port));
+    await makeHost(r).start(config(port, paired: true));
     final running = r.run(restartedBySystem: false);
     await until(() => host!.status.up && r.status.phase == Phase.recording && r.status.nightSamples > 100);
 
@@ -251,7 +267,7 @@ void main() {
     expect(state['contact'], {'O1': 400000, 'O2': 1500000, 'T3': 3000000, 'T4': null});
     expect(state['age'], lessThan(2));
 
-    final marked = await ask(port, '/marker', method: 'POST', body: 'eyes closed start');
+    final marked = await ask(port, '/marker', method: 'POST', body: 'eyes closed start', sign: true);
     expect(marked.code, 200);
     final list = jsonDecode((await ask(port, '/files?sha=0')).body) as Map<String, Object?>;
     final paths = [for (final f in list['files']! as List) (f as Map)['path']];
@@ -355,7 +371,7 @@ void main() {
     await until(() => host!.status.up);
     expect((await ask(port, '/files/recordings/2026-11-18-231200.log')).body, 'connected\n');
     expect((jsonDecode((await ask(port, '/state')).body) as Map)['status'], 'not recording');
-    expect((await ask(port, '/marker', method: 'POST', body: 'x')).code, 503);
+    expect((await ask(port, '/marker', method: 'POST', body: 'x')).code, 403, reason: 'only the paired laptop, signed');
     await until(() => !host!.running);
     expect(log.last, 'sharing on Wi-Fi off: time is up');
     await expectLater(ask(port, '/state'), throwsA(isA<SocketException>()));
@@ -364,22 +380,23 @@ void main() {
   test("between nights the laptop's work signal reaches the app (automatic recording's hook); a night's server says no", () async {
     final works = <(bool, bool?)>[];
     final port = await freePort();
-    await makeHost(null, onWork: (w, m) => works.add((w, m))).start(config(port));
+    await makeHost(null, onWork: (w, m) => works.add((w, m))).start(config(port, paired: true));
     await until(() => host!.status.up);
-    expect((await ask(port, '/work', method: 'POST', body: '{"working": true}')).code, 202);
+    expect((await ask(port, '/work', method: 'POST', body: '{"working": true}')).code, 403, reason: 'the token is not enough');
+    expect((await ask(port, '/work', method: 'POST', body: '{"working": true}', sign: true)).code, 202);
     await until(() => works.isNotEmpty);
     expect(works, [(true, null)]);
     // the meeting crosses the isolate border too (DECISIONS 685)
-    expect((await ask(port, '/work', method: 'POST', body: '{"working": true, "meeting": true}')).code, 202);
+    expect((await ask(port, '/work', method: 'POST', body: '{"working": true, "meeting": true}', sign: true)).code, 202);
     await until(() => works.length == 2);
     expect(works.last, (true, true));
     await host!.stop();
 
     // the night recorder's server has no hook: the laptop hears 503 and the night is not disturbed
     final night = await freePort();
-    await makeHost(null).start(config(night));
+    await makeHost(null).start(config(night, paired: true));
     await until(() => host!.status.up);
-    expect((await ask(night, '/work', method: 'POST', body: '{"working": true}')).code, 503);
+    expect((await ask(night, '/work', method: 'POST', body: '{"working": true}', sign: true)).code, 503);
   });
 
   test("the Work session's summary reaches /state through the server's isolate, also when set before it starts", () async {
@@ -426,7 +443,7 @@ void main() {
     await until(() => host!.status.up);
     expect(host!.status.addresses, ['192.168.77.5']);
     expect(shareAddress(host!.status), '192.168.77.5:$port');
-    expect(log.single, 'sharing on Wi-Fi on: 192.168.77.5 port $port');
+    expect(log.single, 'sharing on Wi-Fi on: port $port, 1 Wi-Fi address'); // no address in a log (DECISIONS 757)
     expect((await ask(port, '/files')).code, 200); // 127.0.0.1: adb forward
   });
 
@@ -443,8 +460,8 @@ void main() {
     await until(() => host!.status.addresses.isNotEmpty);
     expect(log, [
       'sharing on Wi-Fi on: no Wi-Fi address yet, port 8765',
-      'sharing on Wi-Fi: no Wi-Fi address found (android: vpn tun0 10.10.10.1/30; interfaces: failed: x)',
-      'sharing on Wi-Fi now at 192.168.1.5 port 8765',
+      'sharing on Wi-Fi: no Wi-Fi address found (android: vpn tun0 x.x.x.x/30; interfaces: failed: x)',
+      'sharing on Wi-Fi: the Wi-Fi network changed (port 8765, 1 Wi-Fi address)',
     ]);
   });
 
@@ -467,13 +484,12 @@ void main() {
     const s = RecorderStatus(phase: Phase.recording, nightSamples: 250 * 60 * 12);
     expect(notificationText(s), 'Recording · 12 min');
     expect(notificationText(s, shareDown), 'Recording · 12 min');
-    const up = (up: true, addresses: ['192.168.1.23', '127.0.0.1'], port: 8765, note: '');
+    final up = shareStatusWith(shareDown, up: true, addresses: ['192.168.1.23', '127.0.0.1'], port: 8765, here: 'home', net: '192.168.1.0/24', copiedAtMs: 5, copiedBy: 'laptop');
     expect(notificationText(s, up), 'Recording · 12 min · shared on Wi-Fi at 192.168.1.23:8765');
-    expect(notificationText(s, (up: true, addresses: const ['127.0.0.1'], port: 8765, note: '')), 'Recording · 12 min · shared on Wi-Fi');
-    final back = shareStatusFrom(shareMessage(up))!;
-    expect(back.up, isTrue);
+    expect(notificationText(s, shareStatusWith(shareDown, up: true, addresses: const ['127.0.0.1'])), 'Recording · 12 min · shared on Wi-Fi');
+    final back = shareStatusFrom(shareMessage(up))!; // the night recorder's word reaches the screen whole
     expect(back.addresses, ['192.168.1.23', '127.0.0.1']);
-    expect(back.port, 8765);
+    expect((back.up, back.port, back.here, back.net, back.copiedAtMs, back.copiedBy), (true, 8765, 'home', '192.168.1.0/24', 5, 'laptop'));
     expect(shareStatusFrom({'kind': 'status'}), isNull);
     expect(shareStatusFrom({'kind': 'share', 'config': <String, Object?>{}}), isNull);
   });

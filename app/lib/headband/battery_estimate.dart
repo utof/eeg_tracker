@@ -1,14 +1,13 @@
 // The headband's battery as one number for every screen (DECISIONS 853). The BrainBit's gauge reads whole percent and
 // sticks while it streams (0-2 % and 100 %, DECISIONS 40; 6 % for nine hours on 2026-11-19, lib/logs/battery_report.dart
-// `stuckLevels`), and it moved 99 -> 79 % over a two-hour session on 2026-11-20: about the rated 10 % an hour
-// (auto/battery_guard.dart `BatteryRule`). So the number shown is an estimate: the last reading we believe, minus
-// 10 % for every hour streamed since. A reading is believed when the gauge moved and landed near the estimate, when it
+// `stuckLevels`), and it moved 99 -> 79 % over a 1.8-hour session on 2026-11-20: 11 % an hour, the laptop's rule too
+// (scripts/battery.py, DECISIONS 766). So the number shown is an estimate: the last reading we believe, minus
+// 11 % for every hour streamed since. A reading is believed when the gauge moved and landed near the estimate, when it
 // is the first one ever, or when a new connection reads higher than the estimate (it was charged). A reading far from
 // the estimate (99 % one moment, 6 % the next) is the gauge sticking: the estimate goes on and the screen says so.
 import 'dart:convert';
 import 'dart:io';
 
-import '../auto/battery_guard.dart' show BatteryRule;
 import '../logs/battery_report.dart' show stuckLevels;
 
 class BandBattery {
@@ -30,7 +29,7 @@ class BandBattery {
   int? get percent => estimate ?? gauge;
 
   /// Hours of streaming left at the rated drain (null: unknown).
-  double? get hoursLeft => percent == null ? null : percent! / BatteryRule.drainPctPerHour;
+  double? get hoursLeft => percent == null ? null : percent! / BandBatteryTrack.drainPctPerHour;
 
   /// `about 62 %`, or `–`.
   String get words => percent == null ? '–' : 'about $percent %';
@@ -53,6 +52,9 @@ class BandBatteryTrack {
     this.lastStreaming = false,
     this.emptyTold = false,
   });
+
+  /// What an hour of streaming takes (the laptop's number, DECISIONS 766: 99 % to 79 % in 1.8 h on 2026-11-20).
+  static const double drainPctPerHour = 11;
 
   /// A reading within this many points of the estimate is in line with it.
   static const int nearPct = 8;
@@ -124,7 +126,7 @@ class BandBatteryTrack {
   double? _estimate() {
     final a = anchorPct;
     if (a == null) return null;
-    return (a - BatteryRule.drainPctPerHour * streamedMs / 3600000).clamp(0, 100).toDouble();
+    return (a - BandBatteryTrack.drainPctPerHour * streamedMs / 3600000).clamp(0, 100).toDouble();
   }
 
   BandBattery get now {
