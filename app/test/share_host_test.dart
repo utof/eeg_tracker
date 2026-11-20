@@ -327,7 +327,7 @@ void main() {
       throw StateError('tap');
     };
     final w = ChunkWriter.open(dir, DateTime(2026, 11, 19, 3));
-    final rows = [for (var i = 0; i < 5; i++) (pack: i, o1: 1e-6, o2: 0.0, t3: 0.0, t4: 0.0)];
+    final rows = [for (var i = 0; i < 5; i++) Sample.four(pack: i, o1: 1e-6, o2: 0.0, t3: 0.0, t4: 0.0)];
     w.addBatch(DateTime.now(), rows);
     w.addBatch(DateTime.now(), rows);
     w.close();
@@ -340,7 +340,7 @@ void main() {
     final seen = <(String, int, int)>[];
     ChunkWriter.onBatch = (stem, first, arrival, samples) => seen.add((stem, first, samples.length));
     final w = ChunkWriter.open(dir, DateTime(2026, 11, 19, 3));
-    final rows = [for (var i = 0; i < 5; i++) (pack: i, o1: 1e-6, o2: 0.0, t3: 0.0, t4: 0.0)];
+    final rows = [for (var i = 0; i < 5; i++) Sample.four(pack: i, o1: 1e-6, o2: 0.0, t3: 0.0, t4: 0.0)];
     w.addBatch(DateTime.now(), rows);
     w.addBatch(DateTime.now(), rows.sublist(0, 3));
     w.close();

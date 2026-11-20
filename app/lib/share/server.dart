@@ -120,8 +120,9 @@ class ShareServer {
   final List<_Reader> _readers = [];
   final Map<String, ({int bytes, int modifiedMs, String sha256})> _hashes = {};
 
-  // The last 5 s of samples in volts, 4 per row, as a ring.
-  final Float32List _ring = Float32List(_ringRows * 4);
+  // The last 5 s of samples in volts, [_width] per row (the recording's channels), as a ring.
+  int _width = 4;
+  Float32List _ring = Float32List(_ringRows * 4);
   int _ringNext = 0;
   int _ringCount = 0;
 
@@ -166,16 +167,21 @@ class ShareServer {
   // ---- live data in ------------------------------------------------------------------------------------------
 
   /// One batch as it arrived: [first] is the index of its first sample in the run [stem], [t] its unix time in
-  /// seconds, [volts] 4 values per sample (O1 O2 T3 T4).
-  void addBatch(String stem, int first, double t, Float32List volts) {
-    final n = volts.length ~/ 4;
+  /// seconds, [volts] [channels] values per sample (the BrainBit's O1 O2 T3 T4; a board's CH1..).
+  void addBatch(String stem, int first, double t, Float32List volts, {int channels = 4}) {
+    final w = channels;
+    if (w < 1) return;
+    final n = volts.length ~/ w;
     if (n == 0) return;
-    for (var k = 0; k < n * 4; k += 4) {
-      final o = _ringNext * 4;
-      _ring[o] = volts[k];
-      _ring[o + 1] = volts[k + 1];
-      _ring[o + 2] = volts[k + 2];
-      _ring[o + 3] = volts[k + 3];
+    if (w != _width) {
+      // another device or board: the ring starts again at its width
+      _width = w;
+      _ring = Float32List(_ringRows * w);
+      _ringNext = 0;
+      _ringCount = 0;
+    }
+    for (var k = 0; k < n * w; k += w) {
+      _ring.setRange(_ringNext * w, _ringNext * w + w, volts, k);
       _ringNext = (_ringNext + 1) % _ringRows;
     }
     _ringCount = _ringCount + n > _ringRows ? _ringRows : _ringCount + n;
@@ -184,10 +190,14 @@ class ShareServer {
     _lastT = t;
     if (_readers.isEmpty) return; // nobody listens: nothing is built or sent
     final b = StringBuffer('{"i":$first,"t":${_num(t, 3)},"uv":[');
-    for (var k = 0; k < n * 4; k += 4) {
+    for (var k = 0; k < n * w; k += w) {
       if (k > 0) b.write(',');
-      b.write('[${_num(volts[k] * 1e6, 2)},${_num(volts[k + 1] * 1e6, 2)},'
-          '${_num(volts[k + 2] * 1e6, 2)},${_num(volts[k + 3] * 1e6, 2)}]');
+      b.write('[');
+      for (var c = 0; c < w; c++) {
+        if (c > 0) b.write(',');
+        b.write(_num(volts[k + c] * 1e6, 2));
+      }
+      b.write(']');
     }
     b.write(']}');
     _publish(b.toString());
@@ -195,11 +205,19 @@ class ShareServer {
 
   /// The recorder's status about once a second (`RecorderStatus.toMap`), or `{}` when the app itself serves.
   /// The channels' names: the DIY board's from the recorder's status while it records one (DECISIONS rows 360-369),
-  /// else the BrainBit's.
+  /// as many as the samples carry (630-639); else the BrainBit's for four, Ch1..ChN for any other width.
   List<String> get _names {
     final b = _live['board'];
     final n = b is Map ? b['names'] : null;
-    return n is List && n.length == 4 && n.every((x) => x is String) ? n.cast<String>() : _brainBit;
+    if (n is List && n.length == _width && n.every((x) => x is String)) return n.cast<String>();
+    return _width == 4 ? _brainBit : [for (var c = 1; c <= _width; c++) 'Ch$c'];
+  }
+
+  /// Samples a second: the board's from the recorder's status, else the BrainBit's.
+  int get _rate {
+    final b = _live['board'];
+    final fs = b is Map ? b['fs'] : null;
+    return fs is int && fs > 0 ? fs : _fs;
   }
 
   void setLive(Map<Object?, Object?> live) {
@@ -233,19 +251,21 @@ class ShareServer {
   Map<String, Object?> state() {
     final rows = _ringCount < _stateRows ? _ringCount : _stateRows;
     final data = <List<double>>[];
-    for (var c = 0; c < 4; c++) {
+    final w = _width;
+    for (var c = 0; c < w; c++) {
       var sum = 0.0;
       final col = Float64List(rows);
       for (var k = 0; k < rows; k++) {
         final row = (_ringNext - rows + k + _ringRows * 2) % _ringRows;
-        col[k] = _ring[row * 4 + c];
+        col[k] = _ring[row * w + c];
         sum += col[k];
       }
       final mean = rows == 0 ? 0.0 : sum / rows;
       data.add([for (final v in col) _round((v - mean) * 1e6, 1)]);
     }
     final ohms = _live['contact'];
-    final known = _live['contactKnown'] == true && ohms is List && ohms.length == 4;
+    final names = _names;
+    final known = _live['contactKnown'] == true && ohms is List && ohms.length == names.length;
     final samples = _live['nightSamples'];
     final t = _lastT;
     final battery = _live['battery'];
@@ -253,12 +273,12 @@ class ShareServer {
       'status': _status,
       'battery': battery is num ? battery.toInt() : '?',
       'battery_note': null,
-      'minutes': _round((samples is num ? samples : (_stem == null ? 0 : _nextI)) / _fs / 60, 1),
+      'minutes': _round((samples is num ? samples : (_stem == null ? 0 : _nextI)) / _rate / 60, 1),
       'age': t == null ? 999 : _round(_seconds() - t, 1),
-      'names': _names,
-      'fs': _fs,
+      'names': names,
+      'fs': _rate,
       'contact': {
-        for (var c = 0; c < 4; c++) _names[c]: known && ohms[c] is num ? (ohms[c] as num).round() : null,
+        for (var c = 0; c < names.length; c++) names[c]: known && ohms[c] is num ? (ohms[c] as num).round() : null,
       },
       'contact_t': _contactT,
       'data': data,
@@ -407,7 +427,7 @@ class ShareServer {
 
       out.listen((_) {}, onDone: gone, onError: gone, cancelOnError: true);
       unawaited(out.done.then(gone, onError: gone));
-      final hello = {'hello': true, 'names': _names, 'fs': _fs, 'unit': 'uV', 'status': _status, 'next_i': _nextI};
+      final hello = {'hello': true, 'names': _names, 'fs': _rate, 'unit': 'uV', 'status': _status, 'next_i': _nextI};
       out.write('data: ${jsonEncode(hello)}\n\n');
       await out.flush();
       while (!r.closed) {

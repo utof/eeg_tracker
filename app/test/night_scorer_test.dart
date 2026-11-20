@@ -113,7 +113,7 @@ const int minute = 60000;
 Sample sampleAt(int i) {
   final t = i / 250;
   final eye = t % 20 >= 10 && t % 20 < 11 ? 60.0 : 0.0;
-  return (
+  return Sample.four(
     pack: i % 2048,
     o1: (12000 + 10 * math.sin(i * 0.25)) * 1e-6,
     o2: (-8000 + 8 * math.cos(i * 0.1)) * 1e-6,

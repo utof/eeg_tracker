@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:eeg_tracker/detectors/detectors.dart' show Quality;
+import 'package:eeg_tracker/recorder/chunk_writer.dart' show Sample;
 import 'package:eeg_tracker/signal/live_signal.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -141,7 +142,7 @@ void main() {
   });
 
   test('the app\'s 4-channel record in volts becomes µV, with its packet numbers', () {
-    final b = LiveBatch.fromSamples(DateTime(2026), [(pack: 7, o1: 1e-5, o2: -2e-5, t3: 0.05, t4: 0)]);
+    final b = LiveBatch.fromSamples(DateTime(2026), [Sample.four(pack: 7, o1: 1e-5, o2: -2e-5, t3: 0.05, t4: 0)]);
     expect(b.channels, 4);
     expect(b.values, [closeTo(10, 1e-4), closeTo(-20, 1e-4), closeTo(50000, 0.01), 0]);
     expect(b.packs, [7]);

@@ -484,7 +484,7 @@ class MorningController extends ChangeNotifier {
     _writer = null;
     if (w != null && st != null) {
       w.close();
-      for (final ext in ['f32', 'idx', 'log', 'markers.jsonl']) {
+      for (final ext in ['f32', 'idx', 'log', 'markers.jsonl', 'header.json']) {
         final f = File('${st.dir.path}/${w.stem}.$ext');
         if (f.existsSync()) f.deleteSync();
       }

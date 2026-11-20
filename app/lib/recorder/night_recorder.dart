@@ -33,10 +33,10 @@ import '../sleep/night_scorer.dart';
 import 'battery.dart';
 import 'chunk_writer.dart';
 import 'contact.dart';
+import 'header.dart';
 import 'headband.dart';
 import 'live_drift.dart';
 import 'nights.dart';
-import 'packed.dart' show rawLength;
 import 'packets.dart';
 import 'status.dart';
 import 'watch_guard.dart';
@@ -423,7 +423,7 @@ class NightRecorder {
       }
       final ChunkWriter w;
       try {
-        w = ChunkWriter.open(dir, _now());
+        w = ChunkWriter.open(dir, _now(), header: headerOf(band));
       } catch (e) {
         _set(_status.copyWith(note: 'cannot write files: ${_short(e)}'));
         await _quietly(band.disconnectAndDispose);
@@ -606,7 +606,11 @@ class NightRecorder {
                   'signal ${rssi == null ? 'unknown (no scan)' : '$rssi dBm'}'
             : 'connected ${band.name} ${band.address} (no battery or signal-strength reading from this board)',
       );
-      if (other != null) _otherBoard(other.board);
+      if (other != null) {
+        _otherBoard(other.board);
+      } else {
+        _mapSites(w.header);
+      }
       await _logPhone(w);
       await _logBattery(w);
       _set(
@@ -680,9 +684,11 @@ class NightRecorder {
     final slot = ms ~/ slotMs;
     _slots[slot] = (_slots[slot] ?? 0) + rows.length;
     _status = _status.copyWith(nightSamples: _status.nightSamples + rows.length, lastDataMs: ms, slots: _slots);
+    // the detectors read O1 O2 T3 T4 in that order, picked by name; with them off nothing reads these
+    final sites = _noDetectors ? rows : inOrder(rows, _siteMap);
     if (_drift != null) {
       _guarded((d) {
-        d.add(t, rows, firstOfFile: firstOfFile);
+        d.add(t, sites, firstOfFile: firstOfFile);
         for (final text in d.takeEvents()) {
           _marker(text, t);
         }
@@ -690,10 +696,10 @@ class NightRecorder {
     }
     if (_alarm == null && !_alarmMade) _startAlarm(t);
     _live.run((_) {
-      scorer?.add(t, rows, firstOfFile: firstOfFile); // an exception here reaches the guard: all of it off
+      scorer?.add(t, sites, firstOfFile: firstOfFile); // an exception here reaches the guard: all of it off
       _scorerLines();
-      _alarmCall((a) => a.add(t, rows, firstOfFile: firstOfFile), t);
-      _cueCall((c) => c.add(t, rows, firstOfFile: firstOfFile), t);
+      _alarmCall((a) => a.add(t, sites, firstOfFile: firstOfFile), t);
+      _cueCall((c) => c.add(t, sites, firstOfFile: firstOfFile), t);
     });
     _liveTidy();
   }
@@ -963,26 +969,58 @@ class NightRecorder {
   /// A board that is not a BrainBit: the drift-off detector (and its hands-free), the smart alarm's sleep model, the
   /// lucid cues and the live sleep model they share read BrainBit's O1 O2 T3 T4, so they stop for the night before the
   /// board's first sample, each with one line, and none starts again; the phone's alarm itself still rings.
-  void _otherBoard(BoardLive b) {
+  void _otherBoard(BoardLive b) => _detectorsOff(
+    drift: "it reads BrainBit's O1 O2 T3 T4, not this board's ${b.names.join(' ')}",
+    cues: "off with this board (the sleep model reads BrainBit's O1 O2 T3 T4); no cue plays tonight",
+    cuesShort: 'off with the DIY board',
+    alarmNote: "Off with the DIY board: the sleep model reads BrainBit's O1 O2 T3 T4.",
+    alarm: "the sleep model is off with this board (it reads BrainBit's O1 O2 T3 T4)",
+  );
+
+  /// Where the detectors' O1 O2 T3 T4 are in this run's records (header.dart `pick`, by name); null: in that order.
+  List<int>? _siteMap;
+
+  /// The detectors read O1 O2 T3 T4 by name from the run's header; a recording without them turns them off as a board
+  /// does, saying which sites it lacks (DECISIONS 630-639): never another channel in their place.
+  void _mapSites(RecordingHeader h) {
+    try {
+      _siteMap = mapping(h, sleepSites, who: 'The drift-off detector and the live sleep model');
+    } on MissingSites catch (e) {
+      _siteMap = null;
+      final lacks = e.missing.join(' ');
+      _detectorsOff(
+        drift: e.message,
+        cues: 'off: the sleep model reads O1 O2 T3 T4 and this recording has no $lacks; no cue plays tonight',
+        cuesShort: 'off: no $lacks in this recording',
+        alarmNote: 'Off: the sleep model reads O1 O2 T3 T4; this recording has no $lacks.',
+        alarm: 'the sleep model is off: it reads O1 O2 T3 T4 and this recording has no $lacks',
+      );
+    }
+  }
+
+  void _detectorsOff({
+    required String drift,
+    required String cues,
+    required String cuesShort,
+    required String alarmNote,
+    required String alarm,
+  }) {
     if (_noDetectors) return;
     _noDetectors = true;
-    if (_drift != null) _driftOff("it reads BrainBit's O1 O2 T3 T4, not this board's ${b.names.join(' ')}");
+    if (_drift != null) _driftOff(drift);
     final c = _cueWatch;
     _cueWatch = null;
     if (c != null) {
-      _cueLine("${c.who}: off with this board (the sleep model reads BrainBit's O1 O2 T3 T4); no cue plays tonight");
-      _offCues('off with the DIY board', c);
+      _cueLine('${c.who}: $cues');
+      _offCues(cuesShort, c);
     }
     final plan = _plan;
     if (plan != null && !_night.alarmOff) {
       final a = _alarm;
       _alarm = null;
       _night = _night.copyWith(alarmScoring: false, alarmOff: true);
-      _alarmLast = const AlarmLive(phase: AlarmPhase.off, note: "Off with the DIY board: the sleep model reads BrainBit's O1 O2 T3 T4.");
-      _logLine(
-        "smart alarm: the sleep model is off with this board (it reads BrainBit's O1 O2 T3 T4); the phone's alarm still "
-        'rings at ${_hm(plan.endMs)}',
-      );
+      _alarmLast = AlarmLive(phase: AlarmPhase.off, note: alarmNote);
+      _logLine("smart alarm: $alarm; the phone's alarm still rings at ${_hm(plan.endMs)}");
       if (a != null) unawaited(_closeAlarm(a));
     }
     // nothing is left under the guard: the shared model never gets a sample
@@ -1112,7 +1150,7 @@ class NightRecorder {
   int _closedSamples() {
     final log = _lastLog;
     if (log == null) return 0;
-    return rawLength(File('${log.path.substring(0, log.path.length - 4)}.f32')) ~/ recordBytes; // packed or not
+    return recordsIn(File('${log.path.substring(0, log.path.length - 4)}.f32')); // packed or not, by its header
   }
 
   Future<void> _contactCheck(Headband band, ChunkWriter w) async {

@@ -187,7 +187,7 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
     if (m is! List || m.isEmpty) return;
     switch (m[0]) {
       case 'b':
-        server.addBatch(m[1] as String, m[2] as int, m[3] as double, m[4] as Float32List);
+        server.addBatch(m[1] as String, m[2] as int, m[3] as double, m[4] as Float32List, channels: m.length > 5 ? m[5] as int : 4);
       case 's':
         server.setLive(m[1] as Map);
       case 'm':
@@ -344,16 +344,15 @@ class ShareHost {
     final port = _port;
     if (port == null) return;
     try {
-      final v = Float32List(samples.length * 4);
+      if (samples.isEmpty) return;
+      final n = samples.first.volts.length; // one recording: every sample as wide as its header says
+      final v = Float32List(samples.length * n);
       var o = 0;
       for (final s in samples) {
-        v[o] = s.o1;
-        v[o + 1] = s.o2;
-        v[o + 2] = s.t3;
-        v[o + 3] = s.t4;
-        o += 4;
+        v.setRange(o, o + n, s.volts);
+        o += n;
       }
-      port.send(['b', stem, first, unixSeconds(arrival), v]);
+      port.send(['b', stem, first, unixSeconds(arrival), v, n]);
     } catch (e) {
       _end('sharing on Wi-Fi stopped: $e');
     }

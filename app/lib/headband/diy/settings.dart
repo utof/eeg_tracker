@@ -10,8 +10,10 @@ import 'dart:io';
 /// today's firmware records the chip's own test signal or shorted inputs, whatever the names say).
 const List<String> defaultDiyNames = ['O1', 'O2', 'Fz', 'Fp1'];
 
-/// The phone records the 4-channel chip (the owner's ADS1299-4) into the BrainBit's 20-byte record (DECISIONS 363).
-const int diyChannels = 4;
+/// The channel counts the board's frames carry (E9: the ADS1299-4, -6 and -8). The phone records any of them, each in a
+/// record as wide as its channels with a header that names them (DECISIONS 630-639; until 2026-11-20 the 4-channel
+/// chip only, row 363).
+const List<int> diyChannelCounts = [4, 6, 8];
 
 /// A channel name as the laptop's recorder accepts it (scripts/record_diy.py `NAME_RE`).
 final RegExp diyNameRe = RegExp(r'^[A-Za-z0-9_.\-]{1,16}$');
@@ -23,7 +25,9 @@ List<String> parseDiyNames(String text) => [
 
 /// Why [names] cannot be used, in a sentence, or null when they can.
 String? diyNamesProblem(List<String> names) {
-  if (names.length != diyChannels) return 'Give 4 names, one for each channel (CH1 to CH4), e.g. O1, O2, Fz, Fp1.';
+  if (!diyChannelCounts.contains(names.length)) {
+    return 'Give 4, 6 or 8 names, one for each of the board\'s channels from CH1, e.g. O1, O2, Fz, Fp1.';
+  }
   final bad = names.where((n) => !diyNameRe.hasMatch(n)).toList();
   if (bad.isNotEmpty) return 'Use letters, digits, _ . or - only, up to 16 each (not: ${bad.join(', ')}).';
   if (names.toSet().length != names.length) return 'Each channel needs its own name.';
@@ -36,7 +40,7 @@ class DiyBoardSettings {
   /// "Headband: DIY board (test)". Off = the BrainBit.
   final bool useDiy;
 
-  /// CH1-CH4's names in the files and on the night screen.
+  /// CH1..'s names in the files and on the night screen (4, 6 or 8). A board with another count records as Ch1..ChN.
   final List<String> names;
 
   DiyBoardSettings copyWith({bool? useDiy, List<String>? names}) =>

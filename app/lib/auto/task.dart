@@ -169,7 +169,7 @@ class SimulatedCheck implements HeadbandCheck {
       _timer = Timer.periodic(const Duration(milliseconds: 32), (_) {
         final rows = <Sample>[
           for (var i = 0; i < 8; i++)
-            (
+            Sample.four(
               pack: pack + i,
               o1: 20e-6 * math.sin(2 * math.pi * 10 * (pack + i) / 250),
               o2: 18e-6 * math.sin(2 * math.pi * 10 * (pack + i) / 250),

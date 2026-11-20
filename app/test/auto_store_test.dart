@@ -12,7 +12,7 @@ import 'package:eeg_tracker/recorder/nights.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 List<Sample> batch(int first, [int n = 8]) => [
-  for (var i = 0; i < n; i++) (pack: first + i, o1: 1e-5, o2: 2e-5, t3: -1e-5, t4: 3e-6),
+  for (var i = 0; i < n; i++) Sample.four(pack: first + i, o1: 1e-5, o2: 2e-5, t3: -1e-5, t4: 3e-6),
 ];
 
 void main() {

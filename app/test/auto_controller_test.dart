@@ -16,7 +16,7 @@ import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 List<Sample> batch(int first) => [
-  for (var i = 0; i < 8; i++) (pack: first + i, o1: 1e-5, o2: 2e-5, t3: -1e-5, t4: 3e-6),
+  for (var i = 0; i < 8; i++) Sample.four(pack: first + i, o1: 1e-5, o2: 2e-5, t3: -1e-5, t4: 3e-6),
 ];
 
 /// The headband check: what it finds, and the batches it streams while held.

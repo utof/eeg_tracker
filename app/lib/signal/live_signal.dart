@@ -35,19 +35,21 @@ class LiveBatch {
 
   int get length => values.length ~/ channels;
 
-  /// The app's sample record: four channels in volts (the BrainBit's O1 O2 T3 T4, the DIY board's CH1-CH4).
+  /// The app's sample record: its channels in volts, as many as the device sends (the BrainBit's O1 O2 T3 T4, the
+  /// DIY board's CH1..; DECISIONS 630-639). [batch] is not empty.
   static LiveBatch fromSamples(DateTime arrival, List<Sample> batch, {int? first, String? run}) {
-    final v = Float32List(batch.length * 4);
+    final n = batch.first.volts.length;
+    final v = Float32List(batch.length * n);
     final p = Int32List(batch.length);
     for (var i = 0; i < batch.length; i++) {
       final s = batch[i];
-      v[4 * i] = s.o1 * 1e6;
-      v[4 * i + 1] = s.o2 * 1e6;
-      v[4 * i + 2] = s.t3 * 1e6;
-      v[4 * i + 3] = s.t4 * 1e6;
+      final x = s.volts;
+      for (var c = 0; c < n && c < x.length; c++) {
+        v[n * i + c] = x[c] * 1e6;
+      }
       p[i] = s.pack;
     }
-    return LiveBatch(arrival: arrival, values: v, channels: 4, packs: p, first: first, run: run);
+    return LiveBatch(arrival: arrival, values: v, channels: n, packs: p, first: first, run: run);
   }
 }
 
@@ -209,7 +211,7 @@ class LiveSignal {
     final packs = b.packs;
     if (packs != null) {
       _hasPacks = true;
-      _account.add([for (final p in packs) (pack: p, o1: 0.0, o2: 0.0, t3: 0.0, t4: 0.0)]);
+      _account.add([for (final p in packs) Sample.four(pack: p, o1: 0.0, o2: 0.0, t3: 0.0, t4: 0.0)]);
     }
     final n = b.length, end = b.arrival.millisecondsSinceEpoch.toDouble();
     for (var i = 0; i < n; i++) {

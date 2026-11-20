@@ -240,7 +240,7 @@ class _ReplayBand implements Headband {
       }
       final b = ByteData.sublistView(bytes);
       for (var o = 0; o + recordBytes <= bytes.length; o += recordBytes) {
-        out.add((
+        out.add(Sample.four(
           pack: b.getUint32(o, Endian.little),
           o1: b.getFloat32(o + 4, Endian.little),
           o2: b.getFloat32(o + 8, Endian.little),

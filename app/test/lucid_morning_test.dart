@@ -28,7 +28,7 @@ File writeRun(Directory dir, int seconds, double lrlrAtS) {
       if (t >= lrlrAtS + 1.2) eye = 120;
       if (t >= lrlrAtS + 1.8) eye = -120;
       if (t >= lrlrAtS + 2.4) eye = 0;
-      rows.add((
+      rows.add(Sample.four(
         pack: i % 2048,
         o1: (12000 + 10 * math.sin(i * 0.25)) * 1e-6,
         o2: (-8000 + 8 * math.cos(i * 0.1)) * 1e-6,
