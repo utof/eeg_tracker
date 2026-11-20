@@ -946,6 +946,7 @@ class PhoneLook:
     copying: bool = False      # phone_link.py on this laptop copies its files now
     copied: datetime | None = None   # when phone_link.py last reached the phone
     sharing: str | None = None       # what the phone says of its Wi-Fi: home, here (allowed by hand), paused
+    pushed: datetime | None = None   # when the phone last sent its files by itself (phone/push-state.json)
 
 
 def phone_state(address: str, port: int, key: str, home: str | None = None, timeout: float = PHONE_TIMEOUT_S
@@ -978,12 +979,17 @@ def look_at_phone(local: Path, now: datetime, ask: Callable[..., tuple[str, dict
         return PhoneLook(now, "repair" if _old_pairing(local) else "unpaired")
     result, state, code = ask(*t)
     copying, copied, sharing = False, None, None
+    try:  # read from the disk: the phone may send its files while its own server does not answer
+        push = json.loads((local / "phone" / "push-state.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        push = None
+    pushed = _aware(push.get("last_push")) if isinstance(push, dict) else None
     if result == "ok":
         st = probe()
         copying = bool(st and st.get("connected"))
         copied = _aware(st.get("last_copy")) if st else None
         sharing = st.get("sharing") if st and st.get("sharing") in ("home", "here", "paused") else None
-    return PhoneLook(now, result, t[0], state, code, copying, copied, sharing)
+    return PhoneLook(now, result, t[0], state, code, copying, copied, sharing, pushed)
 
 
 def _num(v: object) -> float | None:
@@ -1096,9 +1102,27 @@ class PhoneView:
     lines: tuple[str, ...] = ()
 
 
+def pushed_line(look: PhoneLook | None) -> str | None:
+    """When the phone last sent its files by itself: the time today, the day too when it was another day."""
+    if look is None or look.pushed is None:
+        return None
+    t = look.pushed.astimezone()
+    day = "" if t.date() == look.at.astimezone().date() else f"{t.day} {t.strftime('%b')}, "
+    return f"Phone: sent its files by itself {day}{hm(t)}"
+
+
 def phone_view(last: PhoneLook | None, ok: PhoneLook | None, misses: int) -> PhoneView:
     """The menu's phone lines and the icon's ring from the latest look and the last answered one: one failed look
-    after an answer keeps that answer (a Wi-Fi blip); [PHONE_MISSES] in a row, or none answered, is the failure."""
+    after an answer keeps that answer (a Wi-Fi blip); [PHONE_MISSES] in a row, or none answered, is the failure.
+    When the phone sent its files by itself, a line says when (also while it is not reachable)."""
+    v = _phone_view(last, ok, misses)
+    sent = pushed_line(last)
+    if sent is None or v.kind not in ("unreachable", "refused", "reachable") or not v.lines:
+        return v
+    return PhoneView(v.kind, v.ring, v.lines[:1] + (sent,) + v.lines[1:])
+
+
+def _phone_view(last: PhoneLook | None, ok: PhoneLook | None, misses: int) -> PhoneView:
     if last is None:
         return PhoneView("checking", "none", ())
     if last.result == "unpaired":

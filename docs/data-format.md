@@ -810,6 +810,21 @@ a wrong proof, a second try or a client outside the local network. `_local/phone
 `laptop` (`v` 2, `host`, `port`, `key`, `name`, `paired_at_ms`) of the Share on Wi-Fi setting in the app's private
 settings, beside `here_until_ms` and `here_net` (Share here for 12 hours).
 
+### What the phone sends by itself (push)
+
+DECISIONS 840-849, `docs/phone-link.md` "The phone sends by itself". The same files as `GET /files`, into the same
+places on the laptop, by the same rules; only the direction differs. What it leaves behind:
+
+| File | Where | Holds |
+|---|---|---|
+| `transfer/push.json` | phone (never shared) | `ok_ms`, `try_ms` (last good push, last try), `fails` and `why` (tries in a row that did not reach the laptop at home, the last reason), `files`, `bytes` of the last good push, `swept_ms` |
+| `transfer/laptop-at.json` | phone (never shared) | `address`, `at_ms`: where the paired laptop's signed requests last came from |
+| `phone/push-inbox/` | laptop | uploaded bytes waiting for a commit: one file per path, named by a hash of the path, plus a small `.json` beside it (`path`, `from`, the listed size, time and SHA-256); emptied as files are filed |
+| `phone/push-state.json` | laptop | `last_push` (local ISO time), `files`, `bytes`, `last_try`: what the tray shows |
+| `phone/pulls.jsonl` | laptop | a pushed pass is a line like any other, with `"phone": "pushed"` |
+
+The phone's server may answer on 8766-8768 when 8765 is taken; `phone/link.json` then holds that port.
+
 ### Raw files that left the phone (`<stamp>.removed.json`, `transfer/`)
 
 DECISIONS 690-699. A recording's samples (`.f32` or `.f32.gz`) and index (`.idx`) may leave the phone once the paired

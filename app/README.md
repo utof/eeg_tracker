@@ -1847,6 +1847,16 @@ when the laptop last copied, and so does the laptop tray's menu. The sheet canno
 holds only the address. **New code** shuts out every device that has the old one; the paired laptop does not use
 the code: **Forget this laptop** shuts it out.
 
+**The phone also sends by itself** (DECISIONS 840-849, `../docs/phone-link.md`). With a laptop paired, the phone
+does not wait to be asked: about every 15 minutes while it is on your home Wi-Fi, and a few seconds after each
+recording or session ends, it sends the laptop whatever the laptop lacks. This works with the app closed and the
+screen off, and there is no notification: Android runs it as a short background job. It goes only to the paired
+laptop (which must prove the pairing first) and only at home (the laptop recognises its own router). During a
+recording the laptop can also still ask the phone, as before; the two ways use the same rules and never copy a file
+twice. The Share sheet says so in one sentence, and the laptop tray shows "Phone: sent its files by itself 14:05".
+If something else on the phone holds port 8765, the app now serves on the next free port (8766-8768) and keeps
+trying during a recording; before, one failed start meant no sharing until Stop.
+
 **Connecting the laptop by one scan** (DECISIONS rows 530-539 and 753, `../docs/phone-link.md`). The square code on
 the laptop works once, for 5 minutes. The app asks before anything is sent; the laptop proves it showed that square
 code, and then both work out the same key from it, so neither the code, the key nor the phone's own code crosses the

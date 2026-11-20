@@ -12,6 +12,7 @@ import 'logs/usage.dart' show Usage;
 import 'logs/usage_watch.dart' show UsageGestures, UsageNavigatorObserver;
 import 'phone.dart' show Phone;
 import 'recorder/recorder_service.dart';
+import 'share/push/task.dart' show runPushTask;
 import 'sharp/prompts.dart';
 import 'ui/auto_hooks.dart';
 import 'ui/night_screen.dart';
@@ -39,6 +40,10 @@ void main() {
 /// The headband watcher's own engine (AutoWatchService.kt, lib/auto/task.dart; DECISIONS 600).
 @pragma('vm:entry-point')
 Future<void> autoWatchMain() => runAutoWatch();
+
+/// The push's own engine (PushJob.kt, lib/share/push/task.dart; DECISIONS 840-849).
+@pragma('vm:entry-point')
+Future<void> pushMain() => runPushTask();
 
 class EegTrackerApp extends StatefulWidget {
   const EegTrackerApp({super.key, this.sharp});
