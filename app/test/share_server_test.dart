@@ -23,6 +23,7 @@ void main() {
   final markers = <String>[];
   MarkerResult? markerAnswer;
   final works = <bool>[];
+  final meetings = <bool?>[];
 
   Future<void> start({Duration keepalive = const Duration(seconds: 10)}) async {
     server = ShareServer(
@@ -36,7 +37,10 @@ void main() {
         markers.add(text);
         return markerAnswer;
       },
-      onWork: works.add,
+      onWork: (working, meeting) {
+        works.add(working);
+        meetings.add(meeting);
+      },
     );
     await server.listen();
   }
@@ -49,6 +53,7 @@ void main() {
     markers.clear();
     markerAnswer = null;
     works.clear();
+    meetings.clear();
     await start();
   });
   tearDown(() async {
@@ -383,6 +388,15 @@ void main() {
       expect((await ask('/work')).code, 405, reason: 'a signal, not a page');
       expect(works, [true, false]);
       expect((await json('/'))['routes'], contains('POST /work'));
+    });
+
+    test('POST /work says whether the laptop is in a meeting; older trays say nothing (DECISIONS 685)', () async {
+      expect((await ask('/work', method: 'POST', body: '{"working": true, "meeting": true}')).code, 202);
+      expect((await ask('/work', method: 'POST', body: '{"working": true, "meeting": false}')).code, 202);
+      expect((await ask('/work', method: 'POST', body: '{"working": true}')).code, 202);
+      expect((await ask('/work', method: 'POST', body: '{"working": true, "meeting": "yes"}')).code, 202, reason: 'an odd meeting is not said');
+      expect(works, [true, true, true, true]);
+      expect(meetings, [true, false, null, null]);
     });
 
     test('POST /work where nothing takes it (the night recorder serves): 503', () async {

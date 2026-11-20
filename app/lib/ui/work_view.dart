@@ -38,6 +38,9 @@ class WorkViewModel {
     this.closedLeft = 0,
     this.calibrationLeftMin = 0,
     this.kept = true,
+    this.meeting = false,
+    this.calibrationWaits = false,
+    this.rawNote,
     this.summary,
     this.sessions = const [],
     this.saveNote,
@@ -66,6 +69,15 @@ class WorkViewModel {
 
   /// The phone may be locked (the session keeper holds it).
   final bool kept;
+
+  /// A meeting now (a call on the phone, or the laptop's meeting): talking expected, no verdict, no hint.
+  final bool meeting;
+
+  /// Calibrating, but waiting for a quiet minute (talking?).
+  final bool calibrationWaits;
+
+  /// What was kept of the raw EEG (the done page).
+  final String? rawNote;
 
   /// The session that just ended.
   final WorkSummary? summary;
@@ -149,7 +161,7 @@ class WorkView extends StatelessWidget {
       _Rule('First', 'about 4 minutes of your usual work: your awake baseline. Start when you feel fresh.'),
       _Rule('Then', 'alert, getting drowsy or drowsy, from the last 5 minutes against your baseline.'),
       _Rule('Hints', 'a soft chime after an hour worn, or when drowsiness stays up; at most 4 a day, 45 minutes apart, none 23:00-08:00.'),
-      _Rule('Breaks', 'tap On a break, or take the headband off for 5 minutes. After it you see if drowsiness went down.'),
+      _Rule('Breaks', 'tap On a break, or take the headband off for 5 minutes. Talking, chewing and moving are not a break. After it you see if drowsiness went down.'),
       const SizedBox(height: 8),
       SwitchListTile(
         contentPadding: EdgeInsets.zero,
@@ -208,6 +220,7 @@ class WorkView extends StatelessWidget {
     final m = model, s = m.summary;
     return [
       _Status(mark: _Mark.saved, word: 'Saved', line: m.saveNote ?? 'Your work session is kept on this phone and goes out with Export data.'),
+      if (m.rawNote != null) Para(m.rawNote!, color: Night.inkMuted, top: 12),
       if (s != null) ...[
         const SizedBox(height: 24),
         Row(
@@ -296,7 +309,17 @@ class WorkView extends StatelessWidget {
     return (_Mark.problem, 'No signal', 'The headband is out of reach, off or not sending; the app keeps reconnecting.');
   }
   if (m.stage == WorkStage.calibrating) {
-    return (_Mark.idle, 'Calibrating', 'Learning your awake baseline: work as usual, ${left(m.calibrationLeftMin)} left.');
+    final line = m.signal == WorkSignal.off
+        ? 'Paused: the headband seems off. It goes on once the headband is back on.'
+        : m.meeting
+        ? 'In a meeting: it waits for a quiet minute after the meeting. Talking is never a break.'
+        : m.calibrationWaits
+        ? 'Waiting for a quiet minute to calibrate (talking?). Talking is never a break; hourly hints still come.'
+        : 'Learning your awake baseline: work as usual, ${left(m.calibrationLeftMin)} left.';
+    return (_Mark.idle, 'Calibrating', line);
+  }
+  if (m.meeting) {
+    return (_Mark.none, 'In a meeting', 'Talking is expected: drowsiness is not read and break hints wait until it ends.');
   }
   if (m.eyesClosedNow) return (_Mark.fair, 'Eyes closed', 'Your eyes have been closed for 2 of the last 5 minutes: resting, or nodding off.');
   return switch (m.level) {
@@ -615,9 +638,9 @@ class _SignalLine extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final (icon, color, words) = switch (signal) {
       WorkSignal.good => (Icons.circle, Night.live, 'Signal good'),
-      WorkSignal.noisy => (Icons.adjust, Night.caution, 'Noisy: talking, chewing or moving'),
+      WorkSignal.noisy => (Icons.adjust, Night.caution, 'Talking / moving — reading paused'),
       WorkSignal.noEyes => (Icons.adjust, Night.caution, 'An electrode has no contact: eye readings paused'),
-      WorkSignal.off => (Icons.radio_button_unchecked, Night.caution, 'No usable signal: is the headband on?'),
+      WorkSignal.off => (Icons.radio_button_unchecked, Night.caution, 'The headband seems off: no skin contact in the signal'),
       WorkSignal.lost => (Icons.radio_button_unchecked, Night.problem, 'No signal: reconnecting'),
     };
     return Row(

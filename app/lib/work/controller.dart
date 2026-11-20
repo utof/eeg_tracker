@@ -9,15 +9,35 @@
 // worn time). Optional first: one minute with eyes closed, whose alpha tells closed eyes apart later. The session file
 // is written whole every 5 minutes and at Stop (store.dart). The lock-screen card follows the level, the hint (gone
 // after its 30 minutes) and the break (with Back on it).
+//
+// A working day (owner, 2026-11-20, talking in a Zoom meeting: "it said on break; I pressed Back, it calibrated again
+// and said on break again"; DECISIONS 680-686):
+// - Worn is skin contact judged from the signal itself (worn.dart: the automatic recording's worn check, DECISIONS
+//   601), not whether the drowsiness level can read it: talking, chewing and moving are worn but not readable ("Talking
+//   / moving: reading paused"), never a break. Only the headband really off (flat, at the rails or wild on most
+//   channels, or no data) for 5 minutes, or a tap, starts one.
+// - Calibration learns only from quiet half minutes (drowsiness.dart) and says when it waits for one; no break starts
+//   by itself while it calibrates. Back never redoes it: a finished baseline stays all session (DECISIONS 441); one
+//   still being gathered starts over only after the headband was off 5 minutes.
+// - The raw EEG of the whole session (calibration included) is kept as a recording beside the nights' (`files/
+//   recordings/<stamp>.f32 .idx .log .header.json`, chunk_writer.dart) whose header says `session: work`, so it is no
+//   night (recorder/nights.dart, scripts/night_files.py); packed after a day like the nights' (packed.dart).
+// - Meetings: a call holding the phone's sound (the chime's `inCall`, asked every 15 s) or the laptop's word that its
+//   session is in a meeting (`POST /work` `meeting`, auto/laptop.dart) labels the half minutes as a meeting: talking
+//   is expected, no drowsiness verdict comes from them, and no hint is decided until it ends.
 import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import 'dart:convert';
+import 'dart:io';
+
 import '../detectors/detectors.dart';
 import '../dream/band_link.dart';
 import '../feedback/features.dart' show fs, median;
-import '../recorder/chunk_writer.dart' show Sample;
+import '../recorder/chunk_writer.dart' show ChunkWriter, Sample, unixSeconds;
+import '../recorder/header.dart' show brainBitHeader, sessionWork;
 import '../recorder/headband.dart' show HeadbandFinder;
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
 import '../session_clock.dart';
@@ -27,6 +47,7 @@ import '../sound/work_sound.dart';
 import 'breaks.dart';
 import 'drowsiness.dart';
 import 'store.dart';
+import 'worn.dart';
 
 enum WorkStage { setup, connecting, contact, eyesClosed, calibrating, running, ending, done, failed }
 
@@ -49,8 +70,12 @@ const int workGapSamples = 25;
 /// The optional eyes-closed minute: its length, and the clean seconds it needs to count.
 const int closedMinuteS = 60, closedMinCleanS = 20;
 
-/// Of the last 10 detector seconds, this many must have a usable back channel for the headband to count as worn.
-const int wornOf = 10, wornNeeded = 3;
+/// The worn judgement (20 s of signal, worn.dart) is made again every this many seconds.
+const int wornEveryS = 5;
+
+/// Of the last 10 detector seconds, this many must be readable (no muscle, movement or hole, a clean back channel)
+/// for the reading to count as going on; fewer: worn but "Talking / moving: reading paused" (DECISIONS 681).
+const int readOf = 10, readNeeded = 3;
 
 class WorkTiming {
   const WorkTiming({
@@ -59,9 +84,17 @@ class WorkTiming {
     this.noDataAfter = const Duration(seconds: 3),
     this.saveEvery = const Duration(minutes: 5),
     this.holdEvery = const Duration(minutes: 20),
+    this.callEvery = const Duration(seconds: 15),
+    this.syncEvery = const Duration(seconds: 10),
   });
   final LinkTiming link;
   final Duration tick, noDataAfter, saveEvery, holdEvery;
+
+  /// How often the phone is asked whether a call holds its sound (a meeting, DECISIONS 685).
+  final Duration callEvery;
+
+  /// The raw EEG is flushed to the storage device this often (as the night recorder's).
+  final Duration syncEvery;
 }
 
 class WorkController extends ChangeNotifier {
@@ -74,6 +107,8 @@ class WorkController extends ChangeNotifier {
     DateTime Function()? clock,
     this.inCall,
     this.mediaVolume,
+    this.laptopMeeting,
+    this.recordingsDir,
     Duration Function()? monotonic,
   }) : sound = sound ?? SilentWorkSound(),
        keeper = keeper ?? FakeSessionKeeper(grant: false),
@@ -98,6 +133,12 @@ class WorkController extends ChangeNotifier {
 
   /// The media volume, read at Start and before each chime; null: never read.
   final Future<MediaVolume?> Function()? mediaVolume;
+
+  /// The paired laptop says its work session is in a meeting now (auto/laptop.dart); null: no laptop.
+  final bool Function()? laptopMeeting;
+
+  /// Where the raw EEG is kept (`files/recordings`); null: not kept (set by the screen once the folder is known).
+  Directory? recordingsDir;
 
   /// A quiet line when the chime may not be heard (the media volume off or low); null when nothing needs saying.
   String? volumeNote;
@@ -131,8 +172,32 @@ class WorkController extends ChangeNotifier {
   bool get leftLost => _link?.leftLost ?? false;
   bool get onBreak => _planner?.onBreak ?? false;
 
-  /// The headband sends a usable signal now.
+  /// The headband is on the head now (skin contact in the signal; not necessarily readable).
   bool worn = false;
+
+  /// A meeting now: a call holds the phone's sound, or the laptop says its session is in one.
+  bool get meeting => _meetingSource != null;
+
+  /// What says it is a meeting: `phone call`, `laptop` or `phone call and laptop`; null: none.
+  String? get meetingSource => _meetingSource;
+
+  /// The drowsiness level can read the signal now (3 of the last 10 seconds readable).
+  bool get readable => _usable.where((u) => u).length >= readNeeded;
+
+  /// Calibrating on the head, outside a break and a meeting, but the signal is not quiet enough to learn from: it
+  /// waits for a quiet minute (talking?).
+  bool get calibrationWaits {
+    if (stage != WorkStage.calibrating || !worn || signalLost || onBreak || meeting) return false;
+    final d = _drowsy;
+    if (d == null || d.calibrated || d.settleLeft > 0) return false;
+    return d.waitingForQuiet || (_usable.length >= readOf && !readable);
+  }
+
+  /// The raw EEG's file set (`<stamp>` of `files/recordings/<stamp>.f32`); null when it is not kept.
+  String? rawStem;
+
+  /// What was kept of the raw EEG, or why it was not, for the done page; null when nothing was to be kept.
+  String? rawNote;
 
   /// The link is reconnecting, or nothing arrived for a few seconds.
   bool get signalLost => (_link?.lost ?? false) || _quiet;
@@ -145,8 +210,7 @@ class WorkController extends ChangeNotifier {
   double get calibrationLeftMin {
     final d = _drowsy;
     if (d == null) return (WorkRule.settleEpochs + WorkRule.baselineEpochs) / 2;
-    final settle = math.max(0, WorkRule.settleEpochs - d.epochs.length);
-    return (settle + d.baselineLeft) / 2;
+    return (d.settleLeft + d.baselineLeft) / 2;
   }
 
   /// The last hour as 12 cells of 5 minutes (oldest first).
@@ -183,6 +247,7 @@ class WorkController extends ChangeNotifier {
   WorkSignal get signal {
     if (signalLost) return WorkSignal.lost;
     if (!worn) return WorkSignal.off;
+    if (_usable.length >= readOf && !readable) return WorkSignal.noisy;
     final last = _drowsy?.epochs.lastOrNull;
     if (last != null && last.cleanS < WorkRule.minCleanS) return WorkSignal.noisy;
     return (_drowsy?.eyesPaused ?? false) ? WorkSignal.noEyes : WorkSignal.good;
@@ -198,8 +263,26 @@ class WorkController extends ChangeNotifier {
   bool _gapPending = false, _quiet = false, _ended = false, _disposed = false;
   int _lostSamples = 0, _moveCursor = 0;
 
-  /// The level the lock-screen card says (null: it says something else).
-  DrowsyLevel? _cardLevel;
+  /// What the lock-screen card says, less its minutes: it is held again when this changes at an epoch.
+  String? _cardKey;
+
+  /// Skin contact in the signal (worn.dart).
+  SignalWornJudge _judge = SignalWornJudge();
+  bool? _signalWorn;
+
+  /// Calibrating with the headband off since then (monotonic).
+  Duration? _calOffSince;
+
+  /// The raw EEG being written, and when it was last flushed to the storage device.
+  ChunkWriter? _writer;
+  DateTime? _syncedAt;
+
+  /// Meetings: the phone's last answer about a call, when it was asked, an ask under way; the meeting now (its
+  /// source and start) and the ones that ended.
+  bool _phoneCall = false, _callPolling = false;
+  DateTime? _callPolledAt, _meetingFrom;
+  String? _meetingSource;
+  final List<Map<String, Object?>> _meetings = [];
 
   /// The hint whose chime has not played yet (a call held it back), and a call check under way.
   WorkHint? _chimeWaits;
@@ -234,6 +317,7 @@ class WorkController extends ChangeNotifier {
       final ohms = await link.contact();
       if (!_live(run)) return await link.close();
       contact = ohms;
+      _judge.contact(ohms);
       final now = _now();
       startedAt = now;
       final prior = _prior(now);
@@ -247,6 +331,7 @@ class WorkController extends ChangeNotifier {
       }
       _seen = Detectors(onSecond: _onSecond);
       if (!eyesClosedMinute) _drowsy = WorkDrowsiness(onEpoch: _onEpoch);
+      _openRaw(link.name, now);
       await link.startSignal();
       if (!_live(run)) return await link.close(); // Stop came while the stream started
       _lastData = null;
@@ -283,22 +368,22 @@ class WorkController extends ChangeNotifier {
     }
   }
 
-  KeepSpec _keep() {
+  /// The card's words; [withMinutes] false: without the worn minutes (what [_cardKey] compares).
+  String _cardText({bool withMinutes = true}) {
     final h = hint;
-    final String text;
-    _cardLevel = null;
-    if (h != null) {
-      text = hintTitle(h);
-    } else if (onBreak) {
-      text = 'On a break';
-    } else if (stage == WorkStage.running) {
-      text = '${levelWords[level]} · ${_minutes(wornMin)} worn';
-      _cardLevel = level;
-    } else {
-      text = 'Calibrating';
-    }
+    final worn = withMinutes ? ' · ${_minutes(wornMin)} worn' : '';
+    if (h != null) return hintTitle(h);
+    if (onBreak) return 'On a break';
+    if (meeting && stage.index >= WorkStage.calibrating.index) return 'In a meeting$worn';
+    if (stage == WorkStage.running) return '${levelWords[level]}$worn';
+    if (calibrationWaits) return 'Calibrating: waiting for a quiet minute';
+    return 'Calibrating';
+  }
+
+  KeepSpec _keep() {
+    _cardKey = _cardText(withMinutes: false);
     // no audio focus: only a short chime plays now and then, and music or a podcast while working goes on (row 468)
-    return KeepSpec(title: 'Work session', text: text, headband: true, focus: false, button: onBreak ? 'Back' : null);
+    return KeepSpec(title: 'Work session', text: _cardText(), headband: true, focus: false, button: onBreak ? 'Back' : null);
   }
 
   void _reset() {
@@ -322,7 +407,20 @@ class WorkController extends ChangeNotifier {
     closedAlpha = null;
     closedLeft = 0;
     hint = null;
-    _cardLevel = null;
+    _cardKey = null;
+    _judge = SignalWornJudge();
+    _signalWorn = null;
+    _calOffSince = null;
+    _writer = null;
+    _syncedAt = null;
+    rawStem = null;
+    rawNote = null;
+    _phoneCall = false;
+    _callPolling = false;
+    _callPolledAt = null;
+    _meetingFrom = null;
+    _meetingSource = null;
+    _meetings.clear();
     _chimeWaits = null;
     volumeNote = null;
     afterBreak = null;
@@ -339,6 +437,7 @@ class WorkController extends ChangeNotifier {
   void _onBatch(DateTime now, List<Sample> batch) {
     final seen = _seen;
     if (seen == null || _ended || batch.isEmpty) return;
+    _rawBatch(now, batch);
     final last = _lastData;
     if (last != null && now.difference(last).inMicroseconds / 1e6 > 1 + batch.length / fs) {
       _gapPending = true;
@@ -362,7 +461,10 @@ class WorkController extends ChangeNotifier {
         _lostSamples = 0;
       }
       final row = [x.o1 * 1e6, x.o2 * 1e6, x.t3 * 1e6, x.t4 * 1e6]; // the SDK gives volts
-      if (row.every((v) => v.isFinite)) seen.push(row);
+      if (row.every((v) => v.isFinite)) {
+        seen.push(row);
+        _judge.push(row);
+      }
     }
   }
 
@@ -373,9 +475,10 @@ class WorkController extends ChangeNotifier {
       if (seen.eyeMoves[_moveCursor].i ~/ fs == s.k) moves++;
       _moveCursor++;
     }
-    final x = workInputOf(s, eyeMoves: moves);
-    _usable.add(x.backClean && !x.gap);
-    if (_usable.length > wornOf) _usable.removeAt(0);
+    final x = workInputOf(s, eyeMoves: moves, meeting: meeting, away: onBreak);
+    _usable.add(x.readable);
+    if (_usable.length > readOf) _usable.removeAt(0);
+    if (s.k % wornEveryS == 0 || _signalWorn == null) _signalWorn = _judge.worn;
     if (stage == WorkStage.eyesClosed) return _closedSecond(x);
     _drowsy?.second(x);
   }
@@ -399,11 +502,15 @@ class WorkController extends ChangeNotifier {
   void _onEpoch(WorkEpoch e) {
     final now = _now();
     _epochs.add({'at': now.subtract(const Duration(seconds: 30)).toIso8601String(), ...e.toJson()});
-    _planner?.epoch(e.level, eyesClosed: e.eyesClosed, window: e.window);
-    if (stage == WorkStage.calibrating && (_drowsy?.calibrated ?? false)) _set(WorkStage.running, '');
+    // a meeting's half minutes give no verdict: the drowsiness hints do not count them
+    _planner?.epoch(e.meeting ? DrowsyLevel.unknown : e.level, eyesClosed: e.eyesClosed && !e.meeting, window: e.window);
+    if (stage == WorkStage.calibrating && (_drowsy?.calibrated ?? false)) {
+      _set(WorkStage.running, '');
+      _mark('work: calibrated', now);
+    }
     _afterBreakLine(now);
-    // the card's words follow the level (not only at the 20-minute hold)
-    if (stage == WorkStage.running && hint == null && !onBreak && level != _cardLevel) _rehold();
+    // the card's words follow the level and the calibration's wait (not only at the 20-minute hold)
+    if (hint == null && !onBreak && _cardText(withMinutes: false) != _cardKey) _rehold();
     _notify();
   }
 
@@ -419,21 +526,29 @@ class WorkController extends ChangeNotifier {
     if (_ended) return;
     final now = _now(), lastData = _lastData;
     if (lastData != null && now.difference(lastData) > timing.noDataAfter) _quiet = true;
-    worn = !signalLost && lastData != null && _usable.where((u) => u).length >= wornNeeded;
+    // skin contact, not a readable signal: talking and moving are worn (DECISIONS 680)
+    worn = !signalLost && lastData != null && (_signalWorn ?? _judge.contactWorn ?? true);
+    _writeRaw(now);
+    _meetingTick(now);
     _link?.tick();
     final p = _planner;
     if (p != null && stage.index >= WorkStage.calibrating.index && stage != WorkStage.ending) {
+      final calibrating = stage == WorkStage.calibrating;
+      if (calibrating) _calibrationOff(now);
       final was = p.currentBreak;
-      final h = p.tick(now, worn: worn, mono: _mono.now);
+      // while it calibrates no break starts by itself: the headband off only pauses the worn count (DECISIONS 682)
+      final h = p.tick(now, worn: worn, mono: _mono.now, meeting: meeting, autoBreak: !calibrating);
       if (h != null) _showHint(h);
       if (was == null && p.onBreak) {
         // the headband came off for a break: the hint no longer needs an answer; the card says so, with Back
         hint = null;
+        _mark('work: on a break (the headband off)', now);
         _rehold();
       } else if (was != null && !p.onBreak) {
         if (was.endSource == BreakEnd.auto) {
           _events.add({'at': now.toIso8601String(), 'event': 'break ended by itself (Back not tapped)', 'end': was.end?.toIso8601String()});
         }
+        _mark('work: back from the break', now);
         _afterBreakLine(now);
         _rehold();
       }
@@ -443,6 +558,185 @@ class WorkController extends ChangeNotifier {
     if (_savedAt == null || now.difference(_savedAt!) >= timing.saveEvery) _save(now);
     if (_heldAt != null && now.difference(_heldAt!) >= timing.holdEvery) _rehold();
     _notify();
+  }
+
+  /// Calibrating with the headband off (or no data) for 5 minutes or more: a baseline still being gathered starts
+  /// over once the headband is back, its settling minute first (it sits differently now). A finished one is never
+  /// touched (DECISIONS 441), and a shorter time off keeps what was gathered.
+  void _calibrationOff(DateTime now) {
+    final d = _drowsy;
+    if (d == null || d.calibrated) {
+      _calOffSince = null;
+      return;
+    }
+    final at = _mono.now;
+    if (!worn) {
+      _calOffSince ??= at;
+      return;
+    }
+    final from = _calOffSince;
+    _calOffSince = null;
+    if (from == null || (at - from).inMilliseconds / 60000 < BreakRule.breakMin) return;
+    d.restartBaseline();
+    _events.add({'at': now.toIso8601String(), 'event': 'calibration starts over: the headband was off 5 minutes'});
+    _rawLog('calibration starts over: the headband was off 5 minutes', now);
+  }
+
+  // ---- meetings (DECISIONS 685) ----
+
+  /// Asks the phone about a call every [WorkTiming.callEvery] and reads the laptop's word; a change starts or ends a
+  /// meeting.
+  void _meetingTick(DateTime now) {
+    final ask = inCall;
+    final polled = _callPolledAt;
+    if (ask != null && !_callPolling && (polled == null || now.difference(polled) >= timing.callEvery)) {
+      _callPolledAt = now;
+      _callPolling = true;
+      unawaited(_askCall(ask, _run));
+    }
+    bool laptop;
+    try {
+      laptop = laptopMeeting?.call() ?? false;
+    } catch (_) {
+      laptop = false;
+    }
+    final source = switch ((_phoneCall, laptop)) {
+      (true, true) => 'phone call and laptop',
+      (true, false) => 'phone call',
+      (false, true) => 'laptop',
+      (false, false) => null,
+    };
+    if (source == _meetingSource) return;
+    final was = _meetingSource;
+    _meetingSource = source;
+    if (was != null && source != null) return; // still a meeting: only who says so changed
+    if (source != null) {
+      _meetingFrom = now;
+      _events.add({'at': now.toIso8601String(), 'event': 'meeting started', 'source': source});
+      _mark('work: meeting ($source)', now);
+    } else {
+      _closeMeeting(now, was!);
+      _events.add({'at': now.toIso8601String(), 'event': 'meeting ended'});
+      _mark('work: meeting ended', now);
+    }
+    if (stage.index >= WorkStage.calibrating.index) _rehold();
+  }
+
+  void _closeMeeting(DateTime now, String source) {
+    final from = _meetingFrom;
+    if (from == null) return;
+    _meetings.add({'start': from.toIso8601String(), 'end': now.toIso8601String(), 'source': source});
+    _meetingFrom = null;
+  }
+
+  Future<void> _askCall(Future<bool?> Function() ask, int run) async {
+    bool? busy;
+    try {
+      busy = await ask().timeout(const Duration(seconds: 2));
+    } catch (_) {
+      busy = null; // the phone did not say: no call
+    } finally {
+      if (run == _run) _callPolling = false;
+    }
+    if (!_live(run)) return;
+    _phoneCall = busy ?? false;
+  }
+
+  /// The session's meetings so far (the one going on up to [now]) and their minutes.
+  List<Map<String, Object?>> _meetingsUntil(DateTime now) => [
+    ..._meetings,
+    if (_meetingFrom != null) {'start': _meetingFrom!.toIso8601String(), 'end': now.toIso8601String(), 'source': _meetingSource},
+  ];
+
+  static double _meetingMin(List<Map<String, Object?>> meetings) {
+    var ms = 0;
+    for (final m in meetings) {
+      final a = DateTime.tryParse('${m['start']}'), b = DateTime.tryParse('${m['end']}');
+      if (a != null && b != null && b.isAfter(a)) ms += b.difference(a).inMilliseconds;
+    }
+    return (ms / 6000).round() / 10;
+  }
+
+  // ---- the raw EEG (DECISIONS 683) ----
+
+  /// Opens the session's raw EEG files before the first sample: the nights' file set, its header saying `work`.
+  void _openRaw(String band, DateTime now) {
+    final dir = recordingsDir;
+    if (dir == null) return;
+    try {
+      final w = ChunkWriter.open(dir, now, header: brainBitHeader.forSession(sessionWork));
+      w.log('work session (not a night: its header says session work); headband $band', at: now);
+      w.log('contact ${[for (final e in contact.entries) '${e.key} ${e.value?.round() ?? 'none'}'].join(', ')}', at: now);
+      _writer = w;
+      _syncedAt = now;
+      rawStem = w.stem;
+    } catch (e) {
+      rawNote = 'The raw EEG of this session could not be saved: $e';
+    }
+  }
+
+  void _rawBatch(DateTime now, List<Sample> batch) {
+    final w = _writer;
+    if (w == null) return;
+    try {
+      w.addBatch(now, batch);
+    } catch (e) {
+      _rawFailed(e);
+    }
+  }
+
+  /// Moves the buffered samples into the files each tick, and flushes them to the device every 10 s.
+  void _writeRaw(DateTime now) {
+    final w = _writer;
+    if (w == null) return;
+    try {
+      final synced = _syncedAt;
+      if (synced == null || now.difference(synced) >= timing.syncEvery) {
+        w.sync();
+        _syncedAt = now;
+      } else {
+        w.append();
+      }
+    } catch (e) {
+      _rawFailed(e);
+    }
+  }
+
+  /// A write that failed (storage full): what was written is kept, the session goes on without it.
+  void _rawFailed(Object e) {
+    rawNote = 'The raw EEG stopped saving: $e. What was saved before is kept with your recordings.';
+    final w = _writer;
+    _writer = null;
+    w?.close();
+  }
+
+  /// A line in the raw EEG's `.log`.
+  void _rawLog(String line, DateTime at) => _writer?.log(line, at: at);
+
+  /// A line in the `.log` and a marker in the `.markers.jsonl` (an annotation in the BDF).
+  void _mark(String text, DateTime now) {
+    final w = _writer, dir = recordingsDir;
+    if (w == null || dir == null || w.isClosed) return;
+    w.log(text, at: now);
+    try {
+      File('${dir.path}/${w.stem}.markers.jsonl').writeAsStringSync(
+        '${jsonEncode({'t': unixSeconds(now), 'i': w.samplesReceived, 'text': text})}\n',
+        mode: FileMode.append,
+        flush: true,
+      );
+    } catch (_) {}
+  }
+
+  /// Saves and closes the raw EEG (Stop, a failure); says what was kept.
+  void _closeRaw(DateTime now, String why) {
+    final w = _writer;
+    if (w == null) return;
+    _writer = null;
+    w.log(why, at: now);
+    w.close();
+    final mb = w.samplesWritten * w.header.recordBytes / 1e6;
+    rawNote = 'The raw EEG (${mb < 1 ? '<1' : mb.round()} MB) is kept with your recordings, apart from your nights, '
+        'and goes out with Export data.';
   }
 
   /// An unanswered hint goes after its 30 minutes, from the page and the card.
@@ -470,6 +764,11 @@ class WorkController extends ChangeNotifier {
       _chimeWaits = null;
       return;
     }
+    if (meeting) {
+      // a hint shown just before a meeting: its chime waits until the meeting is over
+      _chimeWaited(h, _phoneCall ? 'chime waited: a call' : 'chime waited: a meeting');
+      return;
+    }
     if (ask != null) {
       _callAsked = true;
       bool? busy;
@@ -486,15 +785,19 @@ class WorkController extends ChangeNotifier {
         return;
       }
       if (busy ?? false) {
-        if (!_events.any((e) => e['event'] == 'chime waited: a call' && e['hint'] == h.at.toIso8601String())) {
-          _events.add({'at': _now().toIso8601String(), 'event': 'chime waited: a call', 'hint': h.at.toIso8601String()});
-        }
+        _chimeWaited(h, 'chime waited: a call');
         return;
       }
     }
     _chimeWaits = null;
     unawaited(_readVolume(_run));
     await sound.chime();
+  }
+
+  void _chimeWaited(WorkHint h, String why) {
+    if (!_events.any((e) => e['event'] == why && e['hint'] == h.at.toIso8601String())) {
+      _events.add({'at': _now().toIso8601String(), 'event': why, 'hint': h.at.toIso8601String()});
+    }
   }
 
   /// The media volume, at Start and before each chime: [volumeNote] says when the chime may not be heard.
@@ -530,6 +833,7 @@ class WorkController extends ChangeNotifier {
     } else {
       p.startBreak(now);
     }
+    _mark('work: on a break (tapped)', now);
     afterBreak = null;
     _rehold();
     _notify();
@@ -541,6 +845,7 @@ class WorkController extends ChangeNotifier {
     if (p == null || !p.onBreak) return;
     final now = _now();
     p.endBreak(now);
+    _mark('work: back (tapped)', now);
     _afterBreakLine(now);
     _rehold();
     _notify();
@@ -563,6 +868,7 @@ class WorkController extends ChangeNotifier {
   }
 
   void _onLinkEvent(LinkEvent e, String line) {
+    _rawLog(line, _now());
     if (e == LinkEvent.reconnectTry) return;
     _events.add({'at': _now().toIso8601String(), 'event': line});
     if (e == LinkEvent.drop) {
@@ -581,17 +887,20 @@ class WorkController extends ChangeNotifier {
     _ticker?.cancel();
     if (connecting) {
       final link = _link;
+      _closeRaw(_now(), 'stopped while starting');
       _set(WorkStage.setup, 'Stopped.');
       await link?.close(); // a search still running lets go of what it brings
       await keeper.release();
       return;
     }
     _set(WorkStage.ending, 'Stopping.');
-    final p = _planner;
-    if (p != null && p.onBreak) p.endBreak(_now(), how: BreakEnd.stop);
-    // the file first: the headband's release can take its deadlines, and once the service is let go a locked phone
+    final p = _planner, now = _now();
+    if (p != null && p.onBreak) p.endBreak(now, how: BreakEnd.stop);
+    if (_meetingSource != null) _closeMeeting(now, _meetingSource!);
+    // the files first: the headband's release can take its deadlines, and once the service is let go a locked phone
     // may freeze the app (as the nap, DECISIONS 460 and 463)
-    _save(_now(), end: true);
+    _save(now, end: true);
+    _closeRaw(now, 'stopped');
     await _link?.close();
     await keeper.release();
     await sound.stop();
@@ -604,6 +913,7 @@ class WorkController extends ChangeNotifier {
     final stopped = _ended;
     _ended = true;
     _ticker?.cancel();
+    _closeRaw(_now(), 'failed: $why');
     await _link?.close();
     await keeper.release();
     if (!stopped) _set(WorkStage.failed, why);
@@ -616,10 +926,11 @@ class WorkController extends ChangeNotifier {
   }
 
   Map<String, Object?> sessionJson(DateTime now, {bool end = false}) {
-    final d = _drowsy, p = _planner;
-    final minutes = <String, double>{for (final l in DrowsyLevel.values) levelKey(l): 0, 'eyes_closed': 0};
+    final d = _drowsy, p = _planner, meetings = _meetingsUntil(now);
+    final minutes = <String, double>{for (final l in DrowsyLevel.values) levelKey(l): 0, 'eyes_closed': 0, 'meeting': 0};
     for (final e in d?.epochs ?? const <WorkEpoch>[]) {
       if (e.eyesClosed) minutes['eyes_closed'] = minutes['eyes_closed']! + 0.5;
+      if (e.meeting) minutes['meeting'] = minutes['meeting']! + 0.5;
       if (d!.calibratedAtS != null && e.startS >= d.calibratedAtS!) minutes[levelKey(e.level)] = minutes[levelKey(e.level)]! + 0.5;
     }
     return {
@@ -631,12 +942,15 @@ class WorkController extends ChangeNotifier {
       'ended': end ? 'stopped' : 'running',
       'headband': _link?.name,
       'contact_ohms': contact,
+      'raw': rawStem,
       'closed_alpha': closedAlpha,
       'baseline': d?.baseline?.toJson(),
       'calibrated_at_s': d?.calibratedAtS,
       'worn_min': (wornMin * 10).round() / 10,
       'minutes': minutes,
       ...?p?.toJson(),
+      'meetings': meetings,
+      'meeting_min': _meetingMin(meetings),
       'events': _events,
       'epochs': _epochs,
     };

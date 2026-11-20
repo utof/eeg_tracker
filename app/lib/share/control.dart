@@ -69,7 +69,7 @@ class ShareControl extends ChangeNotifier {
         onChange: onChange,
         wifi: Phone.wifiNets,
         wifiLock: lock,
-        onWork: (working) => unawaited(laptopWorkSignal(working: working)),
+        onWork: (working, meeting) => unawaited(laptopWorkSignal(working: working, meeting: meeting)),
       );
 
   ShareConfig _config = const ShareConfig();

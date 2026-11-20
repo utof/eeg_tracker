@@ -15,12 +15,17 @@
 //   - eyes closed: alpha 3 times the baseline (with the eyes-closed minute: the geometric middle of the baseline and
 //     its alpha, at least 2 times) with no blink and at most one sideways eye movement in 30 s; not scored (closed
 //     eyes raise alpha without drowsiness), shown as "eyes closed";
-//   - after 1 minute of settling in, the next 6 scored epochs (3 minutes) are the baseline (medians); after it each
+//   - after 1 minute of settling in, the next 6 quiet epochs (3 minutes) are the baseline (medians); quiet: scored,
+//     at least 20 readable seconds (no muscle, movement, hole, and a clean back channel; blinks allowed), not on a
+//     break and not in a meeting: talking only makes the baseline wait (DECISIONS 682). A baseline still being
+//     gathered starts over (with its settling minute) when the session says so (the headband off 5 minutes); after it each
 //     epoch's index is the mean of a = log2(alpha / baseline) and still = log2((baseline events + 1) / (events + 1)),
 //     each clipped to -2..3; still eyes (still > 0) count only as far as alpha is up, in full from a = 0.5 (alpha
 //     1.41 times its baseline): still eyes alone may be focus, so they never raise the level without alpha;
 //   - the level is the median index of the scored epochs among the last 10 (5 minutes; at least 6 needed, else
-//     "not sure"): under 0.5 alert, 0.5 getting drowsy, 1.0 drowsy, with 0.1 of hysteresis on the way down.
+//     "not sure"): under 0.5 alert, 0.5 getting drowsy, 1.0 drowsy, with 0.1 of hysteresis on the way down;
+//   - a meeting epoch (over half its seconds in a call or a laptop meeting, DECISIONS 685) is never scored and never
+//     closed eyes, and the level reads "not sure" while it lasts: no drowsiness verdict from a meeting.
 // Planning values (docs/evidence/work-session.md).
 import 'dart:math' as math;
 
@@ -29,6 +34,10 @@ import '../feedback/features.dart' show median;
 
 abstract final class WorkRule {
   static const int settleEpochs = 2, baselineEpochs = 6, minCleanS = 10, windowEpochs = 10, minScored = 6;
+
+  /// A baseline half minute needs this many readable seconds (no muscle, movement or hole, a clean back channel;
+  /// blinks allowed): talking makes the calibration wait instead of learning from it (DECISIONS 682).
+  static const int baselineReadS = 20;
 
   /// Eye events (blinks and sideways movements) are counted per 30 usable seconds; at least this many needed.
   static const int minEyeS = 20;
@@ -80,6 +89,8 @@ class WorkInput {
     this.muscle = false,
     this.movement = false,
     this.gap = false,
+    this.meeting = false,
+    this.away = false,
   });
 
   /// µV², the mean of the usable back channels (O1, O2).
@@ -93,10 +104,18 @@ class WorkInput {
   final bool backClean, sideClean, eyeClean;
   final int blinks, eyeMoves;
   final bool muscle, movement, gap;
+
+  /// In a call or a laptop meeting (talking expected), and on a break: the session's labels, not the signal's.
+  final bool meeting, away;
+
+  /// The drowsiness level could read this second: no muscle, movement or hole, and a clean back channel (a blink is
+  /// readable: it is only left out of alpha).
+  bool get readable => backClean && !gap && !muscle && !movement;
 }
 
-/// One detector second as the drowsiness level's input; [eyeMoves]: the sideways eye movements found in it.
-WorkInput workInputOf(Second s, {int eyeMoves = 0}) {
+/// One detector second as the drowsiness level's input; [eyeMoves]: the sideways eye movements found in it; [meeting]
+/// and [away]: the session's labels for it.
+WorkInput workInputOf(Second s, {int eyeMoves = 0, bool meeting = false, bool away = false}) {
   var n = 0;
   var a = 0.0, t = 0.0;
   for (var b = 0; b < backChannels.length; b++) {
@@ -119,6 +138,8 @@ WorkInput workInputOf(Second s, {int eyeMoves = 0}) {
     muscle: s.muscleOn,
     movement: s.movement,
     gap: s.gap,
+    meeting: meeting,
+    away: away,
   );
 }
 
@@ -161,6 +182,9 @@ class WorkEpoch {
     required this.eyeMoves,
     this.eyeS = 0,
     this.eyeBadS = 0,
+    this.readS = 0,
+    this.meetingS = 0,
+    this.awayS = 0,
     this.alpha,
     this.theta,
     this.sem,
@@ -174,6 +198,12 @@ class WorkEpoch {
 
   /// Seconds counted for eye events, and seconds left out because a channel was unusable for the detectors.
   final int eyeS, eyeBadS;
+
+  /// Readable seconds ([WorkInput.readable]), seconds in a meeting, and seconds on a break.
+  final int readS, meetingS, awayS;
+
+  /// Over half of it in a meeting: never scored, no closed eyes, the level "not sure".
+  bool get meeting => meetingS * 2 > epochS;
 
   /// Medians over the clean seconds (null: under 10 clean seconds).
   final double? alpha, theta, sem;
@@ -206,6 +236,7 @@ class WorkEpoch {
     'sem': sem == null ? null : _r(sem!),
     'events': events == null ? null : _r(events!),
     'eyes_closed': eyesClosed,
+    'meeting': meeting,
     'a': a == null ? null : _r(a!),
     'still': still == null ? null : _r(still!),
     't': t == null ? null : _r(t!),
@@ -247,8 +278,33 @@ class WorkDrowsiness {
 
   bool get calibrated => baseline != null;
 
-  /// Calibrating: the scored epochs still needed for the baseline.
+  /// Calibrating: the quiet epochs still needed for the baseline.
   int get baselineLeft => calibrated ? 0 : WorkRule.baselineEpochs - _base.length;
+
+  /// Calibrating: the settling epochs still to come (the first minute, again after [restartBaseline]).
+  int get settleLeft => calibrated ? 0 : math.max(0, _settleUntil - epochs.length);
+
+  /// Calibrating, past the settling minute, and the last half minute was not quiet enough for the baseline (talking,
+  /// chewing, moving): it waits for quieter ones.
+  bool get waitingForQuiet {
+    final e = epochs.lastOrNull;
+    if (calibrated || e == null || epochs.length <= _settleUntil || e.meeting || e.awayS > 0) return false;
+    return !_quiet(e);
+  }
+
+  /// The epoch count up to which the settling minute runs.
+  int _settleUntil = WorkRule.settleEpochs;
+
+  /// A baseline still being gathered starts over, its settling minute first (the headband was off a long while: it
+  /// sits differently now). A finished baseline is kept for the whole session (DECISIONS 441).
+  void restartBaseline() {
+    if (calibrated) return;
+    _base.clear();
+    _settleUntil = epochs.length + WorkRule.settleEpochs;
+  }
+
+  /// Quiet enough for the baseline: scored, enough readable seconds, not closed eyes.
+  static bool _quiet(WorkEpoch e) => e.alpha != null && !e.eyesClosed && e.readS >= WorkRule.baselineReadS;
 
   /// Eye events are not read now: over half of the last half minute had a channel unusable for the detectors (an
   /// electrode with no contact), so the level reads alpha alone.
@@ -275,7 +331,11 @@ class WorkDrowsiness {
   void _endEpoch() {
     final back = <WorkInput>[], side = <double>[];
     var muscle = 0, moved = 0, gaps = 0, blinks = 0, moves = 0, eyeS = 0, eyeBad = 0, eyeEvents = 0;
+    var read = 0, meetingS = 0, awayS = 0;
     for (final x in _ep) {
+      if (x.readable) read++;
+      if (x.meeting) meetingS++;
+      if (x.away) awayS++;
       if (x.muscle) muscle++;
       if (x.movement) moved++;
       if (x.gap) gaps++;
@@ -295,6 +355,7 @@ class WorkDrowsiness {
     }
     final enough = back.length >= WorkRule.minCleanS;
     final alpha = enough ? median([for (final x in back) x.alpha]) : null;
+    final inMeeting = meetingS * 2 > epochS;
     final e = WorkEpoch(
       n: epochs.length,
       startS: seconds - epochS,
@@ -306,18 +367,26 @@ class WorkDrowsiness {
       eyeMoves: moves,
       eyeS: eyeS,
       eyeBadS: eyeBad,
+      readS: read,
+      meetingS: meetingS,
+      awayS: awayS,
       alpha: alpha,
       theta: enough ? median([for (final x in back) x.theta]) : null,
       sem: side.length >= WorkRule.minCleanS ? median(side) : null,
       events: eyeS >= WorkRule.minEyeS ? eyeEvents * epochS / eyeS : null,
-      eyesClosed: alpha != null && blinks <= WorkRule.closedMaxBlinks && moves <= WorkRule.closedMaxEyeMoves && alpha >= _closedLine(),
+      eyesClosed:
+          !inMeeting &&
+          alpha != null &&
+          blinks <= WorkRule.closedMaxBlinks &&
+          moves <= WorkRule.closedMaxEyeMoves &&
+          alpha >= _closedLine(),
     );
     epochs.add(e);
     final b = baseline;
     if (b == null) {
-      if (epochs.length > WorkRule.settleEpochs && alpha != null && !e.eyesClosed) _base.add(e);
+      if (epochs.length > _settleUntil && !inMeeting && awayS == 0 && _quiet(e)) _base.add(e);
       if (_base.length == WorkRule.baselineEpochs) _setBaseline();
-    } else {
+    } else if (!inMeeting) {
       _score(e, b);
     }
     if (calibrated) _level();
@@ -386,6 +455,12 @@ class WorkDrowsiness {
   }
 
   void _level() {
+    if (epochs.last.meeting) {
+      // no verdict from a meeting: "not sure" while it lasts; after it the level comes back once 6 of 10 are read
+      window = null;
+      level = DrowsyLevel.unknown;
+      return;
+    }
     final from = math.max(0, epochs.length - WorkRule.windowEpochs);
     final scored = [
       for (var i = from; i < epochs.length; i++)

@@ -7,9 +7,13 @@ import 'store.dart';
 
 /// The laptop's latest word on a work session (its tray; laptop.dart).
 class LaptopWork {
-  const LaptopWork({required this.working, required this.at});
+  const LaptopWork({required this.working, required this.at, this.meeting});
   final bool working;
   final DateTime at;
+
+  /// The laptop's session is in a meeting (a call app holds the microphone, or a meeting window is in front; DECISIONS
+  /// 660-666); null: the word did not say (an older tray).
+  final bool? meeting;
 }
 
 /// What the phone knows without any permission, read when the check runs.

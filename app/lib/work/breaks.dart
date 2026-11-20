@@ -1,9 +1,11 @@
 // The work session's break hints (ROADMAP row 35, DECISIONS 443-445): the laptop's break-hint rules
 // (docs/break-hints.md, scripts/break_hints.py) on the time the headband is worn, plus a hint when drowsiness stays up.
 //
-// - Worn time counts while the headband sends a usable signal and you are not on a break (on a monotonic clock when
-//   the caller gives one, so a change of the phone's clock is not worn time). The headband off (or no usable signal)
-//   under 5 minutes only pauses the count; 5 minutes or more is a break from the moment it went off.
+// - Worn time counts while the headband is on the head and you are not on a break (on a monotonic clock when the
+//   caller gives one, so a change of the phone's clock is not worn time). "Worn" is the session's judgement of skin
+//   contact, not of a readable signal: talking, chewing and moving are worn (DECISIONS 680). The headband off (or no
+//   data) under 5 minutes only pauses the count; 5 minutes or more is a break from the moment it went off, except
+//   while the session still calibrates (no break starts by itself then, DECISIONS 682).
 //   "On a break" / "Back" taps make a break too; one of 5 minutes or more resets the stretch, a shorter one pauses.
 //   A tapped break whose Back was forgotten ends by itself: once the headband was off for a minute or more during it
 //   and has then been worn 2 minutes (it ends when it came back), or after 20 minutes' worth of readable half
@@ -13,7 +15,8 @@
 // - A hint when the drowsiness level read getting drowsy or drowsy in 8 of the last 12 epochs (6 minutes), or the
 //   eyes were closed in 6 of them; only epochs since the last break count (none from before or during one).
 // - At most 4 hints a day (a day runs 04:00 to 04:00, earlier sessions included), at least 45 minutes apart, none in
-//   the quiet hours 23:00-08:00. Snooze brings one hint back 20 minutes later (the spacing does not apply; a break of
+//   the quiet hours 23:00-08:00, none during a meeting (a call on the phone or the laptop's meeting, DECISIONS 685:
+//   the first tick after it decides, the meeting's minutes counted as worn). Snooze brings one hint back 20 minutes later (the spacing does not apply; a break of
 //   5 minutes or more cancels it). A break of 5 minutes or more that starts within 30 minutes of a hint marks it
 //   "break taken". A hint is answered only within those 30 minutes.
 // - Each break keeps the drowsiness median just before it (for the headband off: before it went off) and over the
@@ -232,9 +235,11 @@ class BreakPlanner {
     return BreakRule.firstMin + BreakRule.backoffMin * n;
   }
 
-  /// Call every few seconds. [worn]: the headband sends a usable signal now. [mono]: a monotonic clock's reading
-  /// (only differences count), for the worn time; without it the wall clock [now] is used. Returns a hint to show.
-  WorkHint? tick(DateTime now, {required bool worn, Duration? mono}) {
+  /// Call every few seconds. [worn]: the headband is on the head now (not necessarily readable). [mono]: a monotonic
+  /// clock's reading (only differences count), for the worn time; without it the wall clock [now] is used. [meeting]:
+  /// a meeting now: no hint. [autoBreak]: false while the session calibrates: the headband off only pauses the
+  /// count. Returns a hint to show.
+  WorkHint? tick(DateTime now, {required bool worn, Duration? mono, bool meeting = false, bool autoBreak = true}) {
     final last = _last, lastMono = _lastMono;
     final step = mono != null && lastMono != null ? (mono - lastMono).inMilliseconds : last == null ? 0 : now.difference(last).inMilliseconds;
     final dt = math.max(0, step / 1000).toDouble();
@@ -247,6 +252,10 @@ class BreakPlanner {
       } else {
         _forgotten(now, worn, dt);
       }
+      return null;
+    }
+    if (!worn && !autoBreak) {
+      _offSince = null; // paused, and no break: the off time counts from scratch once breaks start by themselves
       return null;
     }
     if (!worn) {
@@ -267,7 +276,7 @@ class BreakPlanner {
       activeS += dt;
       stretchS += dt;
     }
-    return _maybeHint(now);
+    return meeting ? null : _maybeHint(now);
   }
 
   /// A tapped break whose Back was forgotten: it ends by itself once the headband, off for a minute or more during
