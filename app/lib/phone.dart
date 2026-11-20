@@ -102,6 +102,17 @@ class Phone {
   static Future<List<String>> exitReasons(int sinceMs) async =>
       (await _channel.invokeListMethod<String>('exitReasons', {'sinceMs': sinceMs})) ?? const [];
 
+  /// The storage the app's files are on: its size and free bytes (StatFs); null when the phone did not answer.
+  static Future<({int total, int free})?> storageSpace() async {
+    try {
+      final m = await _channel.invokeMapMethod<Object?, Object?>('storageSpace');
+      final t = m?['total'], f = m?['free'];
+      return t is int && f is int ? (total: t, free: f) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// The phone's battery now: level, charge counter, current, charger, temperature (BatteryManager).
   static Future<PhoneBattery?> battery() async =>
       PhoneBattery.fromMap(await _channel.invokeMapMethod<Object?, Object?>('battery'));

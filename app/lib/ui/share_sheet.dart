@@ -108,8 +108,9 @@ class ShareSheet extends StatelessWidget {
           Text('Share on Wi-Fi', style: text.titleLarge),
           const SizedBox(height: 10),
           Text(
-            'Any device on this Wi-Fi that has the code can read your recordings; nothing can change or delete '
-            'them. Not encrypted: use it on your home Wi-Fi only. Nothing goes to the internet.',
+            'Any device on this Wi-Fi that has the code can read your recordings; nothing can change or delete them. '
+            'Only the paired laptop can say it holds a checked copy: the phone then removes old raw recordings by '
+            'itself (More, Storage). Not encrypted: use it on your home Wi-Fi only. Nothing goes to the internet.',
             style: muted,
           ),
           const SizedBox(height: 20),

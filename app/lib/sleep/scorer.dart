@@ -19,6 +19,7 @@ import 'dart:typed_data';
 
 import '../recorder/nights.dart';
 import '../recorder/packed.dart' show rawExists, rawLength;
+import '../recorder/remove.dart' show RawUse;
 import 'extras.dart';
 import 'model.dart';
 import 'prep.dart';
@@ -119,7 +120,8 @@ class SleepScorer {
     final markers = _markers();
     final out = <_Night>[];
     for (final n in nightsIn(recordingsDir).reversed) {
-      if (n.recordings.isEmpty) continue;
+      // a night whose raw files left the phone (remove.dart) keeps its report: never scored again from what is left
+      if (n.recordings.isEmpty || n.removed.isNotEmpty) continue;
       final inputs = inputsOf(n);
       final p = progressStore.read(n.name);
       final going = p != null && p.matches(inputs, model);
@@ -168,7 +170,7 @@ class SleepScorer {
   /// "Score again" for a night with a report (from an older scorer): scored once more from the start.
   void request(String night) {
     final n = nightsIn(recordingsDir).where((n) => n.name == night).firstOrNull;
-    if (n == null || n.recordings.isEmpty) return;
+    if (n == null || n.recordings.isEmpty || n.removed.isNotEmpty) return;
     progressStore.write(night, NightProgress(inputs: inputsOf(n), model: model, requested: true));
     final m = store.markerFor(night);
     if (m.existsSync()) m.deleteSync();
@@ -184,7 +186,15 @@ class SleepScorer {
     NightFiles night, {
     void Function(String step)? progress,
     Future<void> Function()? between,
-  }) async {
+  }) =>
+      // its raw files are read meanwhile: nothing removes them (remove.dart)
+      RawUse.hold([for (final f in night.recordings) f.path], () => _score(night, progress, between));
+
+  Future<SleepReport> _score(
+    NightFiles night,
+    void Function(String step)? progress,
+    Future<void> Function()? between,
+  ) async {
     final inputs = inputsOf(night);
     store.dir.createSync(recursive: true);
     final saved = progressStore.read(night.name);

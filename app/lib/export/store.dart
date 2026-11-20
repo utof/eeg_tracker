@@ -6,6 +6,8 @@
 //   models/      copies of the app's own sleep-model assets (made again from the APK)
 //   export/      this file's state: the index of what was exported and the export log
 //   cache/       what the app makes again by itself: a night's scoring under way, Share on Wi-Fi's SHA-256 list
+//   transfer/    the paired laptop's acks of the raw files it holds, and the move setting (recorder/acks.dart,
+//                share/move.dart); a raw file that left the phone leaves its `<stamp>.removed.json`, which is exported
 //   *.tmp        half-written files (every store writes a temporary file, then renames it)
 //   *.scoring    the sleep scorer's "working on it" marker
 //   profileInstalled, flutter_callback_cache.json
@@ -33,7 +35,7 @@ const int manifestVersion = 1;
 /// Days after the last complete export from which the main screen warns, when something new is only on the phone.
 const int exportReminderDays = 3;
 
-const Set<String> _staysTop = {'models', 'export', 'cache'};
+const Set<String> _staysTop = {'models', 'export', 'cache', 'transfer'};
 const Set<String> _platformFiles = {'profileInstalled', 'flutter_callback_cache.json'};
 
 /// A relative path inside the export folder: `/`-separated, no empty, `.` or `..` parts.

@@ -20,7 +20,14 @@ enum LucidDue { turnOn, practise, answer, ready }
 
 /// Last night as the page shows it.
 class LucidLastNight {
-  const LucidLastNight({required this.record, this.endMs, this.signals, this.answers, this.searching = false});
+  const LucidLastNight({
+    required this.record,
+    this.endMs,
+    this.signals,
+    this.answers,
+    this.searching = false,
+    this.rawGone,
+  });
   final LucidNightRecord record;
 
   /// The night's last data (unix ms); null while unknown.
@@ -30,6 +37,9 @@ class LucidLastNight {
 
   /// The morning's search over the night is running.
   final bool searching;
+
+  /// Not searched, and the night's samples are not on the phone any more: where they are, in words (remove.dart).
+  final String? rawGone;
 }
 
 class LucidViewModel {
@@ -492,6 +502,8 @@ class LastNightLog extends StatelessWidget {
           label: 'Dream signals',
           value: n.searching
               ? 'looking...'
+              : s == null && n.rawGone != null
+              ? 'not searched: raw not on the phone'
               : s == null
               ? 'not searched'
               : s.signals.isEmpty
@@ -501,6 +513,10 @@ class LastNightLog extends StatelessWidget {
         LogValueRow(label: 'Your answers', value: _answerWords(n.answers), last: true),
         const SizedBox(height: 12),
         Text(_sentence(r, s), style: muted),
+        if (s == null && n.rawGone != null) ...[
+          const SizedBox(height: 8),
+          Text(n.rawGone!, style: muted),
+        ],
       ],
     );
   }

@@ -3,10 +3,12 @@
 // (DECISIONS 370-379) is worked out from the app's files when the page opens, when the report changes, and after
 // an answer, in a background isolate (DECISIONS 620-629): its line appears a moment after the report.
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
 import '../alarm/record.dart';
+import '../recorder/remove.dart' show rawGoneText, removedOfNight;
 import '../sleep/report.dart';
 import '../wearer/check.dart' show kindNight;
 import '../wearer/wearer.dart';
@@ -35,6 +37,17 @@ class _SleepReportScreenState extends State<SleepReportScreen> {
   int _check = 0;
 
   String get _dir => widget.scoring.scorer.recordingsDir.path;
+
+  /// Where the night's samples are when they left the phone (remove.dart), read once: "Score again" needs them.
+  late final String? _rawGone = _safeRawGone();
+
+  String? _safeRawGone() {
+    try {
+      return rawGoneText(removedOfNight(Directory(_dir), widget.nightOf));
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Works the check out in the background; the page shows it when it is done.
   void _ask(String? built) {
@@ -84,9 +97,10 @@ class _SleepReportScreenState extends State<SleepReportScreen> {
           MaterialPageRoute<void>(builder: (_) => SleepReportScreen(scoring: scoring, nightOf: r.nightOf)),
         ),
         onRetry: () => scoring.retry(nightOf),
-        onRescore: report != null && report.scored && scoring.scorer.olderScorer(report) && !scoring.busy
+        onRescore: report != null && report.scored && scoring.scorer.olderScorer(report) && !scoring.busy && _rawGone == null
             ? () => scoring.rescore(nightOf)
             : null,
+        rawGone: report != null && report.scored && scoring.scorer.olderScorer(report) ? _rawGone : null,
         onLicences: () => showLicensePage(context: context, applicationName: 'EEG Tracker'),
         wearer: w == null ? null : wearerLine(w, kindNight, nightOf),
         onWearerAnswer: _answer,

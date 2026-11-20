@@ -18,6 +18,7 @@ import 'experiments_view.dart' show experimentLine;
 import '../recorder/headband.dart';
 import '../recorder/nights.dart';
 import '../recorder/packed.dart' show packInBackground, packOldRecordings;
+import '../storage/clear.dart' show ClearMode, autoClear, planClear;
 import '../recorder/recorder_service.dart';
 import '../recorder/status.dart';
 import '../session_keeper.dart' show KeepSpec, PhoneSessionKeeper;
@@ -38,6 +39,7 @@ import 'lights_off_view.dart';
 import 'meditation_screen.dart';
 import 'lucid_screen.dart';
 import 'memory_cues_screen.dart';
+import 'storage_screen.dart';
 import 'nap_screen.dart';
 import 'morning_screen.dart';
 import 'morning_section.dart';
@@ -463,7 +465,29 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
         .then((run) {
           if (run.failed.isNotEmpty) debugPrint('packing: ${run.failed.length} not packed: ${run.failed.first.$2}');
         })
+        .then((_) => _moveOld(dir))
         .whenComplete(() => _packing = null);
+  }
+
+  /// Then the Storage page's keep times (DECISIONS 690-699): while a laptop is paired, the raw recordings and spoken
+  /// answers the laptop checked longer ago than their category's time (3 days unless the owner picked another) leave
+  /// the phone; nothing that is only on the phone, ever. The plan is worked out off the screen's thread; the deletes
+  /// run here, where the readers are known.
+  Future<void> _moveOld(String dir) async {
+    final laptop = _share.config.laptop;
+    final run = await autoClear(
+      Directory(dir).parent,
+      busy: _packingMustWait,
+      paired: laptop != null,
+      laptop: laptop?.name,
+      plan: (Directory files, Map<String, DateTime> before) => Isolate.run(
+        () => planClear(files, before.keys.toSet(), mode: ClearMode.keepTime, now: DateTime.now(), before: before),
+        debugName: 'storage-plan',
+      ),
+    );
+    if (run != null && run.removed.isNotEmpty) {
+      debugPrint('storage: ${run.removed.length} left the phone, the laptop has them (${(run.freedBytes / 1e6).round()} MB)');
+    }
   }
 
   Future<bool> _packingMustWait() async {
@@ -876,6 +900,19 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   Future<void> _settings() =>
       Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
 
+  /// The Storage page (DECISIONS 690-699): it clears nothing while a night records or a session runs.
+  Future<void> _storage() async {
+    final dir = _dir;
+    if (dir == null) return;
+    final laptop = _share.config.laptop;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => StorageScreen(filesDir: Directory(dir).parent.path, paired: laptop != null, laptop: laptop?.name),
+      ),
+    );
+    unawaited(_refresh());
+  }
+
   Future<void> _trends() =>
       Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TrendsScreen(recordingsDir: _dir)));
 
@@ -1055,6 +1092,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       ),
       onLightsOff: _lightsOff,
       onSettings: _settings,
+      onStorage: _dir == null ? null : () => unawaited(_storage()),
       onAlarm: _onAlarm,
       onAwake: _awake,
       onHeadbandPage: () => unawaited(_refresh()),
@@ -1101,7 +1139,8 @@ class _NightPicker extends StatelessWidget {
               title: Text('Night of ${nightLabel(n.nightOf)}', style: text.titleMedium),
               subtitle: Text(
                 'from ${two(n.start.hour)}:${two(n.start.minute)} · '
-                '${n.runs == 1 ? '1 file set' : '${n.runs} file sets'} · ${_mb(n.bytes)}',
+                '${n.runs == 1 ? '1 file set' : '${n.runs} file sets'} · ${_mb(n.bytes)}'
+                '${n.removed.isEmpty ? '' : n.recordings.isEmpty ? ' · raw not on the phone' : ' · part of the raw not on the phone'}',
                 style: text.bodyMedium?.copyWith(color: Night.inkMuted),
               ),
               onTap: () => Navigator.pop(context, n),

@@ -283,4 +283,20 @@ void main() {
     expect(find.text('Score again'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('a night whose raw recording left the phone says where instead of offering Score again', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: nightTheme(),
+      home: SleepReportView(
+        nightOf: '2026-11-17',
+        report: SleepReport(Map<String, dynamic>.of(_main.json)..['model'] = 'anysleep older pieces'),
+        rawGone: "This night's raw recording is on the laptop now (desk).",
+      ),
+    ));
+    await tester.scrollUntilVisible(find.textContaining('Scored on this phone'), 400);
+    expect(find.text('Score again'), findsNothing);
+    expect(find.textContaining("This night's raw recording is on the laptop now (desk)."), findsOneWidget);
+    expect(find.textContaining('The phone cannot score it again without it'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }
