@@ -20,6 +20,38 @@ import 'lucid_view.dart';
 /// A night's morning questions may be answered until this long after the night's start.
 const Duration answerWithin = Duration(hours: 30);
 
+/// What is due from the settings, the newest finished night and its answers, and the evening practices; and when the
+/// last practice in the 3 hours before [now] ended. Shared by the page and the night screen's line.
+({LucidDue due, DateTime? practised}) lucidDue({
+  required LucidSettings settings,
+  required LucidNightRecord? last,
+  required LucidAnswers? lastAnswers,
+  required List<PracticeRecord> practices,
+  required DateTime now,
+  required bool nightRunning,
+}) {
+  final s = settings;
+  DateTime? practised;
+  for (final p in practices) {
+    if (!p.completed) continue;
+    final age = now.difference(p.end);
+    if (age >= Duration.zero && age <= const Duration(hours: 3)) practised = p.end;
+  }
+  final due = !s.on && last == null
+      ? LucidDue.turnOn
+      : last != null &&
+            lastAnswers == null &&
+            !nightRunning &&
+            now.millisecondsSinceEpoch - last.startMs < answerWithin.inMilliseconds
+      ? LucidDue.answer
+      : !s.on
+      ? LucidDue.turnOn
+      : s.level == null || (practised == null && !nightRunning)
+      ? LucidDue.practise
+      : LucidDue.ready;
+  return (due: due, practised: practised);
+}
+
 /// What the page needs from the files (pure, for tests).
 LucidViewModel lucidModel({
   required LucidStore store,
@@ -38,25 +70,15 @@ LucidViewModel lucidModel({
   ];
   final last = done.isEmpty ? null : done.last;
   final answers = {for (final r in records) r.stamp: store.answers(r.stamp)};
-  DateTime? practised;
-  for (final p in practices) {
-    if (!p.completed) continue;
-    final age = now.difference(p.end);
-    if (age >= Duration.zero && age <= const Duration(hours: 3)) practised = p.end;
-  }
   final lastAnswers = last == null ? null : answers[last.stamp];
-  final due = !s.on && last == null
-      ? LucidDue.turnOn
-      : last != null &&
-            lastAnswers == null &&
-            !nightRunning &&
-            now.millisecondsSinceEpoch - last.startMs < answerWithin.inMilliseconds
-      ? LucidDue.answer
-      : !s.on
-      ? LucidDue.turnOn
-      : s.level == null || (practised == null && !nightRunning)
-      ? LucidDue.practise
-      : LucidDue.ready;
+  final (:due, :practised) = lucidDue(
+    settings: s,
+    last: last,
+    lastAnswers: lastAnswers,
+    practices: practices,
+    now: now,
+    nightRunning: nightRunning,
+  );
   LucidResults? results;
   final test = store.test();
   if (test != null) {
@@ -99,20 +121,31 @@ LucidViewModel lucidModel({
   );
 }
 
-/// The night screen's one line for the Lucid dreams section; null when the cues were never used.
+/// The night screen's one line for the Lucid dreams section; null when the cues were never used. Read at every start
+/// and return: only the settings, the newest night (by its file name), its answers and the practices are opened, and
+/// none again while they are unchanged (DECISIONS 620-629; it used to build the whole page, every night twice).
 String? lucidNightLine(String recordingsDir, {DateTime? now}) {
   try {
     final store = LucidStore(lucidDirFor(recordingsDir));
-    final m = lucidModel(store: store, now: now ?? DateTime.now(), nightRunning: false);
-    if (!m.on && m.last == null) return null;
-    return switch (m.due) {
+    final s = store.settings();
+    final last = store.newestNight();
+    if (!s.on && last == null) return null;
+    final (:due, :practised) = lucidDue(
+      settings: s,
+      last: last,
+      lastAnswers: last == null ? null : store.answers(last.stamp),
+      practices: store.practices(),
+      now: now ?? DateTime.now(),
+      nightRunning: false,
+    );
+    return switch (due) {
       LucidDue.answer => 'Last night\'s questions are waiting.',
       LucidDue.turnOn => 'Off.',
       LucidDue.practise =>
-        m.level == null ? 'On: practise first, it sets the loudness.' : 'On: practise before you sleep.',
+        s.level == null ? 'On: practise first, it sets the loudness.' : 'On: practise before you sleep.',
       LucidDue.ready =>
-        'On; practised at ${m.practisedAt!.hour.toString().padLeft(2, '0')}:'
-            '${m.practisedAt!.minute.toString().padLeft(2, '0')}.',
+        'On; practised at ${practised!.hour.toString().padLeft(2, '0')}:'
+            '${practised.minute.toString().padLeft(2, '0')}.',
     };
   } catch (_) {
     return null;

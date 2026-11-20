@@ -8,7 +8,9 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../cache/file_summaries.dart' show firstParsed, newestFirst;
 import '../recorder/chunk_writer.dart' show fileStem;
+import '../recorder/nights.dart' show stemTime;
 import '../trends/days.dart';
 import '../wearer/check.dart' show wearerAnswerIn;
 import 'result.dart';
@@ -99,6 +101,19 @@ class MorningStore {
       }
     }
     return out..sort((a, b) => b.start.compareTo(a.start));
+  }
+
+  /// The first readable check-in of [day] (04:00 to 04:00, trends/days.dart), found by the file names (their start):
+  /// only that day's files are opened, and none again while they are unchanged (DECISIONS 620-629).
+  MorningRecord? firstOfDay(String day) {
+    final files = [
+      for (final f in newestFirst(dir, '.morning.json'))
+        if (stemTime(f.uri.pathSegments.last) case final t? when dayKey(t) == day) f,
+    ].reversed;
+    return firstParsed(files, (j) {
+      final r = MorningRecord.fromJson(j);
+      return r != null && r.day == day ? r : null;
+    });
   }
 
   /// The results before [start], oldest first, at most the last [historyN] (the laptop's comparison history).

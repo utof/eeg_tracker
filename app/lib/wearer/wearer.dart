@@ -5,7 +5,9 @@
 // goes into the log once. Never a medical or identity claim: it says the signal looks unlike your usual and asks.
 import 'dart:math' as math;
 
+import '../cache/file_summaries.dart' show newestFirst;
 import '../morning/store.dart';
+import '../recorder/nights.dart' show dateName;
 import '../sleep/report.dart';
 import '../work/store.dart';
 import 'check.dart';
@@ -25,6 +27,23 @@ List<SleepReport> ownNightReports(String recordingsDir) => [
   for (final r in NightReportStore(nightsDirFor(recordingsDir)).all())
     if (r.wearerAnswer != answerSomeoneElse) r,
 ];
+
+/// [ownNightReports] of the nights that can still be recent at [now] (sharp/page.dart `recentNights`: a final
+/// wake-up in the last 14 days, at most about 2.5 days after the night's date), found by their file names
+/// (`<night>.report.json`): older reports are not opened (DECISIONS 620-629).
+List<SleepReport> recentOwnNightReports(String recordingsDir, DateTime now, {int days = 18}) {
+  const suffix = '.report.json';
+  final store = NightReportStore(nightsDirFor(recordingsDir));
+  final from = dateName(DateTime(now.year, now.month, now.day - days));
+  final out = <SleepReport>[];
+  for (final f in newestFirst(store.dir, suffix)) {
+    final name = f.uri.pathSegments.last;
+    if (name.compareTo(from) < 0) break; // newest first: the rest are older
+    final r = store.read(name.substring(0, name.length - suffix.length));
+    if (r != null && r.wearerAnswer != answerSomeoneElse) out.add(r);
+  }
+  return out;
+}
 
 /// A night (with a `wearer_signal`: scored since the check exists) or a check-in as the check sees it.
 List<WearerRecording> wearerRecordings(List<SleepReport> nights, List<MorningRecord> mornings) => [
