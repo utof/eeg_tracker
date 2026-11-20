@@ -110,6 +110,7 @@ class ArchiveView extends StatelessWidget {
     this.onFilter,
     this.onDay,
     this.onStorage,
+    this.top,
   });
 
   final ArchiveViewModel model;
@@ -122,6 +123,9 @@ class ArchiveView extends StatelessWidget {
 
   /// Opens the Storage page (what the app keeps by kind of data, DECISIONS 690-699); null: no link.
   final VoidCallback? onStorage;
+
+  /// Above the list: the confirmation questions' card (DECISIONS 867); it draws nothing when nothing is asked.
+  final Widget? top;
 
   @override
   Widget build(BuildContext context) {
@@ -136,6 +140,7 @@ class ArchiveView extends StatelessWidget {
         key: const PageStorageKey('archive'),
         padding: const EdgeInsets.fromLTRB(24, 4, 24, 32),
         children: [
+          ?top,
           if (model.loading && page == null)
             const Para('Reading what the phone keeps…', color: Night.inkMuted, top: 8)
           else if (model.error != null && page == null)
