@@ -218,6 +218,29 @@ void main() {
       expect((await ask('/files', tok: token)).code, 200);
     });
 
+    test('home lasts 30 minutes after the laptop last said so: a phone carried elsewhere stops sharing', () async {
+      // another Wi-Fi may use the same addresses (192.168.1.x is everywhere), so the address range alone cannot tell
+      await ask('/files', signWith: key);
+      expect(server.here, 'home');
+      now = now.add(const Duration(minutes: 29));
+      expect(server.here, 'home');
+      await ask('/who', signWith: key); // the laptop's next look keeps it
+      now = now.add(const Duration(minutes: 29));
+      expect((await ask('/files', tok: token)).code, 200);
+      now = now.add(const Duration(minutes: 2));
+      expect(server.here, 'waiting');
+      expect((await ask('/files', tok: token)).code, 403);
+      expect((await ask('/files', signWith: key, home: false)).code, 403);
+    });
+
+    test('Android saying the network changed forgets home, also on the same address range', () async {
+      await ask('/files', signWith: key);
+      server.networkChanged();
+      server.lan = [(address: InternetAddress('192.168.1.5'), prefix: 24)]; // back on "the same" range
+      expect(server.here, 'waiting');
+      expect((await ask('/files', tok: token)).code, 403);
+    });
+
     test('another network forgets that it was home', () async {
       await ask('/state', signWith: key);
       expect(server.here, 'home');

@@ -79,6 +79,10 @@ const List<String> sharingStates = ['open', 'home', 'here', 'waiting'];
 /// Who a request comes from, once it is let in.
 typedef _Caller = ({bool laptop, String? nonce, bool home});
 
+/// How long the paired laptop's "this is my home network" holds without its next word (DECISIONS 752): the tray
+/// looks every 45 s and the mirror every 2 minutes, so at home it never runs out.
+const Duration homeFor = Duration(minutes: 30);
+
 /// Connections held at once from one address, and in all (DECISIONS 755): one more is closed before HTTP reads it.
 const int serverConnectionsPerClient = 16;
 const int serverConnectionsMax = 32;
@@ -323,6 +327,10 @@ class ShareServer {
 
   /// The Wi-Fi network on which the paired laptop last said it is home (`lanSignature`); null: none yet.
   String? _home;
+
+  /// Home lasts [homeFor] after the paired laptop last said so: a phone carried to another Wi-Fi with the same
+  /// addresses (192.168.1.x is common) stops sharing by then, even without Android's word.
+  int _homeUntilMs = 0;
   String _hereWas = '';
   final Map<String, int> _nonces = {}; // nonce -> until (ms), oldest first
   final Map<String, List<int>> _tries = {}; // address -> times (ms) of its wrong tries in the last minute
@@ -369,10 +377,17 @@ class ShareServer {
   }
 
   /// What the phone says of its Wi-Fi now ([sharingStates]).
+  /// Android said the network changed (the app's network callback): another Wi-Fi may use the same addresses, so
+  /// it is not home until the paired laptop says so again.
+  void networkChanged() {
+    _homeUntilMs = 0;
+    _tellHere();
+  }
+
   String get here {
     if (key == null) return 'open';
     final sig = lanSignature(_lan);
-    if (sig.isNotEmpty && _home == sig) return 'home';
+    if (sig.isNotEmpty && _home == sig && _now().millisecondsSinceEpoch < _homeUntilMs) return 'home';
     if (sig.isNotEmpty && hereNet == sig && _now().millisecondsSinceEpoch < hereUntilMs) return 'here';
     return 'waiting';
   }
@@ -736,6 +751,7 @@ class ShareServer {
   void _vouch(_Caller c) {
     if (c.laptop && c.home && _lan.isNotEmpty) {
       _home = lanSignature(_lan);
+      _homeUntilMs = _now().millisecondsSinceEpoch + homeFor.inMilliseconds;
       _tellHere();
     }
   }

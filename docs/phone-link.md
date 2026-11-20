@@ -56,8 +56,9 @@ Plain HTTP is safe enough on your own WPA2/WPA3 Wi-Fi, not on a shared one. A pa
 
 - **at home**: the paired laptop said so (a signed request with `X-Eeg-Home: 1` from the local network). The phone
   cannot read the Wi-Fi's name itself without the location permission, which this app does not ask for; it trusts the
-  laptop, which recognises its own router. A change of network forgets it until the laptop says so again (within a
-  few minutes at home);
+  laptop, which recognises its own router. It lasts 30 minutes after the laptop last said so (the tray looks every 45
+  seconds and copies every 2 minutes, so at home it does not run out), and Android's word that the network changed
+  ends it at once: another Wi-Fi may use the same addresses;
 - **here, for 12 hours**: **Share here for 12 hours** on the Share sheet allows the Wi-Fi the phone is on now, until
   then or until it changes networks (**Stop sharing here** ends it);
 - otherwise it is **paused**: 403 `not sharing on this Wi-Fi` to everyone on the network, the laptop too. A USB cable

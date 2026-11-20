@@ -57,7 +57,7 @@ List<Object?> shareIsolateArgs(
 
 /// The server isolate. Messages in: `['b', stem, first, t, Float32List]` a batch, `['s', map]` the status,
 /// `['m', id, t, i]` a marker's answer (t null = not recording), `['w', nets, note]` Android's answer about the
-/// Wi-Fi address again, `['k', map or null]` the daytime session for /state, `['x']` stop. Messages out:
+/// Wi-Fi address again, `['n']` Android said the network changed (home is forgotten: DECISIONS 752), `['k', map or null]` the daytime session for /state, `['x']` stop. Messages out:
 /// `['port', SendPort]`, `['up', addresses, port, why]` (why: empty, or what each source returned when no Wi-Fi
 /// address was found), `['marker', id, text]`, `['copying', n]` file requests being answered, `['work', working,
 /// meeting]` the laptop's work signal, `['here', state]` what the phone says of its Wi-Fi (server.dart
@@ -222,6 +222,8 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
       case 'w':
         android = (nets: [for (final n in m[1] as List) n as String], note: m[2] as String);
         unawaited(look());
+      case 'n':
+        server.networkChanged();
       case 'k': // the daytime session that holds the headband, for /state (DECISIONS 671)
         server.setSession(m[1] as Map<Object?, Object?>?);
       case 'x':
@@ -465,6 +467,9 @@ class ShareHost {
   /// server answers on the new network (and forgets that the old one was home) without waiting a minute.
   Future<void> networkChanged() async {
     if (_ended) return;
+    try {
+      _port?.send(['n']);
+    } catch (_) {}
     if (wifi != null) await _sendWifi();
   }
 
