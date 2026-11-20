@@ -265,12 +265,6 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    `scripts/pull_phone.py http://127.0.0.1:18765 --token <code> --once --dest <scratch>`; Start night (the
    recorder's service serves, status `reconnecting` without a headband), Stop (the app serves again), switch off
    (the port closes). All of it passed; the emulator cannot show Wi-Fi with the screen off or the battery cost.
-10. **The night's Wi-Fi lines and lock** (2026-11-20, DECISIONS 616): Share on Wi-Fi on, Start night, then
-   `adb logcat -s eeg_tracker flutter | grep -i wifi` shows who holds the lock (`wifi lock: recorder on, held for
-   [screen, recorder]`) and a `wifi ...` line at every change: `adb shell svc wifi disable` / `enable`, the power
-   key, `adb shell dumpsys deviceidle force-idle` (after `dumpsys battery unplug`). `adb shell dumpsys wifi` lists the
-   lock under "Locks held". `adb shell settings put global wifi_sleep_policy 0` and battery saver on show the Phone
-   section's Wi-Fi rows. All of it passed.
 
 10. **The smart alarm inside the night recorder** (DECISIONS rows 230-231): `flutter build apk --release
    --target-platform android-x64 -t tool/alarm_smoke.dart`, install with `-g`, put one recording into
@@ -311,6 +305,13 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    The first run found a bug the unit tests had missed: Dart sent the handshake chunked and Python's server read an
    empty body ("The laptop said no"); fixed in `69f5e27`. Not checked here: Chrome opening the page (Chrome hung at
    its first-run screen on the loaded laptop), a real camera, a VPN.
+
+13. **The night's Wi-Fi lines and lock** (2026-11-20, DECISIONS 616): Share on Wi-Fi on, Start night, then
+   `adb logcat -s eeg_tracker flutter | grep -i wifi` shows who holds the lock (`wifi lock: recorder on, held for
+   [screen, recorder]`) and a `wifi ...` line at every change: `adb shell svc wifi disable` / `enable`, the power
+   key, `adb shell dumpsys deviceidle force-idle` (after `dumpsys battery unplug`). `adb shell dumpsys wifi` lists the
+   lock under "Locks held". `adb shell settings put global wifi_sleep_policy 0` and battery saver on show the Phone
+   section's Wi-Fi rows. All of it passed.
 
 The night of 2026-11-17 (58 recordings, 12.9 h) scored on the emulator in 99 s with a peak of 448 MB (PSS) and the
 laptop's stage on every scored epoch (two passes, 2026-11-19; the 1-hour pieces before took 69 s, peaked at 442 MB
