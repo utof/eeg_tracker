@@ -3,8 +3,9 @@
 ## What it does
 
 About 5 minutes each morning: a contact check, 2 minutes with eyes closed, 2 minutes looking at a dot, then
-three quick ratings (sleepiness 1-9, mood, tension). It measures your alpha rhythm (the 8-12 Hz wave at the back
-of the head that grows when you close your eyes) and compares it only with your own earlier mornings.
+three quick ratings (sleepiness 1-9, mood, tension) and, if you like, one tap on how you slept (1-5). It measures
+your alpha rhythm (the 8-12 Hz wave at the back of the head that grows when you close your eyes) and compares it
+only with your own earlier mornings.
 
 ## Evidence for this headband: strong
 

@@ -258,3 +258,111 @@ def test_the_measure_list_covers_the_phones_trends_and_the_notes():
         else:
             assert m["evidence"] is None, m["id"]  # not a headband measure
     assert len(set(ids)) == len(ids)
+
+
+# ---------------------------------------------------------------------- sleep efficiency, regularity, the rating
+# DECISIONS 650-659: the same rules as app/lib/trends/sleep_days.dart, worked out here from first principles.
+
+def _sleep_nights(loc: Path, nights: list[dict]) -> None:
+    """nights: day (the day woken), onset, wake (hh:mm), start (data start hh:mm, default 20 min before onset),
+    asleep, lights_off (hh:mm on the evening or None), extras, wearer."""
+    for n in nights:
+        d = n["day"]
+        evening = (datetime.fromisoformat(d + "T12:00:00") - __import__("datetime").timedelta(days=1)).date().isoformat()
+
+        def at(hhmm: str, date: str | None = None) -> str:
+            date = date or (evening if int(hhmm[:2]) >= 12 else d)
+            return f"{date}T{hhmm}:00+03:00"
+
+        onset, wake = at(n["onset"]), at(n["wake"], d)
+        drift = None
+        if n.get("lights_off"):
+            drift = dict(source="button", lights_off=at(n["lights_off"]), model_onset_min=10.0)
+        r = _report(evening, at(n.get("start", n["onset"])), at(n["wake"], d), n.get("asleep", 400.0), 200.0, 80.0, 120.0,
+                    1, 10.0, extras=n.get("extras"), drift=drift, wearer=n.get("wearer"))
+        r["periods"][0].update(start=onset, end=wake)
+        _w(loc / f"phone/nights/{evening}.report.json", r)
+
+
+def _circular_sd(minutes: list[float]) -> float:
+    """Written out again, not shared with the code under test: sqrt(-2 ln R) of the times as points on a circle."""
+    import math
+    c = sum(math.cos(m / 720 * math.pi) for m in minutes) / len(minutes)
+    s = sum(math.sin(m / 720 * math.pi) for m in minutes) / len(minutes)
+    return math.sqrt(-2 * math.log(math.hypot(c, s))) * 720 / math.pi
+
+
+def test_sleep_efficiency_is_asleep_over_lights_off_to_the_last_wakeup_or_the_recording_start(tmp_path):
+    loc = tmp_path / "_local"
+    _sleep_nights(loc, [
+        dict(day="2026-11-18", onset="23:00", wake="07:00", start="22:00", asleep=400.0, lights_off="22:30"),
+        dict(day="2026-11-19", onset="23:00", wake="07:00", start="22:00", asleep=400.0),  # recording start: 540 min
+    ])
+    d = days_by_key(loc)
+    assert d["2026-11-18"]["numbers"]["efficiency"] == round(400 / 510 * 100, 2)
+    assert d["2026-11-19"]["numbers"]["efficiency"] == round(400 / 540 * 100, 2)
+
+
+def test_sleep_efficiency_never_passes_100_and_a_late_tap_does_not_cut_into_the_sleep(tmp_path):
+    loc = tmp_path / "_local"
+    _sleep_nights(loc, [dict(day="2026-11-18", onset="23:00", wake="07:00", start="22:00", asleep=500.0,
+                             lights_off="01:30"),  # a tap after the first sleep: counted from the first sleep
+                        ])
+    assert days_by_key(loc)["2026-11-18"]["numbers"]["efficiency"] == 100.0
+
+
+def test_sleep_regularity_is_the_circular_spread_of_onsets_and_wakeups_over_the_last_7_nights(tmp_path):
+    loc = tmp_path / "_local"
+    nights = []
+    for k, day in enumerate(range(12, 19)):  # 7 nights ending on 18 Nov: bedtimes 23:00 +/- 20, wake-ups 07:00 +/- 40
+        s = 1 if k % 2 else -1
+        h, m = divmod(23 * 60 + 20 * s, 60)
+        w = 7 * 60 + 40 * s
+        nights.append(dict(day=f"2026-11-{day}", onset=f"{h:02d}:{m:02d}", wake=f"{w // 60:02d}:{w % 60:02d}"))
+    _sleep_nights(loc, nights)
+    want = (_circular_sd([23 * 60 + 20 * (1 if k % 2 else -1) for k in range(7)])
+            + _circular_sd([7 * 60 + 40 * (1 if k % 2 else -1) for k in range(7)])) / 2
+    d = days_by_key(loc)
+    assert d["2026-11-18"]["numbers"]["regularity"] == round(want, 2)
+    assert 25 < want < 35
+    assert "regularity" in d["2026-11-16"]["numbers"]  # 5 nights by then
+    assert "regularity" not in d["2026-11-15"]["numbers"]  # only 4
+
+
+def test_a_bedtime_either_side_of_midnight_is_close_and_left_out_nights_are_not_nights(tmp_path):
+    loc = tmp_path / "_local"
+    nights = [dict(day=f"2026-11-{day}", onset="23:50" if day % 2 else "00:10", wake="07:00") for day in range(14, 19)]
+    # 00:10 belongs to the same morning's night: its evening date is the day before, as the reports have it
+    _sleep_nights(loc, nights)
+    got = days_by_key(loc)["2026-11-18"]["numbers"]["regularity"]
+    assert got < 15
+    noisy = dict(asleep=dict(min=400.0, degraded_min=300.0, missing_min=0.0, jaw_bursts=0, jaw_per_hour=0.0))
+    loc2 = tmp_path / "second"
+    _sleep_nights(loc2, [dict(day=f"2026-11-{day}", onset="23:00", wake="07:00") for day in range(15, 19)]
+                  + [dict(day="2026-11-14", onset="23:00", wake="07:00", extras=noisy),
+                     dict(day="2026-11-13", onset="23:00", wake="07:00", wearer="someone else")])
+    assert "regularity" not in days_by_key(loc2)["2026-11-18"]["numbers"]  # 4 good nights only
+
+
+def test_the_sleep_rating_is_the_first_of_the_days_check_ins_with_one_in_1_to_5(tmp_path):
+    loc = tmp_path / "_local"
+    _w(loc / "phone/mornings/2026-11-20-071500.morning.json",
+       _morning("2026-11-20T07:15:00+03:00", dict(kss=6, mood=3, tension=2), app="phone"))  # not tapped
+    _w(loc / "phone/mornings/2026-11-20-090000.morning.json",
+       _morning("2026-11-20T09:00:00+03:00", dict(kss=6, mood=3, tension=2, sleep=2), app="phone"))
+    _w(loc / "phone/mornings/2026-11-20-100000.morning.json",
+       _morning("2026-11-20T10:00:00+03:00", dict(kss=6, mood=3, tension=2, sleep=5), app="phone"))
+    _w(loc / "phone/mornings/2026-11-21-090000.morning.json",
+       _morning("2026-11-21T09:00:00+03:00", dict(kss=6, mood=3, tension=2, sleep=7), app="phone"))  # off the scale
+    d = days_by_key(loc)
+    assert d["2026-11-20"]["numbers"]["slept"] == 2.0
+    assert "slept" not in d["2026-11-21"]["numbers"]
+
+
+def test_the_measure_set_is_version_2_and_names_the_new_numbers():
+    m = ds.measure_set()
+    assert m["version"] == 2 == ds.MEASURES_VERSION
+    ids = {x["id"]: x for x in m["measures"]}
+    assert {"efficiency", "regularity", "slept"} <= set(ids)
+    assert ids["slept"]["source"] == "self-report" and ids["slept"]["unit"] == "1-5"
+    assert "Lights off" in ids["efficiency"]["rule"] and "recording" in ids["efficiency"]["rule"]

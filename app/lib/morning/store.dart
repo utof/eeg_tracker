@@ -51,6 +51,9 @@ class MorningRecord {
   int? get kss => _int('ratings.kss', 1, 9);
   int? get mood => _int('ratings.mood', 1, 5);
   int? get tension => _int('ratings.tension', 1, 5);
+
+  /// "How did you sleep?", 1 very badly to 5 very well: an optional tap, so null when it was not given.
+  int? get slept => _int('ratings.sleep', 1, 5);
   double? get alphaEc => _num('back.alpha_ec_uv2');
   double? get ecRise => _num('back.ec_rise');
   double? get iafHz => _num('back.iaf_hz');

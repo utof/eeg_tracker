@@ -2,8 +2,9 @@
 
 ## What it does
 
-A page in the phone app with a few numbers per day (sleep, jaw muscle bursts in the night, morning sleepiness and
-reaction time, mood, tension, the alpha numbers, practice, coffee and alcohol, and from work sessions the share of work
+A page in the phone app with a few numbers per day (sleep: time asleep, minutes of light, deep and dream sleep,
+wake-ups, time to fall asleep, sleep efficiency and sleep regularity, and jaw muscle bursts in the night; morning
+sleepiness, reaction time, mood, tension, how you say you slept, the alpha numbers, practice, coffee and alcohol, and from work sessions the share of work
 time drowsy, hints and breaks), each shown next to yesterday's and your usual, plus a
 sleep-pressure curve built from your sleep log. Forecasts stay hidden until they prove useful for you.
 
@@ -41,9 +42,20 @@ an EEG sleep-pressure number and next-day forecasts are weak, and no study shows
 - "Your usual": the middle value of your last 28 days with a value, shown from 7 days. A day runs from 04:00 to
   04:00; a night counts for the day you woke from it. No single brain score, no red or green health colours.
 - Arrows from 14 days, and only when a day is beyond your normal day-to-day spread (twice a robust spread) and
-  beyond the smallest change that matters: 1 hour of sleep, 2 points on a rating, 10 % in reaction time, a quarter
-  of your usual in jaw muscle bursts (a planning value). Each arrow says in words what it means, with your normal
+  beyond the smallest change that matters: 1 hour of sleep, 15 minutes of a stage or of falling asleep or of timing
+  spread, 2 wake-ups, 5 points of efficiency, 2 points on a rating, 10 % in reaction time, a quarter
+  of your usual in jaw muscle bursts (planning values). Each arrow says in words what it means, with your normal
   range.
+- The sleep numbers beyond time asleep come from the sleep model, which has not been checked against a lab sleep test
+  on this headband, so each says so and is "seen together, not tested". Research grades time asleep, wake-ups and
+  falling asleep usable, deep and dream minutes usable as a trend within one person (not as lab figures), and
+  light sleep weak, so light sleep gets no arrow. Sleep efficiency (asleep over time in bed, counted from Lights off
+  or, with no tap, from when the recording started) and sleep regularity (how far your bed and wake-up times moved
+  over the last 7 nights) are measures a large study of depression relapse found tied to it (steadier sleep and higher
+  efficiency went with fewer relapses); neither is checked on this headband. Nights marked "someone else" and nights mostly read through noise are left out.
+- There is no single sleep score here, on purpose: wearable scores have no published formula, and none has been shown
+  to beat its parts. Your own "How did you sleep?" tap sits beside the numbers: in the studies we found, measured
+  sleep stages add little beyond how people rate their own sleep when predicting next-day mood.
 - Jaw muscle bursts are the sleep report's count an hour asleep: a trend to compare your nights, not a test for
   teeth grinding (the jaw note says why).
 - "Same as yesterday": every number shows yesterday's beside it.

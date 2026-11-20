@@ -60,9 +60,13 @@ class MorningAnswers {
     required this.caffeineToday,
     this.caffeineLate,
     this.reaction,
+    this.sleep,
   });
 
   final int kss, mood, tension, cups, drinks;
+
+  /// "How did you sleep?", 1-5: an optional tap, null when not given (DECISIONS row 657).
+  final int? sleep;
   final bool caffeineToday;
 
   /// Any caffeine in the 8 hours before sleep (asked only when [cups] > 0).
@@ -71,7 +75,7 @@ class MorningAnswers {
   /// The reaction test: median_ms (null with too few taps), taps, lapses, false_starts, length_s; null if skipped.
   final Map<String, Object?>? reaction;
 
-  Map<String, int> get ratings => {'kss': kss, 'mood': mood, 'tension': tension};
+  Map<String, int> get ratings => {'kss': kss, 'mood': mood, 'tension': tension, 'sleep': ?sleep};
   Map<String, Object?> get habits => {
     'caffeine_cups': cups,
     'caffeine_late': cups == 0 ? false : caffeineLate,

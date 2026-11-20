@@ -1,10 +1,11 @@
-// The trends page's content from the phone's own files (DECISIONS rows 120-129, 155, 287): one number per day per
-// measure, from the sleep reports (files/nights; jaw muscle bursts from their extras), the morning check-ins
-// (files/mornings), the sharp-hours log (files/sharp-hours), the work sessions (files/work-sessions, rows 480-489)
-// and the meditation and alpha-theta reports; each with yesterday's value ("same as yesterday"), your
-// usual and an arrow when the day is beyond your normal spread (usual.dart); the last 14 days as a line; sleep
-// pressure from the sleep log (pressure.dart); and the hidden forecast (forecast.dart). Plain Dart: the screen only
-// lays it out.
+// The trends page's content from the phone's own files (DECISIONS rows 120-129, 155, 287, 650-659): one number per
+// day per measure, from the sleep reports (files/nights; jaw muscle bursts from their extras; the sleep model's
+// stage minutes, wake-ups, falling asleep, efficiency and regularity in sleep_days.dart), the morning check-ins
+// (files/mornings, with the "How did you sleep?" tap), the sharp-hours log (files/sharp-hours), the work sessions
+// (files/work-sessions, rows 480-489) and the meditation and alpha-theta reports; each with yesterday's value
+// ("same as yesterday"), your usual and an arrow when the day is beyond your normal spread (usual.dart); the last 14
+// days as a line; sleep pressure from the sleep log (pressure.dart); and the hidden forecast (forecast.dart). Plain
+// Dart: the screen only lays it out.
 import '../meditation/tracker.dart' show MeditationSummary;
 import '../morning/store.dart' show MorningRecord;
 import '../sleep/extras.dart' show ExtrasAsleep;
@@ -13,6 +14,7 @@ import '../training/control.dart' show SessionKind;
 import 'days.dart';
 import 'forecast.dart';
 import 'pressure.dart';
+import 'sleep_days.dart';
 import 'usual.dart';
 
 /// Days a line shows, and how old the newest value may be to be shown as "now".
@@ -34,6 +36,7 @@ class MeasureSpec {
     this.note,
     this.min = 0,
     this.max,
+    this.askedFor = false,
   });
 
   final String id;
@@ -51,6 +54,10 @@ class MeasureSpec {
   /// The ends of the measure's own scale: a normal range shown is kept inside them.
   final double min;
   final double? max;
+
+  /// Exists only when you did something for it (a Lights off tap, a rating at the check-in): "Nothing yet for ..."
+  /// does not name it.
+  final bool askedFor;
 }
 
 /// `7 h 05 min`, `42 min`, with no-break spaces so a duration never splits across lines.
@@ -69,6 +76,9 @@ String _count(double v, String one, String many) {
 
 const String _together = 'Seen together, not tested.';
 
+/// The end of the notes of the sleep model's rows (DECISIONS row 650).
+const String _model = 'From the sleep model, not yet checked against a lab test on this headband. $_together';
+
 final List<MeasureSpec> measureSpecs = [
   MeasureSpec(
     id: 'asleep',
@@ -79,6 +89,78 @@ final List<MeasureSpec> measureSpecs = [
     up: 'longer than usual',
     down: 'shorter than usual',
     note: 'The sleep model is a first guess on this headband.',
+  ),
+  MeasureSpec(
+    id: 'light',
+    label: 'Light sleep',
+    group: TrendGroup.sleep,
+    scale: Scale.noArrows,
+    format: _hm,
+    note: 'Minutes of the lighter stages (N1 and N2), the part of the model that is least certain. $_model',
+  ),
+  MeasureSpec(
+    id: 'deep',
+    label: 'Deep sleep',
+    group: TrendGroup.sleep,
+    scale: Scale.shortMinutes,
+    format: _hm,
+    up: 'more than usual',
+    down: 'less than usual',
+    note: 'Minutes of the deepest stage (N3). Compare your own nights with each other, not with a lab figure. $_model',
+  ),
+  MeasureSpec(
+    id: 'dream',
+    label: 'Dream sleep',
+    group: TrendGroup.sleep,
+    scale: Scale.shortMinutes,
+    format: _hm,
+    up: 'more than usual',
+    down: 'less than usual',
+    note: 'Minutes of REM sleep, where most dreams happen. $_model',
+  ),
+  MeasureSpec(
+    id: 'wakeups',
+    label: 'Wake-ups',
+    group: TrendGroup.sleep,
+    scale: Scale.count,
+    format: (v) => _n(v, 'wake-up', 'wake-ups'),
+    up: 'more than usual',
+    down: 'fewer than usual',
+    note: 'Awake stretches of over 5 minutes between sleeping. $_model',
+  ),
+  MeasureSpec(
+    id: 'fall_asleep',
+    label: 'Falling asleep',
+    group: TrendGroup.sleep,
+    scale: Scale.shortMinutes,
+    format: _hm,
+    up: 'slower than usual',
+    down: 'quicker than usual',
+    askedFor: true,
+    note: 'From Lights off to the model\'s first sleep. Only nights with a Lights off tap. $_model',
+  ),
+  MeasureSpec(
+    id: 'efficiency',
+    label: 'Sleep efficiency',
+    group: TrendGroup.sleep,
+    scale: Scale.percent,
+    format: (v) => '${v.round()}\u00a0%',
+    max: 100,
+    up: 'higher than usual',
+    down: 'lower than usual',
+    note: 'Time asleep over the time from Lights off to your last wake-up; a night with no Lights off counts from when '
+        'the recording started. $_model',
+  ),
+  MeasureSpec(
+    id: 'regularity',
+    label: 'Sleep regularity',
+    group: TrendGroup.sleep,
+    scale: Scale.shortMinutes,
+    format: (v) => '\u00b1${v.round()}\u00a0min',
+    up: 'less regular than usual',
+    down: 'more regular than usual',
+    note: 'How far your fall-asleep and wake-up times moved over the last 7 nights (their typical distance from the '
+        'middle, the two averaged); smaller is steadier. Needs 5 of the 7 nights. $_model',
   ),
   MeasureSpec(
     id: 'jaw',
@@ -100,6 +182,19 @@ final List<MeasureSpec> measureSpecs = [
     max: 9,
     up: 'sleepier than usual',
     down: 'more alert than usual',
+  ),
+  MeasureSpec(
+    id: 'slept',
+    label: 'How you slept',
+    group: TrendGroup.morning,
+    scale: Scale.rating,
+    format: (v) => _of(v, 5),
+    min: 1,
+    max: 5,
+    up: 'better than usual',
+    down: 'worse than usual',
+    askedFor: true,
+    note: 'Your own tap at the check-in, 1 very badly to 5 very well.',
   ),
   MeasureSpec(
     id: 'reaction',
@@ -306,6 +401,10 @@ DateTime finalWake(SleepReport r) {
 /// `sharp` and `dayrt`, sharp/hours.dart; the work sessions' `work...`, work/days.dart); ids that are not measures are ignored.
 Map<String, Map<String, double>> dailySeries(TrendInputs inputs, {Map<String, Map<String, double>> extra = const {}}) {
   final out = {for (final m in measureSpecs) m.id: <String, double>{}};
+  // the sleep model's numbers (sleep_days.dart); the ids of `extra` come after and may replace them
+  for (final MapEntry(key: id, value: days) in sleepModelDays(inputs.nights).entries) {
+    out[id]!.addAll(days);
+  }
   for (final MapEntry(key: id, value: days) in extra.entries) {
     out[id]?.addAll({
       for (final MapEntry(key: d, value: v) in days.entries)
@@ -338,6 +437,7 @@ Map<String, Map<String, double>> dailySeries(TrendInputs inputs, {Map<String, Ma
     first('kss', d, m.kss);
     first('reaction', d, m.reactionMs);
     first('mood', d, m.mood);
+    first('slept', d, m.slept);
     first('tension', d, m.tension);
     first('iaf', d, m.iafHz);
     first('alpha', d, m.alphaEc);

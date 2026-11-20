@@ -81,6 +81,8 @@ const List<Outcome> outcomes = [
   Outcome('kss', 'morning sleepiness', 'higher', 'lower', matters: 1),
   Outcome('reaction', 'reaction time', 'slower', 'quicker', matters: 0.05),
   Outcome('mood', 'mood', 'higher', 'lower', matters: 1),
+  // the morning "How did you sleep?" tap (DECISIONS row 657): a point
+  Outcome('slept', 'rating of how you slept', 'better', 'worse', matters: 1),
   // the sharp-hours log's day numbers (DECISIONS row 287): the mean of the next day's ratings, half a point
   Outcome('sharp', 'sharpness in the day', 'higher', 'lower', matters: 0.5),
   Outcome('dayrt', 'reaction time in the day', 'slower', 'quicker', matters: 0.05),

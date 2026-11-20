@@ -28,7 +28,7 @@ abstract final class MorningMarker {
   static const start = 'morning:start';
   static String phase(String key, String edge) => 'morning:$key:$edge';
   static String ratings(Map<String, int> r) =>
-      'morning:ratings ${jsonEncode({'kss': r['kss'], 'mood': r['mood'], 'tension': r['tension']})}';
+      'morning:ratings ${jsonEncode({'kss': r['kss'], 'mood': r['mood'], 'tension': r['tension'], 'sleep': ?r['sleep']})}';
   static const end = 'morning:end';
   static const abort = 'morning:abort';
 }
