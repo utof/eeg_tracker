@@ -63,6 +63,9 @@ Each line says what it does. In brackets: how well the research backs it **for t
 - **The DIY board (test)**: records the self-built ADS1299 board over Wi-Fi. The board is not assembled yet, so this
   has only met a fake board and shows its test signal, not EEG.
 - **Try these**: one page that walks the owner through each feature's first try, in order, and ticks some by itself.
+- **Signal tab and the bottom bar** (Night, Sessions, Signal, Trends, More): a 3D head you can turn with each
+  electrode's contact, live traces per electrode in µV, and the raw data; it reads the night's or a session's stream,
+  never a second connection.
 
 ### On the laptop
 
