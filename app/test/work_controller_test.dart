@@ -227,7 +227,8 @@ void main() {
     expect(sent.last, containsPair('signal', 'good'));
     expect(sent.last, containsPair('on_break', false));
     expect(sent.last!['hint'], isNull);
-    expect((sent.last!['data_at']! as num) * 1e6, closeTo(band.now().microsecondsSinceEpoch, 3e6));
+    // the newest data as of the last send, which is at most 5 s (shareEvery) and a tick old
+    expect((sent.last!['data_at']! as num) * 1e6, closeTo(band.now().microsecondsSinceEpoch, 7e6));
     // between changes it goes out every 5 s of the session's clock, not every tick
     final n = sent.length, at = band.clockS;
     await until(() => band.clockS > at + 20);

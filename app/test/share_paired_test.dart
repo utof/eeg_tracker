@@ -27,11 +27,14 @@ Future<void> fakeServer(List<Object?> args) async {
 class CountingHost extends ShareHost {
   CountingHost(String dir, void Function(ShareStatus) onChange)
     : super(filesDir: dir, onLog: (_) {}, onChange: onChange, entry: fakeServer);
-  int networkChanges = 0;
+  int networkChanges = 0, tells = 0;
   final List<Map<String, Object?>?> sessions = [];
 
   @override
   Future<void> networkChanged() async => networkChanges++;
+
+  @override
+  Future<void> tellLaptop() async => tells++;
 
   @override
   void setSession(Map<String, Object?>? session) {
@@ -74,7 +77,6 @@ void main() {
   group('ShareControl while paired', () {
     late Directory files;
     late ShareConfig saved;
-    late List<String> alive;
     late StreamController<void> network;
     late ValueNotifier<Map<String, Object?>?> session;
     late List<CountingHost> hosts;
@@ -84,7 +86,6 @@ void main() {
     setUp(() {
       files = Directory.systemTemp.createTempSync('share_paired_test');
       saved = const ShareConfig().switchedOn(now.millisecondsSinceEpoch).withLaptop(laptop);
-      alive = [];
       network = StreamController<void>.broadcast();
       session = ValueNotifier(null);
       hosts = [];
@@ -94,7 +95,6 @@ void main() {
         save: (x) async => saved = x,
         sendToRecorder: (_) {},
         keepScreenOn: (_) async {},
-        keepAlive: (on, offAtMs) async => alive.add(on ? 'on $offAtMs' : 'off'),
         clock: () => now,
         session: session,
         networkChanges: network.stream,
@@ -114,13 +114,11 @@ void main() {
 
     Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 150));
 
-    test('stays on a day later and after a night; the line and the notification say it is paired', () async {
+    test('stays on a day later and after a night; the line says it is paired and when the laptop copies', () async {
       await c.sync(night: false, filesDir: files.path);
       await settle();
       expect(c.on, isTrue);
-      expect(alive.last, 'on -1', reason: 'the keep-alive notification has no end time');
-      expect(shareKeepText(-1, 'my-laptop'), startsWith('my-laptop can copy the files'));
-      expect(c.line().text, 'On at 192.168.1.23:8765, paired with my-laptop.');
+      expect(c.line().text, 'On at 192.168.1.23:8765, paired with my-laptop. The laptop copies while this app is open or records.');
       now = now.add(const Duration(hours: 30));
       await c.sync(night: false, filesDir: files.path);
       expect(c.on, isTrue);
@@ -168,6 +166,19 @@ void main() {
       expect(hosts.single.sessions.last, containsPair('stage', 'running'));
       session.value = null;
       expect(hosts.single.sessions.last, isNull);
+    });
+
+    test('with no notification between nights (row 678) the laptop hears from the phone when a session starts and when '
+        'the app comes back to the front', () async {
+      await c.sync(night: false, filesDir: files.path);
+      session.value = {'kind': 'work', 'stage': 'calibrating'};
+      session.value = {'kind': 'work', 'stage': 'running'}; // the same session: told once
+      expect(hosts.single.tells, 1);
+      session.value = null;
+      session.value = {'kind': 'work', 'stage': 'calibrating'}; // a new one
+      expect(hosts.single.tells, 2);
+      c.resumed();
+      expect(hosts.single.tells, 3);
     });
   });
 

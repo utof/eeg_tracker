@@ -37,18 +37,15 @@ void main() {
   group('the share server around a Start', () {
     late Directory files;
     late ShareConfig saved;
-    late List<String> alive;
     late ShareControl share;
     setUp(() async {
       files = Directory.systemTemp.createTempSync('night_start_race');
       saved = const ShareConfig();
-      alive = [];
       share = ShareControl(
         load: () async => saved,
         save: (x) async => saved = x,
         sendToRecorder: (_) {},
         keepScreenOn: (_) async {},
-        keepAlive: (on, _) async => alive.add(on ? 'on' : 'off'),
         clock: () => DateTime(2026, 11, 22, 22, 5),
         host: (dir, onChange, wifiLock) =>
             ShareHost(filesDir: dir, onLog: (_) {}, onChange: onChange, entry: _fakeServer, wifiLock: wifiLock),
@@ -75,18 +72,15 @@ void main() {
       gate.begin(); // Start night tapped
       final resumed = gate.token; // the notification question closes: the app is back, a refresh asks
       await share.beforeNight(); // the Start lets go of the port before the recorder's service starts
-      alive.clear();
       await refreshEnds(gate, resumed, running: false); // "no night": the service is not up yet
       await Future<void>.delayed(const Duration(milliseconds: 150));
       expect(share.status.up, isFalse, reason: 'the port stays free for the recorder');
-      expect(alive, isEmpty, reason: 'and the keep does not come back');
       gate.end();
       await refreshEnds(gate, resumed, running: false); // the same refresh, ending only after the Start
       await Future<void>.delayed(const Duration(milliseconds: 150));
       expect(share.status.up, isFalse);
       await refreshEnds(gate, gate.token, running: true); // the refresh after the Start: the night records
       expect(share.status.up, isFalse);
-      expect(alive, isEmpty);
     });
 
     test('a Start that failed: the next refresh serves again', () async {

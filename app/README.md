@@ -1729,7 +1729,8 @@ deleted this way.
 
 **Safety, in plain words.** It is your brain data, so: every request needs the code the app shows (12 characters);
 only devices on the same local network are answered; it turns itself off 12 hours after you switched it on, and 15
-minutes after Stop. It is **not encrypted** (plain HTTP; encryption is deferred, DECISIONS rows 37 and 225): a device
+minutes after Stop, unless a laptop is paired: then it stays on until you switch it off or tap **Forget this laptop**
+(DECISIONS 675). No notification comes with it (row 678). It is **not encrypted** (plain HTTP; encryption is deferred, DECISIONS rows 37 and 225): a device
 on the same Wi-Fi could listen in, so use it on your home Wi-Fi only, never on a shared or public one. **New code**
 on the sheet shuts out every laptop that has the old one; a paired laptop is told the new one, so tap **Forget this
 laptop** first to shut it out too.
@@ -1737,7 +1738,8 @@ laptop** first to shut it out too.
 **Connecting the laptop by one scan** (DECISIONS rows 530-539, `../docs/phone-link.md`). The square code on the
 laptop works once, for 5 minutes. The app asks before anything is sent, and it sends its own code only to the laptop
 that proves it showed that square code; nothing leaves your home network. The two remember each other, so next time
-there is nothing to scan.
+there is nothing to scan: a Wi-Fi drop on either side, a restart or **New code** needs no new scan (the phone tells
+the laptop where it is as soon as its Wi-Fi is back, DECISIONS 676; the laptop's tray keeps its side running, 677).
 
 **It cannot hurt the recording.** The server runs apart from the recorder, which only hands it copies of the samples
 and never waits for it. If the server fails, sharing goes off with one line in the night's log and the night goes on
@@ -1746,11 +1748,12 @@ it is written to the log and the server goes on answering (row 587). The SHA-256
 between app updates, so the first list after an update takes seconds, not minutes (row 585). The night's sleep
 scoring waits while the laptop copies (row 583).
 
-**Between nights it keeps the app running (since 2026-11-20, row 589).** Android freezes an app in the background,
-and a frozen app's server takes connections and never answers (the owner's phone after an update). While sharing is
-on between nights, a notification "Sharing on Wi-Fi" keeps the app running; its Stop turns sharing off. A session
-(meditation, check-in, ...) shows its own notification meanwhile and gives it back; during a night the recorder's
-notification does it.
+**Between nights it answers while the app runs (row 678, which replaced row 589 on 2026-11-20).** There is no
+"Sharing on Wi-Fi" notification any more (the owner did not want a permanent, player-like one). The app answers while
+it is open or holds a session (a Work session, meditation, ...: their own card keeps it running); during a night the
+recorder's service answers. In the background Android may freeze the app, and a frozen app's server takes connections
+and never answers: the laptop then copies what it missed the next time the app is open, a session runs or a night
+records (the phone tells a paired laptop where it is at each of those). Nothing is lost.
 
 **If the laptop loses the phone at night, nothing is lost (rows 610-616).** The night stays on the phone and the
 laptop copies what it missed once it reaches the phone again (Export data works without Wi-Fi at all). On 2026-11-20
@@ -1800,8 +1803,8 @@ Good to know:
 
 - The code stays the same until you tap **New code**; after a new one the phone tells the paired laptop by itself.
   For the commands by hand, set it once to keep it out of the shell history: `export EEG_PHONE_TOKEN=<code>`.
-- Between nights the phone keeps answering in the background, with a "Sharing on Wi-Fi" notification that stops
-  Android freezing the app (row 589); its Stop turns sharing off. The app keeps the screen on for the first 15 minutes.
+- Between nights the phone answers while the app is open or a session runs (no notification of its own, row 678).
+  The app keeps the screen on for the first 15 minutes.
   During a night it answers with the screen off, as long as the phone keeps its Wi-Fi (the settings above).
 - During a night the laptop's **Re-check contact** button does nothing: the phone checks contact once, at the start
   (DECISIONS row 52). The Sleep page and the morning result are the laptop's own jobs and use the laptop's files,

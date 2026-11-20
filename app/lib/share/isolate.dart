@@ -387,6 +387,13 @@ class ShareHost {
   Future<void> networkChanged() async {
     if (_ended) return;
     if (wifi != null) await _sendWifi();
+    await tellLaptop();
+  }
+
+  /// The paired laptop is told where this phone is now (one handshake; DECISIONS 676, 678): after a network change,
+  /// when a session starts, when the app comes back to the front.
+  Future<void> tellLaptop() async {
+    if (_ended) return;
     try {
       _port?.send(['n']);
     } catch (_) {}

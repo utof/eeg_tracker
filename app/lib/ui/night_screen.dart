@@ -20,7 +20,7 @@ import '../recorder/nights.dart';
 import '../recorder/packed.dart' show packInBackground, packOldRecordings;
 import '../recorder/recorder_service.dart';
 import '../recorder/status.dart';
-import '../session_keeper.dart' show KeepSpec, PhoneSessionKeeper;
+import '../session_keeper.dart' show PhoneSessionKeeper;
 import '../share/control.dart';
 import '../share/isolate.dart' show shareAddress;
 import '../share/network_watch.dart';
@@ -306,10 +306,6 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     save: saveShareConfig,
     sendToRecorder: FlutterForegroundTask.sendDataToTask,
     keepScreenOn: (on) => Phone.keepScreenOn(on: on, session: false),
-    keepAlive: (on, offAtMs) => PhoneSessionKeeper.keepInBackground(
-      on ? KeepSpec(title: 'Sharing on Wi-Fi', text: shareKeepText(offAtMs, _share.config.laptop?.name), focus: false) : null,
-      onStop: () => unawaited(_share.setOn(false)),
-    ),
     // the app's own server between nights holds the Wi-Fi lock too (DECISIONS 612); the recorder holds its own
     wifiLock: (on) => Phone.wifiLock(on: on, who: 'screen'),
     networkChanges: NetworkWatch.changes(), // the paired laptop hears from this phone at once (DECISIONS 676)
@@ -373,6 +369,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _resumedAtMs = DateTime.now().millisecondsSinceEpoch;
+      _share.resumed(); // the paired laptop hears from this phone again (DECISIONS 678)
       unawaited(_refresh());
     }
   }

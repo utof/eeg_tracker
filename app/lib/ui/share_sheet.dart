@@ -137,10 +137,11 @@ class ShareSheet extends StatelessWidget {
                       'without it (below).'
                 : m.night
                 ? (m.laptop != null
-                      ? 'It keeps answering with the screen off while the night records, and after Stop while the laptop is paired.'
+                      ? 'It keeps answering with the screen off while the night records; after Stop, while this app is open.'
                       : 'It keeps answering with the screen off while the night records, and for 15 minutes after Stop.')
-                : 'Between nights it keeps answering in the background too, with a "Sharing on Wi-Fi" notification '
-                      '(its Stop turns sharing off).',
+                // no notification keeps the app running for sharing between nights (DECISIONS 678)
+                : 'Between nights it answers while this app is open or a session runs. In the background the phone may '
+                      'pause it: the laptop copies what it missed the next time the app is open or records.',
             style: address == null ? muted?.copyWith(color: Night.caution) : muted,
           ),
           const SizedBox(height: 10),
