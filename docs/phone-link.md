@@ -45,6 +45,11 @@ page says what crosses the network and why it is safe enough for a home Wi-Fi.
   address: it listens there within 30 seconds). It copies the files and serves the live pages as before, writes
   what it says to `_local/phone/link-keep.log` (addresses and file names, never the token), is started again when
   it ends, and stops with the tray. **Pair phone…** then opens its page with a fresh code, for a new phone.
+- **After a copy** (DECISIONS 768): the kept link starts `scripts/after_pull.py` in the background after a copy that
+  brought something new (at most once every 30 minutes) and once a day without one: it packs raw recordings older
+  than a day, writes the day numbers utof_tracker imports (`export_events.py --daily`) and updates the data book in
+  `_local/data/` (docs/data-format.md). It says how each step went in `_local/after-pull.log`; `--no-after-pull`
+  leaves it out.
 - **Forget the phone…** in the tray's menu deletes `link.json`; the kept link ends by itself, and the phone hears
   "no longer knows this phone" at its next announcement.
 

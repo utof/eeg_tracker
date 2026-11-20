@@ -92,8 +92,12 @@ Each line says what it does. In brackets: how well the research backs it **for t
 - **Tools for the phone's files**: `import_phone.py`, `phone_night_check.py`, `catalog.py`, `pull_phone.py`
   (below), and `pack_old.py`, which packs raw recordings older than a day (both sides pack: lossless, checked).
 - **Pairing with the phone** (`python3 scripts/phone_link.py`, also the tray's **Pair phone…**): a QR code to scan,
-  then the phone's files copied every 2 minutes and its live pages at `http://localhost:8770/`.
-  ([docs/phone-link.md](docs/phone-link.md))
+  then the phone's files copied every 2 minutes and its live pages at `http://localhost:8770/`; after a copy that
+  brought something new it packs old recordings, exports the day numbers for utof_tracker and updates the data book
+  (`scripts/after_pull.py`). ([docs/phone-link.md](docs/phone-link.md))
+- **The data book** (`uv run --project analysis python scripts/data_book.py`): every night, nap, session, day, 30 s
+  of signal and label in five tables in `_local/data/` that open in a spreadsheet, each row with its model version
+  and the SHA-256 of the files it came from. ([docs/data-format.md](docs/data-format.md), "The data book")
 - **Every day's numbers for utof_tracker** (`python3 scripts/export_events.py --daily`): one event per day with what
   the phone's Trends page shows, for the owner's life tracker. ([docs/utof-interface.md](docs/utof-interface.md))
 - **The same scoring and detectors in Python**: the phone's rules were written and checked there first (`analysis/`).
