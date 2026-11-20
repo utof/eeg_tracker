@@ -182,6 +182,8 @@ sound-for-states sessions the same way, and `test/state_synth_test.dart` checks 
 edges, the beat in the sound or only between the ears) without an audio device.
 `test/wearer_cross_check_test.dart` checks "Was this you?" against `analysis/wearer_check.py` (fixture made by
 `analysis/make_wearer_fixture.py` from made-up signals and histories).
+`test/replay_headband_test.dart` plays made-up recordings of any layout through the replay headband into the night
+recorder and whole work sessions (DECISIONS 730-739); `test/start_log_test.dart` checks `files/app-starts.log`.
 `test/heavy_reads_test.dart` counts the files the app opens on the screen's thread (DECISIONS 620-629) on a made-up
 folder with 60 days of history (`test/support/app_folder.dart`, `test/support/read_count.dart` wraps every `File` the
 code makes): the night screen's lines, the study reminders, "Was this you?", Trends, Try these, the Lucid page and the
@@ -202,6 +204,61 @@ The first build on the owner's laptop (2026-11-18) took about 5 minutes and fits
 compressed; 51 MB since the dream catcher's speech engine, DECISIONS row 257; only the named ABI is packaged and native libraries are compressed, `android/app/build.gradle.kts`;
 `android/app/proguard-rules.pro` keeps ONNX Runtime's Java classes). The neurosdk2 1.0.21 plugin shrinks its own release build without keep
 rules, which stripped its `Neurosdk2Plugin` class; `android/build.gradle.kts` builds that one plugin unshrunk.
+
+## Pre-install check (before every phone install)
+
+One command on a temporary emulator checks what reached the owner's phone on 2026-11-19/20 (DECISIONS 730-739).
+Build the candidate (`flutter build apk --release --target-platform android-arm64
+-Pkotlin.compiler.execution.strategy=in-process`) and, for (c), its replay build (the same command with
+`--dart-define=EEG_REPLAY=true`; never install that one on the phone), then:
+
+```bash
+source ~/.local/share/linsa/env.sh
+cd app && python3 tool/precheck.py --old <the APK on the phone now> --new build/app/outputs/flutter-apk/app-release.apk \
+  [--replay <replay build> --talking]          # run it in the heavy build slot: it boots an emulator
+```
+
+It makes an AVD under `/var/tmp` (API 36 x86_64 image, **2 cores**: the phone's arm64 APK runs there through Android's
+ARM translation, and ONNX Runtime crashes at launch with 4), uses a private adb server (port 5041, `ADB_LIBUSB=0
+ADB_USB=0`) and the emulator's own serial on every call, never the phone or the default adb server, and removes the
+AVD, the emulator and its adb server at the end. It prints PASS / FAIL / SKIP:
+
+- **(a) update over yesterday**: the old APK with the phone's finished nights (copies of the reports in
+  `_local/phone/nights/` and the recordings they name from `_local/recordings/`, read-only; `--reports`, `--nights`),
+  then `adb install -r` of the new one: no night may be scored again, every report stays byte for byte. Catches the
+  "old nights scored again after each update" bug (DECISIONS 580).
+- **(b) Share on Wi-Fi in the background**: sharing on (More tab), Home, Doze forced, standby bucket "rare", past
+  Android's freezer delay; `/state` must answer within 5 s, three times. Then a forced `am freeze` (harder than stock
+  Android, which never freezes an app with a foreground service): `/state` must answer again once thawed. Catches the
+  Share hang of 2026-11-19 (DECISIONS 587, 589): a build without the fix sits in the background as a cached process,
+  which Android freezes.
+- **(c) a replayed noisy work session** (only with `--replay` and `--talking`): the made-up talking recording through
+  the replay headband into a real work session for 6.5 minutes; no break may start by itself. **Harness ready, to be
+  switched on once `fix/app-work-session-day` is in main** (the "calibrating, then on break" loop, DECISIONS 680, 735);
+  until then it is a SKIP. The laptop's replay tests already show the loop on main and its fix.
+- **(d) crashes, ANRs, exit reasons**: logcat, `/data/anr` and `dumpsys activity exit-info` are kept; a crash or an
+  ANR fails, and the app's own `files/app-starts.log` must hold its starts with Android's exit reasons.
+
+Logs and details go to `/var/tmp/eeg-precheck-<time>/out/` (`--out`). About 10 minutes, 16 with (c).
+
+## Replay headband (test and replay builds only)
+
+`lib/headband/replay.dart` plays a recording in the app's own format (`.f32` plain or packed, `.idx`, the header) into
+the app through the same slot the tests' fake headbands use (the finder that hands out a headband): batch by batch
+at the recorded arrival times, so drop-outs, talking or the headband off reach the real sessions and the real night
+recorder. Any layout: four channels at the BrainBit's sites at 250 Hz play as a BrainBit; any other count, rate or
+place plays as another board (the recorder keeps it under its own header, sessions say they need O1 O2 T3 T4).
+Laptop tests drive it on a clock of its own (`ReplayPace.virtual`: a working day in seconds;
+`test/replay_headband_test.dart`). Made-up recordings only in the repository: `lib/headband/replay_scenarios.dart`
+(quiet work, talking, the headband off, drop-outs, the helmet plan's 8 channels at 500 Hz, 3 channels with one at a
+custom place); `dart run tool/replay_scenario.dart list` shows them, `... <name|all> <folder>` writes them.
+
+On a device it needs a **replay build** (`--dart-define=EEG_REPLAY=true`; a normal build has no replay code at all)
+and `files/replay/plan.json` (only `adb root` can put it there):
+`{"files": ["talking/2026-11-20-100000.f32"], "speed": 1, "from_s": 0, "max_gap_s": 60, "loop": false}` with the
+files under `files/replay/` (the app's owner and SELinux label, as in step 1 below). Every session and Start night
+then use the replay instead of the headband (the DIY board's switch still wins in the night recorder: turn it off);
+its name is "Replay (not a headband)" and the night's `.log` says what it plays.
 
 ## Emulator smoke test
 
