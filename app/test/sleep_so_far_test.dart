@@ -325,6 +325,9 @@ void main() {
       for (var e = 140; e < 150; e++) {
         log.epoch((start.millisecondsSinceEpoch ~/ 1000 + 30 * e + 7) * 1000, 'N3', 0.8);
       }
+      // a look that waits shows them at once (the page keeps the scorer's latest)
+      await expectLater(s.update(), throwsA(isA<ScoringPaused>()));
+      expect(s.latest!.stages.sublist(140, 150), everyElement('N3'));
       final shown = s.cached()!;
       expect(shown.stages.sublist(140, 150), everyElement('N3'));
       expect(shown.liveEpochs, 10);

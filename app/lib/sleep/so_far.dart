@@ -565,7 +565,12 @@ class SoFarScorer {
       if (who != null) throw ScoringPaused('the live sleep model runs for the $who');
     }
 
-    await mayGo();
+    try {
+      await mayGo();
+    } on ScoringPaused {
+      cached(sinceMs: sinceMs); // what is kept, with the live model's epochs where nothing else scored
+      rethrow;
+    }
     final p = await plan(recordingsDir.path, sinceMs);
     if (p == null) return latest = null;
     final saved = store.read(p.night);
