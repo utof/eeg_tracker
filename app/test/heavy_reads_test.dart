@@ -26,7 +26,7 @@ import 'package:eeg_tracker/ui/lucid_screen.dart';
 import 'package:eeg_tracker/ui/lucid_view.dart' show LucidDue;
 import 'package:eeg_tracker/ui/memory_cues_screen.dart' show memoryNightLine;
 import 'package:eeg_tracker/ui/nap_screen.dart' show napSessionRunning;
-import 'package:eeg_tracker/ui/morning_screen.dart' show checkedInTodayAt;
+import 'package:eeg_tracker/ui/morning_screen.dart' show checkedInTodayAt, outcomeInBackground;
 import 'package:eeg_tracker/ui/nap_view.dart' show endWords;
 import 'package:eeg_tracker/ui/night_lines.dart';
 import 'package:eeg_tracker/wearer/check.dart';
@@ -45,7 +45,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'sharp_prompts_test.dart' show FakeSharpPhone;
 import 'support/app_folder.dart';
 import 'support/read_count.dart';
-import 'wearer_test.dart' show night;
+import 'wearer_test.dart' show checkIn, night;
 
 void main() {
   late Directory root;
@@ -301,6 +301,14 @@ void main() {
       expect(out!.staged, isTrue);
       expect(counts.of('.f32'), greaterThanOrEqualTo(3), reason: 'scored: the night is read once ($counts)');
     });
+  });
+
+  test('a check-in\'s result compares with the trends from a background isolate', () async {
+    final done = MorningRecord.fromJson(checkIn(DateTime(2026, 11, 20, 7, 50)))!;
+    final counts = countReads(addTearDown);
+    final o = await outcomeInBackground(done, rec);
+    expect(counts.total, 0, reason: '$counts');
+    expect(o, isNotNull);
   });
 
   group('the study reminders at every start and return', () {

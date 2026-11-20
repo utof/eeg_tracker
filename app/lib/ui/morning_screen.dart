@@ -35,6 +35,11 @@ String? checkedInTodayAt(List<MorningRecord> records, DateTime now) {
   return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 }
 
+/// [outcomeFor] over the app's folders, in a background isolate. A top-level function, so that the isolate's closure
+/// holds only [done] and [recordingsDir], never a page (row 160: a closure that sent the whole page broke Export).
+Future<MorningOutcome> outcomeInBackground(MorningRecord done, String recordingsDir) =>
+    Isolate.run(() => outcomeFor(done, readTrendInputs(recordingsDir)), debugName: 'check-in outcome');
+
 /// [checkedInTodayAt] from the folder: only today's files are opened, and none again while they are unchanged
 /// (DECISIONS 620-629; the night screen asks at every start and return).
 String? checkedInTodayIn(MorningStore store, DateTime now) {
@@ -138,7 +143,7 @@ class _MorningScreenState extends State<MorningScreen> {
     _doneAt = store == null ? null : checkedInTodayIn(store, DateTime.now());
     // every report, check-in and practice: read in a background isolate (DECISIONS 620-629)
     unawaited(
-      Isolate.run(() => outcomeFor(done, readTrendInputs(rec)), debugName: 'check-in outcome')
+      outcomeInBackground(done, rec)
           .then<MorningOutcome?>((o) => o, onError: (Object _) => null)
           .then((o) {
             if (mounted) setState(() => _outcome = o);
