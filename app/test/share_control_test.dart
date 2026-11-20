@@ -135,6 +135,7 @@ void main() {
   });
 
   test('between nights no notification keeps the app running for sharing (row 678 replaces 589): the session keeper is never asked', () async {
+    TestWidgetsFlutterBinding.ensureInitialized(); // for the mock channel (the last test here: nothing after it uses HTTP)
     const session = MethodChannel('eeg_tracker/session');
     final asked = <String>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(session, (call) async {
