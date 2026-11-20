@@ -28,8 +28,9 @@ class SleepSoFar extends ChangeNotifier {
   String? failed;
   bool ended = false;
 
-  /// When the last look ended.
+  /// When the last look ended, and whether it was cut short (the page closed, the screen went off).
   DateTime? lookedAt;
+  bool cut = false;
   int? _forNight;
   Future<void>? _running;
   bool _halted = false;
@@ -81,6 +82,7 @@ class SleepSoFar extends ChangeNotifier {
     cached();
     step = 'Looking at the recordings';
     waiting = failed = null;
+    cut = false;
     notifyListeners();
     try {
       result = await scorer.update(
@@ -97,6 +99,7 @@ class SleepSoFar extends ChangeNotifier {
     } on ScoringPaused catch (e) {
       result = scorer.latest ?? result;
       if (!_halted) waiting = e.why;
+      cut = _halted;
     } catch (e) {
       result = scorer.latest ?? result;
       failed = '$e';
@@ -149,7 +152,7 @@ class _SleepSoFarScreenState extends State<SleepSoFarScreen> with WidgetsBinding
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && !widget.soFar.ended) {
       final last = widget.soFar.lookedAt;
-      if (last == null || DateTime.now().difference(last) > const Duration(minutes: 1)) {
+      if (last == null || widget.soFar.cut || DateTime.now().difference(last) > const Duration(minutes: 1)) {
         unawaited(widget.soFar.update());
       }
     } else if (state == AppLifecycleState.paused) {
