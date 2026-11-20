@@ -14,6 +14,7 @@ import 'parts.dart';
 import 'phone_checks.dart';
 import 'share_sheet.dart';
 import 'sleep_report_view.dart' show durationParts, nightTitle;
+import 'sleep_so_far_view.dart' show SoFarSection;
 import 'theme.dart';
 import 'try_these_screen.dart' show TryTheseEntry;
 
@@ -62,6 +63,7 @@ class NightViewModel {
     this.nightsOnPhone = 0,
     this.exportLine,
     this.sleep,
+    this.soFarLine,
     this.dreamLine,
     this.lightsOffLine,
     this.lightsOffTapped = false,
@@ -108,6 +110,9 @@ class NightViewModel {
 
   /// The Sleep section, shown between nights.
   final SleepSummary? sleep;
+
+  /// While a night records: the Sleep so far section's line (the last look, or the DIY board's refusal); null: none.
+  final String? soFarLine;
 
   /// The dream catcher's newest session in a line ("Last session: 3 answers, Tue 18 Nov 23:10"), if any.
   final String? dreamLine;
@@ -166,6 +171,7 @@ class NightView extends StatelessWidget {
     this.onWork,
     this.onSleepReport,
     this.onRetrySleep,
+    this.onSleepSoFar,
     this.morning,
     this.onLightsOff,
     this.onSettings,
@@ -197,6 +203,9 @@ class NightView extends StatelessWidget {
   final VoidCallback? onWork;
   final VoidCallback? onSleepReport;
   final VoidCallback? onRetrySleep;
+
+  /// Opens "Sleep so far" while a night records (DECISIONS 640-649); null: no button (the DIY board).
+  final VoidCallback? onSleepSoFar;
 
   /// The Morning section (check-in and trends; morning_section.dart), shown between nights after Sleep.
   final Widget? morning;
@@ -251,6 +260,11 @@ class NightView extends StatelessWidget {
           _Status(m),
           if (m.minutes != null) ...[const SizedBox(height: 28), _Readouts(m)],
           if (m.rows.isNotEmpty) ...[SectionHeading(m.stripTitle), NightStrip(rows: m.rows)],
+          // While a night records, the night so far right under its strip: scored only when its page opens.
+          if (m.running && m.soFarLine != null) ...[
+            const SectionHeading('Sleep so far'),
+            SoFarSection(line: m.soFarLine!, onOpen: onSleepSoFar),
+          ],
           // In the morning the night's sleep comes right after its strip. The DIY board's nights get no report.
           if (!m.running && (sleep != null || m.diy)) ...[
             const SectionHeading('Sleep'),

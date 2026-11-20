@@ -177,7 +177,7 @@ class SleepReportView extends StatelessWidget {
                 '${durationText(unusableMin)}'}.',
       ),
       const SizedBox(height: 12),
-      _Legend(
+      SleepLegend(
         showGap: stages.contains('gap'),
         showNoisy: quality?.contains(EpochQuality.degraded) ?? false,
         showUnusable: quality?.contains(EpochQuality.missing) ?? false,
@@ -245,11 +245,20 @@ class _Blocked extends StatelessWidget {
   }
 }
 
-class _Legend extends StatelessWidget {
-  const _Legend({required this.showGap, this.showNoisy = false, this.showUnusable = false});
+/// The chart's legend: the period band, and the swatches of what the chart shows (Sleep so far adds "not scored yet":
+/// the empty track where the line breaks).
+class SleepLegend extends StatelessWidget {
+  const SleepLegend({
+    super.key,
+    required this.showGap,
+    this.showNoisy = false,
+    this.showUnusable = false,
+    this.showUnscored = false,
+  });
   final bool showGap;
   final bool showNoisy;
   final bool showUnusable;
+  final bool showUnscored;
 
   @override
   Widget build(BuildContext context) {
@@ -281,6 +290,23 @@ class _Legend extends StatelessWidget {
           ),
         if (showNoisy) const SignalSwatch(EpochQuality.degraded),
         if (showUnusable) const SignalSwatch(EpochQuality.missing),
+        if (showUnscored)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 18,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: Night.track,
+                  border: Border.all(color: Night.rule),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text('not scored yet', style: style),
+            ],
+          ),
       ],
     );
   }

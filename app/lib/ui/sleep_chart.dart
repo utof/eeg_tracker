@@ -8,7 +8,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../detectors/detectors.dart' show EpochQuality;
-import '../sleep/periods.dart' show gapStage;
+import '../sleep/periods.dart' show gapStage, unscoredStage;
 import 'theme.dart';
 
 /// Top to bottom; light sleep is N1 and N2 together, as in the report.
@@ -142,6 +142,16 @@ class _ChartPainter extends CustomPainter {
     for (var i = 0; i < periods.length; i++) {
       final (a, b) = periods[i];
       canvas.drawRect(Rect.fromLTRB(x(a), plot.top, x(b + 1), plot.bottom), Paint()..color = Night.rule);
+    }
+    // not scored yet (Sleep so far): the bare track, cut out of a period's band
+    for (var e = 0; e < n; e++) {
+      if (stages[e] != unscoredStage) continue;
+      var f = e;
+      while (f < n && stages[f] == unscoredStage) {
+        f++;
+      }
+      canvas.drawRect(Rect.fromLTRB(x(e), plot.top, math.max(x(f), x(e) + 2), plot.bottom), Paint()..color = Night.track);
+      e = f - 1;
     }
     // missing data: amber hatching, the watch strip's gap colour
     final hatch = Paint()

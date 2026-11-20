@@ -12,10 +12,14 @@
 // (the alarm then leaves the waking to the phone's alarm, the cues stop).
 //
 // Without a shared scorer (a listener made on its own, as in its tests) a listener makes its own one and feeds it.
+//
+// With a [LiveStageLog] (the recorder's), the model's start, every epoch it hands out and its end are also written down
+// for "Sleep so far" on the screen (live_log.dart, DECISIONS 640-649); that log never throws.
 import 'dart:async';
 import 'dart:typed_data';
 
 import '../recorder/chunk_writer.dart' show Sample, unixSeconds;
+import 'live_log.dart';
 import 'live_stager.dart';
 import 'night_signal.dart' show limitMicrovolts, minGapSeconds, roundHalfEven, sampleRate;
 
@@ -43,12 +47,15 @@ abstract interface class StageListener {
 }
 
 class NightScorer {
-  NightScorer({required this.model, this.scale = scaleInBackground, this.slow = slowCall});
+  NightScorer({required this.model, this.scale = scaleInBackground, this.slow = slowCall, this.log});
 
   /// Opens the sleep model (AnySleep's runs on ONNX on the phone).
   final LiveModel Function() model;
   final ScaleFn scale;
   final Duration slow;
+
+  /// Where the model's start, epochs and end are written down for the screen's "Sleep so far"; null: nowhere.
+  final LiveStageLog? log;
 
   final List<StageListener> _listeners = [];
   final List<StageListener> _using = [];
@@ -149,6 +156,7 @@ class NightScorer {
     final whole = _wholeSecond(t0);
     _startUnix = whole;
     _events.add('live sleep model on for the ${_using.map((l) => l.who).join(' and ')} (load $loads tonight)');
+    log?.on(users);
     final lead = roundHalfEven((t0 - whole) * sampleRate);
     for (var i = 0; i < lead; i++) {
       _push(s, first, missing: true);
@@ -172,6 +180,7 @@ class NightScorer {
     final start = _startUnix;
     if (start == null) return;
     final at = (start + st.epoch * 30) * 1000;
+    log?.epoch(at, st.stage, st.confidence);
     for (final l in List.of(_using)) {
       try {
         l.scored(st, at);
@@ -196,6 +205,7 @@ class NightScorer {
     _stager = null;
     _startUnix = null;
     _using.clear();
+    log?.off();
     final t = s.callTimes;
     _events.add(
       'live sleep model off, $why (${s.calls.length} calls'
