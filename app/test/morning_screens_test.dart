@@ -14,7 +14,7 @@ import 'package:eeg_tracker/sleep/report.dart';
 import 'package:eeg_tracker/trends/trends.dart';
 import 'package:eeg_tracker/ui/morning_screen.dart' show outcomeFor;
 import 'package:eeg_tracker/ui/morning_section.dart';
-import 'package:eeg_tracker/ui/form_parts.dart' show ChoiceQuestion;
+import 'package:eeg_tracker/ui/form_parts.dart' show ChoiceQuestion, SliderQuestion;
 import 'package:eeg_tracker/ui/morning_view.dart';
 import 'package:eeg_tracker/ui/night_view.dart';
 import 'package:eeg_tracker/ui/theme.dart';
@@ -242,6 +242,25 @@ void main() {
       await _shoot(tester, _states[name]!, '${name}_full', height: 3200);
     });
   }
+
+  testWidgets('the start page says as many questions as the questions page asks', (tester) async {
+    tester.view.physicalSize = const Size(1210, 20000); // tall enough that the list builds every question
+    tester.view.devicePixelRatio = 2.75;
+    addTearDown(tester.view.reset);
+    Future<void> show(MorningStage stage) => tester.pumpWidget(
+      MaterialApp(theme: nightTheme(), home: MorningView(model: MorningViewModel(stage: stage))),
+    );
+    await show(MorningStage.questions);
+    // every question asked before any answer (the late cup follows a "yes" to coffee only)
+    final asked =
+        find.byType(SliderQuestion).evaluate().length +
+        find.byType(ChoiceQuestion<int>).evaluate().length +
+        find.byType(ChoiceQuestion<bool>).evaluate().length;
+    expect(asked, greaterThanOrEqualTo(6));
+    await show(MorningStage.intro);
+    const words = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve'];
+    expect(find.text('${words[asked]} quick questions'), findsOneWidget);
+  });
 
   testWidgets('the questions: Save waits for every answer and says so', (tester) async {
     MorningAnswers? saved;

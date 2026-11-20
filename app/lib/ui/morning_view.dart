@@ -162,11 +162,11 @@ class MorningView extends StatelessWidget {
       ),
       if (m.stage == MorningStage.intro && m.message.isNotEmpty) Para(m.message, color: Night.caution),
       const SectionHeading('The routine, about 6 minutes'),
-      for (final (word, length) in const [
+      for (final (word, length) in [
         ('Contact check', 'about 30 s'),
         ('Eyes closed', '2 min'),
         ('Eyes open, on a dot', '2 min'),
-        ('Five quick questions', 'under 1 min'),
+        (quickQuestionsText(morningQuestions.length), 'under 1 min'),
         ('Reaction test, if you like', '1 min'),
       ])
         Padding(
@@ -442,6 +442,24 @@ class _ContactRow extends StatelessWidget {
   }
 }
 
+const String _qSleepiness = 'Sleepiness over the last 5 minutes';
+const String _qMood = 'Mood';
+const String _qTension = 'Tension';
+const String _qSlept = 'How did you sleep? (optional)';
+const String _qCups = 'Cups of coffee, strong tea or energy drinks';
+const String _qDrinks = 'Drinks of alcohol (a beer, a glass of wine or a shot each)';
+const String _qToday = 'Any caffeine before this check-in?';
+
+/// The questions every check-in asks after the recording, in their order on the questions page; one more (a cup in
+/// the 8 hours before sleep) follows only a "yes" to coffee. The start page counts them ([_Questions] shows them).
+const List<String> morningQuestions = [_qSleepiness, _qMood, _qTension, _qSlept, _qCups, _qDrinks, _qToday];
+
+/// "Seven quick questions": the count in words up to twelve, then in digits.
+String quickQuestionsText(int n) {
+  const words = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve'];
+  return '${n < words.length ? words[n] : '$n'} quick ${n == 1 ? 'question' : 'questions'}';
+}
+
 /// The questions after the recording, then the optional reaction test (DESIGN.md Questions).
 class _Questions extends StatefulWidget {
   const _Questions({required this.model, required this.onSave, required this.onInfo});
@@ -488,7 +506,7 @@ class _QuestionsState extends State<_Questions> {
           const StepMarks(current: 3),
           _title(context, 'How do you feel right now?'),
           SliderQuestion(
-            question: 'Sleepiness over the last 5 minutes',
+            question: _qSleepiness,
             value: _kss,
             min: 1,
             max: 9,
@@ -496,17 +514,17 @@ class _QuestionsState extends State<_Questions> {
             ends: ('1 extremely alert', '9 fighting sleep'),
             caption: (v) => '$v · ${kssLabels[v - 1]}',
           ),
-          scaleQuestion('Mood', _mood, (v) => setState(() => _mood = v), ('1 very bad', '5 very good')),
-          scaleQuestion('Tension', _tension, (v) => setState(() => _tension = v), ('1 none', '5 very much')),
+          scaleQuestion(_qMood, _mood, (v) => setState(() => _mood = v), ('1 very bad', '5 very good')),
+          scaleQuestion(_qTension, _tension, (v) => setState(() => _tension = v), ('1 none', '5 very much')),
           scaleQuestion(
-            'How did you sleep? (optional)',
+            _qSlept,
             _slept,
             (v) => setState(() => _slept = v),
             ('1 very badly', '5 very well'),
           ),
           const SectionHeading('Yesterday'),
           ChoiceQuestion<int>(
-            question: 'Cups of coffee, strong tea or energy drinks',
+            question: _qCups,
             choices: counts(),
             value: _cups,
             onChanged: (v) => setState(() => _cups = v),
@@ -519,14 +537,14 @@ class _QuestionsState extends State<_Questions> {
               onChanged: (v) => setState(() => _late = v),
             ),
           ChoiceQuestion<int>(
-            question: 'Drinks of alcohol (a beer, a glass of wine or a shot each)',
+            question: _qDrinks,
             choices: counts(),
             value: _drinks,
             onChanged: (v) => setState(() => _drinks = v),
           ),
           const SectionHeading('This morning'),
           ChoiceQuestion<bool>(
-            question: 'Any caffeine before this check-in?',
+            question: _qToday,
             choices: const [(true, 'Yes'), (false, 'No')],
             value: _today,
             onChanged: (v) => setState(() => _today = v),
