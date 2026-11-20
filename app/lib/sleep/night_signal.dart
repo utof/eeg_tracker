@@ -97,6 +97,77 @@ class NightLayout {
     return out;
   }
 
+  /// Samples [from, to) of [channel] (c), the very values it gives there, reading only the records of that stretch
+  /// (and one record for a value held into it): "Sleep so far" prepares an 80-minute window of a long night this way
+  /// (so_far.dart). Past the night's end, the last value held, as [channel] does up to [samples].
+  Float64List channelRange(int c, int from, int to) {
+    final out = Float64List(math.max(0, to - from));
+    if (out.isEmpty) return out;
+    RawReader? open;
+    File? openFile;
+    RawReader reader(File f) {
+      if (openFile?.path != f.path) {
+        open?.closeSync();
+        open = openRaw(f);
+        openFile = f;
+      }
+      return open!;
+    }
+
+    // record [k] of [r]: 0 where the file has shrunk under us, as [channel] keeps it
+    double valueAt(Run r, int k) {
+      final f = reader(r.file)..setPositionSync((r.first + k) * recordBytes);
+      final b = f.readSync(recordBytes);
+      return b.length < recordBytes ? 0 : ByteData.sublistView(b).getFloat32(4 + 4 * c, Endian.little) * 1e6;
+    }
+
+    try {
+      Run? prev; // the run before the current part: its last value is held over a gap
+      var end = 0;
+      for (var i = 0; i < parts.length; i++) {
+        final p = parts[i], run = p.run;
+        end = math.max(end, p.at + p.length);
+        final lo = math.max(p.at, from), hi = math.min(p.at + p.length, to);
+        if (lo < hi) {
+          if (run != null) {
+            _readRange(reader(run.file), run, lo - p.at, hi - lo, c, out, lo - from);
+          } else {
+            // a gap holds the last value before it; one before the first run holds that run's first value
+            final next = parts.skip(i + 1).map((q) => q.run).nonNulls.firstOrNull;
+            final v = prev != null ? valueAt(prev, prev.count - 1) : (next == null ? 0.0 : valueAt(next, 0));
+            out.fillRange(lo - from, hi - from, v);
+          }
+        }
+        if (run != null) prev = run;
+        if (p.at >= to) break;
+      }
+      if (to > end && prev != null) out.fillRange(math.max(end, from) - from, out.length, valueAt(prev, prev.count - 1));
+    } finally {
+      open?.closeSync();
+    }
+    for (var i = 0; i < out.length; i++) {
+      out[i] = out[i].clamp(-limitMicrovolts, limitMicrovolts);
+    }
+    return out;
+  }
+
+  /// [n] records of [run] from its record [skip], channel [c], into out[at..]; zeros past a file that shrank.
+  static void _readRange(RawReader f, Run run, int skip, int n, int c, Float64List out, int at) {
+    const chunk = 16384; // records per read
+    f.setPositionSync((run.first + skip) * recordBytes);
+    for (var done = 0; done < n;) {
+      final want = math.min(chunk, n - done);
+      final bytes = f.readSync(want * recordBytes);
+      final view = ByteData.sublistView(bytes);
+      final got = bytes.length ~/ recordBytes;
+      for (var k = 0; k < got; k++) {
+        out[at + done + k] = view.getFloat32(k * recordBytes + 4 + 4 * c, Endian.little) * 1e6;
+      }
+      if (got < want) break;
+      done += want;
+    }
+  }
+
   /// Every sample of the night in time order, all four channels at once, the values [channel] gives (held over
   /// gaps, clipped to ±400 000 µV), with whether it was filled in (a gap or the end padding). [row] is reused
   /// between calls. For the detectors' pass over a whole night: one 330 KB read at a time.

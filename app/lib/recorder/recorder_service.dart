@@ -22,6 +22,7 @@ import '../phone.dart';
 import '../share/isolate.dart';
 import '../share/protocol.dart';
 import '../signal/live_tap.dart';
+import '../sleep/live_log.dart' show LiveStageLog, liveStagesDirFor;
 import '../sleep/live_stager.dart';
 import '../sleep/night_scorer.dart';
 import '../sleep/onnx_runs.dart';
@@ -144,12 +145,14 @@ Future<ServiceRequestResult> startRecorderService(
 }
 
 /// The night's one live sleep model in the recorder's isolate: AnySleep's runs on ONNX (the plugin is registered in
-/// this engine too), shared by the smart alarm and tonight's sound cues (DECISIONS 330).
+/// this engine too), shared by the smart alarm and tonight's sound cues (DECISIONS 330). Its start, epochs and end are
+/// written down for the screen's "Sleep so far" (sleep/live_log.dart, DECISIONS 640-649).
 NightScorer nightScorer(String recordingsDir) => NightScorer(
   model: () => RunsLiveModel(
     open: (run) => OnnxStageRun.open(run, modelsDir: modelsDirFor(recordingsDir)),
     closeRun: (run) => (run as OnnxStageRun).close(),
   ),
+  log: LiveStageLog(liveStagesDirFor(recordingsDir)),
 );
 
 /// The smart alarm in the recorder's isolate: the night's live model ([scorer]), the early ring through the phone's
