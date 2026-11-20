@@ -632,6 +632,9 @@ that send its code (`Authorization: Bearer <code>`, `X-EEG-Token`, or `?token=`)
   `reconnecting`, `checking contact`, `stopping`, `not recording`, or `session` (a meditation, check-in, dream
   catcher or sound session is recording). The field lists both recorders are tested against:
   `app/test/fixtures/share_api.json`.
+- `POST /work` with `{"working": true}` or `{"working": false}`: the paired laptop's tray says a work session
+  started or ended there (`scripts/laptop_work.py`; automatic recording, DECISIONS 603): 202, kept in
+  `auto-start/laptop.json`; 400 for any other body; 503 during a night (the recorder's server does not take it).
 - `GET /files`: `{"format": "eeg-tracker-phone-files", "version": 1, "listed", "recording", "files": [...],
   "totals"}`; each file has the manifest's `path`, `bytes`, `sha256`, `modified_ms` (the same files and paths as the
   export folder above) and, for a recording packed after a day, `original`. A file changed in the last 20 s is still

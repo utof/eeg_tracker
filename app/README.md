@@ -1440,9 +1440,10 @@ shows `docs/evidence/auto-start.md`).
   which of these your phone allows.
 - When it checks: when you open the app, every 10 minutes in your **bedtime window** (from 2 hours before your usual
   bedtime to your usual wake-up, from your last 14 days of nights; 23:00 to 07:00 until 3 nights; **Change** sets it
-  by hand), when the paired headband comes near, and when the laptop says a work session started (prepared; the
-  laptop does not send it yet). **Check now** runs one. Never during a recording or a session, and not in the 30
-  minutes after a recording's last data.
+  by hand), when the paired headband comes near, and when the laptop tray says a work session started (it tells the
+  phone paired by its QR code, through Share on Wi-Fi between nights). **Check now** runs one. Never during a
+  recording or a session, nor while the Signal tab holds the headband, and not in the 30 minutes after a recording's
+  last data.
 - A check connects for about 10 seconds: contact on each electrode (off the head: no contact at all) and the battery,
   then it lets go. On the head, the app guesses what you are doing from the clock and the phone: in the bedtime window,
   or charging with the screen off (or Do Not Disturb) after 20:00, it is the night; the laptop's work session is work;

@@ -9,6 +9,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../auto/laptop.dart' show laptopWorkSignal;
 import '../phone.dart';
 import 'isolate.dart';
 import 'link.dart';
@@ -49,8 +50,15 @@ class ShareControl extends ChangeNotifier {
   final ShareHost Function(String filesDir, void Function(ShareStatus) onChange) _makeHost;
   final DateTime Function() _now;
 
-  static ShareHost _appHost(String filesDir, void Function(ShareStatus) onChange) =>
-      ShareHost(filesDir: filesDir, onLog: debugPrint, onChange: onChange, wifi: Phone.wifiNets);
+  /// Between nights the app's server also takes the paired laptop's work signal for automatic recording (DECISIONS
+  /// 603): kept in `auto-start/laptop.json`, and a start asks the headband watcher for a check.
+  static ShareHost _appHost(String filesDir, void Function(ShareStatus) onChange) => ShareHost(
+    filesDir: filesDir,
+    onLog: debugPrint,
+    onChange: onChange,
+    wifi: Phone.wifiNets,
+    onWork: (working) => unawaited(laptopWorkSignal(working: working)),
+  );
 
   ShareConfig _config = const ShareConfig();
   ShareStatus _status = shareDown;

@@ -53,8 +53,8 @@ so the app asks instead.
 - Checks happen only at sensible moments: when you open the app, every 10 minutes in your bedtime window (from 2 hours
   before your usual bedtime to your usual wake-up, from your last 14 days of recorded nights; 23:00 to 07:00 until 3
   nights are recorded; you can set it by hand), when Android says the paired headband came near (at most every 30
-  minutes), and when the laptop says a work session started (prepared; the laptop does not send it yet). Never during
-  a recording or a session.
+  minutes), and when the laptop tray says a work session started (it tells the paired phone through Share on Wi-Fi
+  between nights). Never during a recording or a session, nor while the Signal tab holds the headband.
 - A check connects for about 10 seconds: contact on every electrode, by name (any headband or helmet), and the
   battery, then it lets go. A board without contact readings would be judged from 20 seconds of signal instead (flat
   or railed means not on skin); the DIY helmet must never use its chip's lead-off currents on a person.

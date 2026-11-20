@@ -22,6 +22,7 @@ void main() {
   InternetAddress? clientAddress;
   final markers = <String>[];
   MarkerResult? markerAnswer;
+  final works = <bool>[];
 
   Future<void> start({Duration keepalive = const Duration(seconds: 10)}) async {
     server = ShareServer(
@@ -35,6 +36,7 @@ void main() {
         markers.add(text);
         return markerAnswer;
       },
+      onWork: works.add,
     );
     await server.listen();
   }
@@ -46,6 +48,7 @@ void main() {
     clientAddress = null;
     markers.clear();
     markerAnswer = null;
+    works.clear();
     await start();
   });
   tearDown(() async {
@@ -330,6 +333,30 @@ void main() {
       final r = await ask('/marker', method: 'POST', body: 'x');
       expect(r.code, 503);
       expect(markers, ['x']);
+    });
+
+    test("POST /work: the paired laptop's work signal for automatic recording, with the token only", () async {
+      // scripts/laptop_work.py sends it when a work session starts or ends (DECISIONS 603)
+      final r = await ask('/work', method: 'POST', body: '{"working": true}');
+      expect(r.code, 202);
+      expect(jsonDecode(utf8.decode(r.body)), {'ok': true});
+      expect((await ask('/work', method: 'POST', body: '{"working": false}')).code, 202);
+      expect(works, [true, false]);
+      for (final bad in ['', 'yes', '{"working": "yes"}', '[true]', '{"working": true, "x": "${'y' * 300}"}']) {
+        expect((await ask('/work', method: 'POST', body: bad)).code, 400, reason: bad);
+      }
+      expect((await ask('/work', method: 'POST', body: '{"working": true}', tok: 'wrongwrongwr')).code, 401);
+      expect((await ask('/work', method: 'POST', body: '{"working": true}', tok: null)).code, 401);
+      expect((await ask('/work')).code, 405, reason: 'a signal, not a page');
+      expect(works, [true, false]);
+      expect((await json('/'))['routes'], contains('POST /work'));
+    });
+
+    test('POST /work where nothing takes it (the night recorder serves): 503', () async {
+      await server.close();
+      server = ShareServer(filesDir: files, token: token, port: 0, clientOf: (r) => r.connectionInfo?.remoteAddress);
+      await server.listen();
+      expect((await ask('/work', method: 'POST', body: '{"working": true}')).code, 503);
     });
 
     test('what the phone does not do answers as the page server does while the recorder is away', () async {

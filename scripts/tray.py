@@ -277,6 +277,16 @@ def single_instance() -> object | None:
     return f
 
 
+def tell_phone(local: Path, working: bool, send: Callable[..., str] = lw.phone_work_signal) -> threading.Thread:
+    """The paired phone hears that a work session started or ended (Share on Wi-Fi's POST /work, DECISIONS 603), in a
+    thread of its own so the menu never waits for the network; the answer goes to the tray's output."""
+    def run() -> None:
+        print(f"phone: work {'started' if working else 'ended'}: {send(local, working)}", flush=True)
+    t = threading.Thread(target=run, name="tell-phone", daemon=True)
+    t.start()
+    return t
+
+
 def run_tray(a: argparse.Namespace) -> int:
     try:
         import gi
@@ -290,7 +300,8 @@ def run_tray(a: argparse.Namespace) -> int:
     store = lw.SettingsStore(a.config)
     hints = lw.FileHintLog(a.export)
     ctl = lw.WorkTray(lw.ActivityWatch(a.host), DbusNotifier(Gio, GLib), lw.Records(a.local / "laptop" / "work"),
-                      hints, store, a.local, lw.autostart_path(), lambda: lw.phone_line(a.local))
+                      hints, store, a.local, lw.autostart_path(), lambda: lw.phone_line(a.local),
+                      work_signal=lambda working: tell_phone(a.local, working))
     for p in store.problems:
         print("settings:", p, flush=True)
     ctl.resume(datetime.now().astimezone())

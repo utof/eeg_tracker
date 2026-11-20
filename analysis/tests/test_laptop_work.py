@@ -515,6 +515,65 @@ def test_pair_phone_runs_the_merged_phone_link(tmp_path):
     assert 'add_argument("--dest"' in script.read_text(encoding="utf-8")
 
 
+def test_the_phone_hears_when_a_work_session_starts_and_ends(tmp_path):
+    """Automatic recording on the phone (DECISIONS 603) takes "working" from the laptop: a session that starts (by
+    hand, after "Yes", or by itself) tells it True, one that ends tells it False; a session taken up again after a
+    restart tells it nothing new."""
+    told: list[bool] = []
+    tray = lw.WorkTray(lw.Replay([], []), FakeNotifier(), lw.Records(tmp_path / "work"), lw.MemoryHintLog(),
+                       work_signal=told.append)
+    tray.start(at(9))
+    tray.start(at(9, 5))                                  # already running: nothing more
+    assert told == [True]
+    tray.stop(at(10))
+    tray.stop(at(10, 5))
+    assert told == [True, False]
+    def broken(_working):
+        raise OSError("no network")
+    tray2 = lw.WorkTray(lw.Replay([], []), FakeNotifier(), lw.Records(None), lw.MemoryHintLog(), work_signal=broken)
+    tray2.start(at(11))                                   # a phone that cannot be told never stops a session
+    assert tray2.session is not None
+
+
+def test_the_work_signal_goes_to_the_paired_phone_with_its_token(tmp_path):
+    """POST /work on the phone's Share on Wi-Fi server, with the token from phone_link.py's link.json; an answer in
+    words for the log; the token is never part of it."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    got: list[tuple[str, str | None, bytes]] = []
+    code = [202]
+
+    class Phone(BaseHTTPRequestHandler):
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            got.append((self.path, self.headers.get("Authorization"), self.rfile.read(n)))
+            self.send_response(code[0]); self.send_header("Content-Length", "0"); self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Phone)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        assert lw.phone_work_signal(tmp_path, True) == "not paired"
+        (tmp_path / "phone").mkdir()
+        (tmp_path / "phone" / "link.json").write_text(json.dumps(
+            {"version": 1, "phone": {"address": "127.0.0.1", "port": srv.server_port, "token": "abcdefgh1234"}}))
+        assert lw.phone_work_signal(tmp_path, True) == "sent"
+        assert lw.phone_work_signal(tmp_path, False) == "sent"
+        assert got == [("/work", "Bearer abcdefgh1234", b'{"working": true}'),
+                       ("/work", "Bearer abcdefgh1234", b'{"working": false}')]
+        code[0] = 503                                     # a night records: the phone does not take it
+        out = lw.phone_work_signal(tmp_path, True)
+        assert out == "refused (503)" and "abcdefgh1234" not in out
+    finally:
+        srv.shutdown(); srv.server_close()
+    assert lw.phone_work_signal(tmp_path, True, timeout=0.5) == "not reachable"
+    (tmp_path / "phone" / "link.json").write_text(json.dumps(
+        {"version": 1, "phone": {"address": "8.8.8.8", "port": 8765, "token": "abcdefgh1234"}}))
+    assert lw.phone_work_signal(tmp_path, True) == "not paired"   # only a local-network phone is ever called
+
+
 def test_the_phone_line_shows_in_the_menu(tmp_path):
     tray = lw.WorkTray(lw.Replay([], []), FakeNotifier(), lw.Records(None), lw.MemoryHintLog(),
                        phone=lambda: "Phone: connected, copying its files")

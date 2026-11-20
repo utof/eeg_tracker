@@ -1,8 +1,9 @@
 // The laptop's work signal for automatic recording (DECISIONS 603): the laptop tray (branch `feat/laptop-tray`,
 // scripts/tray.py) knows from ActivityWatch when a work session starts and ends; the phone takes "working" from it
-// rather than guessing from the brain. Phase 1 has only the phone's side: [laptopWorkSignal] keeps the latest word in
-// files/auto-start/laptop.json and, when work starts, asks the watcher for a check. Share on Wi-Fi or the QR pairing
-// call it once the laptop sends the signal; nothing calls it yet.
+// rather than guessing from the brain. [laptopWorkSignal] keeps the latest word in files/auto-start/laptop.json and,
+// when work starts, asks the watcher for a check. The tray sends it to the phone paired by its QR code when a session
+// starts or ends (scripts/laptop_work.py `phone_work_signal`): Share on Wi-Fi's `POST /work`, with its token, taken by
+// the app's own server between nights (share/control.dart); during a night it answers 503.
 import 'dart:convert';
 import 'dart:io';
 

@@ -17,7 +17,7 @@ Tested in analysis/tests/test_laptop_work.py. What the owner sees: docs/laptop-t
 """
 from __future__ import annotations
 
-import json, os, shutil, sys, urllib.error, urllib.request
+import ipaddress, json, os, re, shutil, sys, urllib.error, urllib.request
 from bisect import bisect_left, bisect_right
 from collections import Counter
 from dataclasses import asdict, dataclass, field, fields, replace
@@ -660,6 +660,55 @@ def phone_line(local: Path, probe: Callable[[], dict | None] = link_status_probe
     return "Phone: connected, copying its files" if st.get("connected") else "Phone: paired, not answering now"
 
 
+_PHONE_NETS = tuple(ipaddress.ip_network(n) for n in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "127.0.0.0/8"))   # phone_link.py's, and adb's
+_TOKEN = re.compile(r"[A-Za-z0-9]{8,64}")
+
+
+def _phone_target(local: Path) -> tuple[str, int, str] | None:
+    """(address, port, token) of the paired phone's Share on Wi-Fi from <local>/phone/link.json; None when there is
+    none, or it is not on the local network (or this laptop, through adb)."""
+    try:
+        raw = json.loads((local / "phone" / "link.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    ph = raw.get("phone") if isinstance(raw, dict) else None
+    if not isinstance(ph, dict):
+        return None
+    addr, port, token = ph.get("address"), ph.get("port"), ph.get("token")
+    if not (isinstance(addr, str) and isinstance(port, int) and 0 < port < 65536 and isinstance(token, str)
+            and _TOKEN.fullmatch(token)):
+        return None
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return None
+    if ip.version != 4 or not any(ip in n for n in _PHONE_NETS):
+        return None
+    return addr, port, token
+
+
+def phone_work_signal(local: Path, working: bool, *, timeout: float = 3.0) -> str:
+    """Tells the paired phone that a work session started ([working]) or ended here: Share on Wi-Fi's POST /work,
+    with the token phone_link.py keeps. Automatic recording on the phone takes "working" from it (DECISIONS 603) and
+    may check whether the headband is on. One word for the log ("sent", "not paired", "refused (503)": a night
+    records, or sharing is off, "not reachable"); the token is never in it. Never raises; no proxy (local network)."""
+    t = _phone_target(local)
+    if t is None:
+        return "not paired"
+    host, port, token = t
+    req = urllib.request.Request(f"http://{host}:{port}/work", data=json.dumps({"working": working}).encode(),
+                                 method="POST", headers={"Authorization": f"Bearer {token}",
+                                                         "Content-Type": "application/json"})
+    try:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=timeout) as r:
+            return "sent" if 200 <= r.status < 300 else f"refused ({r.status})"
+    except urllib.error.HTTPError as e:
+        return f"refused ({e.code})"
+    except (urllib.error.URLError, OSError, ValueError):
+        return "not reachable"
+
+
 def phone_work_level(local: Path) -> str | None:
     """Hook, not wired yet: while the phone runs its own Work session with the headband, the tray could show its
     drowsiness level (alert / getting drowsy / drowsy) from the phone's Share on Wi-Fi API. The phone's /state has no
@@ -703,11 +752,13 @@ class WorkTray:
 
     def __init__(self, source: Source, notifier: Notifier, records: Records, hints: HintLog,
                  store: SettingsStore | None = None, local: Path = LOCAL,
-                 autostart: Path | None = None, phone: Callable[[], str | None] | None = None):
+                 autostart: Path | None = None, phone: Callable[[], str | None] | None = None,
+                 work_signal: Callable[[bool], None] | None = None):
         self.source, self.notifier, self.records, self.hints = source, notifier, records, hints
         self.store = store or SettingsStore(None); self.local = local
         self.s = self.store.load()
         self.autostart = autostart; self.phone = phone
+        self.work_signal = work_signal          # tells the paired phone a session started (True) or ended (False)
         self.session: WorkSession | None = None
         self.spans: list[Span] = []; self.window: list[dict] = []
         self.run: Run | None = None; self.pending: Run | None = None
@@ -889,6 +940,17 @@ class WorkTray:
         self.session.note(now, f"started ({by})"); self.pending = None
         self.log.append(f"{hm(now)} session started ({by}) from {hm(start)}")
         self.save(now)
+        self._tell_phone(now, True)
+
+    def _tell_phone(self, now: datetime, working: bool) -> None:
+        """Automatic recording on the phone (DECISIONS 603): a session started or ended here. A phone that cannot be
+        told never stops the tray."""
+        if self.work_signal is None:
+            return
+        try:
+            self.work_signal(working)
+        except (OSError, ValueError, RuntimeError) as e:
+            self.log.append(f"{hm(now)} the phone was not told: {e}")
 
     def stop(self, now: datetime, ended: str = "stopped", at: datetime | None = None, why: str = "") -> None:
         s = self.session
@@ -904,6 +966,7 @@ class WorkTray:
         self.save(now)
         self.log.append(f"{hm(now)} session ended ({ended}) at {hm(end)}, {dur(end - s.start)}")
         self.session = None; self.last_end = end; self.last_saved = None
+        self._tell_phone(now, False)
         if isinstance(self.source, ActivityWatch):
             self.source.afk_from = None
         for k in ("hint", "auto"):

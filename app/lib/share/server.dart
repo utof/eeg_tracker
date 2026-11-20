@@ -9,11 +9,13 @@
 //   GET  /files          every file Export data would copy: path, bytes, sha256, modified_ms (and a packed
 //                        recording's `original`: the .f32 it holds)
 //   GET  /files/<path>   one file, with HTTP Range (a growing night file is fetched piece by piece)
+//   POST /work           the paired laptop's work signal, {"working": true|false} (scripts/laptop_work.py), for
+//                        automatic recording (lib/auto/laptop.dart; 503 where nothing takes it: during a night)
 //   the laptop's own jobs (/sleep-report, /morning-report, /hypnogram.png): 503, as the page server answers
 //   while the recorder is away
 //
 // Every request needs the token and a client inside the phone's Wi-Fi network, or the phone itself (DECISIONS row
-// 562). Nothing here writes, renames or deletes the app's files; it keeps one list of its own, the SHA-256 of finished
+// 562). Nothing here writes, renames or deletes the app's files (the work signal goes to the app, which keeps it); it keeps one list of its own, the SHA-256 of finished
 // files in `files/cache/share-hashes.json` (row 585), so an app update does not read every night again. Plain
 // dart:io with no Flutter import: it runs in an isolate of its own (isolate.dart), and in tests.
 import 'dart:async';
@@ -79,6 +81,7 @@ class ShareServer {
     this.keepalive = const Duration(seconds: 10),
     this.hashCache,
     this.onCopying,
+    this.onWork,
     DateTime Function()? clock,
   }) : _now = clock ?? DateTime.now;
 
@@ -101,6 +104,10 @@ class ShareServer {
   /// How many file requests (the list and the files) are being answered, at each change: the night's sleep scoring
   /// waits while the laptop copies (DECISIONS row 583).
   final void Function(int copying)? onCopying;
+
+  /// The paired laptop's work signal (`POST /work`): a work session started ([working]) or ended there (DECISIONS
+  /// 603); null: nothing takes it here (503).
+  final void Function(bool working)? onWork;
   final DateTime Function() _now;
 
   /// SHA-256 worked out by this server (not taken from the cache or the export's index); for tests.
@@ -284,6 +291,10 @@ class ShareServer {
       }
       final trimmed = path.endsWith('/') && path.length > 1 ? path.substring(0, path.length - 1) : path;
       final name = trimmed.substring(trimmed.lastIndexOf('/') + 1);
+      if (path == '/work' || path == '/work/') {
+        if (method != 'POST') return await _json(res, 405, {'error': 'POST {"working": true|false}'});
+        return await _work(req);
+      }
       if (method == 'POST') {
         if (name == 'marker') return await _marker(req);
         if (name == 'contact') {
@@ -302,7 +313,7 @@ class ShareServer {
           'app': 'eeg-tracker',
           'share': 1,
           'status': _status,
-          'routes': ['GET /state', 'GET /stream', 'POST /marker', 'GET /files', 'GET /files/<path>'],
+          'routes': ['GET /state', 'GET /stream', 'POST /marker', 'GET /files', 'GET /files/<path>', 'POST /work'],
         });
       }
       return await _json(res, 404, {'error': 'no such route'});
@@ -352,6 +363,26 @@ class ShareServer {
     if (m == null) return _json(req.response, 503, {'error': 'not recording yet'});
     _publish(jsonEncode({'marker': text, 'i': m.i, 't': _round(m.t, 3)}));
     return _send(req.response, 200, utf8.encode('ok'), 'text/plain');
+  }
+
+  /// The laptop's work signal: `{"working": true|false}`, nothing else, under 200 bytes.
+  Future<void> _work(HttpRequest req) async {
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in req) {
+      if (bytes.length <= 200) bytes.add(chunk);
+    }
+    bool? working;
+    if (bytes.length <= 200) {
+      try {
+        final Object? j = jsonDecode(utf8.decode(bytes.takeBytes()));
+        if (j is Map && j['working'] is bool) working = j['working'] as bool;
+      } catch (_) {}
+    }
+    if (working == null) return _json(req.response, 400, {'error': 'send {"working": true} or {"working": false}'});
+    final take = onWork;
+    if (take == null) return _json(req.response, 503, {'error': 'the work signal is not taken now (a night records)'});
+    take(working);
+    return _json(req.response, 202, {'ok': true});
   }
 
   /// Server-sent events, as `Page.stream` on the laptop. No chunked framing: the laptop's page server passes the

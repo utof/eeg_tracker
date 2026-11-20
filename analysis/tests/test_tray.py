@@ -293,3 +293,18 @@ def test_dbus_notifier_buttons_answers_and_close():
     assert bus.calls[-1][1][1] == n.ids["x"] - 1         # the second replaces the first
     n.close_all()
     assert n.ids == {}
+
+
+def test_the_phone_is_told_in_a_thread_of_its_own(tmp_path, capsys):
+    """A work session's start or end goes to the paired phone (laptop_work.phone_work_signal) away from the menu's
+    thread; what the phone answered is printed, never the token."""
+    import threading
+    seen: list[tuple[Path, bool, str]] = []
+    def send(local, working):
+        seen.append((local, working, threading.current_thread().name))
+        return "sent"
+    tray.tell_phone(tmp_path, True, send).join(timeout=5)
+    tray.tell_phone(tmp_path, False, send).join(timeout=5)
+    assert [(p, w) for p, w, _ in seen] == [(tmp_path, True), (tmp_path, False)]
+    assert all(name == "tell-phone" for _, _, name in seen)
+    assert capsys.readouterr().out.splitlines() == ["phone: work started: sent", "phone: work ended: sent"]

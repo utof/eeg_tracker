@@ -31,8 +31,14 @@ const Duration copyingQuiet = Duration(seconds: 15);
 const Duration _bindWait = Duration(seconds: 2);
 
 /// What a host passes to the isolate, with Android's first answer about the Wi-Fi address. A plain list crosses the
-/// isolate border.
-List<Object?> shareIsolateArgs(SendPort toHost, String filesDir, ShareConfig c, [WifiNets wifi = noWifiAnswer]) => [
+/// isolate border. [work]: the host takes the laptop's work signal (`POST /work`; the app between nights).
+List<Object?> shareIsolateArgs(
+  SendPort toHost,
+  String filesDir,
+  ShareConfig c, [
+  WifiNets wifi = noWifiAnswer,
+  bool work = false,
+]) => [
   toHost,
   filesDir,
   c.token,
@@ -41,14 +47,15 @@ List<Object?> shareIsolateArgs(SendPort toHost, String filesDir, ShareConfig c, 
   wifi.nets,
   wifi.note,
   c.laptop?.toJson(), // the paired laptop, told where this phone is (link.dart)
+  work,
 ];
 
 /// The server isolate. Messages in: `['b', stem, first, t, Float32List]` a batch, `['s', map]` the status,
 /// `['m', id, t, i]` a marker's answer (t null = not recording), `['w', nets, note]` Android's answer about the
 /// Wi-Fi address again, `['x']` stop. Messages out: `['port', SendPort]`, `['up', addresses, port, why]` (why: empty,
 /// or what each source returned when no Wi-Fi address was found), `['marker', id, text]`, `['copying', n]` file
-/// requests being answered, `['error', text]` an error that did not stop it, `['log', line]` (the paired laptop),
-/// `['down', why]`.
+/// requests being answered, `['work', working]` the laptop's work signal, `['error', text]` an error that did not
+/// stop it, `['log', line]` (the paired laptop), `['down', why]`.
 ///
 /// Every error inside it is caught (DECISIONS row 587): before the server listens it ends the isolate the orderly way
 /// (`['down', ...]`); after, it is reported and the server goes on answering. An uncaught error (running out of memory
@@ -107,6 +114,7 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
     },
     hashCache: File('${args[1]! as String}/cache/share-hashes.json'),
     onCopying: (n) => toHost.send(['copying', n]),
+    onWork: args.length > 8 && args[8] == true ? (working) => toHost.send(['work', working]) : null,
   );
   Timer? addressTimer;
   Timer? offTimer;
@@ -245,6 +253,7 @@ class ShareHost {
     this.onChange,
     this.wifiLock,
     this.wifi,
+    this.onWork,
     this.entry = shareIsolateMain,
   });
 
@@ -264,6 +273,10 @@ class ShareHost {
   /// server starts and every minute; it runs here because the server's isolate has no platform channel. Null in
   /// tests: the server then uses Dart's interface list alone.
   final Future<WifiNets> Function()? wifi;
+
+  /// The paired laptop's work signal (`POST /work`): a work session started ([working]) or ended there. Only the app
+  /// between nights takes it (automatic recording, lib/auto/laptop.dart); null: the server answers 503.
+  final void Function(bool working)? onWork;
 
   /// Tests replace the server with one that throws.
   final Future<void> Function(List<Object?> args) entry;
@@ -292,7 +305,7 @@ class ShareHost {
       if (_stopped != null) return _end('sharing on Wi-Fi off'); // Stop came while Android answered: no server
       _isolate = await Isolate.spawn(
         entry,
-        shareIsolateArgs(events.sendPort, filesDir, config, wifiNow),
+        shareIsolateArgs(events.sendPort, filesDir, config, wifiNow, onWork != null),
         onError: events.sendPort,
         onExit: events.sendPort,
         errorsAreFatal: true,
@@ -421,6 +434,10 @@ class ShareHost {
         case 'copying':
           _copying = m[1] as int;
           _copiedAt = DateTime.now();
+        case 'work':
+          try {
+            onWork?.call(m[1] == true);
+          } catch (_) {}
         case 'error':
           // the server goes on answering; the error goes to logcat (tag "flutter") and the night's log
           debugPrint('eeg_tracker share: an error in the server, which goes on: ${m[1]}');

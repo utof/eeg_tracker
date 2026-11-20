@@ -119,6 +119,7 @@ void main() {
     NightRecorder? r, {
     Future<void> Function(List<Object?>)? entry,
     Future<WifiNets> Function()? wifi,
+    void Function(bool working)? onWork,
   }) => host = ShareHost(
     filesDir: files.path,
     onLog: (line) {
@@ -128,6 +129,7 @@ void main() {
     onMarker: (text) => r?.addMarker(text),
     onChange: changes.add,
     wifi: wifi,
+    onWork: onWork,
     entry: entry ?? shareIsolateMain,
   );
 
@@ -357,6 +359,23 @@ void main() {
     await until(() => !host!.running);
     expect(log.last, 'sharing on Wi-Fi off: time is up');
     await expectLater(ask(port, '/state'), throwsA(isA<SocketException>()));
+  });
+
+  test("between nights the laptop's work signal reaches the app (automatic recording's hook); a night's server says no", () async {
+    final works = <bool>[];
+    final port = await freePort();
+    await makeHost(null, onWork: works.add).start(config(port));
+    await until(() => host!.status.up);
+    expect((await ask(port, '/work', method: 'POST', body: '{"working": true}')).code, 202);
+    await until(() => works.isNotEmpty);
+    expect(works, [true]);
+    await host!.stop();
+
+    // the night recorder's server has no hook: the laptop hears 503 and the night is not disturbed
+    final night = await freePort();
+    await makeHost(null).start(config(night));
+    await until(() => host!.status.up);
+    expect((await ask(night, '/work', method: 'POST', body: '{"working": true}')).code, 503);
   });
 
   test('off, or past its time: nothing starts', () async {
