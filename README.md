@@ -102,7 +102,9 @@ Each line says what it does. In brackets: how well the research backs it **for t
 - **Pairing with the phone** (`python3 scripts/phone_link.py`, also the tray's **Pair phone…**): a QR code to scan,
   then the phone's files copied every 2 minutes and its live pages at `http://localhost:8770/`; after a copy that
   brought something new it packs old recordings, exports the day numbers for utof_tracker, updates the data book and
-  scores the detectors against the truth labels (`scripts/after_pull.py`). ([docs/phone-link.md](docs/phone-link.md))
+  scores the detectors against the truth labels (`scripts/after_pull.py`). A phone paired before 2026-11-21 is
+  paired once more (one scan); update the laptop's scripts and the app together.
+  ([docs/phone-link.md](docs/phone-link.md))
 - **The data book** (`uv run --project analysis python scripts/data_book.py`): every night, nap, session, day, 30 s
   of signal and label in six tables in `_local/data/` that open in a spreadsheet, each row with its model version
   and the SHA-256 of the files it came from. ([docs/data-format.md](docs/data-format.md), "The data book")
