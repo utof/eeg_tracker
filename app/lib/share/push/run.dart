@@ -152,8 +152,15 @@ Future<({PushClient? client, String? notHome})> _greet(PushClient c) async {
     return (client: null, notHome: 'the laptop is not on its home network');
   } on PushError catch (e) {
     c.close();
-    final away = e.failure == PushFailure.refused && e.why == 'not at home';
-    return (client: null, notHome: away ? 'the laptop is not on its home network' : null);
+    // a refusal that proved the key is the paired laptop's own word: nowhere else is asked
+    final word = e.failure != PushFailure.refused
+        ? null
+        : e.why == 'time'
+        ? 'the phone\'s and the laptop\'s clocks differ by more than 5 minutes'
+        : e.why == 'not at home'
+        ? 'the laptop is not on its home network'
+        : 'the laptop refused: ${e.why}';
+    return (client: null, notHome: word);
   }
 }
 

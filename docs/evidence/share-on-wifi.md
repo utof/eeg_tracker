@@ -31,7 +31,7 @@ strong WPA3 password it is safe enough; on a shared Wi-Fi others can read what i
   laptop's screen, the camera and the app.
 - Android lets an app do short background work on a schedule without showing anything, but no more often than about
   every 15 minutes, and it picks the exact moment to save battery
-  ([Android: JobInfo.Builder.setPeriodic](https://developer.android.com/reference/android/app/job/JobInfo.Builder#setPeriodic(long)),
+  ([Android: JobInfo.Builder.setPeriodic](https://developer.android.com/reference/android/app/job/JobInfo.Builder),
   [Android: Doze and App Standby](https://developer.android.com/training/monitoring-device-state/doze-standby)).
 - The lasting fix is encryption with certificates both devices check against each other, as Syncthing does
   ([Syncthing protocol](https://docs.syncthing.net/specs/bep-v1.html)).
@@ -64,7 +64,7 @@ strong WPA3 password it is safe enough; on a shared Wi-Fi others can read what i
 ## Sources
 
 - [OWASP MASWE-0050](https://mas.owasp.org/MASWE/MASVS-NETWORK/MASWE-0050/)
-- [Android: JobInfo.Builder.setPeriodic](https://developer.android.com/reference/android/app/job/JobInfo.Builder#setPeriodic(long))
+- [Android: JobInfo.Builder.setPeriodic](https://developer.android.com/reference/android/app/job/JobInfo.Builder)
 - [Android: Doze and App Standby](https://developer.android.com/training/monitoring-device-state/doze-standby)
 - [Android: cleartext communications](https://developer.android.com/privacy-and-security/risks/cleartext-communications)
 - [Wireshark: Wi-Fi decryption](https://www.wireshark.org/docs/wsug_html_chunked/Ch80211Keys.html)

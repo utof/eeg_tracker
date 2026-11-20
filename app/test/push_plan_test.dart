@@ -16,7 +16,7 @@ void main() {
 
     test('the laptop script\'s vectors: the request and the answer', () {
       expect(vectors.length, greaterThanOrEqualTo(3));
-      for (final v in vectors.cast<Map>()) {
+      for (final v in vectors.cast<Map<String, dynamic>>()) {
         final uri = Uri.parse('http://x${v['target']}');
         final body = utf8.encode(v['body'] as String);
         expect(
@@ -119,7 +119,7 @@ void main() {
       expect(all.first, '192.168.1.1');
       expect(all.last, '192.168.1.254');
       expect(sweepAddresses(parseLanNets(['10.43.97.139/8']).single), isEmpty);
-      expect(sweepAddresses(parseLanNets(['10.0.2.16/30']).single), ['10.0.2.17', '10.0.2.18']..remove('10.0.2.16'));
+      expect(sweepAddresses(parseLanNets(['10.0.2.16/30']).single), ['10.0.2.17', '10.0.2.18']);
     });
   });
 
