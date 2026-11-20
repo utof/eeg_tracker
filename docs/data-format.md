@@ -4,7 +4,7 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 
 | Layer | Files | Written by |
 |---|---|---|
-| Raw recording | `<stamp>.f32`, `<stamp>.idx`, `<stamp>.log`, `<stamp>.markers.jsonl` (one set per recorder run) | `scripts/record_night.py` or `scripts/record_ble.py` (laptop, both through `scripts/recorder_hub.py`); the phone app will write the same kind of add-only chunks |
+| Raw recording | `<stamp>.f32`, `<stamp>.idx`, `<stamp>.log`, `<stamp>.markers.jsonl`, `<stamp>.header.json` (one set per recorder run; the header since 2026-11-20) | `scripts/record_night.py` or `scripts/record_ble.py` (laptop, both through `scripts/recorder_hub.py`); the phone app will write the same kind of add-only chunks |
 | Raw recording, DIY board | the same four files in `_local/recordings-diy/` (one set per board capture) | `scripts/record_diy.py` (through `scripts/recorder_hub.py`; below) |
 | One night | `<night>.bdf` (BDF+, 24-bit, µV), `<night>.sleep.json`, `<night>.hypnogram.png` | `scripts/to_bdf.py`, `scripts/score_sleep.py` |
 | Sleep report | `_local/nights/<date>.report.json` beside that night's `<date>.bdf`, `.sleep.json`, `.hypnogram.png` | `scripts/sleep_report.py` (the Sleep page starts it) |
@@ -21,7 +21,8 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 ## Raw recording (BrainBit)
 
 - `.f32`: records of `<I4f` (little-endian): BrainBit packet number, then O1 O2 T3 T4 in **volts** as the
-  headband sent them. 250 records a second.
+  headband sent them. 250 records a second. The bytes are the same as before the recording header existed; since
+  2026-11-20 a `<stamp>.header.json` beside them says so (below).
 - `.idx`: one `<dQ` record per batch that arrived: unix time of arrival (float seconds) and the index of the
   batch's first record. Gaps are found from these times; packet numbers can repeat. With our own driver (`record_ble.py`) one run
   spans the whole night: a Bluetooth drop leaves a gap in these times inside the same file, and the packet number
@@ -58,8 +59,10 @@ recorder's own lines (`connected DIY board udp:9000 (no battery or signal-streng
 `samples N (+n)`, `reconnected (scan, try n) after a drop`).
 
 - `.f32`: records of `<I` + one `f` per channel (`<I4f`, 20 bytes, for the 4-channel chip, the BrainBit's record;
-  `<I8f`, 36 bytes, for the 8-channel chip): the board's sequence number (its data-ready count since it started;
-  a jump is a missing frame, never filled in), then the channels in **volts** (counts x VREF / (gain x 2^23)).
+  `<I6f` for 6 channels; `<I8f`, 36 bytes, for the 8-channel chip): the board's sequence number (its data-ready count
+  since it started; a jump is a missing frame, never filled in), then the channels in **volts** (counts x VREF /
+  (gain x 2^23)). The `<stamp>.header.json` names them (below); the phone records 4, 6 and 8 channels since
+  2026-11-20 (before, the 4-channel chip only).
 - `.log`: the same kind of lines, plus, when the file set opens: `driver DIY board ...; link <USB serial port and
   baud | UDP host:port>`, `channels <names> (montage <file>: reference ...; bias ...)`, `board <n> channels, <fs> Hz,
   gain <g>, vref <V> V (assumed ...)`, `format .f32 records <I<n>f: board sequence number, then <names> in volts;
@@ -71,6 +74,55 @@ recorder's own lines (`connected DIY board udp:9000 (no battery or signal-streng
   board reports none).
 - `.idx` and `.markers.jsonl`: as for the BrainBit. A USB drop while the board keeps running stays in one file set,
   with the gap in the `.idx` times.
+
+## The recording header (`<stamp>.header.json`)
+
+Owner's rule (2026-11-20): "always remember we're making features with custom arrangements and numbers of electrodes
+in mind" (the DIY helmet: 8, later 16 channels at its own sites). Since 2026-11-20 every file set has a header that
+says what its `.f32` holds, so a record can carry any number of channels (DECISIONS 630-639). The `.f32` record is
+`<I` + one `<f` per channel: `<I4f` (20 bytes) for 4 channels, `<I8f` (36 bytes) for 8, `<I16f` (68 bytes) for 16.
+
+- Written once, when the file set opens and before its first sample (under a temporary name, then renamed), and never
+  changed. Plain JSON, UTF-8, small (under 4 KiB for 16 channels); never packed (only the `.f32` is).
+- Written by the phone app (`app/lib/recorder/header.dart`, every recording: nights, check-ins, sessions) and the
+  laptop's recorders (`scripts/recorder_hub.py`, `scripts/recording.py`).
+
+| Field | Meaning |
+|---|---|
+| `format`, `version` | `eeg-tracker-recording`, 1. A reader refuses a higher version in words (written by a newer app). |
+| `channels` | the channels in record order, 1 to 64 objects: `name` (as the device names it, 1-32 characters, each name once; `O1`, `T3`, `Ch5`), `site` (its 10-10 name when it is one, old names as the new: `T3` -> `T7`; or `null`), `xyz` (its direction on the head, unit length: right, front, up; or `null` when not known) |
+| `sample_rate` | samples a second (BrainBit 250; the DIY board its own rate) |
+| `unit` | `V`: the floats are volts |
+| `record` | `<I` + the channel count + `f`, e.g. `<I4f`; must match `channels` |
+| `counter` | what the uint32 is: `packet number` (BrainBit) or `board sequence number` (DIY board) |
+| `device` | `BrainBit`, `DIY board`, ... (optional) |
+| `layout` | the layout the names and positions come from: `BrainBit`, `DIY board`, `Helmet plan (8)`, a montage file name, ... (optional) |
+| `reference`, `ground` | `{"name", "where", "site"}` (`where` in words, `site` a 10-10 name or `null`), or `null` when not known. BrainBit: `Ref`, `forehead`, `Fpz`; the DIY board: `Ref` on an earlobe (`A1`) and `Bias` on the other (`A2`), a plan |
+| `made_by` | the program that wrote it (optional) |
+
+Unknown fields are ignored (a later version 1 may add some). A header that is not valid JSON or breaks a rule above is
+an error that names the file: readers never guess past a damaged header.
+
+```json
+{"format": "eeg-tracker-recording", "version": 1, "device": "BrainBit", "layout": "BrainBit",
+ "channels": [{"name": "O1", "site": "O1", "xyz": [-0.309, -0.951, 0.0]}, {"name": "O2", "site": "O2", "xyz": [0.309, -0.951, 0.0]},
+              {"name": "T3", "site": "T7", "xyz": [-1.0, 0.0, 0.0]}, {"name": "T4", "site": "T8", "xyz": [1.0, 0.0, 0.0]}],
+ "reference": {"name": "Ref", "where": "forehead", "site": "Fpz"}, "ground": null,
+ "sample_rate": 250, "unit": "V", "record": "<I4f", "counter": "packet number", "made_by": "eeg_tracker app"}
+```
+
+**Files without a header** (everything recorded before 2026-11-20) read as before, in this order:
+
+1. the `.log`'s format line, `format .f32 records <I<n>f: board sequence number, then <names> in volts; <fs> Hz`
+   (the DIY board's files, laptop and phone): n channels at fs, the names from that line (`Ch1`..`Chn` when it does
+   not hold n names), device `DIY board`;
+2. otherwise the BrainBit's: `O1 O2 T3 T4`, 250 Hz, volts, `<I4f`.
+
+**Channels by name.** A feature that needs particular sites picks them by name from the header, never by place:
+the sleep model (AnySleep) and the drift-off detector need `O1 O2 T3 T4`, the morning check-in `O1 O2`. A channel
+matches by its exact name first, else by its 10-10 site (`T7` stands for `T3`, `T8` for `T4`, `P7` for `T5`, `P8` for
+`T6`, in any letter case). When a recording lacks one, the feature says which sites it needs and which channels the
+recording has, and does not run: it never reads another channel in its place.
 
 ## Packed raw recordings (`<stamp>.f32.xz`, `<stamp>.f32.gz`)
 
