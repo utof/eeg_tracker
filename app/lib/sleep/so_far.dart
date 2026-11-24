@@ -664,13 +664,12 @@ class SoFarScorer {
       if (input.gap.where((g) => g).length * 2 > input.epochs) {
         stages = List.filled(input.epochs, gapStage); // mostly lost: its scaling would be noise (DECISIONS 172)
       } else {
-        stages = stagesOf(await runs.probabilities(input, mayGo), input.gap).stages;
+        // nobody sleeps while walking (DECISIONS 920): the night's report and the live model say the same. Read
+        // before the model's calls, so a pause between them never throws scored work away
         final walk = walking, all = p.walkLayout;
-        if (walk != null && all != null) {
-          // nobody sleeps while walking (DECISIONS 920): the night's report and the live model say the same
-          await mayGo();
-          stages = walkingVeto(stages, await walk(all, w0, w1, toSample)).$1;
-        }
+        final walks = walk == null || all == null ? null : await walk(all, w0, w1, toSample);
+        stages = stagesOf(await runs.probabilities(input, mayGo), input.gap).stages;
+        if (walks != null) stages = walkingVeto(stages, walks).$1;
       }
       return _letters(stages.sublist(k0 - w0, k1 - w0));
     }

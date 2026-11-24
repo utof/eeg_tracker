@@ -280,6 +280,7 @@ void main() {
             openRun: (_) async => run,
             plan: (d, s) async => planSoFar(d, s),
             prepare: (l, a, b, t) async => prepareWindow(l, a, b, t),
+            walking: (l, a, b, t) async => walkingOfWindow(l, a, b, t),
           ),
           nightStartMs: () => start.millisecondsSinceEpoch,
         );
