@@ -73,7 +73,7 @@ class _Question extends StatelessWidget {
             const SizedBox(height: 8),
             Row(
               children: [
-                for (final (i, choice) in Answer.values.indexed) ...[
+                for (final (i, choice) in Answer.buttons.indexed) ...[
                   if (i > 0) const SizedBox(width: 8),
                   Expanded(
                     child: OutlinedButton(

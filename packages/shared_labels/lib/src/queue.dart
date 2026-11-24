@@ -49,6 +49,7 @@ List<Estimate> openEstimates(ConfirmState state, DateTime now, {List<Labelled> l
   // newest registered first, so a re-scored stretch replaces its older estimate
   for (final e in state.estimates.values.toList().reversed) {
     if (state.answered(e.id) || e.end.isAfter(now)) continue;
+    if (recording == null && state.closed(e.id)) continue;
     if (recording != null ? e.recording != recording : now.difference(e.end) > ConfirmRule.maxAge) continue;
     if (settled.any((s) => s.label.sameAs(e.label) && _same(e, s.start, s.end))) continue;
     if (labelled.any((l) => e.label.says(l.word) && _same(e, l.start, l.end))) continue;
@@ -56,6 +57,14 @@ List<Estimate> openEstimates(ConfirmState state, DateTime now, {List<Labelled> l
     open.add(e);
   }
   return open..sort((a, b) => a.start.compareTo(b.start));
+}
+
+/// Why [e] is closed without an answer as of [now], or null: it is answered, already closed, or may still be asked.
+/// Too old ([ConfirmRule.maxAge]): `expired` when it went out in a notification, else `never_seen`.
+WhyNot? closedWhy(Estimate e, ConfirmState state, DateTime now) {
+  if (state.answered(e.id) || state.closed(e.id) || e.end.isAfter(now)) return null;
+  if (now.difference(e.end) > ConfirmRule.maxAge) return state.notified.contains(e.id) ? WhyNot.expired : WhyNot.neverSeen;
+  return null;
 }
 
 /// How much an answer to [e] is worth, and the main reason: the first that holds of `unsure` (the detector is under

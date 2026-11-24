@@ -1,16 +1,30 @@
 // The confirmation questions on disk (DECISIONS 860-869), in the app's private folder next to the recordings:
 //   files/confirm/estimates.jsonl  one line per estimate a detector registered (estimate.dart)
-//   files/confirm/answers.jsonl    one line per answer: {"estimate_id", "answer": "yes" | "no" | "skip" | "undo", "at",
-//                                  "via": "card" | "notification" | "stop_sheet"}, or a few words you added:
-//                                  {"estimate_id", "note", "at"}. Written by the app and by the notification's
-//                                  buttons (ConfirmPrompts.kt), which work while the app is closed.
+//   files/confirm/answers.jsonl    one line per answer: {"estimate_id", "answer", "at", "via": "card" | "notification"
+//                                  | "stop_sheet"} and, when a card was shown, what the card was: "card" ("normal" |
+//                                  "blind": the guess was not shown), "guess" and "confidence" (what the detector
+//                                  said), "shown", "seconds" (from shown to answered), "age_min" (how old the stretch
+//                                  was when shown). "answer" is one of
+//                                    "yes"       it happened; "times_confirmed" false: the stretch's start and end are
+//                                                still the detector's, NOT confirmed. true with "start" and "end": you
+//                                                looked at the times ("Yes, but the times are off") and set them
+//                                    "no"        it did not happen
+//                                    "not_sure"  its own answer: no label, never asked again ("skip" reads the same)
+//                                    "said"      a blind card: "said" (the label you picked) and / or "words" (yours)
+//                                    "undo"      takes the standing answer back
+//                                    "not_answered"  no answer came, with "why": "dismissed" (the notification was
+//                                                swiped away), "expired" (asked, then too old), "never_seen",
+//                                                "short_and_old", "too_many" (dropped unasked). Never a Yes or a No;
+//                                                a real answer given later stands
+//                                  or a few words you added: {"estimate_id", "note", "at"}. Written by the app and by
+//                                  the notification's buttons (ConfirmPrompts.kt), which work while the app is closed.
 //   files/confirm/asks.jsonl       one line per batch that went out as a notification ({"at", "estimates": [ids],
 //                                  "why": {id: word}}), and what the Android side did with it ({"at", "event", "batch"})
 //   files/confirm/armed.json       the batch waiting for its moment (written whole)
 //   files/confirm/settings.json    the switch, how many questions, how many batches a day, the quiet hours
 //   files/confirm/labels.tsv       your Yes and No answers as truth labels (labels.dart), rebuilt whole
 //   files/confirm/estimates.tsv    every estimate with its answer (labels.dart), rebuilt whole
-// Lines are only ever added. The first Yes, No or Not sure for an estimate stands; "undo" takes it back, as if never
+// Lines are only ever added. The first Yes, No, Not sure or blind-card answer for an estimate stands; "undo" takes it back, as if never
 // answered. Times are local with their UTC offset. Export data and Share on Wi-Fi take the folder with everything
 // else, so answers given offline reach the laptop with the next copy. Plain Dart.
 import 'dart:convert';
@@ -26,16 +40,67 @@ const String confirmFolder = 'confirm';
 Directory confirmDirFor(Directory filesDir) => Directory('${filesDir.path}/$confirmFolder');
 
 enum Answer {
-  yes('Yes'),
-  no('No'),
-  skip('Not sure');
+  yes('Yes', 'yes'),
+  no('No', 'no'),
 
-  const Answer(this.word);
+  /// "Not sure": an answer of its own. Not a label, never asked again, kept out of whatever trains or scores a
+  /// detector (asking.md).
+  skip('Not sure', 'not_sure'),
 
-  /// The button's word.
-  final String word;
+  /// A blind card's answer: you said what you were doing without seeing the guess ([Answered.said], [Answered.words]).
+  said('Said', 'said');
 
-  static Answer? of(Object? s) => values.where((a) => a.name == s).firstOrNull;
+  const Answer(this.word, this.wire);
+
+  /// The word shown after "Saved:", and the word the files hold.
+  final String word, wire;
+
+  /// The three a card with the guess shown offers, in their fixed order.
+  static const List<Answer> buttons = [yes, no, skip];
+
+  static Answer? of(Object? s) => values.where((a) => a.wire == s || a.name == s).firstOrNull;
+}
+
+/// What a card showed: the guess ("The headband thinks you slept"), or not (a blind card, asking.md).
+enum CardKind {
+  normal,
+  blind;
+
+  static CardKind? of(Object? s) => values.where((k) => k.name == s).firstOrNull;
+}
+
+/// Why no answer came. Stored apart from every answer: silence is never a Yes or a No.
+enum WhyNot {
+  /// The notification was swiped away; the question stays on the app's card.
+  dismissed('dismissed'),
+
+  /// It went out in a notification, nobody answered, and it is now too old to ask.
+  expired('expired'),
+
+  /// It never went out and is now too old to ask.
+  neverSeen('never_seen'),
+
+  /// Dropped unasked: a short stretch that is hours old (nobody remembers it).
+  shortAndOld('short_and_old'),
+
+  /// Dropped unasked: more were waiting than a batch holds.
+  tooMany('too_many');
+
+  const WhyNot(this.wire);
+  final String wire;
+
+  /// The question is closed: not on the card, in no notification (a recording's own stop sheet may still ask).
+  bool get closes => this != dismissed;
+
+  static WhyNot? of(Object? s) => values.where((w) => w.wire == s).firstOrNull;
+}
+
+/// The last "no answer came" of an estimate.
+class NotAnswered {
+  const NotAnswered(this.why, this.at, this.via);
+  final WhyNot why;
+  final DateTime at;
+  final String via;
 }
 
 /// Where an answer was given.
@@ -50,13 +115,72 @@ enum AnswerVia {
 
 /// An estimate's standing answer.
 class Answered {
-  const Answered(this.answer, this.at, this.via, {this.note});
+  const Answered(
+    this.answer,
+    this.at,
+    this.via, {
+    this.note,
+    this.card,
+    this.said,
+    this.words,
+    this.start,
+    this.end,
+    this.shown,
+    this.seconds,
+    this.ageMin,
+    this.guess,
+    this.guessConfidence,
+  });
   final Answer answer;
   final DateTime at;
   final String via;
 
   /// The few words you added, or null.
   final String? note;
+
+  /// The card that was shown; null when none was (a stop-sheet chip settled it).
+  final CardKind? card;
+
+  /// A blind card: the label you picked (null: only words of your own), and your own words.
+  final Label? said;
+  final String? words;
+
+  /// "Yes, but the times are off": the start and end you set. Null after a plain Yes, whose times are the detector's.
+  final DateTime? start, end;
+
+  /// When the card (or the notification's question) came on screen, the seconds from then to the answer, and how
+  /// many minutes old the stretch was then.
+  final DateTime? shown;
+  final double? seconds;
+  final int? ageMin;
+
+  /// What the detector had said when you answered, and how sure it was.
+  final String? guess;
+  final double? guessConfidence;
+
+  /// You looked at the times and set them. False after a plain Yes: "it happened", not "these times are right".
+  bool get timesConfirmed => answer == Answer.yes && start != null && end != null;
+
+  /// Whether a blind card's answer names what the detector thought ([guessed]); null when it is not such an answer or
+  /// your words name no label.
+  bool? agrees(Label guessed) => answer != Answer.said || said == null ? null : said!.sameAs(guessed);
+
+  Answered withNote(String? note) => Answered(
+    answer,
+    at,
+    via,
+    note: note,
+    card: card,
+    said: said,
+    words: words,
+    start: start,
+    end: end,
+    shown: shown,
+    seconds: seconds,
+    ageMin: ageMin,
+    guess: guess,
+    guessConfidence: guessConfidence,
+  );
 }
 
 class ConfirmSettings {
@@ -112,7 +236,13 @@ class Armed {
 
 /// Everything the files say, read once.
 class ConfirmState {
-  ConfirmState({required this.estimates, required this.answers, required this.notified, required this.batches});
+  ConfirmState({
+    required this.estimates,
+    required this.answers,
+    required this.notified,
+    required this.batches,
+    this.unanswered = const {},
+  });
 
   /// By id, in the order registered.
   final Map<String, Estimate> estimates;
@@ -126,11 +256,19 @@ class ConfirmState {
   /// When each notification batch went out, oldest first.
   final List<DateTime> batches;
 
+  /// The last "no answer came" of each estimate that has one. An estimate can be here and in [answers]: the answer
+  /// counts.
+  final Map<String, NotAnswered> unanswered;
+
   bool answered(String id) => answers.containsKey(id);
 
+  /// Not answered and closed: dropped unasked or too old (store.dart [WhyNot.closes]).
+  bool closed(String id) => !answered(id) && (unanswered[id]?.why.closes ?? false);
+
   /// Answers that are labels (Yes or No) for [label].
-  int labelsOf(Label label) =>
-      answers.entries.where((a) => a.value.answer != Answer.skip && estimates[a.key]?.label == label).length;
+  int labelsOf(Label label) => answers.entries
+      .where((a) => (a.value.answer == Answer.yes || a.value.answer == Answer.no) && estimates[a.key]?.label == label)
+      .length;
 }
 
 class ConfirmStore {
@@ -184,6 +322,7 @@ class ConfirmStore {
       if (e != null) estimates.putIfAbsent(e.id, () => e);
     }
     final answers = <String, Answered>{};
+    final unanswered = <String, NotAnswered>{};
     final notes = <String, String>{};
     for (final j in _lines(answersFile)) {
       if (j is! Map || j['estimate_id'] is! String) continue;
@@ -197,14 +336,21 @@ class ConfirmStore {
         notes.remove(id);
         continue;
       }
-      final a = Answer.of(j['answer']);
       final at = DateTime.tryParse('${j['at']}')?.toLocal();
+      final via = j['via'] is String ? j['via'] as String : AnswerVia.card.wire;
+      if (j['answer'] == notAnsweredWire) {
+        final why = WhyNot.of(j['why']);
+        if (why != null && at != null) unanswered[id] = NotAnswered(why, at, via);
+        continue;
+      }
+      final a = Answer.of(j['answer']);
       if (a == null || at == null || answers.containsKey(id)) continue;
-      answers[id] = Answered(a, at, j['via'] is String ? j['via'] as String : AnswerVia.card.wire);
+      final read = _answered(a, at, via, j);
+      if (read != null) answers[id] = read;
     }
     for (final n in notes.entries) {
       final a = answers[n.key];
-      if (a != null && n.value.isNotEmpty) answers[n.key] = Answered(a.answer, a.at, a.via, note: n.value);
+      if (a != null && n.value.isNotEmpty) answers[n.key] = a.withNote(n.value);
     }
     final notified = <String>{};
     final batches = <DateTime>[];
@@ -216,7 +362,7 @@ class ConfirmStore {
       notified.addAll((j['estimates'] as List).whereType<String>());
     }
     batches.sort();
-    return ConfirmState(estimates: estimates, answers: answers, notified: notified, batches: batches);
+    return ConfirmState(estimates: estimates, answers: answers, notified: notified, batches: batches, unanswered: unanswered);
   }
 
   /// A detector's one call: keeps [found] as estimates (those not kept before) and returns how many were new.
@@ -232,9 +378,81 @@ class ConfirmStore {
     return n;
   }
 
+  /// One answer line as the files hold it; null for a line that says nothing (a blind answer with neither a label
+  /// nor words).
+  static Answered? _answered(Answer a, DateTime at, String via, Map<Object?, Object?> j) {
+    final said = Label.of(j['said']);
+    final words = j['words'] is String ? cleanNote(j['words'] as String) : '';
+    if (a == Answer.said && said == null && words.isEmpty) return null;
+    final s = DateTime.tryParse('${j['start']}')?.toLocal(), e = DateTime.tryParse('${j['end']}')?.toLocal();
+    final set = a == Answer.yes && j['times_confirmed'] == true && s != null && e != null && e.isAfter(s);
+    final sec = j['seconds'], age = j['age_min'], c = j['confidence'];
+    return Answered(
+      a,
+      at,
+      via,
+      card: CardKind.of(j['card']),
+      said: a == Answer.said ? said : null,
+      words: a == Answer.said && words.isNotEmpty ? words : null,
+      start: set ? s : null,
+      end: set ? e : null,
+      shown: DateTime.tryParse('${j['shown']}')?.toLocal(),
+      seconds: sec is num && sec >= 0 ? sec.toDouble() : null,
+      ageMin: age is num && age >= 0 ? age.round() : null,
+      guess: j['guess'] is String ? j['guess'] as String : null,
+      guessConfidence: c is num && c >= 0 && c <= 1 ? c.toDouble() : null,
+    );
+  }
+
   /// Your answer to an estimate's question. An estimate already answered keeps its first answer (undo it first).
-  void answer(String estimateId, Answer a, {AnswerVia via = AnswerVia.card, DateTime? at}) =>
-      _append(answersFile, {'estimate_id': estimateId, 'answer': a.name, 'at': isoLocal(at ?? DateTime.now()), 'via': via.wire});
+  ///
+  /// [card] and [shown]: the card that asked and when it came on screen (the line then also keeps the seconds you
+  /// took). [estimate]: what was asked about (the line keeps the guess, how sure the detector was and how old the
+  /// stretch was). [start] and [end], with a Yes: the times you set yourself ("Yes, but the times are off"); without
+  /// them a Yes says only that it happened. [said] and [words]: a blind card's answer ([Answer.said]).
+  void answer(
+    String estimateId,
+    Answer a, {
+    AnswerVia via = AnswerVia.card,
+    DateTime? at,
+    CardKind? card,
+    DateTime? shown,
+    Estimate? estimate,
+    DateTime? start,
+    DateTime? end,
+    Label? said,
+    String? words,
+  }) {
+    final now = at ?? DateTime.now();
+    final own = words == null ? '' : cleanNote(words);
+    final set = a == Answer.yes && start != null && end != null && end.isAfter(start);
+    _append(answersFile, {
+      'estimate_id': estimateId,
+      'answer': a.wire,
+      'at': isoLocal(now),
+      'via': via.wire,
+      'card': ?card?.name,
+      if (estimate != null) 'guess': estimate.label.id,
+      if (estimate != null) 'confidence': estimate.confidence,
+      if (shown != null) 'shown': isoLocal(shown),
+      if (shown != null) 'seconds': secondsBetween(shown, now),
+      if (estimate != null) 'age_min': ageMinutes(estimate, shown ?? now),
+      if (a == Answer.yes) 'times_confirmed': set,
+      if (set) 'start': isoLocal(start),
+      if (set) 'end': isoLocal(end),
+      if (a == Answer.said && said != null) 'said': said.id,
+      if (a == Answer.said && own.isNotEmpty) 'words': own,
+    });
+  }
+
+  /// No answer came for [estimateId], and [why]. Kept apart from the answers: never a Yes or a No.
+  void notAnswered(String estimateId, WhyNot why, {AnswerVia via = AnswerVia.card, DateTime? at}) => _append(answersFile, {
+    'estimate_id': estimateId,
+    'answer': notAnsweredWire,
+    'why': why.wire,
+    'at': isoLocal(at ?? DateTime.now()),
+    'via': via.wire,
+  });
 
   /// Takes the estimate's answer back: it is asked again.
   void undo(String estimateId, {DateTime? at}) =>
@@ -295,6 +513,21 @@ class ConfirmStore {
   void writeLabels(String tsv) => _whole(labelsFile, tsv);
 
   void writeEstimates(String tsv) => _whole(estimatesTable, tsv);
+}
+
+/// The word of a "no answer came" line.
+const String notAnsweredWire = 'not_answered';
+
+/// Seconds from [shown] to [answered], to a tenth; 0 when the clock went back.
+double secondsBetween(DateTime shown, DateTime answered) {
+  final ms = answered.difference(shown).inMilliseconds;
+  return ms <= 0 ? 0 : (ms / 100).round() / 10;
+}
+
+/// How many whole minutes old [e]'s stretch was at [at]; 0 while it was not over.
+int ageMinutes(Estimate e, DateTime at) {
+  final m = at.difference(e.end).inMinutes;
+  return m < 0 ? 0 : m;
 }
 
 /// A note as kept: one line, single spaces, at most 200 characters.

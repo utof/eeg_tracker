@@ -72,6 +72,9 @@ class _ConfirmCardHostState extends State<ConfirmCardHost> with WidgetsBindingOb
   List<ConfirmQuestion> _questions = const [];
   final Map<String, Answer> _answers = {};
   final Map<String, String> _notes = {};
+
+  /// When the questions on the card came on screen (the answer keeps how long you took).
+  DateTime _shown = DateTime.now();
   bool _loading = false, _again = false;
 
   @override
@@ -129,11 +132,12 @@ class _ConfirmCardHostState extends State<ConfirmCardHost> with WidgetsBindingOb
       _answers.clear();
       _notes.clear();
       _questions = pending;
+      _shown = (widget.clock ?? DateTime.now)();
     });
   }
 
   void _answer(ConfirmQuestion q, Answer a) {
-    _confirm.answer(q.id, a);
+    _confirm.answer(q.id, a, card: CardKind.normal, shown: _shown);
     setState(() => _answers[q.id] = a);
   }
 

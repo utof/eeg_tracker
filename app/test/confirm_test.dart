@@ -247,9 +247,9 @@ void main() {
       q.answer(a.id, Answer.no); // already answered: nothing written
       final lines = [for (final l in q.store.answersFile.readAsLinesSync()) jsonDecode(l) as Map];
       expect(lines, [
-        {'estimate_id': a.id, 'answer': 'yes', 'at': '2026-11-20T22:01:00+03:00', 'via': 'card'},
-        {'estimate_id': b.id, 'answer': 'no', 'at': '2026-11-20T22:01:00+03:00', 'via': 'card'},
-        {'estimate_id': c.id, 'answer': 'skip', 'at': '2026-11-20T22:01:00+03:00', 'via': 'card'},
+        {'estimate_id': a.id, 'answer': 'yes', 'at': '2026-11-20T22:01:00+03:00', 'via': 'card', 'guess': 'nap', 'confidence': null, 'age_min': 252, 'times_confirmed': false},
+        {'estimate_id': b.id, 'answer': 'no', 'at': '2026-11-20T22:01:00+03:00', 'via': 'card', 'guess': 'walking', 'confidence': null, 'age_min': 47},
+        {'estimate_id': c.id, 'answer': 'not_sure', 'at': '2026-11-20T22:01:00+03:00', 'via': 'card', 'guess': 'asleep', 'confidence': null, 'age_min': 131},
       ]);
       var s = q.store.read();
       expect({for (final e in s.answers.entries) e.key: e.value.answer}, {a.id: Answer.yes, b.id: Answer.no, c.id: Answer.skip});
@@ -292,6 +292,7 @@ void main() {
         'context': 'the app asked; d (v1) said asleep, confidence 0.80',
         'present': '1',
         'estimate_id': a.id,
+        'times_confirmed': '0',
       });
       expect((row(2)['label'], row(2)['present'], row(2)['confidence'], row(2)['owner_words'], row(2)['recording']), (
         'walking',
@@ -309,10 +310,53 @@ void main() {
         File('${from.path}/$n').copySync('${files.path}/confirm/$n');
       }
       final state = ConfirmStore(files).read();
-      expect(state.estimates, hasLength(7));
+      expect(state.estimates, hasLength(15));
       expect(labelsTsv(state), File('${from.path}/labels.tsv').readAsStringSync());
+      expect(estimatesTsv(state), File('${from.path}/estimates.tsv').readAsStringSync());
       expect(tsvCell('a "b"'), '"a ""b"""');
       expect(tsvCell('plain, with a comma'), 'plain, with a comma');
+    });
+
+    test('a question nobody answered is written down as that, once, and is not a label', () async {
+      final q = make(phone: FakePhone());
+      q.store.saveSettings(const ConfirmSettings(quietStartMin: 23 * 60));
+      final pushed = est(Labels.walking, at(19, 8), 126), unseen = est(Labels.nap, at(21), 30);
+      q.register([pushed]);
+      now = at(21, 30);
+      await q.plan(); // armed for 21:30
+      now = at(21, 40);
+      await q.plan(); // it went out
+      q.register([unseen]);
+      expect(q.store.read().notified, {pushed.id});
+      now = at(48 + 21, 20);
+      expect(q.close(), 1, reason: 'the walk ended 48 h and 6 minutes ago');
+      now = at(48 + 21, 31);
+      await q.plan();
+      expect(q.close(), 0, reason: 'each once');
+      final s = q.store.read();
+      expect((s.unanswered[pushed.id]!.why, s.unanswered[unseen.id]!.why), (WhyNot.expired, WhyNot.neverSeen));
+      expect((s.answered(pushed.id), s.closed(pushed.id), s.closed(unseen.id)), (false, true, true));
+      expect(q.pending(), isEmpty);
+      expect(q.store.labelsFile.readAsLinesSync(), hasLength(1), reason: 'silence is no label');
+      final table = q.store.estimatesTable.readAsStringSync();
+      expect(RegExp('not_answered').allMatches(table), hasLength(2));
+      expect(table, isNot(contains('\tyes\t')));
+    });
+
+    test('the card\'s answer keeps what the card was; every answer reaches the hook with whose the times are', () {
+      final got = <(String, Answer, bool)>[];
+      ConfirmQuestions.onAnswered = (e, a) => got.add((e.id, a.answer, a.timesConfirmed));
+      addTearDown(() => ConfirmQuestions.onAnswered = null);
+      final q = make();
+      final a = est(Labels.nap, at(15, 59), 110, confidence: 0.8), b = est(Labels.walking, at(19, 8), 126);
+      q.register([a, b]);
+      now = at(22, 0).add(const Duration(seconds: 3));
+      q.answer(a.id, Answer.yes, card: CardKind.normal, shown: at(22));
+      q.answer(b.id, Answer.yes, card: CardKind.normal, shown: at(22), start: at(19, 20), end: at(21));
+      final s = q.store.read();
+      expect((s.answers[a.id]!.card, s.answers[a.id]!.seconds, s.answers[a.id]!.ageMin, s.answers[a.id]!.guessConfidence), (CardKind.normal, 3.0, 251, 0.8));
+      expect(got, [(a.id, Answer.yes, false), (b.id, Answer.yes, true)]);
+      expect((s.answers[b.id]!.start, s.answers[b.id]!.end), (at(19, 20), at(21)));
     });
 
     test('a Yes calls the hook with the estimate (record-first makes a sleep stretch of it)', () {

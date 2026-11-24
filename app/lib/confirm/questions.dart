@@ -8,8 +8,9 @@
 //   settle(recording, label, start, end) the stop sheet says a chip already answered it: never asked again
 //   refresh()                           gather what the detectors left on disk, rewrite the labels file, arm the phone
 //
-// Until answered, a detector's output is an estimate, not a label. Yes makes a truth label over the estimate's
-// stretch, No a label that it was not so, Not sure nothing; none is asked twice. Works offline: all of it is files in
+// Until answered, a detector's output is an estimate, not a label. Yes makes a truth label that it happened (the
+// times stay the detector's unless you set them), No a label that it was not so, Not sure is kept as its own answer
+// and makes no label; none is asked twice. A question nobody answered is written down as that, never as Yes or No. Works offline: all of it is files in
 // `files/confirm/` (store.dart) that the normal copy to the laptop takes.
 import 'dart:async';
 import 'dart:io';
@@ -72,15 +73,36 @@ class ConfirmQuestions {
     return _questions(pickBatch(open, state, max), now);
   }
 
-  void answer(String estimateId, Answer a, {AnswerVia via = AnswerVia.card}) {
+  /// Called for every answer with the estimate and what was answered: [Answered.timesConfirmed] says whether the
+  /// times are yours ([Answered.start], [Answered.end]) or still the detector's; a blind card's answer has
+  /// [Answered.said].
+  static void Function(Estimate estimate, Answered answer)? onAnswered;
+
+  /// Your answer. [card] and [shown]: the card that asked and when it came on screen. [start] and [end] with a Yes:
+  /// the times you set ("Yes, but the times are off"); without them a Yes says only that it happened. [said] and
+  /// [words]: a blind card's answer ([Answer.said]).
+  void answer(
+    String estimateId,
+    Answer a, {
+    AnswerVia via = AnswerVia.card,
+    CardKind? card,
+    DateTime? shown,
+    DateTime? start,
+    DateTime? end,
+    Label? said,
+    String? words,
+  }) {
     final state = store.read();
     if (state.answered(estimateId)) return;
-    store.answer(estimateId, a, via: via, at: _clock());
+    final e = state.estimates[estimateId];
+    store.answer(estimateId, a, via: via, at: _clock(), card: card, shown: shown, estimate: e, start: start, end: end, said: said, words: words);
     _afterChange();
     final p = phone;
     if (p != null) unawaited(p.answered(estimateId).catchError((Object _) {}).then((_) => plan()));
-    final e = state.estimates[estimateId];
-    if (a == Answer.yes && e != null) onYes?.call(e);
+    if (e == null) return;
+    if (a == Answer.yes) onYes?.call(e);
+    final kept = store.read().answers[estimateId];
+    if (kept != null) onAnswered?.call(e, kept);
   }
 
   /// Takes an answer back; the question is open again.
@@ -149,10 +171,27 @@ class ConfirmQuestions {
     return added;
   }
 
+  /// Writes down which questions nobody answered and are now closed (too old to ask), each once, with why. Stored apart
+  /// from the answers: silence is never a Yes or a No. Returns how many.
+  int close() {
+    final now = _clock();
+    final state = store.read();
+    var n = 0;
+    for (final e in state.estimates.values) {
+      final why = closedWhy(e, state, now);
+      if (why == null) continue;
+      store.notAnswered(e.id, why, via: state.notified.contains(e.id) ? AnswerVia.notification : AnswerVia.card, at: now);
+      n++;
+    }
+    if (n > 0) _afterChange();
+    return n;
+  }
+
   /// Arms the next notification batch, or cancels the one waiting when nothing is left to ask.
   Future<void> plan() async {
     final now = _clock();
     store.settleArmed(now);
+    close();
     final state = store.read();
     final settings = store.settings();
     final batch = notificationBatch(state, settings, now, labelled: labelled());

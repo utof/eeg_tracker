@@ -1042,37 +1042,50 @@ def labels_now(local: Path) -> tuple[list[dict], set[str]]:
         read.add(rel)
         for c in truth.read_confirm(local):
             e = c.estimate
-            if not c.answer or not ds.parse_time(e.get("start")):
-                continue
+            if c.answer in ("", "not_answered") or not ds.parse_time(e.get("start")):
+                continue  # silence is not a label
             lab = e["label"]
+            said = c.said or c.words
             out.append(_label("confirm", dict(estimate_id=e["id"], answer=c.answer, at=c.at), rel, start=iso(e["start"]),
                               end=iso(e.get("end")), kind="activity",
-                              value={"yes": lab, "no": f"not {lab}"}.get(c.answer, "not sure"), unit="word",
+                              value={"yes": lab, "no": f"not {lab}", "said": said}.get(c.answer, "not sure"), unit="word",
                               how_asked=f"question ({c.via})", app_guess=lab, answered=iso(c.at),
                               detector_version=f"{e.get('detector')} {e.get('version')}"))
     return out, read
 
 
 ESTIMATE_COLUMNS = ["estimate_id", "start", "end", "recording", "kind", "label", "detector", "detector_version",
-                    "confidence", "yes_means", "made", "answer", "answered", "via", "label_id", "owner_words"]
+                    "confidence", "yes_means", "made", "answer", "answered", "via", "label_id", "owner_words", "card",
+                    "said", "agrees", "times_confirmed", "confirmed_start", "confirmed_end", "shown",
+                    "seconds_to_answer", "age_min", "why_not"]
 
 
 def estimate_rows(local: Path) -> list[dict]:
-    """estimates.tsv: what the phone's detectors thought happened and what the owner said to each (`answer` yes, no,
-    skip, or empty: not answered yet; an estimate is not a label until it has a yes or a no, whose truth row is
-    `label_id`). Rebuilt whole from `<local>/phone/confirm/` (truth.read_confirm)."""
+    """estimates.tsv: what the phone's detectors thought happened and what the owner said to each. `answer`: yes, no,
+    not_sure (its own answer, no label), said (a blind card: `said` is the label picked, `agrees` 1 when it is the
+    detector's guess), not_answered (`why_not` says why; never a Yes or a No), or empty: still waiting. An estimate
+    is not a label until it has a truth row (`label_id`). `times_confirmed` 1 only when the owner set the times
+    (`confirmed_start`, `confirmed_end`); `start` and `end` stay the detector's. Rebuilt whole from
+    `<local>/phone/confirm/` (truth.read_confirm)."""
     rows = []
     for c in truth.read_confirm(local):
         e = c.estimate
         row = truth.confirm_row(c)
         conf = e.get("confidence")
+        yes = c.answer == "yes"
         rows.append(dict(estimate_id=e["id"], start=iso(e.get("start")), end=iso(e.get("end")),
                          recording=e.get("recording"), kind=e.get("kind"), label=e["label"], detector=e.get("detector"),
                          detector_version=e.get("version"),
                          confidence=conf if isinstance(conf, (int, float)) and not isinstance(conf, bool) else None,
                          yes_means=e.get("yes_means"), made=iso(e.get("made")), answer=c.answer,
                          answered=iso(c.at) if c.at else None, via=c.via, label_id=row["label_id"] if row else None,
-                         owner_words=c.note))
+                         owner_words=": ".join(w for w in (c.words, c.note) if w), card=c.card, said=c.said,
+                         agrees=None if c.agrees is None else int(c.agrees),
+                         times_confirmed=int(c.times_confirmed) if yes else None,
+                         confirmed_start=iso(c.start) if c.times_confirmed else None,
+                         confirmed_end=iso(c.end) if c.times_confirmed else None,
+                         shown=iso(c.shown) if c.shown else None, seconds_to_answer=c.seconds, age_min=c.age_min,
+                         why_not=c.why_not))
     return sorted(rows, key=lambda r: (r["start"] or "", r["estimate_id"]))
 
 
