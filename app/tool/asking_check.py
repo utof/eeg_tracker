@@ -242,10 +242,12 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     # 5: today's two batches are used up (the made-up earlier one and the one just shown). A new walk arrives.
     pc.stop_app()
     now2 = device_now().replace(second=0, microsecond=0)
-    a, b = now2 - timedelta(minutes=42), now2 - timedelta(minutes=12)
-    rec2 = (now2 - timedelta(minutes=50)).strftime("%Y-%m-%d-%H%M%S")
+    # well before the first recording's stretches: one that overlaps an answered walk would rightly not be asked
+    b = now2 - timedelta(minutes=250)
+    a = b - timedelta(minutes=40)
+    rec2 = (b - timedelta(minutes=50)).strftime("%Y-%m-%d-%H%M%S")
     for shift in range(40):
-        a = now2 - timedelta(minutes=42 + shift)
+        a = b - timedelta(minutes=40 + shift)
         if not blind(estimate_id("walking", "walking", a, b, rec2)):
             break
     p = stage / f"walking/{rec2}.walk.json"
