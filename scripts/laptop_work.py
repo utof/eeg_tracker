@@ -820,18 +820,39 @@ def link_status_probe(url: str = "http://127.0.0.1:8771/status") -> dict | None:
 PAIR_PAGE = "http://127.0.0.1:8771/"  # phone_link.py's own page on this laptop: the code, bigger
 
 
+def post_new_code(url: str = PAIR_PAGE + "new") -> bool:
+    """Asks the running phone_link.py for a one-time code: a POST to its own port on this laptop (a plain link makes
+    none, so no web page can: DECISIONS 750). True when it answered."""
+    req = urllib.request.Request(url, data=b"", method="POST")
+
+    class Stay(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *_a, **_k):  # its 303 to the page: the browser opens that, not this
+            return None
+
+    try:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({}), Stay()).open(req, timeout=2) as r:
+            return r.status < 400
+    except urllib.error.HTTPError as e:
+        return e.code == 303
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
 def pair_command(repo: Path = REPO, python: str = sys.executable, *, local: Path | None = None,
                  probe: Callable[[], dict | None] | None = None,
-                 which: Callable[[str], str | None] = shutil.which) -> list[str] | None:
+                 which: Callable[[str], str | None] = shutil.which,
+                 new_code: Callable[[str], object] = post_new_code) -> list[str] | None:
     """The command "Pair phone…" runs. While phone_link.py already runs (its status answers on this laptop; the tray
-    runs it with --keep while a phone is paired): its page, with a new code made for it (`?new=1`), in the browser. Else phone_link.py in a terminal window (it shows the QR code and wants Enter for a
-    new one), copying the phone's files into [local] (the tray's `_local`). None while the script is not in this
-    checkout, or there is no terminal program."""
+    runs it with --keep while a phone is paired): a code asked for by POST, then its page in the browser. Else
+    phone_link.py in a terminal window (it shows the QR code and wants Enter for a new one), copying the phone's files
+    into [local] (the tray's `_local`). None while the script is not in this checkout, or there is no terminal
+    program."""
     script = repo / "scripts" / "phone_link.py"
     if not script.exists():
         return None
     if (probe or link_status_probe)() is not None:
-        return ["xdg-open", PAIR_PAGE + "?new=1"]
+        new_code(PAIR_PAGE + "new")
+        return ["xdg-open", PAIR_PAGE]
     args = [python, str(script)] + (["--dest", str(local)] if local is not None else [])
     term = which("x-terminal-emulator")
     if term is not None:
@@ -842,52 +863,63 @@ def pair_command(repo: Path = REPO, python: str = sys.executable, *, local: Path
 
 _PHONE_NETS = tuple(ipaddress.ip_network(n) for n in (
     "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "127.0.0.0/8"))   # phone_link.py's, and adb's
-_TOKEN = re.compile(r"[A-Za-z0-9]{8,64}")
 
 
-def _phone_target(local: Path) -> tuple[str, int, str] | None:
-    """(address, port, token) of the paired phone's Share on Wi-Fi from <local>/phone/link.json; None when there is
-    none, or it is not on the local network (or this laptop, through adb)."""
-    try:
-        raw = json.loads((local / "phone" / "link.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    ph = raw.get("phone") if isinstance(raw, dict) else None
-    if not isinstance(ph, dict):
-        return None
-    addr, port, token = ph.get("address"), ph.get("port"), ph.get("token")
-    if not (isinstance(addr, str) and isinstance(port, int) and 0 < port < 65536 and isinstance(token, str)
-            and _TOKEN.fullmatch(token)):
+def _phone_target(local: Path) -> tuple[str, int, str, str | None] | None:
+    """(address, port, key, home) of the paired phone from <local>/phone/link.json (version 2, phone_link.py); None
+    when there is none, it is a pairing of the first version, or it is not on the local network (or this laptop,
+    through adb)."""
+    import phone_link
+    t = phone_link.paired_phone(local / "phone" / "link.json")
+    if t is None:
         return None
     try:
-        ip = ipaddress.ip_address(addr)
+        ip = ipaddress.ip_address(t[0])
     except ValueError:
         return None
     if ip.version != 4 or not any(ip in n for n in _PHONE_NETS):
         return None
-    return addr, port, token
+    return t
+
+
+def _old_pairing(local: Path) -> bool:
+    """link.json holds a pairing of the first version (its key crossed the Wi-Fi): one new scan replaces it."""
+    try:
+        raw = json.loads((local / "phone" / "link.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(raw, dict) and raw.get("version") == 1 and raw.get("phone") is not None
+
+
+def _phone(t: tuple[str, int, str, str | None]):
+    """The paired phone as pull_phone.py reaches it: signed with the key, this laptop's network said in each request."""
+    import phone_link, pull_phone
+    home = t[3]
+    return pull_phone.Phone(f"http://{t[0]}:{t[1]}", key=t[2],
+                            home=lambda: home is not None and phone_link.home_id() == home)
 
 
 def phone_work_signal(local: Path, working: bool, *, meeting: bool | None = None, timeout: float = 3.0) -> str:
     """Tells the paired phone that a work session started ([working]) or ended here: Share on Wi-Fi's POST /work,
-    with the token phone_link.py keeps. Automatic recording on the phone takes "working" from it (DECISIONS 603) and
-    may check whether the headband is on. One word for the log ("sent", "not paired", "refused (503)": a night
-    records, or sharing is off, "not reachable"); the token is never in it. Never raises; no proxy (local network).
-    [meeting]: whether the session is in a meeting now (DECISIONS 666), sent at the session's start and end and at
-    each meeting's start and end inside it; the phone's work session labels its meeting minutes by it (DECISIONS 685)."""
+    signed with the pairing's key (the phone takes it from nobody else: DECISIONS 755). Automatic recording on the
+    phone takes "working" from it (DECISIONS 603) and may check whether the headband is on. One word for the log
+    ("sent", "not paired", "refused (503)": a night records, or sharing is off, "not reachable"); no secret is ever in
+    it. Never raises; no proxy (local network). [meeting]: whether the session is in a meeting now (DECISIONS 666),
+    sent at the session's start and end and at each meeting's start and end inside it; the phone's work session
+    labels its meeting minutes by it (DECISIONS 685)."""
+    import pull_phone
     t = _phone_target(local)
     if t is None:
         return "not paired"
-    host, port, token = t
-    req = urllib.request.Request(f"http://{host}:{port}/work", data=json.dumps({"working": working, **({} if meeting is None else {"meeting": meeting})}).encode(),
-                                 method="POST", headers={"Authorization": f"Bearer {token}",
-                                                         "Content-Type": "application/json"})
+    body = json.dumps({"working": working, **({} if meeting is None else {"meeting": meeting})}).encode()
     try:
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=timeout) as r:
+        with _phone(t)._send("/work", {"Content-Type": "application/json"}, timeout, body) as r:
             return "sent" if 200 <= r.status < 300 else f"refused ({r.status})"
     except urllib.error.HTTPError as e:
         return f"refused ({e.code})"
-    except (urllib.error.URLError, OSError, ValueError):
+    except pull_phone.NotThePhone:
+        return "refused (not the paired phone)"
+    except (pull_phone.PhoneError, urllib.error.URLError, OSError, ValueError):
         return "not reachable"
 
 
@@ -912,20 +944,24 @@ class PhoneLook:
     state: dict | None = None
     code: int | None = None
     copying: bool = False      # phone_link.py on this laptop copies its files now
+    copied: datetime | None = None   # when phone_link.py last reached the phone
+    sharing: str | None = None       # what the phone says of its Wi-Fi: home, here (allowed by hand), paused
 
 
-def phone_state(address: str, port: int, token: str, timeout: float = PHONE_TIMEOUT_S) -> tuple[str, dict | None,
-                                                                                               int | None]:
-    """GET /state from the phone's Share on Wi-Fi with the token from link.json (in a header: never in the URL, a log
-    line or an error); no proxy (local network only). ("ok", state, None), ("refused", None, code) or
-    ("unreachable", None, None); never raises."""
-    req = urllib.request.Request(f"http://{address}:{port}/state", headers={"Authorization": f"Bearer {token}"})
+def phone_state(address: str, port: int, key: str, home: str | None = None, timeout: float = PHONE_TIMEOUT_S
+                ) -> tuple[str, dict | None, int | None]:
+    """GET /state from the phone's Share on Wi-Fi, signed with the pairing's key; no proxy (local network only).
+    ("ok", state, None), ("refused", None, code) (403: sharing paused on that Wi-Fi; None: not the paired phone's
+    answer) or ("unreachable", None, None); never raises."""
+    import pull_phone
     try:
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=timeout) as r:
+        with _phone((address, port, key, home))._send("/state", timeout=timeout) as r:
             body = r.read(STATE_MAX_BYTES + 1)
     except urllib.error.HTTPError as e:
         return "refused", None, e.code
-    except (urllib.error.URLError, OSError, ValueError):
+    except pull_phone.NotThePhone:
+        return "refused", None, None
+    except (pull_phone.PhoneError, urllib.error.URLError, OSError, ValueError):
         return "unreachable", None, None
     try:
         d = json.loads(body) if len(body) <= STATE_MAX_BYTES else None
@@ -939,13 +975,15 @@ def look_at_phone(local: Path, now: datetime, ask: Callable[..., tuple[str, dict
     """The slow part, for a thread: link.json read (no network at all while no phone is paired), then /state."""
     t = _phone_target(local)
     if t is None:
-        return PhoneLook(now, "unpaired")
+        return PhoneLook(now, "repair" if _old_pairing(local) else "unpaired")
     result, state, code = ask(*t)
-    copying = False
+    copying, copied, sharing = False, None, None
     if result == "ok":
         st = probe()
         copying = bool(st and st.get("connected"))
-    return PhoneLook(now, result, t[0], state, code, copying)
+        copied = _aware(st.get("last_copy")) if st else None
+        sharing = st.get("sharing") if st and st.get("sharing") in ("home", "here", "paused") else None
+    return PhoneLook(now, result, t[0], state, code, copying, copied, sharing)
 
 
 def _num(v: object) -> float | None:
@@ -1053,7 +1091,7 @@ def band_of(state: dict) -> Band:
 
 @dataclass(frozen=True)
 class PhoneView:
-    kind: str                    # off (no phone watch) | unpaired | checking | unreachable | refused | reachable
+    kind: str                    # off (no phone watch) | unpaired | repair | checking | unreachable | refused | reachable
     ring: str                    # none | dashed | amber | green (RINGS)
     lines: tuple[str, ...] = ()
 
@@ -1065,26 +1103,33 @@ def phone_view(last: PhoneLook | None, ok: PhoneLook | None, misses: int) -> Pho
         return PhoneView("checking", "none", ())
     if last.result == "unpaired":
         return PhoneView("unpaired", "none", ())
+    if last.result == "repair":
+        return PhoneView("repair", "dashed", ("Phone: paired the old way: Pair phone… once more (one scan)",))
     if last.result != "ok" and (ok is None or misses >= PHONE_MISSES):
         if last.result == "unreachable":
             return PhoneView("unreachable", "dashed", ("Phone: not reachable (app asleep, or Share on Wi-Fi off?)", "Headband: —"))
-        why = {401: "does not take this laptop's token any more (Pair phone… again)",
-               403: "answers, but not to this network (a VPN on the phone?)"}.get(
+        why = {401: "no longer knows this laptop (Pair phone… again)",
+               403: "on another Wi-Fi: sharing paused there"}.get(
             last.code or 0, f"answers, but not as the app does ({last.code or 'not the app'})")
         return PhoneView("refused", "dashed", (f"Phone: {why}", "Headband: —"))
     if ok is None or ok.state is None:
         return PhoneView("checking", "none", ("Phone: paired, checking…",))
     band = band_of(ok.state)
-    head = "Phone: paired, reachable" + (" · copying its files" if ok.copying else "")
+    head = {"home": "Phone: sharing on its home Wi-Fi", "here": "Phone: sharing on a Wi-Fi allowed by hand"}.get(
+        ok.sharing or "", "Phone: paired, reachable")
+    if ok.copied is not None:
+        head += f" · copied {hm(ok.copied)}"
+    elif ok.copying:
+        head += " · copying its files"
     return PhoneView("reachable", band.ring, (head, band.line) + ((band.brk,) if band.brk else ()))
 
 
 class LinkKeeper:
-    """phone_link.py --keep, run by the tray whenever a phone is paired (DECISIONS 677): the files copied and the
-    phone's announcements heard without a window. Started again when it ended (at most once a minute, then less
+    """phone_link.py --keep, run by the tray whenever a phone is paired (DECISIONS 677): the files copied and, at
+    home, the phone found again at a new address, without a window. Started again when it ended (at most once a minute, then less
     often after quick ends); none is started while another copy answers on this laptop (a "Pair phone…" window, or
     one an earlier tray left); its own copy is stopped at Forget and Quit. Its output goes to
-    `<local>/phone/link-keep.log` (addresses and file names; never the token)."""
+    `<local>/phone/link-keep.log` (file names; never an address, a key or a code: DECISIONS 757)."""
 
     def __init__(self, local: Path, *, python: str = sys.executable, script: Path | None = None,
                  probe: Callable[[], dict | None] = link_status_probe,
@@ -1145,8 +1190,8 @@ class LinkKeeper:
 
 
 def forget_phone(local: Path) -> bool:
-    """The tray's "Forget the phone": link.json goes (phone_link.py --keep then ends by itself; the phone hears "not
-    paired" at its next announcement). True when there was one."""
+    """The tray's "Forget the phone": link.json goes (phone_link.py --keep then ends by itself; this laptop
+    signs nothing more, and the phone's Forget this laptop is the other half). True when there was one."""
     try:
         (local / "phone" / "link.json").unlink()
         return True
@@ -1275,20 +1320,22 @@ class WorkTray:
         self.phone_last = look
         if look.result == "ok":
             self.phone_ok = look; self.phone_misses = 0; self._close("phone")
-        elif look.result == "unpaired":
+        elif look.result in ("unpaired", "repair"):
             self.phone_ok = None; self.phone_misses = 0
         else:
             self.phone_misses += 1
         first, self.phone_told = not self.phone_told, True
-        if first and look.result in ("unreachable", "refused"):
+        if first and look.result in ("unreachable", "refused", "repair"):
             self.log.append(f"{hm(now)} the paired phone does not answer ({look.result})")
             if self.s.notifications:
-                body = (f"Paired with the phone at {look.address}, but it does not answer: the app asleep (open it, or "
-                        "start a session) or Share on Wi-Fi off. Until then the tray cannot see whether the headband "
-                        "records."
+                body = ("Paired with the phone, but it does not answer: the app asleep (open it, or start a session) "
+                        "or Share on Wi-Fi off. Until then the tray cannot see whether the headband records."
                         if look.result == "unreachable" else
-                        f"The phone at {look.address} does not take this laptop's token any more. Pair phone… in "
-                        "the tray's menu pairs them again.")
+                        "The phone and this laptop were paired the old way: Pair phone… in the tray's menu pairs them "
+                        "again with one scan, the safer way."
+                        if look.result == "repair" else
+                        "The phone is on another Wi-Fi (sharing paused there), or no longer knows this laptop: Pair "
+                        "phone… in the tray's menu pairs them again.")
                 self._notify("phone", "Phone not reachable", body, [], lambda _k: None, low=True)
 
     def phone_now(self) -> PhoneView:

@@ -2,20 +2,117 @@
  "made_by": "make_phone_link_fixture.py (python-qrcode 7.4.2 (Debian python3-qrcode))",
  "proofs": [
   {
-   "via": "code",
-   "secret": "Zm9yLXRoZS1maXh0dXJlLW9ubHk",
+   "code": "Zm9yLXRoZS1maXh0dXJlLW9ubHk",
    "phone_nonce": "cGhvbmUtbm9uY2UtMDAwMQ",
    "laptop_nonce": "bGFwdG9wLW5vbmNlLTAwMDE",
-   "laptop_proof": "40b630e7ad0983798d77a6048cb89b8f1d421ad6c4b69fe8ddc49bed94b8f22b",
-   "phone_proof": "d62c3b94ec98c9d381922ccfa8a2ffabf0fb246e21d078159882817bfbc7315e"
+   "laptop_proof": "c993b213f28f12444f1237cd2b8cc2b62fa1a16dd3da14c6d524b274b5f219b7",
+   "phone_proof": "5917b7e29961891d00e2773e2197ca9b3fc3126ba2fc9388fa32ca961b43b302",
+   "key": "02d7c998952a4ac6ac7fe4659d7069ed44458f61738a0c2a3599cd5c9e420599",
+   "confirm": "ac4d0e8f91959e7dca74b5632522928c376a3e09b5c11d2faa31eb559ca7e20a"
   },
   {
-   "via": "key",
-   "secret": "a2V5LWZvci10aGUtZml4dHVyZS1vbmx5LTMyLWJ5dGVzLWxvbmc",
+   "code": "YW5vdGhlci1maXh0dXJlLWNvZGU",
    "phone_nonce": "cGhvbmUtbm9uY2UtMDAwMg",
    "laptop_nonce": "bGFwdG9wLW5vbmNlLTAwMDI",
-   "laptop_proof": "366a4b5af0822793af7f489c39a5d1e0a13b98f3f60393c3116f5324955c457e",
-   "phone_proof": "a5b1a8d12af81aeefa801416d6f0f17af688cc039524db8fd29e90a8fe08567e"
+   "laptop_proof": "3cd3f97d7dfc7878d725bcd41bcd7cae858b102a2d9fa31b7e00b39443be1876",
+   "phone_proof": "707ec273e717af9f4d381fdf8ff371c72aa06cff3c2691dd4dd61bf2d689aad4",
+   "key": "03336eee38feee2385580a801030b57a768f930c210f55c7255ec97ba014fefa",
+   "confirm": "04b7b32253eaa75c793ff38fab72b47b71cc98a96aaab3eaf73c5449ba236d52"
+  }
+ ],
+ "requests": [
+  {
+   "key": "7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544",
+   "method": "GET",
+   "target": "/files",
+   "time_ms": 1763500000123,
+   "nonce": "cmVxdWVzdC1ub25jZS0wMDE",
+   "home": true,
+   "body": "",
+   "sign": "360e5539ebc8202ac042a628c6edbfdd80bee3cc0f11b980f137f6244cb54491",
+   "reply": "27bc12b6141383059293d0bddc0dc695993fcc7272d3ea32ec7a4f5bdda886aa"
+  },
+  {
+   "key": "7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544",
+   "method": "GET",
+   "target": "/files/recordings/2026-11-19-010000.f32",
+   "time_ms": 1763500000456,
+   "nonce": "cmVxdWVzdC1ub25jZS0wMDI",
+   "home": false,
+   "body": "",
+   "sign": "07eac8d100b78cf2c8a7cecaa8520e05931a6a31eca853d08f74d37098403a3c",
+   "reply": "a540f666d5d2defd8ca038a7a94ba5f3fc7496d0380bb1a883d98275cf73cdd9"
+  },
+  {
+   "key": "7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544",
+   "method": "GET",
+   "target": "/files?sha=0",
+   "time_ms": 1763500000789,
+   "nonce": "cmVxdWVzdC1ub25jZS0wMDM",
+   "home": true,
+   "body": "",
+   "sign": "f29e6c580d4df01cca9e632112ea5d8cda3e9251539c73d4061c3bddcaab856b",
+   "reply": "8978fde54101398516823030830217713f22b791dbb695f22e913a1ca450ae0a"
+  },
+  {
+   "key": "7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544",
+   "method": "POST",
+   "target": "/work",
+   "time_ms": 1763500001000,
+   "nonce": "cmVxdWVzdC1ub25jZS0wMDQ",
+   "home": true,
+   "body": "{\"working\":true}",
+   "sign": "891a419e21f749ef98d7ef52b30d98cb48be433f30f8e664f8c0177f91882adf",
+   "reply": "010ce0fae3026b1851057ca6f616f0cf5f18fa3346565d1ce8ef620f8074ebee"
+  },
+  {
+   "key": "7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544",
+   "method": "GET",
+   "target": "/files/dream-catcher/a%20b.wav",
+   "time_ms": 1763500002000,
+   "nonce": "cmVxdWVzdC1ub25jZS0wMDU",
+   "home": true,
+   "body": "",
+   "sign": "853859d31039f6af39a300342dd65db839317c6a8b930ffc681dc8a2dc6cebf1",
+   "reply": "43975cea40645ca3acbff649164b0b11f7a472de1f4b7366691a7f47e8687dd8"
+  }
+ ],
+ "rechecks": [
+  {
+   "key": "7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544",
+   "path": "recordings/2026-11-19-010000.f32",
+   "nonce": "cmVjaGVjay1ub25jZS0wMDE",
+   "size": 10000,
+   "ranges": [
+    [
+     0,
+     16
+    ],
+    [
+     4096,
+     100
+    ],
+    [
+     9990,
+     10
+    ]
+   ],
+   "data": "(i * 7 + 3) % 256 for i in range(10000)",
+   "mac": "159cec54acb9fc2cb6e472ab1d0fa2019673df684dfcf112f101d94401bcda74"
+  },
+  {
+   "key": "7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544",
+   "path": "dream-catcher/2026-11-19-040000-r1.wav",
+   "nonce": "cmVjaGVjay1ub25jZS0wMDI",
+   "size": 10000,
+   "ranges": [
+    [
+     0,
+     10000
+    ]
+   ],
+   "data": "(i * 7 + 3) % 256 for i in range(10000)",
+   "mac": "162f851d77245c92e4cf59d12a65b9be6cc7ba76db1f02d6dd08549eba148d7f"
   }
  ],
  "qr": [
@@ -345,6 +442,47 @@
     "101110100101110001001100110011001",
     "100000100001101111101111011100000",
     "111111101101011000001110100001010"
+   ]
+  },
+  {
+   "text": "http://192.168.1.10:8771/p#s=AbCdEfGhIjKlMnOpQrStUv",
+   "level": "M",
+   "version": 4,
+   "mask": 5,
+   "rows": [
+    "111111100011111101001100101111111",
+    "100000101110100010100000101000001",
+    "101110101001001110000101001011101",
+    "101110101001101110111000001011101",
+    "101110100101001110001011001011101",
+    "100000100010100101010000001000001",
+    "111111101010101010101010101111111",
+    "000000001101001110011001000000000",
+    "100000101100011011111001011001110",
+    "010001000111011111011011110011101",
+    "110110101000111111000100001010110",
+    "001100010001010101110010101111100",
+    "111110100111110101001001101100001",
+    "011011001000000000100110000101111",
+    "101010101110110111000010100001110",
+    "011101010101100010010011011001101",
+    "010000111010101111101001000110001",
+    "011111011011100110010011111001101",
+    "101110101110000101111011110001101",
+    "101000000110011100000001011111111",
+    "101001110011000100101111110101000",
+    "100111011011011000010001000111100",
+    "101100100010111000101100001100010",
+    "100100001010011110001010010011111",
+    "111000111011101010110010111111111",
+    "000000001001010101110000100010100",
+    "111111100100001101001001101010110",
+    "100000100101101011101000100010100",
+    "101110100001010110001010111111000",
+    "101110100000001001101110000011111",
+    "101110100010110100011001100110011",
+    "100000100000011000001000111011100",
+    "111111101110000111001001100110010"
    ]
   },
   {

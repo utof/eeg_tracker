@@ -1,6 +1,6 @@
-// Share on Wi-Fi's `POST /ack` (share/server.dart; DECISIONS 690-699): the paired laptop's word that it holds checked
-// copies, refused without the pairing's key, kept per file only for the bytes the phone holds, and marked `acked` in
-// `/files`. Real sockets on 127.0.0.1 (no widget binding here: it would answer every request with 400).
+// Share on Wi-Fi's `POST /ack` (share/server.dart; DECISIONS 690-699, 755): the paired laptop's word that it holds
+// checked copies, in a request signed with the pairing's key (refused otherwise), kept per file only for the bytes the
+// phone holds, and marked `acked` in `/files`. Real sockets on 127.0.0.1 (no widget binding here: it would answer every request with 400).
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -9,11 +9,12 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:eeg_tracker/recorder/acks.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart' show fileStem;
+import 'package:eeg_tracker/share/auth.dart';
 import 'package:eeg_tracker/share/server.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const token = 'abcdefghjkmn';
-const key = 'a2V5LWZvci10aGUtYWNrLWZpeHR1cmUtb25seS0zMi1ieXRlcw';
+const key = '7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544';
 
 void main() {
   late Directory files, rec;
@@ -44,7 +45,7 @@ void main() {
     var now = DateTime.now();
 
     Future<void> start(String? withKey) async {
-      server = ShareServer(filesDir: files, token: token, port: 0, ackKey: withKey, clock: () => now);
+      server = ShareServer(filesDir: files, token: token, port: 0, key: withKey, clock: () => now);
       await server.listen();
     }
 
@@ -57,10 +58,19 @@ void main() {
       await server.close();
     });
 
-    Future<({int code, Map<String, Object?> body})> post(String body, {String? proof, String? withKey = key}) async {
+    /// POST /ack signed with [withKey] (the paired laptop's), or with only the token when [withKey] is null.
+    Future<({int code, Map<String, Object?> body})> post(String body, {String? withKey = key}) async {
       final req = await client.openUrl('POST', Uri.parse('http://127.0.0.1:${server.boundPort}/ack'));
-      req.headers.set('Authorization', 'Bearer $token');
-      req.headers.set('X-Eeg-Ack', proof ?? ackProof(withKey ?? key, utf8.encode(body)));
+      if (withKey == null) {
+        req.headers.set('Authorization', 'Bearer $token');
+      } else {
+        final n = newNonce(), t = now.millisecondsSinceEpoch;
+        req.headers
+          ..set(timeHeader, '$t')
+          ..set(nonceHeader, n)
+          ..set(homeHeader, '1')
+          ..set(signHeader, requestSign(withKey, method: 'POST', path: '/ack', query: '', timeMs: t, nonce: n, home: true, body: utf8.encode(body)));
+      }
       req.add(utf8.encode(body));
       final res = await req.close();
       final text = await res.transform(utf8.decoder).join();
@@ -83,16 +93,16 @@ void main() {
       await start(null);
       final stem = run(DateTime(2026, 11, 17, 23));
       final r = await post(body([('recordings/$stem.f32', sha(File('${rec.path}/$stem.f32')))]));
-      expect((r.code, r.body['error']), (403, 'not paired'));
+      expect((r.code, r.body['error']), (401, 'not paired'));
       expect(AckStore(files).load(), isEmpty);
     });
 
-    test('a proof made without the pairing\'s key, or none: refused, nothing kept', () async {
+    test('signed with another key, or only the token: refused, nothing kept', () async {
       await start(key);
       final stem = run(DateTime(2026, 11, 17, 23));
       final b = body([('recordings/$stem.f32', sha(File('${rec.path}/$stem.f32')))]);
-      expect((await post(b, withKey: 'another-key-another-key-another-key')).code, 403);
-      expect((await post(b, proof: '')).code, 403);
+      expect((await post(b, withKey: 'f' * 64)).code, 401);
+      expect((await post(b, withKey: null)).body, {'error': 'the paired laptop signs this'});
       expect(AckStore(files).load(), isEmpty);
     });
 

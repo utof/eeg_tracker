@@ -8,6 +8,7 @@ import 'export/exporter.dart';
 import 'logs/activity.dart' show Activity;
 import 'recorder/battery.dart';
 import 'recorder/headband.dart';
+import 'recorder/phone_steps.dart';
 import 'recorder/wifi_watch.dart' show WifiState;
 import 'share/protocol.dart' show WifiNets;
 
@@ -32,6 +33,9 @@ class PhoneSnapshot {
   final Map<Object?, Object?> _m;
 
   int get sdkInt => (_m['sdkInt'] as num?)?.toInt() ?? 0;
+
+  /// The SDK this app was built to target (what Android 17's local-network rule looks at); 0 when unknown.
+  int get targetSdkInt => (_m['targetSdk'] as num?)?.toInt() ?? 0;
   bool get ignoringBatteryOptimizations => _m['ignoringBatteryOptimizations'] == true;
   bool get backgroundRestricted => _m['backgroundRestricted'] == true;
   bool get notificationsEnabled => _m['notificationsEnabled'] != false;
@@ -90,6 +94,18 @@ class Phone {
 
   /// Turns this window's brightness down to the lowest (the dream catcher in bed), or back to the phone's setting.
   static Future<void> dimScreen({required bool on}) => _window.invokeMethod<void>('dim', {'on': on});
+
+  /// Keeps this window out of screenshots, screen recordings and the recent-apps preview (Android's FLAG_SECURE)
+  /// while [on]: the Share on Wi-Fi sheet shows the code (DECISIONS 754).
+  static Future<void> secureScreen({required bool on}) async {
+    try {
+      await _window.invokeMethod<void>('secure', {'on': on});
+    } on PlatformException {
+      // the sheet still shows
+    } on MissingPluginException {
+      // not Android
+    }
+  }
 
   static Future<PhoneSnapshot> snapshot() async =>
       PhoneSnapshot(await _channel.invokeMethod<Map<Object?, Object?>>('snapshot') ?? const {});
@@ -154,6 +170,31 @@ class Phone {
   /// Schedules the foreground service to start again in [delayMs], then ends this process.
   static Future<void> restartProcess(int delayMs) =>
       _channel.invokeMethod<void>('restartProcess', {'delayMs': delayMs});
+
+  /// Registers the hardware step counter (StepCounter.kt); `on`, `no permission` or `no sensor`.
+  static Future<String> stepCounterStart() async =>
+      await _channel.invokeMethod<String>('stepCounterStart') ?? 'no sensor';
+
+  /// Steps since the phone booted as of the last sensor event; null while none has come.
+  static Future<int?> stepCounterRead() async => (await _channel.invokeMethod<num>('stepCounterRead'))?.toInt();
+
+  static Future<void> stepCounterStop() => _channel.invokeMethod<void>('stepCounterStop');
+}
+
+/// [StepProbe] for the recorder isolate. The switch ([settings]) is read at every start, so a run begun after the
+/// owner moved it follows it; off, the channel is not touched.
+class ChannelStepProbe implements StepProbe {
+  ChannelStepProbe(this.settings);
+  final StepSettings settings;
+
+  @override
+  Future<String> start() async => settings.on ? Phone.stepCounterStart() : 'off';
+
+  @override
+  Future<int?> read() => Phone.stepCounterRead();
+
+  @override
+  Future<void> stop() => Phone.stepCounterStop();
 }
 
 /// [PhoneProbe] for the recorder isolate.

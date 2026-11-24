@@ -24,6 +24,7 @@ import '../dream/answer_text.dart' show readAnswerText;
 import '../recorder/acks.dart';
 import '../recorder/nights.dart';
 import '../recorder/packed.dart' show isPackedPath, rawExists, rawLength, rawOnDisk, rawSuffix;
+import '../recorder/recheck.dart';
 import '../recorder/remove.dart';
 import '../sleep/progress.dart' show ScoringProgressStore, scoringProgressDirFor;
 import '../sleep/report.dart' show NightReportStore, isStale, nightsDirFor;
@@ -381,8 +382,10 @@ Map<String, DateTime> keepCutoffs(StorageSettings s, DateTime now) => {
 };
 
 /// The automatic deleting between nights, while a laptop is paired: what the laptop checked longer ago than its
-/// category's time goes from the phone; nothing that is only on the phone, ever. [plan] works the plan out (a
-/// background isolate on the phone). Never throws; null when nothing was due or something records.
+/// category's time goes from the phone; nothing that is only on the phone, ever. And only what the laptop proved again
+/// in the last 15 minutes that it still holds, byte for byte (recheck.dart, DECISIONS 756): every other due file is
+/// asked about now, and goes at a later run once the laptop has answered. [plan] works the plan out (a background
+/// isolate on the phone). Never throws; null when nothing was due or something records.
 Future<ClearRun?> autoClear(
   Directory filesDir, {
   required Future<bool> Function() busy,
@@ -399,7 +402,30 @@ Future<ClearRun?> autoClear(
         ? planClear(filesDir, before.keys.toSet(), mode: ClearMode.keepTime, now: clock(), before: before)
         : await plan(filesDir, before);
     if (p.groups.isEmpty && p.files.isEmpty) return ClearRun();
-    return await runClear(filesDir, p, busy: busy, laptop: laptop, clock: clock);
+    final store = RecheckStore(filesDir), now = clock();
+    List<String> pathsOf(RawGroup g) => [
+      for (final s in g.sets)
+        for (final f in rawFilesOf(File(s))) ackPathOf(relativeRaw(f)),
+    ];
+    store.ask([for (final g in p.groups) ...pathsOf(g), for (final f in p.files) ackPathOf(f.path)], now: now);
+    final proven = ClearPlan(p.mode);
+    final groupPaths = <RawGroup, List<String>>{};
+    for (final g in p.groups) {
+      final paths = groupPaths[g] = pathsOf(g);
+      if (paths.isNotEmpty && paths.every((x) => store.proven(x, now))) proven.groups.add(g);
+    }
+    for (final f in p.files) {
+      if (store.proven(ackPathOf(f.path), now)) proven.files.add(f);
+    }
+    if (proven.groups.isEmpty && proven.files.isEmpty) return ClearRun(); // asked: the laptop answers at its next look
+    final run = await runClear(filesDir, proven, busy: busy, laptop: laptop, clock: clock);
+    store.forget([
+      for (final g in proven.groups)
+        if (run.removed.contains(g.night ?? g.sets.first.split('/').last)) ...?groupPaths[g],
+      for (final f in proven.files)
+        if (run.removed.contains(f.path)) ackPathOf(f.path),
+    ]);
+    return run;
   } on Object {
     return null;
   }

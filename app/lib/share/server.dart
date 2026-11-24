@@ -14,16 +14,25 @@
 //                        true|false (scripts/laptop_work.py), for automatic recording and the work session's
 //                        meetings (lib/auto/laptop.dart; 503 where nothing takes it: during a night)
 //   POST /ack            the paired laptop's word that it holds checked copies of raw files: {"v":1,"files":[{"path",
-//                        "sha256"}]} with `X-Eeg-Ack`, the HMAC of the body with the pairing's key (recorder/acks.dart,
-//                        DECISIONS 690-699); kept in files/transfer/acks.json, and /files marks those files `acked`
+//                        "sha256"}]} (recorder/acks.dart, DECISIONS 690-699); kept in files/transfer/acks.json, and
+//                        /files marks those files `acked`
+//   GET  /who            the paired laptop finds the phone: {"app","v","here"} (home, here, waiting or open)
 //   the laptop's own jobs (/sleep-report, /morning-report, /hypnogram.png): 503, as the page server answers
 //   while the recorder is away
 //
-// Every request needs the token and a client inside the phone's Wi-Fi network, or the phone itself (DECISIONS row
-// 562). Nothing here writes, renames or deletes the app's files (the work signal goes to the app, which keeps it); it keeps one list of its own, the SHA-256 of finished
-// files in `files/cache/share-hashes.json` (row 585), so an app update does not read every night again, and writes the
-// laptop's acks (`files/transfer/acks.json`; the app, not this server, decides what to delete with them). Plain
-// dart:io with no Flutter import: it runs in an isolate of its own (isolate.dart), and in tests.
+// Who gets in (DECISIONS 562, 751-755): a client inside the phone's Wi-Fi network, or the phone itself, AND either
+// - the paired laptop: every request signed with the pairing's key (auth.dart: method, path, query, time, a nonce used
+//   once, whether the laptop is on the network where it paired, the body's SHA-256), answered with a proof of the key
+//   (`X-Eeg-Reply`). The token never crosses the Wi-Fi for it. /work, /marker, /ack and /who take nothing else;
+// - or the token in `Authorization: Bearer` (a laptop or tool given the code by hand); never in the address.
+// While a laptop is paired the phone shares only on its home Wi-Fi: the network on which the paired laptop said, in
+// a signed request, that it is on its own home network (it knows by its router), or one the owner allowed for 12
+// hours. Elsewhere the paired laptop's signed requests get "not sharing on this Wi-Fi" and the token gets nothing.
+// Nothing here writes, renames or deletes the app's files (the work signal goes to the app, which keeps it); it keeps
+// one list of its own, the SHA-256 of finished files in `files/cache/share-hashes.json` (row 585), so an app update
+// does not read every night again, and writes the laptop's acks (`files/transfer/acks.json`; the app, not this
+// server, decides what to delete with them). Plain dart:io with no Flutter import: it runs in an isolate of its own
+// (isolate.dart), and in tests.
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
@@ -34,6 +43,8 @@ import 'package:crypto/crypto.dart';
 
 import '../export/store.dart';
 import '../recorder/acks.dart';
+import '../recorder/recheck.dart';
+import 'auth.dart';
 import 'protocol.dart';
 
 const List<String> _brainBit = ['O1', 'O2', 'T3', 'T4'];
@@ -49,6 +60,174 @@ const int streamReadersMax = 8;
 
 /// The largest `POST /ack` body: about 2000 files.
 const int ackBodyMax = 256 * 1024;
+
+/// The largest body any POST may have (the others are much smaller).
+const int postBodyMax = ackBodyMax;
+
+/// A signed request's time may differ from the phone's clock by this much (and its nonce is kept twice as long).
+const Duration signWindow = Duration(minutes: 5);
+
+/// Nonces kept at most: far more than the laptop sends in [signWindow] twice.
+const int nonceCacheMax = 20000;
+
+/// What the phone says of its Wi-Fi (DECISIONS 752): `open` not paired (shared by hand, on any Wi-Fi, 12 hours at most);
+/// `home` the paired laptop said it is on its home network here; `here` the owner allowed this Wi-Fi for 12 hours;
+/// `waiting` none of these: only the paired laptop's signed requests are answered, with "not sharing on this Wi-Fi"
+/// unless it says it is home.
+const List<String> sharingStates = ['open', 'home', 'here', 'waiting'];
+
+/// Who a request comes from, once it is let in.
+typedef _Caller = ({bool laptop, String? nonce, bool home});
+
+/// How long the paired laptop's "this is my home network" holds without its next word (DECISIONS 752): the tray
+/// looks every 45 s and the mirror every 2 minutes, so at home it never runs out.
+const Duration homeFor = Duration(minutes: 30);
+
+/// Connections held at once from one address, and in all (DECISIONS 755): one more is closed before HTTP reads it.
+const int serverConnectionsPerClient = 16;
+const int serverConnectionsMax = 32;
+
+/// Wrong tries (a wrong token or signature, a replay) from one address within [triesWindow] before that address
+/// waits [triesWait] (429): guessing the 59-bit token is hopeless anyway, and a flood of tries costs the phone work.
+const int triesMax = 10;
+const Duration triesWindow = Duration(minutes: 1);
+const Duration triesWait = Duration(minutes: 1);
+
+/// The phone's listening socket with a cap on connections: at most [perClient] from one address and [total] in all;
+/// one more is closed at once.
+class _CappedSocket extends Stream<Socket> implements ServerSocket {
+  _CappedSocket(this._inner, {required this.total, required this.perClient});
+  final ServerSocket _inner;
+  final int total, perClient;
+  final Map<String, int> _open = {};
+  int _all = 0;
+
+  @override
+  StreamSubscription<Socket> listen(void Function(Socket event)? onData, {Function? onError, void Function()? onDone, bool? cancelOnError}) =>
+      _inner.map(_admit).where((s) => s != null).cast<Socket>().listen(onData, onError: onError, onDone: onDone, cancelOnError: cancelOnError);
+
+  /// The socket, counted, or null (closed at once: too many, or already gone).
+  Socket? _admit(Socket s) {
+    final String who;
+    try {
+      who = s.remoteAddress.address;
+    } catch (_) {
+      s.destroy();
+      return null;
+    }
+    if (_all >= total || (_open[who] ?? 0) >= perClient) {
+      s.destroy();
+      return null;
+    }
+    _all++;
+    _open[who] = (_open[who] ?? 0) + 1;
+    return _CountedSocket(s, who, _gone);
+  }
+
+  /// One connection from [who] ended (HttpServer destroys every socket it is done with).
+  void _gone(String who) {
+    _all--;
+    final n = (_open[who] ?? 1) - 1;
+    if (n <= 0) {
+      _open.remove(who);
+    } else {
+      _open[who] = n;
+    }
+  }
+
+  @override
+  int get port => _inner.port;
+
+  @override
+  InternetAddress get address => _inner.address;
+
+  @override
+  Future<ServerSocket> close() async {
+    await _inner.close();
+    return this;
+  }
+}
+
+/// An accepted socket that says once when it ends: destroyed (as HttpServer ends each connection) or its output
+/// done. Socket.done alone does not complete on destroy().
+class _CountedSocket extends StreamView<Uint8List> implements Socket {
+  _CountedSocket(this._s, this._who, this._onGone) : super(_s) {
+    _s.done.then((_) => _end(), onError: (Object _) => _end());
+  }
+  final Socket _s;
+  final String _who;
+  final void Function(String who) _onGone;
+  bool _ended = false;
+
+  void _end() {
+    if (_ended) return;
+    _ended = true;
+    _onGone(_who);
+  }
+
+  @override
+  void destroy() {
+    _end();
+    _s.destroy();
+  }
+
+  @override
+  Encoding get encoding => _s.encoding;
+
+  @override
+  set encoding(Encoding value) => _s.encoding = value;
+
+  @override
+  void write(Object? object) => _s.write(object);
+
+  @override
+  void writeln([Object? object = '']) => _s.writeln(object);
+
+  @override
+  void writeAll(Iterable<Object?> objects, [String separator = '']) => _s.writeAll(objects, separator);
+
+  @override
+  void writeCharCode(int charCode) => _s.writeCharCode(charCode);
+
+  @override
+  void add(List<int> data) => _s.add(data);
+
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) => _s.addError(error, stackTrace);
+
+  @override
+  Future<void> addStream(Stream<List<int>> stream) => _s.addStream(stream);
+
+  @override
+  Future<void> flush() => _s.flush();
+
+  @override
+  Future<void> close() => _s.close();
+
+  @override
+  Future<void> get done => _s.done;
+
+  @override
+  bool setOption(SocketOption option, bool enabled) => _s.setOption(option, enabled);
+
+  @override
+  Uint8List getRawOption(RawSocketOption option) => _s.getRawOption(option);
+
+  @override
+  void setRawOption(RawSocketOption option) => _s.setRawOption(option);
+
+  @override
+  int get port => _s.port;
+
+  @override
+  int get remotePort => _s.remotePort;
+
+  @override
+  InternetAddress get address => _s.address;
+
+  @override
+  InternetAddress get remoteAddress => _s.remoteAddress;
+}
 
 /// A file changed in the last seconds is still being written: listed without a SHA-256, marked `growing`.
 const Duration _settled = Duration(seconds: 20);
@@ -92,7 +271,12 @@ class ShareServer {
     this.hashCache,
     this.onCopying,
     this.onWork,
-    this.ackKey,
+    this.key,
+    this.hereUntilMs = 0,
+    this.hereNet,
+    this.onHere,
+    this.onCopied,
+    this.onProved,
     DateTime Function()? clock,
   }) : _now = clock ?? DateTime.now;
 
@@ -123,9 +307,34 @@ class ShareServer {
   /// 603), and whether it is in a meeting (null: not said; DECISIONS 685); null: nothing takes it here (503).
   final void Function(bool working, bool? meeting)? onWork;
 
-  /// The key of the pairing with the laptop (link.dart): `POST /ack` must carry its proof; null: not paired (403).
-  final String? ackKey;
+  /// The key of the pairing with the laptop (link.dart): its signed requests are checked with it; null: not paired.
+  final String? key;
+
+  /// The owner's "Share here for 12 hours" (ShareConfig): until then, on the Wi-Fi network [hereNet] (`lanSignature`).
+  final int hereUntilMs;
+  final String? hereNet;
+
+  /// What the phone says of its Wi-Fi changed ([sharingStates]).
+  final void Function(String here)? onHere;
+
+  /// A file or the list was sent: `laptop` (the paired one, signed) or `code` (someone with the token), or `cable`
+  /// (the phone itself: adb forward).
+  final void Function(String by)? onCopied;
+
+  /// The laptop proved it still holds files the phone asked about before deleting them (recheck.dart): how many now.
+  final void Function(int proven)? onProved;
   final DateTime Function() _now;
+
+  /// The Wi-Fi network on which the paired laptop last said it is home (`lanSignature`); null: none yet.
+  String? _home;
+
+  /// Home lasts [homeFor] after the paired laptop last said so: a phone carried to another Wi-Fi with the same
+  /// addresses (192.168.1.x is common) stops sharing by then, even without Android's word.
+  int _homeUntilMs = 0;
+  String _hereWas = '';
+  final Map<String, int> _nonces = {}; // nonce -> until (ms), oldest first
+  final Map<String, List<int>> _tries = {}; // address -> times (ms) of its wrong tries in the last minute
+  final Map<String, int> _waitUntil = {}; // address -> until when (ms) it waits
 
   /// SHA-256 worked out by this server (not taken from the cache or the export's index); for tests.
   int hashed = 0;
@@ -156,29 +365,69 @@ class ShareServer {
   /// The phone's Wi-Fi addresses, for the screen; empty while none is known.
   List<String> get addresses => [for (final n in _lan) n.address.address];
 
-  /// The Wi-Fi networks clients may come from (DECISIONS row 562), set again at every look at the phone's address.
-  set lan(List<LanNet> nets) => _lan = List.unmodifiable(nets);
+  /// The Wi-Fi networks clients may come from now.
+  List<LanNet> get lanNets => _lan;
+
+  /// The Wi-Fi networks clients may come from (DECISIONS row 562), set again at every look at the phone's address. A
+  /// change of network forgets that the laptop said this is home: it says so again at its next request.
+  set lan(List<LanNet> nets) {
+    _lan = List.unmodifiable(nets);
+    if (_home != null && _home != lanSignature(_lan)) _home = null;
+    _tellHere();
+  }
+
+  /// What the phone says of its Wi-Fi now ([sharingStates]).
+  /// Android said the network changed (the app's network callback): another Wi-Fi may use the same addresses, so
+  /// it is not home until the paired laptop says so again.
+  void networkChanged() {
+    _homeUntilMs = 0;
+    _tellHere();
+  }
+
+  String get here {
+    if (key == null) return 'open';
+    final sig = lanSignature(_lan);
+    if (sig.isNotEmpty && _home == sig && _now().millisecondsSinceEpoch < _homeUntilMs) return 'home';
+    if (sig.isNotEmpty && hereNet == sig && _now().millisecondsSinceEpoch < hereUntilMs) return 'here';
+    return 'waiting';
+  }
+
+  void _tellHere() {
+    final h = '$here ${lanSignature(_lan)}';
+    if (h == _hereWas) return;
+    _hereWas = h;
+    try {
+      onHere?.call(here);
+    } catch (_) {}
+  }
 
   /// Listens on every IPv4 address of the phone (DECISIONS row 562): Wi-Fi, the phone itself for `adb forward`, and
   /// mobile data and a VPN too, which [isServedClient] turns away. So the server does not depend on finding the
   /// Wi-Fi address, and a new lease needs no new socket. Throws when the port is taken.
   Future<void> listen() async {
     if (_server != null) return;
-    final s = await HttpServer.bind(InternetAddress.anyIPv4, port, shared: false);
-    s.idleTimeout = const Duration(seconds: 60);
+    final socket = await ServerSocket.bind(InternetAddress.anyIPv4, port, shared: false);
+    final s = HttpServer.listenOn(_CappedSocket(socket, total: serverConnectionsMax, perClient: serverConnectionsPerClient));
+    s.idleTimeout = const Duration(seconds: 30);
     s.defaultResponseHeaders.clear();
     s.listen(_handle, onError: (Object _) {});
     _server = s;
+    _socket = socket;
   }
+
+  /// The listening socket: an HttpServer made by listenOn does not close it.
+  ServerSocket? _socket;
 
   Future<void> close() async {
     for (final r in _readers.toList()) {
       r.closed = true;
       r.wake();
     }
-    final s = _server;
+    final s = _server, socket = _socket;
     _server = null;
+    _socket = null;
     await s?.close(force: true);
+    await socket?.close();
   }
 
   // ---- live data in ------------------------------------------------------------------------------------------
@@ -328,39 +577,64 @@ class ShareServer {
       res.headers.set('Cache-Control', 'no-store');
       final client = clientOf != null ? clientOf!(req) : req.connectionInfo?.remoteAddress;
       if (client == null || !isServedClient(client, _lan)) {
+        await req.drain<void>();
         return await _json(res, 403, {'error': 'only the local network may connect'});
       }
-      if (!_authorized(req)) return await _json(res, 401, {'error': 'token missing or wrong'});
+      final who = client.address, nowMs = _now().millisecondsSinceEpoch;
+      if ((_waitUntil[who] ?? 0) > nowMs) {
+        await req.drain<void>();
+        return await _json(res, 429, {'error': 'too many wrong tries: wait a minute'});
+      }
       final method = req.method;
       if (method != 'GET' && method != 'POST' && method != 'HEAD') {
+        await req.drain<void>();
         return await _json(res, 405, {'error': 'read-only'});
       }
+      final body = await _body(req);
+      if (body == null) return await _json(res, 413, {'error': 'too big'});
+      final caller = await _caller(req, body);
+      if (caller == null) return _wrongTry(who, nowMs); // answered
+      final nonce = caller.nonce;
+      if (nonce != null) res.headers.set(replyHeader, replyProof(key!, nonce)); // the laptop knows it is this phone
       final path = req.uri.path;
+      final loopback = _loopback(client);
+      if (!loopback) _vouch(caller);
+      if (path == '/who' || path == '/who/') {
+        if (!caller.laptop) return await _json(res, 403, {'error': 'the paired laptop signs this'});
+        return await _json(res, 200, {'app': 'eeg-tracker', 'v': 2, 'here': here});
+      }
+      if (!loopback && !_mayShare(caller)) return await _json(res, 403, {'error': 'not sharing on this Wi-Fi'});
+      final by = loopback ? 'cable' : (caller.laptop ? 'laptop' : 'code');
       if (path == '/files' || path == '/files/') {
         if (method == 'POST') return await _json(res, 405, {'error': 'read-only'});
-        return await _copy(() async => _json(res, 200, await _fileList(hash: req.uri.queryParameters['sha'] != '0')));
+        return await _copy(by, () async => _json(res, 200, await _fileList(hash: req.uri.queryParameters['sha'] != '0')));
       }
       if (path.startsWith('/files/')) {
         if (method == 'POST') return await _json(res, 405, {'error': 'read-only'});
-        return await _copy(() => _file(req, Uri.decodeComponent(path.substring('/files/'.length))));
+        return await _copy(by, () => _file(req, Uri.decodeComponent(path.substring('/files/'.length))));
       }
       final trimmed = path.endsWith('/') && path.length > 1 ? path.substring(0, path.length - 1) : path;
       final name = trimmed.substring(trimmed.lastIndexOf('/') + 1);
       if (path == '/work' || path == '/work/') {
         if (method != 'POST') return await _json(res, 405, {'error': 'POST {"working": true|false}'});
-        return await _work(req);
+        if (!caller.laptop) return await _json(res, 403, {'error': 'the paired laptop signs this'});
+        return await _work(res, body);
+      }
+      if (path == '/recheck' || path == '/recheck/') {
+        if (!caller.laptop) return await _json(res, 403, {'error': 'the paired laptop signs this'});
+        return method == 'POST' ? await _recheck(res, body) : await _json(res, 200, _questions());
       }
       if (path == '/ack' || path == '/ack/') {
         if (method != 'POST') return await _json(res, 405, {'error': 'POST {"v":1,"files":[...]}'});
-        return await _ack(req);
+        if (!caller.laptop) return await _json(res, 403, {'error': 'the paired laptop signs this'});
+        return await _ack(res, body);
       }
       if (method == 'POST') {
-        if (name == 'marker') return await _marker(req);
-        if (name == 'contact') {
-          await req.drain<void>();
-          return await _json(res, 503, {'error': 'the phone checks contact once, at the start of the night'});
+        if (name == 'marker') {
+          if (!caller.laptop) return await _json(res, 403, {'error': 'the paired laptop signs this'});
+          return await _marker(res, body);
         }
-        await req.drain<void>();
+        if (name == 'contact') return await _json(res, 503, {'error': 'the phone checks contact once, at the start of the night'});
         if (_laptopOnly.contains(name)) return await _json(res, 503, {'error': 'recorder reconnecting'});
         return await _json(res, 404, {'error': 'no such route'});
       }
@@ -372,7 +646,18 @@ class ShareServer {
           'app': 'eeg-tracker',
           'share': 1,
           'status': _status,
-          'routes': ['GET /state', 'GET /stream', 'POST /marker', 'GET /files', 'GET /files/<path>', 'POST /work', 'POST /ack'],
+          'routes': [
+            'GET /state',
+            'GET /stream',
+            'POST /marker',
+            'GET /files',
+            'GET /files/<path>',
+            'POST /work',
+            'POST /ack',
+            'GET /who',
+            'GET /recheck',
+            'POST /recheck',
+          ],
         });
       }
       return await _json(res, 404, {'error': 'no such route'});
@@ -386,12 +671,96 @@ class ShareServer {
     }
   }
 
-  bool _authorized(HttpRequest req) {
+  /// One more wrong try from [who]: the tenth within a minute makes it wait a minute. Kept small: the oldest
+  /// addresses are forgotten past 1000.
+  void _wrongTry(String who, int nowMs) {
+    final t = _tries.putIfAbsent(who, () => [])..add(nowMs);
+    t.removeWhere((x) => x <= nowMs - triesWindow.inMilliseconds);
+    if (t.length >= triesMax) {
+      _waitUntil[who] = nowMs + triesWait.inMilliseconds;
+      _tries.remove(who);
+    }
+    _waitUntil.removeWhere((_, until) => until <= nowMs);
+    while (_tries.length > 1000) {
+      _tries.remove(_tries.keys.first);
+    }
+  }
+
+  static bool _loopback(InternetAddress a) {
+    if (a.isLoopback) return true;
+    final b = a.rawAddress; // ::ffff:127.x
+    return b.length == 16 && b.sublist(0, 10).every((x) => x == 0) && b[10] == 0xff && b[11] == 0xff && b[12] == 127;
+  }
+
+  /// A POST's body, read whole before anything else (the laptop's signature covers it); null when it is too big.
+  /// Other methods have none.
+  Future<List<int>?> _body(HttpRequest req) async {
+    if (req.method != 'POST') {
+      await req.drain<void>();
+      return const [];
+    }
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in req) {
+      if (bytes.length <= postBodyMax) bytes.add(chunk);
+    }
+    return bytes.length > postBodyMax ? null : bytes.takeBytes();
+  }
+
+  /// Who sent [req]: the paired laptop (signed), or someone with the token; null when it was answered with why not.
+  Future<_Caller?> _caller(HttpRequest req, List<int> body) async {
+    final res = req.response;
+    final sign = req.headers.value(signHeader);
+    if (sign != null) {
+      final k = key;
+      if (k == null) return _no(res, 401, {'error': 'not paired'});
+      final t = int.tryParse(req.headers.value(timeHeader) ?? ''), nonce = req.headers.value(nonceHeader) ?? '';
+      final home = req.headers.value(homeHeader);
+      final now = _now().millisecondsSinceEpoch;
+      if (t == null || (now - t).abs() > signWindow.inMilliseconds) {
+        return _no(res, 401, {'error': 'clock', 'phone_ms': now});
+      }
+      if (!nonceShape.hasMatch(nonce) || (home != '0' && home != '1')) return _no(res, 401, {'error': 'signature'});
+      final String path, query;
+      try {
+        path = Uri.decodeComponent(req.uri.path);
+        query = Uri.decodeComponent(req.uri.query);
+      } on ArgumentError {
+        return _no(res, 400, {'error': 'bad request'});
+      }
+      final want = requestSign(k, method: req.method, path: path, query: query, timeMs: t, nonce: nonce, home: home == '1', body: body);
+      if (!sameSecret(sign, want)) return _no(res, 401, {'error': 'signature'});
+      _nonces.removeWhere((_, until) => until < now);
+      if (_nonces.containsKey(nonce)) return _no(res, 401, {'error': 'replayed'});
+      if (_nonces.length >= nonceCacheMax) _nonces.remove(_nonces.keys.first);
+      _nonces[nonce] = now + 2 * signWindow.inMilliseconds;
+      return (laptop: true, nonce: nonce, home: home == '1');
+    }
     final auth = req.headers.value('authorization');
-    final given = auth != null && auth.startsWith('Bearer ')
-        ? auth.substring(7).trim()
-        : req.headers.value('x-eeg-token') ?? req.uri.queryParameters['token'] ?? '';
-    return sameToken(given, token);
+    final given = auth != null && auth.startsWith('Bearer ') ? auth.substring(7).trim() : '';
+    if (!sameToken(given, token)) return _no(res, 401, {'error': 'token missing or wrong'});
+    return (laptop: false, nonce: null, home: false);
+  }
+
+  Future<Null> _no(HttpResponse res, int code, Object body) async {
+    await _json(res, code, body);
+    return null;
+  }
+
+  /// The paired laptop, from the Wi-Fi, says it is on its home network (it knows its own router: scripts/phone_link.py
+  /// `home_id`): then this Wi-Fi is home, also when its first word is /who (the tray's look, the search at home).
+  void _vouch(_Caller c) {
+    if (c.laptop && c.home && _lan.isNotEmpty) {
+      _home = lanSignature(_lan);
+      _homeUntilMs = _now().millisecondsSinceEpoch + homeFor.inMilliseconds;
+      _tellHere();
+    }
+  }
+
+  /// Whether this caller, from the Wi-Fi, may have anything now ([here]).
+  bool _mayShare(_Caller c) {
+    final h = here;
+    if (c.laptop) return c.home || h == 'here';
+    return h != 'waiting';
   }
 
   Future<void> _json(HttpResponse res, int code, Object body) => _send(res, code, utf8.encode(jsonEncode(body)), 'application/json');
@@ -404,12 +773,7 @@ class ShareServer {
     await res.close();
   }
 
-  Future<void> _marker(HttpRequest req) async {
-    final bytes = BytesBuilder(copy: false);
-    await for (final chunk in req) {
-      if (bytes.length < 2000) bytes.add(chunk);
-    }
-    final all = bytes.takeBytes();
+  Future<void> _marker(HttpResponse res, List<int> all) async {
     var text = utf8.decode(all.length > 2000 ? all.sublist(0, 2000) : all, allowMalformed: true).trim();
     if (text.length > 200) text = text.substring(0, 200);
     if (text.isEmpty) text = 'marker';
@@ -419,47 +783,31 @@ class ShareServer {
     } catch (_) {
       m = null;
     }
-    if (m == null) return _json(req.response, 503, {'error': 'not recording yet'});
+    if (m == null) return _json(res, 503, {'error': 'not recording yet'});
     _publish(jsonEncode({'marker': text, 'i': m.i, 't': _round(m.t, 3)}));
-    return _send(req.response, 200, utf8.encode('ok'), 'text/plain');
+    return _send(res, 200, utf8.encode('ok'), 'text/plain');
   }
 
   /// The laptop's work signal: `{"working": true|false}`, optionally with `"meeting": true|false`, under 200 bytes.
-  Future<void> _work(HttpRequest req) async {
-    final bytes = BytesBuilder(copy: false);
-    await for (final chunk in req) {
-      if (bytes.length <= 200) bytes.add(chunk);
-    }
+  Future<void> _work(HttpResponse res, List<int> bytes) async {
     bool? working, meeting;
     if (bytes.length <= 200) {
       try {
-        final Object? j = jsonDecode(utf8.decode(bytes.takeBytes()));
+        final Object? j = jsonDecode(utf8.decode(bytes));
         if (j is Map && j['working'] is bool) working = j['working'] as bool;
         if (j is Map && j['meeting'] is bool) meeting = j['meeting'] as bool;
       } catch (_) {}
     }
-    if (working == null) return _json(req.response, 400, {'error': 'send {"working": true} or {"working": false}'});
+    if (working == null) return _json(res, 400, {'error': 'send {"working": true} or {"working": false}'});
     final take = onWork;
-    if (take == null) return _json(req.response, 503, {'error': 'the work signal is not taken now (a night records)'});
+    if (take == null) return _json(res, 503, {'error': 'the work signal is not taken now (a night records)'});
     take(working, meeting);
-    return _json(req.response, 202, {'ok': true});
+    return _json(res, 202, {'ok': true});
   }
 
-  /// The paired laptop's acks (recorder/acks.dart): refused whole without a pairing, a proof made with its key, or
-  /// a well-formed body; then each file on its own (kept only when it holds what the laptop says it checked).
-  Future<void> _ack(HttpRequest req) async {
-    final bytes = BytesBuilder(copy: false);
-    await for (final chunk in req) {
-      if (bytes.length <= ackBodyMax) bytes.add(chunk);
-    }
-    final res = req.response;
-    if (bytes.length > ackBodyMax) return _json(res, 413, {'error': 'too many files at once'});
-    final key = ackKey;
-    if (key == null) return _json(res, 403, {'error': 'not paired'});
-    final body = bytes.takeBytes();
-    if (!sameToken(req.headers.value('x-eeg-ack') ?? '', ackProof(key, body))) {
-      return _json(res, 403, {'error': 'wrong proof'});
-    }
+  /// The paired laptop's acks (recorder/acks.dart), in a request it signed: refused whole without a well-formed
+  /// body; then each file on its own (kept only when it holds what the laptop says it checked).
+  Future<void> _ack(HttpResponse res, List<int> body) async {
     final asked = <({String path, String sha256})>[];
     try {
       final Object? j = jsonDecode(utf8.decode(body));
@@ -491,6 +839,61 @@ class ShareServer {
       return _json(res, 500, {'error': 'the acks could not be kept: $e'});
     }
     return _json(res, 200, {'v': 1, 'acked': acked, 'refused': refused});
+  }
+
+  /// GET /recheck: the open questions before deleting (recheck.dart), for the paired laptop.
+  Map<String, Object?> _questions() => {
+    'v': 1,
+    'asks': [for (final a in RecheckStore(filesDir).open().values) a.toJson()..remove('asked_ms')],
+  };
+
+  /// POST /recheck: the laptop's answers. Each is checked against the phone's own bytes; a laptop that does not hold a
+  /// file, or holds other bytes, loses that file's ack (nothing is deleted on it; the laptop copies and acks it again).
+  Future<void> _recheck(HttpResponse res, List<int> body) async {
+    final List<Map<Object?, Object?>> answers;
+    try {
+      final Object? j = jsonDecode(utf8.decode(body));
+      if (j is! Map || j['v'] != 1 || j['proofs'] is! List) throw const FormatException();
+      answers = [for (final a in j['proofs'] as List) if (a is Map) a else throw const FormatException()];
+    } catch (_) {
+      return _json(res, 400, {'error': 'send {"v":1,"proofs":[{"path","nonce","mac"}]}'});
+    }
+    final store = RecheckStore(filesDir), open = store.open(), now = _now();
+    final proven = <String>[], failed = <Map<String, String>>[], lost = <String>[];
+    for (final a in answers) {
+      final path = a['path'], nonce = a['nonce'];
+      final q = path is String ? open[path] : null;
+      if (q == null || nonce != q.nonce) {
+        failed.add({'path': '${path ?? ''}', 'why': 'not asked'});
+        continue;
+      }
+      String? why;
+      if (a['missing'] == true) {
+        why = 'the laptop does not hold it';
+      } else {
+        final mac = a['mac'];
+        final mine = phoneRanges(filesDir, q);
+        if (mine == null) {
+          why = 'not on the phone as acked';
+        } else if (mac is! String || !sameSecret(mac, recheckMac(key!, q.path, q.nonce, q.bytes, q.ranges, mine))) {
+          why = 'different bytes';
+        }
+      }
+      store.prove(q.path, q.nonce, ok: why == null, why: why, at: now);
+      if (why == null) {
+        proven.add(q.path);
+      } else {
+        failed.add({'path': q.path, 'why': why});
+        if (why != 'not on the phone as acked') lost.add(q.path);
+      }
+    }
+    if (lost.isNotEmpty) AckStore(filesDir).remove(lost);
+    if (proven.isNotEmpty) {
+      try {
+        onProved?.call(proven.length);
+      } catch (_) {}
+    }
+    return _json(res, 200, {'v': 1, 'proven': proven, 'failed': failed});
   }
 
   /// A plain file's SHA-256 for an ack: the kept one while the file is unchanged, else read now.
@@ -551,10 +954,13 @@ class ShareServer {
 
   // ---- files -------------------------------------------------------------------------------------------------
 
-  /// One file request, counted for [onCopying].
-  Future<void> _copy(Future<void> Function() answer) async {
+  /// One file request, counted for [onCopying], and said to [onCopied] with who asked.
+  Future<void> _copy(String by, Future<void> Function() answer) async {
     _copying++;
     _tellCopying();
+    try {
+      onCopied?.call(by);
+    } catch (_) {}
     try {
       await answer();
     } finally {
@@ -695,6 +1101,8 @@ class ShareServer {
     final res = req.response;
     // Only what Export data would copy, by the same rule; never a link, never a path that climbs out.
     if (!isExported(path)) return _json(res, 404, {'error': 'no such file'});
+    // asked about before deleting: not handed out until answered, so the answer comes from the laptop's own copy
+    if (RecheckStore(filesDir).open().containsKey(ackPathOf(path))) return _json(res, 409, {'error': 'being re-checked'});
     final file = File('${filesDir.path}/$path');
     if (FileSystemEntity.typeSync(file.path, followLinks: false) != FileSystemEntityType.file) {
       return _json(res, 404, {'error': 'no such file'});

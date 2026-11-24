@@ -4,6 +4,7 @@
 // and never blocks. A crash, an exception or a hang in the server therefore cannot stop or slow the recording;
 // [ShareHost] hears that the isolate ended, writes one log line and stops feeding it.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
@@ -48,17 +49,21 @@ List<Object?> shareIsolateArgs(
   c.endsAtMs ?? -1, // -1: no end while a laptop is paired (DECISIONS 675)
   wifi.nets,
   wifi.note,
-  c.laptop?.toJson(), // the paired laptop, told where this phone is (link.dart)
+  c.laptop?.toJson(), // the paired laptop: its signed requests are checked with its key (server.dart)
   work,
+  c.hereUntilMs, // "Share here for 12 hours" (DECISIONS 752)
+  c.hereNet,
 ];
 
 /// The server isolate. Messages in: `['b', stem, first, t, Float32List]` a batch, `['s', map]` the status,
 /// `['m', id, t, i]` a marker's answer (t null = not recording), `['w', nets, note]` Android's answer about the
-/// Wi-Fi address again, `['n']` a network came or went (tell the paired laptop now), `['k', map or null]` the daytime
-/// session for /state, `['x']` stop. Messages out: `['port', SendPort]`, `['up', addresses, port, why]` (why: empty,
-/// or what each source returned when no Wi-Fi address was found), `['marker', id, text]`, `['copying', n]` file
-/// requests being answered, `['work', working, meeting]` the laptop's work signal, `['error', text]` an error that did not
-/// stop it, `['log', line]` (the paired laptop), `['down', why]`.
+/// Wi-Fi address again, `['n']` Android said the network changed (home is forgotten: DECISIONS 752), `['k', map or null]` the daytime session for /state, `['x']` stop. Messages out:
+/// `['port', SendPort]`, `['up', addresses, port, why]` (why: empty, or what each source returned when no Wi-Fi
+/// address was found), `['marker', id, text]`, `['copying', n]` file requests being answered, `['work', working,
+/// meeting]` the laptop's work signal, `['here', state]` what the phone says of its Wi-Fi (server.dart
+/// `sharingStates`), `['copied', by]` a file was sent (`laptop`, `code` or `cable`), `['proved', n]` the laptop proved
+/// it still holds n files asked about before deleting (recheck.dart), `['error', text]` an error that did not stop it,
+/// `['log', line]`, `['down', why]`.
 ///
 /// Every error inside it is caught (DECISIONS row 587): before the server listens it ends the isolate the orderly way
 /// (`['down', ...]`); after, it is reported and the server goes on answering. An uncaught error (running out of memory
@@ -105,7 +110,8 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
     nets: [for (final n in args.length > 5 ? args[5]! as List : const <Object?>[]) n as String],
     note: args.length > 6 ? args[6]! as String : noWifiAnswer.note,
   );
-  final server = ShareServer(
+  late final ShareServer server;
+  server = ShareServer(
     filesDir: Directory(args[1]! as String),
     token: args[2]! as String,
     port: args[3]! as int,
@@ -118,11 +124,15 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
     hashCache: File('${args[1]! as String}/cache/share-hashes.json'),
     onCopying: (n) => toHost.send(['copying', n]),
     onWork: args.length > 8 && args[8] == true ? (working, meeting) => toHost.send(['work', working, meeting]) : null,
-    ackKey: PairedLaptop.fromJson(args.length > 7 ? args[7] : null)?.key, // POST /ack: the paired laptop only
+    key: PairedLaptop.fromJson(args.length > 7 ? args[7] : null)?.key, // the paired laptop's signatures
+    hereUntilMs: args.length > 9 && args[9] is int ? args[9]! as int : 0,
+    hereNet: args.length > 10 && args[10] is String ? args[10]! as String : null,
+    onHere: (h) => toHost.send(['here', h, lanSignature(server.lanNets)]),
+    onCopied: (by) => toHost.send(['copied', by]),
+    onProved: (n) => toHost.send(['proved', n]),
   );
   Timer? addressTimer;
   Timer? offTimer;
-  LaptopAnnouncer? announcer;
   var closing = false;
 
   // what the laptop copied, every 10 minutes it copied anything (the app log, DECISIONS 718)
@@ -147,7 +157,6 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
     offTimer?.cancel();
     copiedTimer.cancel();
     tellCopied();
-    announcer?.stop();
     try {
       await binding?.timeout(const Duration(seconds: 3));
     } catch (_) {}
@@ -175,11 +184,8 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
     server.lan = chosen.nets;
     final now = '${server.addresses.join(',')} ${chosen.why}';
     if (now == shown) return;
-    final first = shown.isEmpty;
     shown = now;
     toHost.send(['up', server.addresses, server.boundPort, chosen.why]);
-    // the Wi-Fi came back or changed: the paired laptop hears where this phone is now (DECISIONS 676)
-    if (!first && server.addresses.isNotEmpty) announcer?.soon();
   }
 
   // One look at a time; a request during one (Android's new answer) runs one more after it.
@@ -216,8 +222,8 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
       case 'w':
         android = (nets: [for (final n in m[1] as List) n as String], note: m[2] as String);
         unawaited(look());
-      case 'n': // Android says a network came or went (DECISIONS 676): the laptop hears from this phone now
-        announcer?.soon();
+      case 'n':
+        server.networkChanged();
       case 'k': // the daytime session that holds the headband, for /state (DECISIONS 671)
         server.setSession(m[1] as Map<Object?, Object?>?);
       case 'x':
@@ -247,15 +253,6 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
     final text = '$e';
     toHost.send(['error', text.length > 300 ? '${text.substring(0, 300)}...' : text]);
   });
-  final laptop = PairedLaptop.fromJson(args.length > 7 ? args[7] : null);
-  if (laptop != null) {
-    announcer = LaptopAnnouncer(
-      laptop: laptop,
-      sharePort: server.boundPort,
-      token: args[2]! as String,
-      onLine: (line) => toHost.send(['log', 'sharing on Wi-Fi: $line']),
-    )..start();
-  }
   final offAt = args[4]! as int;
   if (offAt >= 0) {
     final left = offAt - DateTime.now().millisecondsSinceEpoch;
@@ -263,13 +260,63 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
   }
   await look();
   if (closing) return;
+  toHost.send(['here', server.here, lanSignature(server.lanNets)]);
   addressTimer = Timer.periodic(_addressCheck, (_) => unawaited(look()));
 }
 
-/// What the screen and the notification show.
-typedef ShareStatus = ({bool up, List<String> addresses, int port, String note});
+/// What the screen shows: whether it serves, where, why not; [here] what the phone says of its Wi-Fi (server.dart
+/// `sharingStates`: open, home, here, waiting); [copiedAtMs] and [copiedBy] the last file sent and to whom
+/// (`laptop`, `code`, `cable`; 0 and empty for none yet).
+/// [net] the Wi-Fi network as "home" and "Share here" remember it (protocol.dart `lanSignature`).
+typedef ShareStatus = ({bool up, List<String> addresses, int port, String note, String here, String net, int copiedAtMs, String copiedBy});
 
-const ShareStatus shareDown = (up: false, addresses: <String>[], port: sharePort, note: '');
+const ShareStatus shareDown = (up: false, addresses: <String>[], port: sharePort, note: '', here: '', net: '', copiedAtMs: 0, copiedBy: '');
+
+/// [s] with some fields changed.
+ShareStatus shareStatusWith(
+  ShareStatus s, {
+  bool? up,
+  List<String>? addresses,
+  int? port,
+  String? note,
+  String? here,
+  String? net,
+  int? copiedAtMs,
+  String? copiedBy,
+}) => (
+  up: up ?? s.up,
+  addresses: addresses ?? s.addresses,
+  port: port ?? s.port,
+  note: note ?? s.note,
+  here: here ?? s.here,
+  net: net ?? s.net,
+  copiedAtMs: copiedAtMs ?? s.copiedAtMs,
+  copiedBy: copiedBy ?? s.copiedBy,
+);
+
+/// `files/transfer/copied.json`: when a file was last sent and to whom, so the screen says it after a restart too.
+File _copiedFile(String filesDir) => File('$filesDir/transfer/copied.json');
+
+({int atMs, String by}) readCopied(String filesDir) {
+  try {
+    final j = jsonDecode(_copiedFile(filesDir).readAsStringSync());
+    final at = j is Map ? j['at_ms'] : null, by = j is Map ? j['by'] : null;
+    if (at is int && by is String && const ['laptop', 'code', 'cable'].contains(by)) return (atMs: at, by: by);
+  } catch (_) {}
+  return (atMs: 0, by: '');
+}
+
+void _writeCopied(String filesDir, int atMs, String by) {
+  try {
+    final f = _copiedFile(filesDir);
+    f.parent.createSync(recursive: true);
+    final tmp = File('${f.path}.$pid.tmp');
+    tmp.writeAsStringSync(jsonEncode({'at_ms': atMs, 'by': by}), flush: true);
+    tmp.renameSync(f.path);
+  } catch (_) {
+    // the screen then says it from memory only
+  }
+}
 
 /// Owns the server isolate from the recording side. Every method is safe to call at any time and never throws.
 final AppLog _log = AppLog('share');
@@ -311,6 +358,9 @@ class ShareHost {
   /// Tests replace the server with one that throws.
   final Future<void> Function(List<Object?> args) entry;
 
+  /// The laptop proved it still holds files asked about before deleting (recheck.dart): the app may delete them now.
+  void Function(int proven)? onProved;
+
   Isolate? _isolate;
   ReceivePort? _events;
   SendPort? _port;
@@ -337,6 +387,8 @@ class ShareHost {
     try {
       if (!config.activeAt(DateTime.now().millisecondsSinceEpoch)) return;
       _ended = false;
+      final copied = readCopied(filesDir);
+      _status = shareStatusWith(_status, copiedAtMs: copied.atMs, copiedBy: copied.by);
       final events = _events = ReceivePort();
       events.listen(_onEvent);
       final wifiNow = await _askWifi();
@@ -411,21 +463,14 @@ class ShareHost {
 
   Map<String, Object?>? _session;
 
-  /// Android says a network came or went (`Phone.networkChanges`, DECISIONS 676): the Wi-Fi address is asked again
-  /// and the paired laptop is told where this phone is now, not at the next 5 minutes.
+  /// Android says a network came or went (`Phone.networkChanges`): the Wi-Fi address is asked again at once, so the
+  /// server answers on the new network (and forgets that the old one was home) without waiting a minute.
   Future<void> networkChanged() async {
-    if (_ended) return;
-    if (wifi != null) await _sendWifi();
-    await tellLaptop();
-  }
-
-  /// The paired laptop is told where this phone is now (one handshake; DECISIONS 676, 678): after a network change,
-  /// when a session starts, when the app comes back to the front.
-  Future<void> tellLaptop() async {
     if (_ended) return;
     try {
       _port?.send(['n']);
     } catch (_) {}
+    if (wifi != null) await _sendWifi();
   }
 
   /// The recorder's status (`RecorderStatus.toMap`), about once a second.
@@ -481,13 +526,14 @@ class ShareHost {
         case 'up':
           final addresses = [for (final a in m[1] as List) a as String];
           final first = !_status.up, moved = addresses.join(',') != _status.addresses.join(',');
-          _status = (up: true, addresses: addresses, port: m[2] as int, note: '');
+          _status = shareStatusWith(_status, up: true, addresses: addresses, port: m[2] as int, note: '');
+          // never the addresses themselves in a log (DECISIONS 757): the screen shows them, the logs leave the phone
           if (first) {
             _say('sharing on Wi-Fi on: ${_where(_status)}');
           } else if (moved) {
-            _say('sharing on Wi-Fi now at ${_where(_status)}');
+            _say('sharing on Wi-Fi: the Wi-Fi network changed (${_where(_status)})');
           }
-          final why = m.length > 3 && m[3] is String ? m[3] as String : '';
+          final why = m.length > 3 && m[3] is String ? redactAddresses(m[3] as String) : '';
           if (why.isNotEmpty && why != _why) {
             // what each source returned, once per change: in the night's log and in logcat (tag "flutter")
             debugPrint('eeg_tracker share: $why');
@@ -495,6 +541,36 @@ class ShareHost {
           }
           _why = why;
           onChange?.call(_status);
+        case 'here':
+          final h = m[1] as String, net = m.length > 2 && m[2] is String ? m[2] as String : '';
+          if (net != _status.net) {
+            _status = shareStatusWith(_status, net: net);
+            if (h == _status.here) onChange?.call(_status);
+          }
+          if (h != _status.here) {
+            _status = shareStatusWith(_status, here: h);
+            final words = switch (h) {
+              'home' => 'the paired laptop says this is the home Wi-Fi',
+              'here' => 'allowed on this Wi-Fi by hand',
+              'waiting' => 'not shared on this Wi-Fi until the paired laptop says it is home',
+              _ => null,
+            };
+            if (words != null) _say('sharing on Wi-Fi: $words');
+            onChange?.call(_status);
+          }
+        case 'proved':
+          _say('sharing on Wi-Fi: the laptop proved it still holds ${m[1]} files asked about before deleting');
+          try {
+            onProved?.call(m[1] as int);
+          } catch (_) {}
+        case 'copied':
+          final now = DateTime.now().millisecondsSinceEpoch, by = m[1] as String;
+          final again = now - _status.copiedAtMs < 60000 && by == _status.copiedBy;
+          _status = shareStatusWith(_status, copiedAtMs: now, copiedBy: by);
+          if (!again) {
+            _writeCopied(filesDir, now, by); // once a minute at most
+            onChange?.call(_status);
+          }
         case 'marker':
           MarkerResult? r;
           try {
@@ -543,7 +619,7 @@ class ShareHost {
     } catch (_) {}
     _isolate = null;
     _lock(false);
-    _status = (up: false, addresses: const <String>[], port: _status.port, note: line);
+    _status = shareStatusWith(_status, up: false, addresses: const <String>[], note: line, here: '', net: '');
     try {
       final up = _upSince;
       _upSince = null;
@@ -570,9 +646,10 @@ class ShareHost {
   }
 }
 
+/// For the logs: the port and how many Wi-Fi addresses, never the addresses (DECISIONS 757).
 String _where(ShareStatus s) {
-  final lan = s.addresses.where((a) => a != '127.0.0.1').toList();
-  return lan.isEmpty ? 'no Wi-Fi address yet, port ${s.port}' : '${lan.join(', ')} port ${s.port}';
+  final lan = s.addresses.where((a) => a != '127.0.0.1').length;
+  return lan == 0 ? 'no Wi-Fi address yet, port ${s.port}' : 'port ${s.port}, $lan Wi-Fi ${lan == 1 ? 'address' : 'addresses'}';
 }
 
 /// `192.168.1.23:8765`, or null without a Wi-Fi address.

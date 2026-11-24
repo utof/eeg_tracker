@@ -1,26 +1,33 @@
 // The sleep report of one night (opened from the night screen's Sleep section), following the scorer live:
 // while the night is being scored the page says so, and the report appears when it is written. "Was this you?"
 // (DECISIONS 370-379) is worked out from the app's files when the page opens, when the report changes, and after
-// an answer, in a background isolate (DECISIONS 620-629): its line appears a moment after the report.
+// an answer, in a background isolate (DECISIONS 620-629): its line appears a moment after the report. The night's pulse
+// (DECISIONS 815) is read the same way: the pulse pass over its raw files when none is kept for them (never while a
+// night records, a session runs or the scoring runs: then only what is kept), drawn as the chart's Pulse lane.
 import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 
 import '../alarm/record.dart';
+import '../pulse/night.dart' show NightPulse, nightPulseInBackground;
 import '../recorder/remove.dart' show rawGoneText, removedOfNight;
 import '../sleep/report.dart';
 import '../wearer/check.dart' show kindNight;
 import '../wearer/wearer.dart';
 import 'alarm_view.dart';
+import 'archive_screen.dart' show phoneArchiveBusy;
 import 'evidence_sheet.dart';
 import 'sleep_report_view.dart';
 import 'sleep_scoring.dart';
 
 class SleepReportScreen extends StatefulWidget {
-  const SleepReportScreen({super.key, required this.scoring, required this.nightOf});
+  const SleepReportScreen({super.key, required this.scoring, required this.nightOf, this.pulse});
   final SleepScoring scoring;
   final String nightOf;
+
+  /// Tests: the night's pulse without an isolate or the phone's busy check ([run]: the pass may run).
+  final Future<NightPulse> Function(String recordingsPath, String nightOf, int startMs, int n, bool run)? pulse;
 
   @override
   State<SleepReportScreen> createState() => _SleepReportScreenState();
@@ -35,6 +42,11 @@ class _SleepReportScreenState extends State<SleepReportScreen> {
 
   /// The newest check asked for: an older one that ends later is dropped.
   int _check = 0;
+
+  /// The night's pulse on its report's clock, the report's `built` time it was read for, and whether it is being read.
+  List<double?>? _pulse;
+  String? _pulseFor;
+  bool _pulseAsked = false, _pulseReading = false;
 
   String get _dir => widget.scoring.scorer.recordingsDir.path;
 
@@ -62,6 +74,34 @@ class _SleepReportScreenState extends State<SleepReportScreen> {
     );
   }
 
+  /// Reads the night's pulse in the background (the pass first, when nothing records or scores); shown when done.
+  void _askPulse(SleepReport r, String? built) {
+    _pulseFor = built;
+    _pulseAsked = true;
+    _pulseReading = true;
+    final dir = _dir, night = widget.nightOf;
+    final start = r.dataStart.millisecondsSinceEpoch, n = r.stages.length;
+    unawaited(() async {
+      NightPulse? p;
+      try {
+        final load = widget.pulse;
+        if (load != null) {
+          p = await load(dir, night, start, n, true);
+        } else {
+          final b = await phoneArchiveBusy();
+          p = await nightPulseInBackground(dir, night, start, n, run: !(b.nightRecording || b.sessionRunning || b.scoring));
+        }
+      } catch (_) {
+        p = null; // the pulse is never worth breaking the report
+      }
+      if (!mounted || _pulseFor != built) return;
+      setState(() {
+        _pulse = p?.bpm;
+        _pulseReading = false;
+      });
+    }());
+  }
+
   void _answer(String? answer) {
     try {
       answerWearer(_dir, kindNight, widget.nightOf, answer, DateTime.now());
@@ -81,6 +121,9 @@ class _SleepReportScreenState extends State<SleepReportScreen> {
       final report = all.where((r) => r.nightOf == nightOf).firstOrNull;
       final built = report?.json['built'] as String?;
       if (!_asked || built != _checkedFor) _ask(built);
+      if (report != null && report.scored && (!_pulseAsked || _pulseFor != built)) {
+        _askPulse(report, built);
+      }
       final w = _wearer;
       return SleepReportView(
         nightOf: nightOf,
@@ -106,6 +149,9 @@ class _SleepReportScreenState extends State<SleepReportScreen> {
         wearer: w == null ? null : wearerLine(w, kindNight, nightOf),
         onWearerAnswer: _answer,
         onWearerInfo: () => showEvidence(context, 'was-this-you'),
+        pulse: _pulseFor == built ? _pulse : null,
+        pulseReading: _pulseReading,
+        onPulseInfo: () => showEvidence(context, 'pulse'),
       );
     },
   );

@@ -55,12 +55,20 @@ Each line says what it does. In brackets: how well the research backs it **for t
   end, marked "tested" apart from "seen together". (some)
 - **"Was this you?"**: a soft question when someone else seems to have worn the headband, so a borrowed headband
   does not spoil your trends. A weak check, tested only on made-up people. (weak)
+- **Pulse (experiment)**: after a recording, the pulse your heartbeat leaves in the headband's signal (any
+  electrodes), as a red Pulse lane under the sleep report's chart and the Archive's timeline where it could be read,
+  "Pulse while asleep: about X/min" in the sleep report and in Trends; `scripts/compare_pulse.py` checks it against a
+  watch's export. (weak)
 - **Hands-free controls**: a double jaw clench or a look left then right as a switch during sessions. Off by
   default. (some)
+- **Walking and steps**: after a recording, walking, its pace, running, stops and estimated steps from the rhythm your
+  steps leave in the headband's signal (any electrodes), as a Walking lane in the Archive and Walking and Steps
+  (estimated) in Trends; an optional switch writes the phone's own step counter into the recording once a minute,
+  which wins where it counted and checks the headband. (weak)
 - **Export data**: copies everything the app keeps to a folder you pick (with a checksum list) for the laptop.
 - **Share on Wi-Fi**: the laptop watches the phone's recording live and copies its files during the night. Off by
   default, home Wi-Fi only. **Connecting is one scan**: the laptop shows a QR code (`scripts/phone_link.py`), the
-  phone's camera opens the app, **Connect**; after that the phone tells the laptop where it is by itself.
+  phone's camera opens the app, **Connect**; after that the laptop finds the phone by itself (on your home Wi-Fi).
 - **Packing old nights**: raw recordings nothing has written for a day are packed (lossless, checked) to save space;
   every page and the laptop read them as before.
 - **Our own headband connection (test switch)**: our own Bluetooth code instead of BrainBit's library; BrainBit's
@@ -92,8 +100,19 @@ Each line says what it does. In brackets: how well the research backs it **for t
 - **Tools for the phone's files**: `import_phone.py`, `phone_night_check.py`, `catalog.py`, `pull_phone.py`
   (below), and `pack_old.py`, which packs raw recordings older than a day (both sides pack: lossless, checked).
 - **Pairing with the phone** (`python3 scripts/phone_link.py`, also the tray's **Pair phone…**): a QR code to scan,
-  then the phone's files copied every 2 minutes and its live pages at `http://localhost:8770/`.
+  then the phone's files copied every 2 minutes and its live pages at `http://localhost:8770/`; after a copy that
+  brought something new it packs old recordings, exports the day numbers for utof_tracker, updates the data book and
+  scores the detectors against the truth labels (`scripts/after_pull.py`). A phone paired before 2026-11-21 is
+  paired once more (one scan); update the laptop's scripts and the app together.
   ([docs/phone-link.md](docs/phone-link.md))
+- **The data book** (`uv run --project analysis python scripts/data_book.py`): every night, nap, session, day, 30 s
+  of signal and label in six tables in `_local/data/` that open in a spreadsheet, each row with its model version
+  and the SHA-256 of the files it came from. ([docs/data-format.md](docs/data-format.md), "The data book")
+- **Truth labels and the detectors scored against them**: what really happened (awake, walking, eating, a watch's
+  pulse), typed against a vocabulary (`scripts/truth_vocabulary.tsv`), from the hand file
+  `_local/analyses/truth-labels.tsv` (`python3 scripts/truth.py check`) and the Archive's tags marked "This is what I
+  was doing", into `_local/data/truth.tsv`; `scripts/validate_detectors.py` writes `validation.tsv` and `validation.md`
+  (agreement, false minutes per detector and label). ([docs/data-format.md](docs/data-format.md), "`truth.tsv`")
 - **Every day's numbers for utof_tracker** (`python3 scripts/export_events.py --daily`): one event per day with what
   the phone's Trends page shows, for the owner's life tracker. ([docs/utof-interface.md](docs/utof-interface.md))
 - **The same scoring and detectors in Python**: the phone's rules were written and checked there first (`analysis/`).
@@ -158,6 +177,9 @@ python3 scripts/export_events.py _local/recordings/*.morning.json             # 
 (every Trends number, sleep stages, what was left out and why), the nights and the check-ins into
 `_local/export/events/`; re-running adds only what changed. utof_tracker reads that folder itself. The contract:
 [docs/utof-interface.md](docs/utof-interface.md).
+Walking minutes and steps come with each day: from the phone's walk files, and from the laptop's own
+(`uv run --project analysis python scripts/walks.py --all` walks every recording in `_local/recordings/`;
+[docs/detectors.md](docs/detectors.md#walking-pace-and-estimated-steps-decisions-800-809)).
 
 Tests (no headband): `uv run --project analysis --with pytest pytest analysis/tests` (add `-m "not slow"` to skip
 the 2.5-minute fake-headband run) and `node --test tests/js/*.test.mjs`.
@@ -259,13 +281,17 @@ MIT licence.
 The recorder restarts itself after every Bluetooth drop and for every contact re-check, and its pages go away for
 20-40 s each time. `python3 scripts/page_server.py` (port 8770) never restarts: it serves the pages itself and
 passes live data through from the recorder, answering "reconnecting" while the recorder is away. Use
-`http://<laptop>:8770/` instead of port 8765. It answers the Sleep page and the morning result itself, so they
+`http://localhost:8770/` instead of port 8765: it answers this laptop only (127.0.0.1, with `Host` and `Origin`
+checked, DECISIONS 750), not other devices on the Wi-Fi. It answers the Sleep page and the morning result itself, so they
 work while the headband is off or charging (the recorder has no page server then).
 
 ### The phone as the recorder
 
 The phone app records nights too, and with **Share on Wi-Fi** switched on (off by default; app/README.md) it answers
-the same routes as the laptop recorder: `python3 scripts/page_server.py --recorder http://<phone>:8765 --token <code>`
-shows these pages on the phone's recording, and `python3 scripts/pull_phone.py http://<phone>:8765 --token <code>`
-mirrors its files into `_local/` every 2 minutes while it records, checked against the phone's SHA-256 list.
-Local network only, a code on every request, plain HTTP (not encrypted: home Wi-Fi only; DECISIONS rows 220-229).
+the same routes as the laptop recorder: `EEG_PHONE_TOKEN=<code> python3 scripts/page_server.py --recorder
+http://<phone>:8765` shows these pages on the phone's recording, and `EEG_PHONE_TOKEN=<code> python3
+scripts/pull_phone.py http://<phone>:8765` mirrors its files into `_local/` every 2 minutes while it records, checked
+against the phone's SHA-256 list (a paired phone needs neither: the tray does both). Local network only, a code or the
+pairing's signature on every request, plain HTTP (not encrypted: a paired phone shares only on your home Wi-Fi or one
+you allow for 12 hours; DECISIONS rows 220-229, 750-759). The laptop's own pages answer this laptop only
+(127.0.0.1, `Host` and `Origin` checked).

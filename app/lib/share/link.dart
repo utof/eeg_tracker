@@ -1,31 +1,29 @@
-// Pairing with a laptop by one scan (DECISIONS rows 530-539; scripts/phone_link.py; docs/phone-link.md).
+// Pairing with a laptop by one scan (DECISIONS rows 530-539, 750-759; scripts/phone_link.py; docs/phone-link.md).
 //
-// The laptop shows a QR code; the phone's camera opens its page, which opens this app with
+// The laptop shows a QR code; the phone's camera opens its page, whose script reads the one-time code from the link's
+// `#` part (a browser never sends that part over the network) and opens this app with
 // `eegtracker://pair?h=<laptop>&p=<port>&s=<one-time code>&n=<name>`. On Connect the app checks that the laptop knows
-// the code (an HMAC over the app's own random nonce, so the code never travels back), proves that it knows it too,
-// and only then sends its Share on Wi-Fi port and token. The laptop answers with a key of their own. With that key
-// the app later tells the laptop where it is now, by the same two steps: whenever sharing starts and every 5 minutes
-// while it is on ([LaptopAnnouncer], in the share isolate). The laptop takes the phone's address from the connection
-// itself, so nothing here needs to know the phone's own address.
+// the code (an HMAC over the app's own random nonce, so the code never travels), proves that it knows it too, and
+// sends its Share on Wi-Fi port. Both sides then work out the same key from the code and the two nonces (auth.dart),
+// so the key never crosses the Wi-Fi either; the laptop's last answer proves it holds the same key. Nothing secret is
+// sent: not the code, not the key, not the token.
 //
-// Plain dart:io with no Flutter import: it also runs in the share isolate, and in tests.
+// After the pairing the laptop finds the phone and signs every request with that key (server.dart); the phone tells
+// the laptop nothing by itself, and the laptop listens on the Wi-Fi only while a code is shown (DECISIONS 750-751).
+//
+// Plain dart:io with no Flutter import: it runs in the share isolate, and in tests.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:crypto/crypto.dart';
+import 'auth.dart';
 
 const String linkScheme = 'eegtracker';
-const int linkVersion = 1;
-const String _proofTag = 'eeg-tracker link v1';
-final RegExp _nonceShape = RegExp(r'^[A-Za-z0-9_-]{16,64}$');
 
-/// How often a paired phone tells the laptop where it is while sharing is on.
-const Duration announceEvery = Duration(minutes: 5);
-
-/// After a failed try: the next ones, then [announceEvery].
-const List<Duration> announceRetries = [Duration(seconds: 30), Duration(minutes: 1), Duration(minutes: 2)];
+/// The pairing's version: 2 derives the key on both sides (DECISIONS 753). A version-1 pairing sent its key over the
+/// Wi-Fi and is not used any more: one new scan replaces it.
+const int linkVersion = 2;
 
 /// The answer a laptop may give is small; anything longer is not the laptop.
 const int _maxAnswer = 16 * 1024;
@@ -74,14 +72,14 @@ class PairLink {
     final q = u.queryParameters;
     final host = q['h'] ?? '', code = q['s'] ?? '';
     final port = int.tryParse(q['p'] ?? '');
-    if (!isLaptopAddress(host) || port == null || port < 1024 || port > 65535 || !_nonceShape.hasMatch(code)) {
+    if (!isLaptopAddress(host) || port == null || port < 1024 || port > 65535 || !nonceShape.hasMatch(code)) {
       return null;
     }
     return PairLink(host: host, port: port, code: code, name: laptopName(q['n']));
   }
 }
 
-/// The laptop this phone is paired with: where it was, and the key they share.
+/// The laptop this phone is paired with: where it was at pairing, its name, and the key they both worked out.
 class PairedLaptop {
   const PairedLaptop({required this.host, required this.port, required this.key, required this.name, this.pairedAtMs = 0});
   final String host;
@@ -90,16 +88,22 @@ class PairedLaptop {
   final String name;
   final int pairedAtMs;
 
-  Map<String, Object?> toJson() => {'host': host, 'port': port, 'key': key, 'name': name, 'paired_at_ms': pairedAtMs};
+  Map<String, Object?> toJson() => {'v': linkVersion, 'host': host, 'port': port, 'key': key, 'name': name, 'paired_at_ms': pairedAtMs};
 
+  /// A version-2 pairing only: an older one (its key crossed the Wi-Fi) reads as none ([oldPairingName] says whose).
   static PairedLaptop? fromJson(Object? j) {
-    if (j is! Map) return null;
+    if (j is! Map || j['v'] != linkVersion) return null;
     final h = j['host'], p = j['port'], k = j['key'], t = j['paired_at_ms'];
-    if (h is! String || !isLaptopAddress(h) || p is! int || p < 1024 || p > 65535 || k is! String || k.length < 32) {
+    if (h is! String || !isLaptopAddress(h) || p is! int || p < 1024 || p > 65535 || k is! String || !keyShape.hasMatch(k)) {
       return null;
     }
     return PairedLaptop(host: h, port: p, key: k, name: laptopName(j['name']), pairedAtMs: t is int ? t : 0);
   }
+
+  /// The name of a pairing made before version 2, which this app no longer uses (one new scan replaces it); null for
+  /// anything else.
+  static String? oldPairingName(Object? j) =>
+      j is Map && j['v'] != linkVersion && j['key'] is String ? laptopName(j['name']) : null;
 
   @override
   bool operator ==(Object other) =>
@@ -109,35 +113,12 @@ class PairedLaptop {
   int get hashCode => Object.hash(host, port, key, name, pairedAtMs);
 }
 
-/// HMAC-SHA256 of `eeg-tracker link v1|<who>|<via>|<first>|<second>` keyed with the code or the key, in hex; the same
-/// as `proof()` in scripts/phone_link.py (both checked against app/test/fixtures/phone_link.json).
-String linkProof(String secret, String who, String via, String first, String second) =>
-    Hmac(sha256, utf8.encode(secret)).convert(utf8.encode([_proofTag, who, via, first, second].join('|'))).toString();
-
-/// 16 random bytes, URL-safe, no padding (22 characters).
-String newNonce([Random? random]) {
-  final r = random ?? Random.secure();
-  return base64Url.encode([for (var i = 0; i < 16; i++) r.nextInt(256)]).replaceAll('=', '');
-}
-
-bool _same(String a, String b) {
-  final x = utf8.encode(a), y = utf8.encode(b);
-  var diff = x.length ^ y.length;
-  for (var i = 0; i < y.length; i++) {
-    diff |= (i < x.length ? x[i] : 0) ^ y[i];
-  }
-  return diff == 0;
-}
-
 enum LinkFailure {
   /// No connection, or no answer in time.
   noAnswer,
 
   /// The one-time code has expired or was used.
   expired,
-
-  /// The laptop has no key (it was never paired, or its pairing file is gone).
-  notPaired,
 
   /// The answer did not prove the code or the key: nothing was sent.
   wrongLaptop,
@@ -147,6 +128,12 @@ enum LinkFailure {
 
   /// Something that is not the laptop's answer.
   bad,
+
+  /// The laptop's scripts are older than this app (they speak the first version of pairing).
+  oldLaptop,
+
+  /// Android 17 blocks the local network for this app: the owner refused its "Nearby devices" permission.
+  localNetwork,
 }
 
 class LinkError implements Exception {
@@ -158,10 +145,10 @@ class LinkError implements Exception {
   String toString() => detail.isEmpty ? why.name : '${why.name}: $detail';
 }
 
-/// The laptop's answer to a finished handshake: its name, and the new key after a pairing.
-typedef LinkAnswer = ({String name, String? key});
+/// The pairing's outcome: the laptop's name and the key both sides worked out.
+typedef LinkAnswer = ({String name, String key});
 
-/// The phone's side of the handshake (scripts/phone_link.py is the laptop's).
+/// The phone's side of the pairing (scripts/phone_link.py is the laptop's).
 class LinkClient {
   LinkClient({this.timeout = const Duration(seconds: 8), this.random});
   final Duration timeout;
@@ -169,37 +156,29 @@ class LinkClient {
   /// Tests pass a seeded one; null = the system's secure random.
   final Random? random;
 
-  /// Step one: the laptop proves it knows [secret] (the one-time code with [via] `code`, the shared key with `key`).
-  /// Step two, only then: this phone proves it too and sends [sharePort] and [token]. Throws [LinkError].
-  Future<LinkAnswer> handshake({
-    required String host,
-    required int port,
-    required String via,
-    required String secret,
-    required int sharePort,
-    required String token,
-  }) async {
+  /// Step one: the laptop proves it knows [code]. Step two, only then: this phone proves it too and says its Share on
+  /// Wi-Fi [sharePort]. Both work the key out; the laptop's answer proves it got the same one. Throws [LinkError].
+  Future<LinkAnswer> pair({required String host, required int port, required String code, required int sharePort}) async {
     if (!isLaptopAddress(host)) throw const LinkError(LinkFailure.bad, 'not a local-network address');
     final mine = newNonce(random);
-    final hello = await _post(host, port, '/link/hello', {'v': linkVersion, 'via': via, 'nonce': mine});
+    final hello = await _post(host, port, '/link/hello', {'v': linkVersion, 'nonce': mine});
     final theirs = hello['nonce'], given = hello['proof'];
-    if (theirs is! String || !_nonceShape.hasMatch(theirs) || given is! String) {
+    if (theirs is! String || !nonceShape.hasMatch(theirs) || given is! String) {
       throw const LinkError(LinkFailure.bad, 'an answer without a proof');
     }
-    if (!_same(given, linkProof(secret, 'laptop', via, mine, theirs))) {
-      throw const LinkError(LinkFailure.wrongLaptop);
-    }
+    if (!sameSecret(given, linkProof(code, 'laptop', mine, theirs))) throw const LinkError(LinkFailure.wrongLaptop);
     final done = await _post(host, port, '/link/finish', {
       'v': linkVersion,
-      'via': via,
       'nonce': theirs,
-      'proof': linkProof(secret, 'phone', via, theirs, mine),
+      'proof': linkProof(code, 'phone', theirs, mine),
       'port': sharePort,
-      'token': token,
     });
-    final key = done['key'];
-    if (via == 'code' && (key is! String || key.length < 32)) throw const LinkError(LinkFailure.bad, 'no key');
-    return (name: laptopName(done['name'] ?? hello['name']), key: key is String ? key : null);
+    final key = deriveKey(code, mine, theirs);
+    final confirm = done['confirm'];
+    if (confirm is! String || !sameSecret(confirm, confirmProof(key, mine, theirs))) {
+      throw const LinkError(LinkFailure.bad, 'the laptop did not confirm the key');
+    }
+    return (name: laptopName(done['name'] ?? hello['name']), key: key);
   }
 
   Future<Map<String, Object?>> _post(String host, int port, String path, Map<String, Object?> body) async {
@@ -231,8 +210,8 @@ class LinkClient {
           return answer.cast<String, Object?>();
         case 410:
           throw const LinkError(LinkFailure.expired);
-        case 404 when error == 'not paired':
-          throw const LinkError(LinkFailure.notPaired);
+        case 400:
+          throw const LinkError(LinkFailure.oldLaptop); // the laptop's scripts speak the first version of pairing
         case 403:
           throw LinkError(LinkFailure.refused, error is String ? error : '');
         default:
@@ -247,122 +226,5 @@ class LinkClient {
     } finally {
       client.close(force: true);
     }
-  }
-}
-
-/// Tells the paired laptop where this phone is: at once, then every [every] while it works, sooner after a failure.
-/// Lives in the share isolate (isolate.dart), so it runs wherever the server runs (the app or the night recorder)
-/// and ends with it. One line to [onLine] when the state changes, never one per try.
-class LaptopAnnouncer {
-  LaptopAnnouncer({
-    required this.laptop,
-    required this.sharePort,
-    required this.token,
-    LinkClient? client,
-    this.onLine,
-    this.every = announceEvery,
-    this.retries = announceRetries,
-  }) : _client = client ?? LinkClient();
-
-  final PairedLaptop laptop;
-  final int sharePort;
-  final String token;
-  final LinkClient _client;
-  final void Function(String line)? onLine;
-  final Duration every;
-  final List<Duration> retries;
-
-  Timer? _timer;
-  bool _closed = false, _busy = false, _again = false;
-  int _fails = 0;
-  LinkFailure? _last;
-  bool _known = false;
-
-  /// Tries so far that reached the laptop and were accepted.
-  int told = 0;
-
-  void start() => _schedule(Duration.zero);
-
-  /// The phone's network came back or changed (DECISIONS 676): one try now, not at the next 5 minutes, and the
-  /// quick retries again after a failure. A try under way finishes first; then one more follows.
-  void soon() {
-    if (_closed) return;
-    _fails = 0;
-    if (_busy) {
-      _again = true;
-      return;
-    }
-    _schedule(Duration.zero);
-  }
-
-  void stop() {
-    _closed = true;
-    _timer?.cancel();
-  }
-
-  void _schedule(Duration d) {
-    if (_closed) return;
-    _timer?.cancel();
-    _timer = Timer(d, () => unawaited(tell()));
-  }
-
-  /// One try now; true when the laptop took it.
-  Future<bool> tell() async {
-    if (_closed) return false;
-    _busy = true;
-    try {
-      return await _tell();
-    } finally {
-      _busy = false;
-      if (_again && !_closed) {
-        _again = false;
-        _schedule(Duration.zero);
-      }
-    }
-  }
-
-  Future<bool> _tell() async {
-    LinkFailure? failure;
-    try {
-      await _client.handshake(
-        host: laptop.host,
-        port: laptop.port,
-        via: 'key',
-        secret: laptop.key,
-        sharePort: sharePort,
-        token: token,
-      );
-    } on LinkError catch (e) {
-      failure = e.why;
-    } catch (_) {
-      failure = LinkFailure.bad;
-    }
-    if (_closed) return failure == null;
-    if (failure == null) {
-      told++;
-      if (!_known) _say('the laptop ${laptop.name} knows where this phone is');
-      _known = true;
-      _fails = 0;
-      _last = null;
-      _schedule(every);
-      return true;
-    }
-    if (_known || _last != failure) {
-      _say(switch (failure) {
-        LinkFailure.notPaired || LinkFailure.wrongLaptop => 'the laptop ${laptop.name} no longer knows this phone: scan its code again',
-        _ => 'the laptop ${laptop.name} did not answer (${failure.name}); trying again',
-      });
-    }
-    _known = false;
-    _last = failure;
-    _schedule(_fails < retries.length ? retries[_fails] : every);
-    _fails++;
-    return false;
-  }
-
-  void _say(String line) {
-    try {
-      onLine?.call(line);
-    } catch (_) {}
   }
 }

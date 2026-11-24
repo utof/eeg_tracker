@@ -142,6 +142,13 @@ class MainActivity : FlutterActivity() {
                     if (call.argument<Boolean>("session") != false) SharpPrompts.screenHeld = on
                     result.success(null)
                 }
+                // the Share on Wi-Fi sheet shows the code: no screenshots, screen recordings or recent-apps preview of
+                // this window while it is open (DECISIONS 754)
+                "secure" -> runOnUiThread {
+                    if (on) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    result.success(null)
+                }
                 "dim" -> runOnUiThread {
                     val attrs = window.attributes
                     attrs.screenBrightness = if (on) 0.01f else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE

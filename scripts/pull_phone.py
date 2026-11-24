@@ -1,9 +1,12 @@
 """Mirror the phone app's files onto the laptop over Wi-Fi while it records: new files, and the new end of growing ones.
 
-usage: pull_phone.py http://<phone-ip>:8765 --token <t> [--every 2] [--once] [--dest _local] [--raw-only] [--no-ack]
+usage: pull_phone.py [http://<phone-ip>:8765] [--every 2] [--once] [--dest _local] [--raw-only] [--no-ack]
+       with EEG_PHONE_TOKEN=<t> (or --token <t>) for a phone not paired with this laptop
 
 On the phone: switch "Share on Wi-Fi" on (main screen, Your data; app/README.md). It shows the address and the
-token. The token may also come from the EEG_PHONE_TOKEN environment variable (keeps it out of the shell history).
+token. Give the token in EEG_PHONE_TOKEN (the command line is readable by other users' `ps`). Without an address and
+token it uses the phone paired with this laptop (`<dest>/phone/link.json`, scripts/phone_link.py): every request is
+then signed with the pairing's key and the phone's answers must prove it (DECISIONS 751); the token is not used.
 
 Every --every minutes (default 2) this asks the phone for its list (GET /files: path, bytes, SHA-256, modified time;
 the list Export data's manifest holds) and fetches what the laptop lacks, into the layout of scripts/import_phone.py:
@@ -33,10 +36,12 @@ the list Export data's manifest holds) and fetches what the laptop lacks, into t
 - Acknowledged receipt (DECISIONS 690-699): when this laptop is paired with the phone (`<dest>/phone/link.json`, made
   by scripts/phone_link.py, holds the pairing's key; `--no-ack` turns it off), it hashes each copy the phone lists as
   finished and not yet acked again from its own disk (a packed `.f32.xz` unpacked; at most 4 GB a pass, oldest first)
-  and, where it equals the phone's SHA-256 (a packed `.f32.gz`'s `original`), tells the phone so: `POST /ack` with the
-  paths and hashes and an HMAC of the body under the key. The phone keeps the acks; its Storage page deletes old raw
-  recordings from the phone only once they are acked (3 days after, by default), never anything else. This script
-  never deletes anything: `<dest>/phone/acks.jsonl` gets a line per ack. A raw set that left the phone leaves its
+  and, where it equals the phone's SHA-256 (a packed `.f32.gz`'s `original`), tells the phone so: a signed
+  `POST /ack` with the paths and hashes. The phone keeps the acks; its Storage page deletes old raw recordings from
+  the phone only once they are acked (3 days after, by default), never anything else, and only after this laptop
+  proved again that it holds them: each pass answers the phone's questions (`GET /recheck`: random byte ranges and a
+  nonce) with an HMAC over those bytes of this laptop's own copy (`POST /recheck`; DECISIONS 756), or says it does
+  not hold the file. This script never deletes anything: `<dest>/phone/acks.jsonl` gets a line per ack. A raw set that left the phone leaves its
   `<stamp>.removed.json`, fetched like any file; a record whose files this laptop does not hold is a PROBLEM.
 
 A phone that does not answer (asleep, out of Wi-Fi, sharing off) is tried again at the next pass. Exit status with
@@ -54,13 +59,13 @@ from typing import Callable
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # find import_phone.py even under `python3 -I`
 import import_phone as ip  # noqa: E402  (the layout, the index of copies and the path check are its own)
 import packed  # noqa: E402  (raw files packed after a day: the phone's .f32.gz, the laptop's .f32.xz)
+import phone_auth as pa  # noqa: E402  (the paired laptop's signatures: DECISIONS 751-755)
 
 FORMAT = "eeg-tracker-phone-files"
 VERSION = 1
 RAW = (".f32", ".f32.gz", ".idx", ".log", ".markers.jsonl", ".header.json")  # a file set (docs/data-format.md)
 LIST_TIMEOUT = 600  # the phone may be working out SHA-256 of files it never listed before
 FILE_TIMEOUT = 60
-ACK_PROOF = "eeg-tracker ack v1"  # POST /ack's HMAC: app/lib/recorder/acks.dart ackProof
 ACK_BUDGET = 4 * 1024 ** 3  # bytes hashed again for acks in one pass
 ACK_BATCH = 400  # files per POST /ack (the phone takes up to 256 KB)
 ACK_RETRY_S = 6 * 3600  # an app without /ack is asked again after this long
@@ -71,16 +76,24 @@ class PhoneError(Exception):
 
 
 class Refused(Exception):
-    """The token is wrong or this is not the app: trying again will not help."""
+    """The token or the key is refused, or this is not the app: trying again will not help."""
+
+
+class NotThePhone(Refused):
+    """What answered at the phone's address did not prove the pairing's key: nothing it says is used."""
+
+
+class Held(Exception):
+    """The phone holds this file back for now (409): it asked this laptop to prove it still holds it before deleting it
+    (DECISIONS 756). The answer must come from this laptop's own copy; the file is copied again later if needed."""
+
+
+class Paused(PhoneError):
+    """The phone does not share on this Wi-Fi: not its home network and not allowed there by hand (DECISIONS 752)."""
 
 
 class AckRefused(Exception):
     """POST /ack was refused whole: no route (an older app), not paired, or a wrong key."""
-
-
-def ack_proof(key: str, body: bytes) -> str:
-    """HMAC-SHA256 of `eeg-tracker ack v1|` and the body under the pairing's key, in hex (app/test/fixtures/phone_ack.json)."""
-    return hmac.new(key.encode("utf-8"), ACK_PROOF.encode() + b"|" + body, hashlib.sha256).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -119,6 +132,9 @@ class Pass:
     ack_note: str | None = None  # why nothing was acked this pass (not paired, an older app)
     removed: list[str] = field(default_factory=list)  # raw sets that left the phone, their files here
     lost: list[str] = field(default_factory=list)  # raw files the phone removed that this laptop does not hold
+    here: str | None = None  # what the paired phone says of its Wi-Fi: home, here (allowed by hand) or paused
+    proven: list[str] = field(default_factory=list)  # asked about before deleting: proven from this laptop's own copy
+    unproven: list[str] = field(default_factory=list)  # asked about: not held here as acked (missing or other bytes)
 
     @property
     def problems(self) -> bool:
@@ -135,26 +151,79 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class Phone:
-    """The phone's Share on Wi-Fi server."""
+    """The phone's Share on Wi-Fi server. With the pairing's [key] (scripts/phone_link.py) every request is signed
+    (phone_auth.py) and the token never leaves this laptop; each answer must prove the key too, or it is not the
+    paired phone. [home]: whether this laptop is on the network where it paired, said in each signature. Without a
+    key (a phone shared by hand: --token), the token goes in a header, never in the address."""
 
-    def __init__(self, base: str, token: str) -> None:
+    def __init__(self, base: str, token: str | None = None, *, key: str | None = None,
+                 home: Callable[[], bool] | bool = False) -> None:
         self.base = base.rstrip("/")
         self.token = token
-        self.opener = urllib.request.build_opener(_NoRedirect)
+        self.key = key
+        self._home = home if callable(home) else (lambda: bool(home))
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+
+    def _send(self, path: str, headers: dict[str, str] | None = None, timeout: float = FILE_TIMEOUT,
+              data: bytes | None = None):
+        """The response, or urllib's HTTPError for an error answer; a signed request's answer is checked first."""
+        method = "POST" if data is not None else "GET"
+        h = dict(headers or {})
+        nonce = None
+        if self.key:
+            signed = pa.signed_headers(self.key, method, path, data or b"", home=self._home())
+            nonce = signed[pa.NONCE_H]
+            h.update(signed)
+        elif self.token:
+            h["Authorization"] = f"Bearer {self.token}"
+        req = urllib.request.Request(self.base + path, data=data, method=method, headers=h)
+        try:
+            r = self.opener.open(req, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if nonce is not None and e.code != 401 and not pa.reply_ok(self.key or "", nonce, e.headers.get(pa.REPLY_H)):
+                raise NotThePhone("it did not prove the pairing's key") from e
+            raise
+        except (OSError, urllib.error.URLError) as e:
+            raise PhoneError(f"no answer: {getattr(e, 'reason', e)}") from e
+        if nonce is not None and not pa.reply_ok(self.key or "", nonce, r.headers.get(pa.REPLY_H)):
+            r.close()
+            raise NotThePhone("it did not prove the pairing's key")
+        return r
+
+    @staticmethod
+    def _why(e: urllib.error.HTTPError) -> str | None:
+        try:
+            w = json.loads(e.read().decode("utf-8")).get("error")
+        except (OSError, ValueError, AttributeError):
+            return None
+        return w if isinstance(w, str) else None
 
     def _open(self, path: str, headers: dict[str, str] | None = None, timeout: float = FILE_TIMEOUT,
               data: bytes | None = None):
-        req = urllib.request.Request(self.base + path, data=data, method="POST" if data is not None else "GET",
-                                     headers={"Authorization": f"Bearer {self.token}", **(headers or {})})
         try:
-            return self.opener.open(req, timeout=timeout)
+            return self._send(path, headers, timeout, data)
         except urllib.error.HTTPError as e:
+            why = self._why(e)
+            if e.code == 401:
+                raise Refused(f"the phone refused this laptop's signature ({why})" if self.key and why else
+                              "the phone refused the token") from e
+            if e.code == 403 and why == "not sharing on this Wi-Fi":
+                raise Paused(why) from e
+            if e.code == 409:
+                raise Held(why or "being re-checked") from e
             if e.code in (401, 403):
-                raise Refused("the phone refused the token" if e.code == 401 else
-                              "the phone refused this computer's address (it serves the local network only)") from e
+                raise Refused(f"the phone refused ({why or 'local network only'})") from e
             raise PhoneError(f"the phone answered {e.code} for {path}") from e
-        except (OSError, urllib.error.URLError) as e:
-            raise PhoneError(f"no answer from {self.base} ({getattr(e, 'reason', e)})") from e
+
+    def who(self) -> dict | None:
+        """GET /who (signed only): the app's word that it is there and what it says of its Wi-Fi (`here`: home, here
+        or paused); None when it is not the paired phone's answer."""
+        try:
+            with self._open("/who", timeout=5) as r:
+                m = json.loads(r.read(4096).decode("utf-8"))
+        except (OSError, ValueError, Refused):
+            return None
+        return m if isinstance(m, dict) and m.get("app") == "eeg-tracker" else None
 
     def files(self) -> tuple[list[Listed], list[str]]:
         """The phone's list, and the paths in it that are not usable."""
@@ -189,27 +258,26 @@ class Phone:
             out.append(Listed(p, size, digest, mod, orig, f.get("acked") is True))
         return out, bad
 
-    def ack(self, files: list[dict[str, str]], key: str) -> tuple[list[str], list[dict]]:
-        """POST /ack: (paths the phone took, [{path, why}] it did not). Raises AckRefused when it refused all of it."""
+    def ack(self, files: list[dict[str, str]], key: str | None = None) -> tuple[list[str], list[dict]]:
+        """POST /ack, signed with the pairing's key: (paths the phone took, [{path, why}] it did not). Raises
+        AckRefused when it refused all of it."""
+        if not self.key:
+            raise AckRefused("only the paired laptop acks (no key here)")
         body = json.dumps({"v": 1, "files": files}, separators=(",", ":")).encode()
-        headers = {"Content-Type": "application/json", "X-Eeg-Ack": ack_proof(key, body)}
-        req = urllib.request.Request(self.base + "/ack", data=body, method="POST",
-                                     headers={"Authorization": f"Bearer {self.token}", **headers})
         try:
-            with self.opener.open(req, timeout=FILE_TIMEOUT) as r:
+            with self._send("/ack", {"Content-Type": "application/json"}, FILE_TIMEOUT, body) as r:
                 m = json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
+            why = self._why(e)
             if e.code == 401:
-                raise Refused("the phone refused the token") from e
-            try:
-                why = json.loads(e.read().decode("utf-8")).get("error")
-            except (OSError, ValueError, AttributeError):
-                why = None
+                raise Refused(f"the phone refused this laptop's signature ({why})") from e
+            if e.code == 403 and why == "not sharing on this Wi-Fi":
+                raise Paused(why) from e
             raise AckRefused({404: "the phone's app is older than acks (update it)",
                               403: f"the phone refused the ack ({why or 'local network only'})"}.get(
                                   e.code, f"the phone answered {e.code} to the ack")) from e
-        except (OSError, ValueError) as e:
-            raise PhoneError(f"the ack did not reach the phone ({e})") from e
+        except ValueError as e:
+            raise PhoneError(f"the ack's answer could not be read ({e})") from e
         acked = [a for a in m.get("acked") or [] if isinstance(a, str)] if isinstance(m, dict) else []
         refused = [r for r in m.get("refused") or [] if isinstance(r, dict)] if isinstance(m, dict) else []
         return acked, refused
@@ -395,84 +463,89 @@ def pull(phone: Phone, dest: Path, *, raw_only: bool = False, now: datetime | No
     """One pass: the phone's list, then everything the laptop lacks; with the pairing's [key], then the acks."""
     pairing = key
     now = now or datetime.now().astimezone()
+    here = phone.who() if phone.key else None
     listed, bad = phone.files()
-    rep = Pass(listed=len(listed), refused=bad)
+    rep = Pass(listed=len(listed), refused=bad, here=here.get("here") if here and isinstance(here.get("here"), str) else None)
     index, state = ip.Index(dest, False), State(dest)
     replaced = dest / "phone" / "replaced" / ip._stamp(now)
     try:
         for e in order(listed):
-            if raw_only and not is_raw(e.path):
-                continue
-            key, dst = str(e.path), ip.target_for(dest, e.path)
-            if e.sha256 is None:
-                rep.growing += 1
-            if e.original is not None or packed.is_packed(ip.on_laptop(dst) or dst):
-                _pull_packed(phone, e, dest, index, state, rep, replaced)
-                continue
-            if not dst.is_file():
-                if _whole(phone, e, dst):
-                    rep.new.append(key); rep.fetched += e.bytes
-                    if e.sha256 is None:
-                        state.partial[key] = e.bytes
+            try:
+                if raw_only and not is_raw(e.path):
+                    continue
+                key, dst = str(e.path), ip.target_for(dest, e.path)
+                if e.sha256 is None:
+                    rep.growing += 1
+                if e.original is not None or packed.is_packed(ip.on_laptop(dst) or dst):
+                    _pull_packed(phone, e, dest, index, state, rep, replaced)
+                    continue
+                if not dst.is_file():
+                    if _whole(phone, e, dst):
+                        rep.new.append(key); rep.fetched += e.bytes
+                        if e.sha256 is None:
+                            state.partial[key] = e.bytes
+                        else:
+                            state.checked(e); index.put(dst, e.sha256)
                     else:
-                        state.checked(e); index.put(dst, e.sha256)
-                else:
-                    rep.damaged.append(key)
-                continue
-            have = dst.stat().st_size
-            if e.sha256 is not None and have == e.bytes and index.sha(dst) == e.sha256:
-                if key in state.partial:
-                    rep.checked.append(key)
-                else:
-                    rep.same += 1
-                state.checked(e)
-                continue
-            if state.raw.get(key) == have and have < e.bytes:
-                state.partial[key] = have  # our checked copy, and the phone added to the file since
-            if key in state.partial and have <= e.bytes:
-                # our own partial copy of a file the phone only ever adds to: fetch the new end
-                if have < e.bytes:
-                    with dst.open("ab") as out:
-                        got = phone.fetch(e.path, have, e.bytes, out)
-                        out.flush()
-                        os.fsync(out.fileno())
-                    rep.fetched += got
-                    if got:
-                        rep.grown.append(key)
-                    _set_time(dst, e.modified_ms)
-                    have = dst.stat().st_size
-                state.partial[key] = have
-                if e.sha256 is None or have != e.bytes:
-                    if e.sha256 is None and have == e.bytes and key not in rep.grown:
+                        rep.damaged.append(key)
+                    continue
+                have = dst.stat().st_size
+                if e.sha256 is not None and have == e.bytes and index.sha(dst) == e.sha256:
+                    if key in state.partial:
+                        rep.checked.append(key)
+                    else:
                         rep.same += 1
+                    state.checked(e)
                     continue
-                if ip.hash_file(dst) == e.sha256:
-                    state.checked(e); index.put(dst, e.sha256); rep.checked.append(key)
+                if state.raw.get(key) == have and have < e.bytes:
+                    state.partial[key] = have  # our checked copy, and the phone added to the file since
+                if key in state.partial and have <= e.bytes:
+                    # our own partial copy of a file the phone only ever adds to: fetch the new end
+                    if have < e.bytes:
+                        with dst.open("ab") as out:
+                            got = phone.fetch(e.path, have, e.bytes, out)
+                            out.flush()
+                            os.fsync(out.fileno())
+                        rep.fetched += got
+                        if got:
+                            rep.grown.append(key)
+                        _set_time(dst, e.modified_ms)
+                        have = dst.stat().st_size
+                    state.partial[key] = have
+                    if e.sha256 is None or have != e.bytes:
+                        if e.sha256 is None and have == e.bytes and key not in rep.grown:
+                            rep.same += 1
+                        continue
+                    if ip.hash_file(dst) == e.sha256:
+                        state.checked(e); index.put(dst, e.sha256); rep.checked.append(key)
+                        continue
+                    # the partial copy does not add up to the phone's file: keep it aside, fetch the file whole
+                    state.partial.pop(key); state.raw.pop(key, None)
+                    if _replace(phone, e, dst, replaced / dst.relative_to(dest), rep, index):
+                        state.checked(e)
                     continue
-                # the partial copy does not add up to the phone's file: keep it aside, fetch the file whole
-                state.partial.pop(key); state.raw.pop(key, None)
+                # a different copy that is not ours to continue: import_phone.py's rule
+                if e.modified_ms <= dst.stat().st_mtime_ns // 1_000_000:
+                    rep.kept.append(key)  # the laptop's copy is as new or newer
+                    continue
+                if e.sha256 is None:
+                    rep.waiting.append(key)  # replace only with a copy that can be checked
+                    continue
                 if _replace(phone, e, dst, replaced / dst.relative_to(dest), rep, index):
                     state.checked(e)
-                continue
-            # a different copy that is not ours to continue: import_phone.py's rule
-            if e.modified_ms <= dst.stat().st_mtime_ns // 1_000_000:
-                rep.kept.append(key)  # the laptop's copy is as new or newer
-                continue
-            if e.sha256 is None:
-                rep.waiting.append(key)  # replace only with a copy that can be checked
-                continue
-            if _replace(phone, e, dst, replaced / dst.relative_to(dest), rep, index):
-                state.checked(e)
+            except Held:  # asked about before the phone deletes it: not handed out now (DECISIONS 756)
+                rep.waiting.append(str(e.path))
         _check_removed(dest, rep)
         if pairing:
             acknowledge(phone, dest, listed, pairing, rep, state, raw_only=raw_only, budget=ack_budget, now=now)
+            answer_rechecks(phone, dest, rep)
         else:
             rep.ack_note = "not paired: no acks (scripts/phone_link.py pairs)"
     finally:
         state.save()
         index.save()
         if rep.changed or rep.problems:
-            _record(rep, dest, phone.base, now)
+            _record(rep, dest, "paired" if phone.key else "by code", now)
     return rep
 
 
@@ -581,12 +654,92 @@ def acknowledge(phone: Phone, dest: Path, listed: list[Listed], key: str, rep: P
             by = {a["path"]: a["sha256"] for a in todo}
             with f.open("a", encoding="utf-8") as out:
                 out.write(json.dumps({"acked": datetime.fromtimestamp(t).astimezone().isoformat(timespec="seconds"),
-                                      "phone": phone.base, "files": [{"path": p, "sha256": by.get(p)} for p in acked]})
+                                      "files": [{"path": p, "sha256": by.get(p)} for p in acked]})
                           + "\n")
 
 
-def _record(rep: Pass, dest: Path, base: str, now: datetime) -> None:
-    line = dict(pulled=now.isoformat(timespec="seconds"), phone=base, listed=rep.listed, bytes=rep.fetched,
+RECHECK_MAX = 4000  # questions answered in one pass (each reads 8 x 4 KB, or a whole small file)
+
+
+def _ranges(dst: Path, ranges: list[tuple[int, int]]):
+    """The bytes of [ranges] of this laptop's copy (a raw .f32 plain or packed .f32.xz, unpacked as it is read), in
+    order. Ranges in order and not overlapping are read in one pass; others reopen the copy."""
+    raw = dst.name.endswith(packed.RAW)
+    f = packed.open_raw(dst) if raw else open(ip.on_laptop(dst) or dst, "rb")
+    try:
+        pos = 0
+        for start, n in ranges:
+            if start < pos:  # not in order: from the start again
+                f.close()
+                f = packed.open_raw(dst) if raw else open(ip.on_laptop(dst) or dst, "rb")
+                pos = 0
+            while pos < start:  # forward: an unpacking reader cannot jump
+                skipped = len(f.read(min(start - pos, 1 << 20)))
+                if not skipped:
+                    break
+                pos += skipped
+            b = f.read(n)
+            pos += len(b)
+            yield b
+    finally:
+        f.close()
+
+
+def answer_rechecks(phone: Phone, dest: Path, rep: Pass) -> None:
+    """The phone's questions before it deletes raw recordings by itself (DECISIONS 756): for each, an HMAC with the
+    phone's nonce over the asked byte ranges of THIS laptop's own copy (phone_auth.recheck_mac; a packed .f32.xz
+    unpacked), never over bytes fetched from the phone; "missing" when this laptop does not hold those bytes (no copy,
+    or one of another length). The phone deletes only on a fresh proof. An app without /recheck: nothing to answer."""
+    if not phone.key:
+        return
+    try:
+        with phone._open("/recheck", timeout=FILE_TIMEOUT) as r:
+            m = json.loads(r.read(4_000_000).decode("utf-8"))
+    except (PhoneError, Refused, OSError, ValueError):
+        return
+    asks = m.get("asks") if isinstance(m, dict) else None
+    if not isinstance(asks, list):
+        return
+    proofs: list[dict] = []
+    for a in asks[:RECHECK_MAX]:
+        if not isinstance(a, dict):
+            continue
+        nonce, size, ranges = a.get("nonce"), a.get("bytes"), a.get("ranges")
+        try:
+            path = ip.safe_path(a.get("path"))
+        except ip.ManifestError:
+            continue
+        if not (isinstance(nonce, str) and pa.NONCE.fullmatch(nonce) and isinstance(size, int) and size >= 0
+                and isinstance(ranges, list) and 0 < len(ranges) <= 64
+                and all(isinstance(x, list) and len(x) == 2 and all(isinstance(v, int) and not isinstance(v, bool)
+                                                                       for v in x)
+                        and x[0] >= 0 and 0 <= x[1] <= 1 << 20 and x[0] + x[1] <= size for x in ranges)):
+            continue
+        rs = [(x[0], x[1]) for x in ranges]
+        dst = ip.target_for(dest, path)
+        try:
+            held = ip.on_laptop(dst) is not None and ip.size_of(dst) == size
+            mac = pa.recheck_mac(phone.key, str(path), nonce, size, rs, _ranges(dst, rs)) if held else None
+        except (OSError, EOFError, ValueError):
+            mac = None
+        proofs.append({"path": str(path), "nonce": nonce, "mac": mac} if mac else
+                      {"path": str(path), "nonce": nonce, "missing": True})
+    if not proofs:
+        return
+    body = json.dumps({"v": 1, "proofs": proofs}, separators=(",", ":")).encode()
+    try:
+        with phone._open("/recheck", {"Content-Type": "application/json"}, FILE_TIMEOUT, body) as r:
+            m = json.loads(r.read().decode("utf-8"))
+    except (PhoneError, Refused, OSError, ValueError):
+        return
+    if isinstance(m, dict):
+        rep.proven += [p for p in m.get("proven") or [] if isinstance(p, str)]
+        rep.unproven += [f"{f.get('path')} ({f.get('why')})" for f in m.get("failed") or [] if isinstance(f, dict)]
+
+
+def _record(rep: Pass, dest: Path, how: str, now: datetime) -> None:
+    """One line of pulls.jsonl: how the phone was reached (paired, or by code), never its address (DECISIONS 757)."""
+    line = dict(pulled=now.isoformat(timespec="seconds"), phone=how, listed=rep.listed, bytes=rep.fetched,
                 new=len(rep.new), grown=len(rep.grown), checked=len(rep.checked), updated=len(rep.updated),
                 kept=len(rep.kept), damaged=len(rep.damaged), waiting=len(rep.waiting), refused=len(rep.refused),
                 acked=len(rep.acked), removed=len(rep.removed), lost=len(rep.lost))
@@ -627,6 +780,12 @@ def summary(rep: Pass, dest: Path, now: datetime) -> list[str]:
                    "again on this disk); its Storage settings decide when old raw recordings leave the phone")
     if rep.ack_refused:
         out.append(f"  {len(rep.ack_refused)} not acked (the phone's copy changed meanwhile): {ip._names(rep.ack_refused)}")
+    if rep.proven:
+        out.append(f"  proved to the phone that {len(rep.proven)} file{'s are' if len(rep.proven) != 1 else ' is'} still "
+                   "here, byte for byte: it may remove them now")
+    if rep.unproven:
+        out.append(f"  {len(rep.unproven)} the phone asked about are not here as acked: it keeps them, and they are "
+                   f"copied again: {ip._names(rep.unproven)}")
     if rep.removed:
         out.append(f"  {len(rep.removed)} recording{'s' if len(rep.removed) != 1 else ''} left the phone; "
                    f"the raw files stay here: {ip._names(rep.removed)}")
@@ -640,19 +799,23 @@ def summary(rep: Pass, dest: Path, now: datetime) -> list[str]:
 
 
 def pairing_key(dest: Path) -> str | None:
-    """The key of this laptop's pairing with the phone (`<dest>/phone/link.json`, scripts/phone_link.py); None without."""
+    """The key of this laptop's pairing with the phone (`<dest>/phone/link.json` version 2, scripts/phone_link.py);
+    None without one (a pairing of the first version needs one new scan)."""
     try:
-        k = json.loads((dest / "phone" / "link.json").read_text(encoding="utf-8")).get("laptop_key")
-    except (OSError, ValueError, AttributeError):
+        raw = json.loads((dest / "phone" / "link.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return None
-    return k if isinstance(k, str) and len(k) >= 32 else None
+    k = raw.get("key") if isinstance(raw, dict) and raw.get("version") == 2 else None
+    return k if isinstance(k, str) and pa.KEY.fullmatch(k) else None
 
 
 def main(argv: list[str] | None = None, out: Callable[[str], object] = print,
          sleep: Callable[[float], object] = time.sleep) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("phone", help="the address the app shows, e.g. http://192.168.1.23:8765")
-    ap.add_argument("--token", default=os.environ.get("EEG_PHONE_TOKEN"), help="the token the app shows (or EEG_PHONE_TOKEN)")
+    ap.add_argument("phone", nargs="?", help="the address the app shows, e.g. http://192.168.1.23:8765 (default: the "
+                                             "paired phone's, from <dest>/phone/link.json)")
+    ap.add_argument("--token", default=os.environ.get("EEG_PHONE_TOKEN"),
+                    help="the code the app shows (or EEG_PHONE_TOKEN), for a phone not paired with this laptop")
     ap.add_argument("--every", type=float, default=2, help="minutes between passes (default 2)")
     ap.add_argument("--once", action="store_true", help="one pass, then exit")
     ap.add_argument("--dest", type=Path, default=ip.DEFAULT_DEST, help="where to copy (default: <repo>/_local)")
@@ -663,12 +826,26 @@ def main(argv: list[str] | None = None, out: Callable[[str], object] = print,
                     help="only the raw recordings in recordings/ and recordings-diy/ (.f32 .idx .log .markers.jsonl "
                          ".header.json, and the phone's packed .f32.gz)")
     a = ap.parse_args(argv)
-    if not a.token:
-        out("Give the token the app shows: --token <t> (or set EEG_PHONE_TOKEN).")
+    paired = pairing_key(a.dest)
+    if a.phone is None:
+        import phone_link  # the paired phone's address and this laptop's home network
+        p = phone_link.paired_phone(a.dest / "phone" / "link.json")
+        if p is None:
+            out("No phone is paired with this laptop: pair it (python3 scripts/phone_link.py), or give its address "
+                "and the code the app shows (--token or EEG_PHONE_TOKEN).")
+            return 2
+        home = p[3]
+        phone = Phone(f"http://{p[0]}:{p[1]}", key=p[2], home=lambda: home is not None and phone_link.home_id() == home)
+    elif a.token:
+        base = a.phone if "://" in a.phone else f"http://{a.phone}"
+        phone = Phone(base.split("?")[0], a.token)
+    elif paired:  # the paired phone at another address (adb forward): signed with the key
+        base = a.phone if "://" in a.phone else f"http://{a.phone}"
+        phone = Phone(base.split("?")[0], key=paired, home=False)
+    else:
+        out("Give the code the app shows: --token <t> (or set EEG_PHONE_TOKEN), or pair the phone with this laptop.")
         return 2
-    base = a.phone if "://" in a.phone else f"http://{a.phone}"
-    phone = Phone(base.split("?")[0], a.token)
-    key = None if a.no_ack else pairing_key(a.dest)
+    key = None if a.no_ack or phone.key is None else phone.key
     while True:
         now = datetime.now().astimezone()
         code = 0
@@ -678,7 +855,7 @@ def main(argv: list[str] | None = None, out: Callable[[str], object] = print,
                 out(line)
             code = 1 if rep.problems else 0
         except Refused as e:
-            out(f"Cannot pull: {e}. Check the address and token on the phone (Your data, Share on Wi-Fi).")
+            out(f"Cannot pull: {e}. Check the address and code on the phone (Your data, Share on Wi-Fi).")
             return 2
         except PhoneError as e:
             out(f"{now.strftime('%H:%M')} {e}" + ("" if a.once else f"; trying again in {a.every:g} min"))

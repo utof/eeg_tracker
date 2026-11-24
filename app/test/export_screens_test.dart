@@ -228,7 +228,7 @@ void main() {
         // no address known: the cable way, with commands that work after it (DECISIONS row 563)
         expect(find.text('adb forward tcp:8765 tcp:8765'), address == null ? findsOneWidget : findsNothing);
         expect(find.textContaining('A USB cable works without it'), address == null ? findsOneWidget : findsNothing);
-        expect(find.textContaining('scripts/pull_phone.py http://${address ?? '127.0.0.1'}:8765 --token kq7m2xwp9dfh'), findsOneWidget);
+        expect(find.textContaining('EEG_PHONE_TOKEN=kq7m2xwp9dfh python3 scripts/pull_phone.py http://${address ?? '127.0.0.1'}:8765'), findsOneWidget);
         // between nights it answers while the app is open; no notification keeps it running (DECISIONS 678 replaces 589)
         expect(find.textContaining('Between nights it answers while this app is open'), name == 'app' ? findsOneWidget : findsNothing);
         expect(find.textContaining('notification'), findsNothing, reason: 'no notification for sharing (DECISIONS 678)');
@@ -238,8 +238,8 @@ void main() {
     }
   }
 
-  test('the QR code holds the address and the code, with a quiet margin', () {
-    final image = QrImage(QrCode(payload: QrPayload.fromString(shareUrl('192.168.1.23', 8765, 'kq7m2xwp9dfh'))));
+  test('the QR code holds the address (never the code), with a quiet margin', () {
+    final image = QrImage(QrCode(payload: QrPayload.fromString(shareUrl('192.168.1.23', 8765))));
     expect(image.moduleCount, lessThanOrEqualTo(37)); // 208 dp / (37 + 8) = 4 dp a module at the least
   });
 

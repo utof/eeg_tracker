@@ -2,6 +2,7 @@
 // detectors' pass run in another when none is kept for its files as they are, your tags added, changed and removed
 // (archive/tags.dart), the raw signal at a moment (raw_signal_screen.dart), and deleting it by the owner's rules (Remove
 // from this phone with the laptop's checked copy; the Danger zone, twice confirmed). Pops true when anything changed.
+// The pulse pass (pulse/pass.dart, DECISIONS 815) runs the same way after the detectors' pass, for the Pulse lane.
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
@@ -15,8 +16,11 @@ import '../archive/items.dart';
 import '../archive/raw_remover.dart' show OnLaptop;
 import '../archive/seen.dart';
 import '../archive/tags.dart';
+import '../walking/pass.dart' show Walked, walkInBackground;
+import '../pulse/pass.dart' show PulseResult, Pulsed, pulseInBackground;
 import 'archive_screen.dart' show deleteInBackground, phoneArchiveBusy;
 import 'archive_sheets.dart';
+import 'evidence_sheet.dart' show showEvidence;
 import 'raw_signal_screen.dart';
 import 'recording_view.dart';
 
@@ -31,6 +35,8 @@ class RecordingScreen extends StatefulWidget {
     required this.all,
     this.detail,
     this.see,
+    this.walk,
+    this.pulse,
     this.busy,
     this.delete,
   });
@@ -44,6 +50,10 @@ class RecordingScreen extends StatefulWidget {
   /// Tests: without isolates.
   final Future<RecordingDetail> Function(String filesPath, ArchiveItem item, List<SessionFile> sessions)? detail;
   final Future<Seen> Function(String filesPath, String id, List<String> paths)? see;
+  final Future<Walked> Function(String filesPath, String id, List<String> paths)? walk;
+
+  /// Tests: the pulse pass without an isolate.
+  final Future<Pulsed> Function(String filesPath, String id, List<String> paths)? pulse;
   final Future<ArchiveBusy> Function()? busy;
   final Future<DeleteOutcome> Function(String filesPath, ArchiveItem item, DeleteMode mode, List<ArchiveItem> all, ArchiveBusy busy)? delete;
 
@@ -57,6 +67,8 @@ class _RecordingScreenState extends State<RecordingScreen> {
   TimelineInput? _input;
   bool _passing = false;
   String? _passWhy;
+  PulseResult? _pulse;
+  String? _pulseWhy;
   bool _changed = false;
 
   Directory get _files => Directory(widget.filesPath);
@@ -75,8 +87,58 @@ class _RecordingScreenState extends State<RecordingScreen> {
       _detail = d;
       _input = d.input;
       _passWhy = d.input.seenWhy;
+      _pulse = d.pulse;
     });
     if (!d.passKept && d.input.seenWhy == null && d.rawPaths.isNotEmpty) await _pass(d.rawPaths);
+    if (mounted && !d.walkKept && d.rawPaths.isNotEmpty) await _walk(d.rawPaths);
+    if (mounted && !d.pulseKept && d.rawPaths.isNotEmpty) await _pulsePass(d.rawPaths);
+  }
+
+  /// The walking pass (walking/pass.dart) when none is kept for the files as they are; never on the night still being
+  /// recorded.
+  Future<void> _walk(List<String> paths) async {
+    final b = await (widget.busy ?? phoneArchiveBusy)();
+    if (!mounted || (b.nightRecording && _isNewest())) return;
+    setState(() => _passing = true);
+    Walked w;
+    try {
+      w = await (widget.walk ?? walkInBackground)(widget.filesPath, _item.id, paths);
+    } catch (e) {
+      w = (walk: null, why: 'Could not read it: $e');
+    }
+    if (!mounted) return;
+    final i = _input!;
+    setState(() {
+      _passing = false;
+      _input = TimelineInput(
+        seen: i.seen,
+        seenWhy: i.seenWhy,
+        stages: i.stages,
+        work: i.work,
+        sessions: i.sessions,
+        tags: i.tags,
+        walk: w.walk ?? i.walk,
+      );
+    });
+  }
+
+  /// The pulse pass when none is kept for the files as they are; never on the night still being recorded.
+  Future<void> _pulsePass(List<String> paths) async {
+    final b = await (widget.busy ?? phoneArchiveBusy)();
+    if (!mounted || (b.nightRecording && _isNewest())) return;
+    setState(() => _passing = true);
+    Pulsed p;
+    try {
+      p = await (widget.pulse ?? pulseInBackground)(widget.filesPath, _item.id, paths);
+    } catch (e) {
+      p = (pulse: null, why: 'Could not read it: $e');
+    }
+    if (!mounted) return;
+    setState(() {
+      _passing = false;
+      _pulse = p.pulse ?? _pulse;
+      _pulseWhy = p.why;
+    });
   }
 
   Future<void> _pass(List<String> paths) async {
@@ -98,7 +160,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
     setState(() {
       _passing = false;
       _passWhy = s.why;
-      _input = TimelineInput(seen: s.seen, seenWhy: s.why, stages: i.stages, work: i.work, sessions: i.sessions, tags: i.tags);
+      _input = TimelineInput(seen: s.seen, seenWhy: s.why, stages: i.stages, work: i.work, sessions: i.sessions, tags: i.tags, walk: i.walk);
     });
   }
 
@@ -184,7 +246,15 @@ class _RecordingScreenState extends State<RecordingScreen> {
       );
       final x = _input;
       if (x != null) {
-        _input = TimelineInput(seen: x.seen, seenWhy: x.seenWhy, stages: x.stages, work: x.work, sessions: x.sessions, tags: file?.tags ?? const []);
+        _input = TimelineInput(
+          seen: x.seen,
+          seenWhy: x.seenWhy,
+          stages: x.stages,
+          work: x.work,
+          sessions: x.sessions,
+          tags: file?.tags ?? const [],
+          walk: x.walk,
+        );
       }
     });
   }
@@ -221,7 +291,16 @@ class _RecordingScreenState extends State<RecordingScreen> {
         if (!didPop) Navigator.of(context).pop(_changed);
       },
       child: RecordingView(
-        model: RecordingViewModel(item: i, timeline: _timeline, passRunning: _passing, passWhy: _passWhy, loading: _detail == null),
+        model: RecordingViewModel(
+          item: i,
+          timeline: _timeline,
+          passRunning: _passing,
+          passWhy: _passWhy,
+          loading: _detail == null,
+          pulse: _pulse,
+          pulseWhy: _pulseWhy,
+        ),
+        onPulseInfo: () => showEvidence(context, 'pulse'),
         onBand: _band,
         onTime: _signal,
         onLane: _lane,

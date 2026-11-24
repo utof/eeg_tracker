@@ -278,7 +278,7 @@ class NightLayout {
 /// index is missing or empty). [f32] by its plain name, also when it is packed (`.f32.gz`). The channels [names] are
 /// picked from its header by name ([who] needs them): [MissingSites] when it lacks one, [HeaderError] for a header
 /// that cannot be used.
-List<Run> runsOf(File f32, {List<String> names = channelNames, String who = 'The sleep report'}) {
+List<Run> runsOf(File f32, {List<String> names = channelNames, String who = 'The sleep report', int rate = sampleRate}) {
   final header = readHeader(f32);
   final recordBytes = header.recordBytes;
   final records = rawLength(f32) ~/ recordBytes;
@@ -300,7 +300,7 @@ List<Run> runsOf(File f32, {List<String> names = channelNames, String who = 'The
   }
   final t0 = [
     for (var k = 0; k < rows.length; k++)
-      rows[k].$1 - ((k + 1 < rows.length ? rows[k + 1].$2 : records) - rows[k].$2) / sampleRate,
+      rows[k].$1 - ((k + 1 < rows.length ? rows[k + 1].$2 : records) - rows[k].$2) / rate,
   ]; // a batch arrives just after its last sample
   final out = <Run>[];
   var start = 0;
@@ -315,7 +315,7 @@ List<Run> runsOf(File f32, {List<String> names = channelNames, String who = 'The
   if (before > 0) {
     // samples before the first index row (should not happen) join the first run
     final r = out.first;
-    out[0] = run(0, r.count + before, r.t0 - before / sampleRate);
+    out[0] = run(0, r.count + before, r.t0 - before / rate);
   }
   return out;
 }
@@ -323,8 +323,13 @@ List<Run> runsOf(File f32, {List<String> names = channelNames, String who = 'The
 /// to_bdf.py `join` for the night's `.f32` files (oldest first), without reading the samples. The layout reads the
 /// channels [names] (the sleep tools' O1 O2 T3 T4 unless said), picked by name in each file: a file without one is
 /// refused ([MissingSites], naming what [who] needs and what the file has).
-NightLayout joinLayout(List<File> f32Files, {List<String> names = channelNames, String who = 'The sleep report'}) {
-  final runs = [for (final f in f32Files) ...runsOf(f, names: names, who: who)];
+NightLayout joinLayout(
+  List<File> f32Files, {
+  List<String> names = channelNames,
+  String who = 'The sleep report',
+  int rate = sampleRate,
+}) {
+  final runs = [for (final f in f32Files) ...runsOf(f, names: names, who: who, rate: rate)];
   if (runs.isEmpty) return NightLayout(0, 0, const [], const [], names: names);
   _stableSortByT0(runs);
   final start = _wholeSecond(runs.first.t0);
@@ -332,7 +337,7 @@ NightLayout joinLayout(List<File> f32Files, {List<String> names = channelNames, 
   final bad = <Bad>[];
   var n = 0;
   for (final r in runs) {
-    final want = roundHalfEven((r.t0 - start) * sampleRate);
+    final want = roundHalfEven((r.t0 - start) * rate);
     if (want > n) {
       parts.add(Part.hold(n, want - n));
       bad.add((at: n, samples: want - n, text: 'BAD_gap'));
@@ -342,7 +347,7 @@ NightLayout joinLayout(List<File> f32Files, {List<String> names = channelNames, 
     parts.add(Part.run(r, n));
     n += r.count;
   }
-  final pad = (sampleRate - n % sampleRate) % sampleRate;
+  final pad = (rate - n % rate) % rate;
   if (pad > 0) bad.add((at: n, samples: pad, text: 'BAD_padding'));
   return NightLayout(start, n + pad, parts, bad, names: names);
 }

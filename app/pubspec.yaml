@@ -16,7 +16,7 @@ dependencies:
     path: packages/neurosdk2
   # Foreground service whose TaskHandler isolate owns the whole BrainBit session (DECISIONS row 2).
   flutter_foreground_task: ^11.0.3
-  permission_handler: ^12.0.1
+  permission_handler: ^13.0.2
   # Sound engine for the meditation feedback (DECISIONS rows 11 and 72): SoLoud + miniaudio, MIT/zlib. Its build
   # hook compiles the C++ engine with the NDK; the Xiph decoders are left out (below), we only play WAV and
   # waveforms made in memory.

@@ -1,6 +1,0 @@
-{
- "about": "POST /ack's proof (DECISIONS 690-699): HMAC-SHA256 of 'eeg-tracker ack v1|' and the body's bytes, keyed with the pairing's key; checked by app/test/move_off_phone_test.dart (recorder/acks.dart) and analysis/tests/test_pull_phone.py (scripts/pull_phone.py).",
- "key": "a2V5LWZvci10aGUtYWNrLWZpeHR1cmUtb25seS0zMi1ieXRlcw",
- "body": "{\"v\":1,\"files\":[{\"path\":\"recordings/2026-11-18-231200.f32.gz\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"},{\"path\":\"recordings/2026-11-18-231200.idx\",\"sha256\":\"fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210\"}]}",
- "proof": "8d99836344bc0e752c0d0b7229121eaa8d33e8031182e4e1f70a3b96ddcfb7db"
-}

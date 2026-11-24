@@ -5,6 +5,7 @@
 //   Drowsy       getting drowsy or drowsy, awake with eyes open: the same
 //   Talking      jaw muscle (both sides) in most seconds: talking or chewing awake, jaw clenching asleep
 //   Moving       3 or more channels jumping at once for a few seconds
+//   Walking      walking or running with the pace: the step rhythm in the signal (walking/pass.dart), steps estimated
 //   Signal       no usable signal (the headband away, off or loose), and long stretches read through noise
 //   Work         a work session (its breaks left out); Meeting: the meetings its file names
 //   Sessions     every session in that time (meditation, a nap, the dream catcher, a sound, a check-in)
@@ -12,6 +13,8 @@
 // A band is a run of 30 s epochs (bridging one odd epoch), at least the rule's length (seen.dart ActivityRule: planning
 // values). Asleep wins: eyes closed, drowsy and talking are not shown asleep. Plain Dart.
 import '../detectors/detectors.dart' show epochS;
+import '../walking/detector.dart' show StretchKind;
+import '../walking/pass.dart' show WalkResult, WalkSummary;
 import 'items.dart';
 import 'seen.dart';
 import 'tags.dart';
@@ -22,6 +25,7 @@ enum Lane {
   drowsy('Drowsy'),
   talking('Talking'),
   moving('Moving'),
+  walking('Walking'),
   signal('Signal'),
   work('Work'),
   meeting('Meeting'),
@@ -99,8 +103,12 @@ class TimelineInput {
     this.work = const [],
     this.sessions = const [],
     this.tags = const [],
+    this.walk,
   });
   final RecordingSeen? seen;
+
+  /// The walking pass's result (walking/pass.dart), kept also after the raw signal left the phone; null: none yet.
+  final WalkResult? walk;
 
   /// Why there is no pass ("needs O1 O2 T3 T4", ...); null while it was not tried.
   final String? seenWhy;
@@ -255,6 +263,26 @@ Timeline timelineOf(ArchiveItem item, TimelineInput input) {
     }
   }
 
+  // walking, by its own pass: a band per walking or running stretch with its pace (stops are the gaps between them)
+  for (final w in input.walk?.walks ?? const <WalkSummary>[]) {
+    for (final st in w.stretches) {
+      if (st.kind == StretchKind.stopped) continue;
+      final run = st.kind == StretchKind.running;
+      final pace = st.pace == null ? '' : ', ${st.pace!.round()} a minute';
+      add(
+        Band(
+          Lane.walking,
+          st.start,
+          st.end,
+          '${run ? 'Running' : 'Walking'}$pace',
+          source: 'The step rhythm in the headband\'s signal: about ${st.steps} steps, estimated'
+              '${st.confidence == null ? '' : ' (${st.confidence})'}.',
+          tone: st.confidence == 'unsure' ? BandTone.faint : BandTone.found,
+        ),
+      );
+    }
+  }
+
   // work sessions
   for (final w in input.work) {
     var at = w.start;
@@ -326,7 +354,13 @@ List<String> foundWords({double? asleepMin, Map<String, double>? minutes}) {
   final parts = <(String, double)>[
     if (asleepMin != null && asleepMin > 0) ('asleep', asleepMin),
     if (minutes != null)
-      for (final e in const [('eyes', 'eyes closed'), ('drowsy', 'drowsy'), ('talking', 'talking'), ('moving', 'moving')])
+      for (final e in const [
+        ('eyes', 'eyes closed'),
+        ('drowsy', 'drowsy'),
+        ('talking', 'talking'),
+        ('moving', 'moving'),
+        ('walking', 'walking'),
+      ])
         if ((minutes[e.$1] ?? 0) >= 1) (e.$2, minutes[e.$1]!),
   ]..sort((a, b) => b.$2.compareTo(a.$2));
   return [for (final p in parts.take(4)) '${p.$1} ${_minutes(Duration(seconds: (p.$2 * 60).round()))}'];

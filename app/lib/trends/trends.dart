@@ -1,6 +1,7 @@
 // The trends page's content from the phone's own files (DECISIONS rows 120-129, 155, 287, 650-659): one number per
 // day per measure, from the sleep reports (files/nights; jaw muscle bursts from their extras; the sleep model's
-// stage minutes, wake-ups, falling asleep, efficiency and regularity in sleep_days.dart), the morning check-ins
+// stage minutes, wake-ups, falling asleep, efficiency and regularity in sleep_days.dart; pulse while asleep from the
+// pulse files, pulse/night.dart, given as an extra day number), the morning check-ins
 // (files/mornings, with the "How did you sleep?" tap), the sharp-hours log (files/sharp-hours), the work sessions
 // (files/work-sessions, rows 480-489) and the meditation and alpha-theta reports; each with yesterday's value
 // ("same as yesterday"), your usual and an arrow when the day is beyond your normal spread (usual.dart); the last 14
@@ -22,7 +23,9 @@ const int lineDays = 14;
 
 /// [day]: the sharp-hours log's numbers (DECISIONS row 287) and the study reminders' recall (row 401), shown only
 /// once something is logged. [work]: the work sessions' day numbers (rows 480-489), the same.
-enum TrendGroup { sleep, morning, day, work, practice, noted }
+/// [activity]: walking from the headband's step rhythm and the phone's step counter (DECISIONS 800-809), shown only
+/// once a walk was found.
+enum TrendGroup { sleep, morning, day, work, practice, activity, noted }
 
 class MeasureSpec {
   const MeasureSpec({
@@ -37,6 +40,7 @@ class MeasureSpec {
     this.min = 0,
     this.max,
     this.askedFor = false,
+    this.evidence,
   });
 
   final String id;
@@ -58,6 +62,9 @@ class MeasureSpec {
   /// Exists only when you did something for it (a Lights off tap, a rating at the check-in): "Nothing yet for ..."
   /// does not name it.
   final bool askedFor;
+
+  /// Its own "i" note (`docs/evidence/<id>.md`), shown beside it; null: the page's note covers it.
+  final String? evidence;
 }
 
 /// `7 h 05 min`, `42 min`, with no-break spaces so a duration never splits across lines.
@@ -75,6 +82,21 @@ String _count(double v, String one, String many) {
 }
 
 const String _together = 'Seen together, not tested.';
+
+/// `8 700` with a thin no-break space between thousands.
+String _thousands(int v) {
+  final s = v.abs().toString();
+  final b = StringBuffer(v < 0 ? '-' : '');
+  for (var i = 0; i < s.length; i++) {
+    if (i > 0 && (s.length - i) % 3 == 0) b.write('\u202f');
+    b.write(s[i]);
+  }
+  return b.toString();
+}
+
+/// The steps row's note before the check against the phone is known (the page replaces it: walking/days.dart).
+const String walkStepsNote = 'Your phone\'s own count where it counted, else estimated from the headband\'s step '
+    'rhythm, not yet checked against your phone.';
 
 /// The end of the notes of the sleep model's rows (DECISIONS row 650).
 const String _model = 'From the sleep model, not yet checked against a lab test on this headband. $_together';
@@ -171,6 +193,17 @@ final List<MeasureSpec> measureSpecs = [
     up: 'more than usual',
     down: 'fewer than usual',
     note: 'An hour asleep. A trend to compare your nights, not a test for teeth grinding.',
+  ),
+  MeasureSpec(
+    id: 'pulse',
+    label: 'Pulse while asleep',
+    group: TrendGroup.sleep,
+    scale: Scale.beats,
+    format: (v) => '${v.round()}\u00a0a\u00a0minute',
+    up: 'higher than usual',
+    down: 'lower than usual',
+    note: 'An experiment: the pulse your heartbeat leaves in the headband\'s signal, where it shows, on nights with 5 '
+        'minutes of it or more. Not yet checked against a watch.',
   ),
   MeasureSpec(
     id: 'kss',
@@ -374,6 +407,29 @@ final List<MeasureSpec> measureSpecs = [
     note: 'Meditation and alpha-theta, minutes of signal.',
   ),
   MeasureSpec(
+    id: 'walk_min',
+    label: 'Walking',
+    group: TrendGroup.activity,
+    scale: Scale.shortMinutes,
+    format: _hm,
+    up: 'more than usual',
+    down: 'less than usual',
+    evidence: 'walking',
+    note: 'Steady walking found in the headband\'s step rhythm while it recorded, and minutes your phone counted 60 '
+        'steps or more. Short walks indoors and slow strolls are missed. $_together',
+  ),
+  MeasureSpec(
+    id: 'walk_steps',
+    label: 'Steps (estimated)',
+    group: TrendGroup.activity,
+    scale: Scale.amount,
+    format: (v) => '${_thousands(v.round())}\u00a0steps',
+    up: 'more than usual',
+    down: 'fewer than usual',
+    evidence: 'walking',
+    note: walkStepsNote,
+  ),
+  MeasureSpec(
     id: 'caffeine',
     label: 'Caffeine the day before',
     group: TrendGroup.noted,
@@ -470,9 +526,13 @@ class TrendRow {
     this.value,
     this.yesterday,
     this.arrow = Arrow.none,
+    this.note,
   });
 
   final MeasureSpec spec;
+
+  /// This page's own note for it (the steps row says how its check against the phone stands); null: the spec's.
+  final String? note;
 
   /// The newest day with a value in the last [lineDays] days (null: none), its value and the day before's.
   final String? day;
@@ -515,7 +575,12 @@ class TrendsModel {
   ];
 }
 
-TrendsModel buildTrends(TrendInputs inputs, DateTime now, {Map<String, Map<String, double>> extra = const {}}) {
+TrendsModel buildTrends(
+  TrendInputs inputs,
+  DateTime now, {
+  Map<String, Map<String, double>> extra = const {},
+  Map<String, String> notes = const {},
+}) {
   final today = dayKey(now);
   final series = dailySeries(inputs, extra: extra);
   final days = lastDays(today, lineDays);
@@ -539,6 +604,7 @@ TrendsModel buildTrends(TrendInputs inputs, DateTime now, {Map<String, Map<Strin
       usual: usual,
       arrow: v == null ? Arrow.none : usual.arrow(v),
       line: [for (final d in days) s[d]],
+      note: notes[spec.id],
     ));
   }
   final spans = <SleepSpan>[

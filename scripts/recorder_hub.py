@@ -22,10 +22,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Sequence
 
+import local_http  # scripts/local_http.py: this laptop only (DECISIONS 750)
 import recording  # scripts/recording.py: the recording header (standard library only)
 
 try:
-    import battery as batt  # scripts/battery.py: drops the gauge's stuck values, time left from the trend
+    import battery as batt  # scripts/battery.py: the gauge's stuck values, time left, the charge by wear time
 except Exception:
     batt = None
 try:
@@ -67,7 +68,7 @@ class Hub:
         self.want_contact = threading.Event()
         self.live: dict = dict(status="recording", t=time.time(), battery_note=None)
         self.subs: list[queue.Queue] = []; self.subs_lock = threading.Lock()  # live stream: one queue per reader
-        self.batt_pts: list = []  # (unix time, %) of the last 3 hours, earlier runs' logs included
+        self.batt_pts: list = []  # (unix time, %) of the last 16 hours (battery.WEAR_HOURS), earlier runs' logs included
         self.last_report = time.time(); self.last_total = 0
         self.stamp: str | None = None
         self.data = self.logf = self.idxf = self.markf = None
@@ -190,7 +191,7 @@ class Hub:
         """The battery note from earlier runs' logs, so it shows before this run has its own trend."""
         if batt:
             try:
-                self.batt_pts = batt.from_logs(self.out, time.time())
+                self.batt_pts = batt.from_logs(self.out, time.time(), batt.WEAR_HOURS)
                 self.live["battery_note"] = batt.estimate(self.batt_pts, time.time())["text"]
             except Exception:
                 self.batt_pts, self.live["battery_note"] = [], None
@@ -201,7 +202,7 @@ class Hub:
         self.log(f"samples {self.total} (+{got}) battery {self.live.get('battery', '?')}%")
         if batt and isinstance(self.live.get("battery"), int):
             try:
-                self.batt_pts.append((time.time(), self.live["battery"])); del self.batt_pts[:-1100]
+                self.batt_pts.append((time.time(), self.live["battery"])); del self.batt_pts[:-6000]  # 16 h at 10 s
                 self.live["battery_note"] = batt.estimate(self.batt_pts, time.time())["text"]
             except Exception:
                 pass
@@ -243,7 +244,8 @@ class Hub:
                     contact_t=self.contact_t, data=data)
 
     def serve(self, port: int) -> None:
-        self.server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(self))
+        """The live pages on 127.0.0.1:[port] only (DECISIONS 750): open http://localhost:<port>/ on this laptop."""
+        self.server = local_http.LocalServer(("127.0.0.1", port), make_handler(self))
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
 
@@ -256,6 +258,8 @@ def make_handler(hub: Hub) -> type:
             self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body)
 
         def do_POST(self) -> None:
+            if not local_http.guard(self):
+                return
             name = self.path.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
             if name == "contact":
                 hub.want_contact.set(); self._send(b"ok", "text/plain")
@@ -303,7 +307,7 @@ def make_handler(hub: Hub) -> type:
             """Server-sent events: a hello line, then every batch as {"i": first sample, "t": arrival, "uv": [[O1,O2,T3,T4]...]}
             and every page marker as {"marker": text, "i", "t"}. Any number of consumers (pages, scripts/lsl_bridge.py)."""
             self.send_response(200); self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-store"); self.send_header("Access-Control-Allow-Origin", "*"); self.end_headers()
+            self.send_header("Cache-Control", "no-store"); self.end_headers()  # no CORS: other sites' pages never read it
             q: queue.Queue = queue.Queue(maxsize=200)
             with hub.subs_lock: hub.subs.append(q)
             try:
@@ -320,6 +324,8 @@ def make_handler(hub: Hub) -> type:
                     if q in hub.subs: hub.subs.remove(q)
 
         def do_GET(self) -> None:
+            if not local_http.guard(self):
+                return
             if self.path.split("?")[0].rstrip("/").endswith("/stream"):
                 self.stream(); return
             if self.path.split("?")[0].rstrip("/").rsplit("/", 1)[-1] in ("sleep-report", "morning-report", "hypnogram.png"):

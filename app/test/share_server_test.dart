@@ -7,11 +7,15 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:eeg_tracker/export/store.dart';
 import 'package:eeg_tracker/recorder/packed.dart' show packRaw;
+import 'package:eeg_tracker/share/auth.dart';
 import 'package:eeg_tracker/share/protocol.dart';
 import 'package:eeg_tracker/share/server.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const token = 'abcdefghjkmn';
+
+/// The paired laptop's key: /work and /marker take only its signed requests (DECISIONS 755).
+const key = '7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544';
 
 void main() {
   late Directory files;
@@ -25,10 +29,11 @@ void main() {
   final works = <bool>[];
   final meetings = <bool?>[];
 
-  Future<void> start({Duration keepalive = const Duration(seconds: 10)}) async {
+  Future<void> start({Duration keepalive = const Duration(seconds: 10), bool paired = false}) async {
     server = ShareServer(
       filesDir: files,
       token: token,
+      key: paired ? key : null,
       port: 0,
       keepalive: keepalive,
       clock: () => now,
@@ -64,15 +69,26 @@ void main() {
 
   Uri url(String path) => Uri.parse('http://127.0.0.1:${server.boundPort}$path');
 
+  /// [sign]: as the paired laptop, signed with [key] (the server must have been started paired).
   Future<({int code, List<int> body, HttpHeaders headers})> ask(
     String path, {
     String method = 'GET',
     String? tok = token,
     Map<String, String> headers = const {},
     String? body,
+    bool sign = false,
   }) async {
     final req = await client.openUrl(method, url(path));
-    if (tok != null) req.headers.set('Authorization', 'Bearer $tok');
+    if (sign) {
+      final n = newNonce(), t = now.millisecondsSinceEpoch, u = Uri.parse(path);
+      req.headers
+        ..set(timeHeader, '$t')
+        ..set(nonceHeader, n)
+        ..set(homeHeader, '1')
+        ..set(signHeader, requestSign(key, method: method, path: Uri.decodeComponent(u.path), query: Uri.decodeComponent(u.query), timeMs: t, nonce: n, home: true, body: utf8.encode(body ?? '')));
+    } else if (tok != null) {
+      req.headers.set('Authorization', 'Bearer $tok');
+    }
     headers.forEach(req.headers.set);
     if (body != null) req.add(utf8.encode(body));
     final res = await req.close();
@@ -105,14 +121,14 @@ void main() {
   }
 
   group('token and address', () {
-    test('no token, a wrong token: 401; header, X-EEG-Token and ?token= all work', () async {
+    test('no token, a wrong token: 401; only the Authorization header carries it, never X-EEG-Token or ?token= (DECISIONS 754)', () async {
       expect((await ask('/state', tok: null)).code, 401);
       expect((await ask('/state', tok: 'abcdefghjkmx')).code, 401);
       expect((await ask('/state', tok: '')).code, 401);
       expect((await ask('/files/settings.json', tok: null)).code, 401);
       expect((await ask('/state')).code, 200);
-      expect((await ask('/state', tok: null, headers: {'X-EEG-Token': token})).code, 200);
-      expect((await ask('/state?token=$token', tok: null)).code, 200);
+      expect((await ask('/state', tok: null, headers: {'X-EEG-Token': token})).code, 401);
+      expect((await ask('/state?token=$token', tok: null)).code, 401);
     });
 
     test('a client that is not on the local network is refused, token or not', () async {
@@ -331,7 +347,7 @@ void main() {
 
     test('/stream: a hello, each batch, markers and keep-alives, as plain server-sent events', () async {
       await server.close();
-      await start(keepalive: const Duration(milliseconds: 150));
+      await start(keepalive: const Duration(milliseconds: 150), paired: true);
       server.addBatch('2026-11-19-030000', 0, 1763500000.0, batch(0, 10));
       final socket = await Socket.connect('127.0.0.1', server.boundPort);
       final text = StringBuffer();
@@ -348,7 +364,7 @@ void main() {
       expect(server.readers, 1);
       server.addBatch('2026-11-19-030000', 10, 1763500000.1004, batch(10, 2));
       markerAnswer = (t: 1763500000.2, i: 12);
-      expect((await ask('/marker', method: 'POST', body: '  eyes closed start \n')).code, 200);
+      expect((await ask('/marker', method: 'POST', body: '  eyes closed start \n', sign: true)).code, 200);
       await until(() => text.toString().contains('"marker"') && text.toString().contains(': keepalive'));
       final all = text.toString();
       final head = all.substring(0, all.indexOf('\r\n\r\n')).toLowerCase();
@@ -396,21 +412,26 @@ void main() {
     });
 
     test('POST /marker without a recording: 503, as the laptop before its files are open', () async {
-      final r = await ask('/marker', method: 'POST', body: 'x');
+      await server.close();
+      await start(paired: true);
+      final r = await ask('/marker', method: 'POST', body: 'x', sign: true);
       expect(r.code, 503);
       expect(markers, ['x']);
     });
 
-    test("POST /work: the paired laptop's work signal for automatic recording, with the token only", () async {
-      // scripts/laptop_work.py sends it when a work session starts or ends (DECISIONS 603)
-      final r = await ask('/work', method: 'POST', body: '{"working": true}');
+    test("POST /work: the paired laptop's work signal for automatic recording, signed with the pairing's key", () async {
+      // scripts/laptop_work.py sends it when a work session starts or ends (DECISIONS 603, 755)
+      await server.close();
+      await start(paired: true);
+      final r = await ask('/work', method: 'POST', body: '{"working": true}', sign: true);
       expect(r.code, 202);
       expect(jsonDecode(utf8.decode(r.body)), {'ok': true});
-      expect((await ask('/work', method: 'POST', body: '{"working": false}')).code, 202);
+      expect((await ask('/work', method: 'POST', body: '{"working": false}', sign: true)).code, 202);
       expect(works, [true, false]);
       for (final bad in ['', 'yes', '{"working": "yes"}', '[true]', '{"working": true, "x": "${'y' * 300}"}']) {
-        expect((await ask('/work', method: 'POST', body: bad)).code, 400, reason: bad);
+        expect((await ask('/work', method: 'POST', body: bad, sign: true)).code, 400, reason: bad);
       }
+      expect((await ask('/work', method: 'POST', body: '{"working": true}')).code, 403, reason: 'the token is not enough');
       expect((await ask('/work', method: 'POST', body: '{"working": true}', tok: 'wrongwrongwr')).code, 401);
       expect((await ask('/work', method: 'POST', body: '{"working": true}', tok: null)).code, 401);
       expect((await ask('/work')).code, 405, reason: 'a signal, not a page');
@@ -419,19 +440,21 @@ void main() {
     });
 
     test('POST /work says whether the laptop is in a meeting; older trays say nothing (DECISIONS 685)', () async {
-      expect((await ask('/work', method: 'POST', body: '{"working": true, "meeting": true}')).code, 202);
-      expect((await ask('/work', method: 'POST', body: '{"working": true, "meeting": false}')).code, 202);
-      expect((await ask('/work', method: 'POST', body: '{"working": true}')).code, 202);
-      expect((await ask('/work', method: 'POST', body: '{"working": true, "meeting": "yes"}')).code, 202, reason: 'an odd meeting is not said');
+      await server.close();
+      await start(paired: true);
+      expect((await ask('/work', method: 'POST', body: '{"working": true, "meeting": true}', sign: true)).code, 202);
+      expect((await ask('/work', method: 'POST', body: '{"working": true, "meeting": false}', sign: true)).code, 202);
+      expect((await ask('/work', method: 'POST', body: '{"working": true}', sign: true)).code, 202);
+      expect((await ask('/work', method: 'POST', body: '{"working": true, "meeting": "yes"}', sign: true)).code, 202, reason: 'an odd meeting is not said');
       expect(works, [true, true, true, true]);
       expect(meetings, [true, false, null, null]);
     });
 
     test('POST /work where nothing takes it (the night recorder serves): 503', () async {
       await server.close();
-      server = ShareServer(filesDir: files, token: token, port: 0, clientOf: (r) => r.connectionInfo?.remoteAddress);
+      server = ShareServer(filesDir: files, token: token, key: key, port: 0, clock: () => now, clientOf: (r) => r.connectionInfo?.remoteAddress);
       await server.listen();
-      expect((await ask('/work', method: 'POST', body: '{"working": true}')).code, 503);
+      expect((await ask('/work', method: 'POST', body: '{"working": true}', sign: true)).code, 503);
     });
 
     test('what the phone does not do answers as the page server does while the recorder is away', () async {
@@ -640,6 +663,17 @@ void main() {
       expect(r.body, [95, 96, 97, 98, 99]);
       expect(r.headers.value('content-range'), 'bytes 95-99/100');
 
+      // as shelf_static 1.2.0: a number too big for an int is no 500; a suffix of nothing is the whole file
+      const huge = '99999999999999999999';
+      r = await ask('/files/recordings/2026-11-19-030000.f32', headers: {'Range': 'bytes=-$huge'});
+      expect((r.code, r.body.length), (206, 100));
+      r = await ask('/files/recordings/2026-11-19-030000.f32', headers: {'Range': 'bytes=90-$huge'});
+      expect((r.code, r.body.length), (206, 10));
+      r = await ask('/files/recordings/2026-11-19-030000.f32', headers: {'Range': 'bytes=$huge-'});
+      expect(r.code, 416);
+      r = await ask('/files/recordings/2026-11-19-030000.f32', headers: {'Range': 'bytes=-0'});
+      expect((r.code, r.body.length), (200, 100));
+
       // nothing new yet: 416 with the size
       r = await ask('/files/recordings/2026-11-19-030000.f32', headers: {'Range': 'bytes=100-'});
       expect(r.code, 416);
@@ -695,6 +729,17 @@ void main() {
       expect(parseRange('lines=1-2', 100), isNull);
       expect(() => parseRange('bytes=100-', 100), throwsRangeError);
       expect(() => parseRange('bytes=0-', 0), throwsRangeError);
+      // shelf_static 1.2.0's rules: no FormatException (a 500) from a number too big for an int, and a suffix that
+      // selects no bytes is ignored (the whole file, 200), not refused
+      const huge = '99999999999999999999';
+      expect(parseRange('bytes=-$huge', 100), (start: 0, end: 99));
+      expect(parseRange('bytes=0-$huge', 100), (start: 0, end: 99));
+      expect(() => parseRange('bytes=$huge-', 100), throwsRangeError);
+      expect(() => parseRange('bytes=$huge-$huge', 100), throwsRangeError);
+      expect(parseRange('bytes=$huge-5', 100), isNull);
+      expect(parseRange('bytes=-0', 100), isNull);
+      expect(parseRange('bytes=-5', 0), isNull);
+      expect(parseRange('bytes=50-10', 100), isNull);
     });
   });
 
@@ -722,7 +767,7 @@ void main() {
     test('the laptop\'s words for the phases, and the address the QR code holds', () {
       expect(statusWord('recording'), 'recording');
       expect(statusWord('idle'), 'not recording');
-      expect(shareUrl('192.168.1.23', 8765, 'abc'), 'http://192.168.1.23:8765/?token=abc');
+      expect(shareUrl('192.168.1.23', 8765), 'http://192.168.1.23:8765/'); // never the token (DECISIONS 754)
     });
   });
 }

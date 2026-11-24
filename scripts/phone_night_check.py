@@ -42,7 +42,7 @@ import packed  # noqa: E402  (a recording packed after a day, <stamp>.f32.xz, re
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "analysis"))
 import rem_check as rc  # noqa: E402  (the dream sleep check; standard library only but its detector)
 import recording  # noqa: E402  (what a .f32 holds: its header; standard library only)
-from battery import STUCK  # noqa: E402  the headband gauge's stuck readings (0-2 %, 100 %)
+import battery  # noqa: E402  the headband gauge's stuck values and the charge by wear time (one rule)
 
 FS = 250  # the BrainBit's rate; a run's own is Run.fs
 REC = 20  # one `<I4f` record in a BrainBit .f32; a run's own record size is Run.rec
@@ -72,6 +72,16 @@ HUM_SOME, HUM_HIGH = 20, 200  # scripts/live_page.html: power at 49-51 Hz agains
 GOOD_OHMS, FAIR_OHMS = 1e6, 2.5e6  # app/lib/recorder/contact.dart (row 51, planning values)
 BAD_SHARE = 0.10  # a channel flat or railed this share of the night is worth fixing
 WIFI_OFF_S = 120  # Wi-Fi off this long while sharing is worth fixing (a planning value)
+# The phone's own cost (DECISIONS 767): the first hour after unplugging (the gauge holds 100 % with a flat charge
+# counter) and the hours the screen was on are left out; a log without screen lines (before 2026-11-20) counts an
+# hour drawing this much as the screen on (a lit screen alone is about 200 mA at minimum brightness: planning value)
+UNPLUG_SKIP_S = 3600
+FULL_PHONE_PCT = 99  # a night that starts unplugged at this level was just unplugged
+SCREEN_MA = 200.0
+PHONE_GAP_S = 600  # phone battery readings further apart than this are not joined into a stretch
+LOW_BAND_PCT = 20  # the headband's charge (by wear time) under this: charge it before the next night
+PHONE_COST_RULE = (f"phone-cost-v1: no first {UNPLUG_SKIP_S // 60} min after unplugging, no screen-on hours "
+                   f"(without screen lines: {SCREEN_MA:g} mA or more)")
 
 # ---- the log --------------------------------------------------------------------------------------------------------
 # Every line the recorders write. P = the phone app (app/lib/recorder/night_recorder.dart, battery.dart,
@@ -637,10 +647,95 @@ def settings_of(rest: str) -> dict[str, str]:
     return out
 
 
+def screen_spans(evs: list[Event]) -> list[tuple[float, float]] | None:
+    """When the phone's screen was on, from its Wi-Fi lines (each says the screen's state at that moment): from a line
+    saying on to the next line, or the last event; None when the log has no screen lines (an app from before
+    2026-11-20)."""
+    lines = [e for e in evs if e.kind == "wifi" and e.g.get("screen") in ("on", "off")]
+    if not lines:
+        return None
+    end = max(e.t for e in evs)
+    spans = []
+    for a, b in zip(lines, lines[1:] + [None]):
+        if a.g["screen"] == "on":
+            spans.append((a.t, b.t if b is not None else end))
+    return spans
+
+
+def phone_cost(pts: list[tuple], screen: list[tuple[float, float]] | None) -> dict | None:
+    """The phone's own cost over its steady hours (DECISIONS 767): `pts` (time, %, uAh, plugged, |current| uA) a minute
+    apart. Left out: readings while plugged, the first hour after unplugging (the night's first reading counts as
+    unplugging when it is unplugged at 99 % or more), and every clock hour with the screen on (by the Wi-Fi lines'
+    screen state; without them, an hour drawing SCREEN_MA or more on average). None with no steady hour left."""
+    unplugged_at: float | None = None
+    keep: dict[float, list[tuple[float, float, float, float | None]]] = {}  # clock hour -> (s, mAh, %, mA)
+    skipped_unplug = 0.0
+    for i, (a, b) in enumerate(zip(pts, pts[1:])):
+        if a[3] or b[3]:
+            unplugged_at = None
+            continue
+        if i == 0 and a[1] is not None and a[1] >= FULL_PHONE_PCT:
+            unplugged_at = a[0]
+        if unplugged_at is None and i > 0 and pts[i - 1][3]:
+            unplugged_at = a[0]
+        dt = b[0] - a[0]
+        if dt <= 0 or dt > PHONE_GAP_S or a[2] is None or b[2] is None:
+            continue
+        if unplugged_at is not None and a[0] < unplugged_at + UNPLUG_SKIP_S:
+            skipped_unplug += dt
+            continue
+        ma = (a[4] + b[4]) / 2000 if a[4] is not None and b[4] is not None else None
+        pct = (a[1] - b[1]) if a[1] is not None and b[1] is not None else 0.0
+        keep.setdefault(hour_of(a[0]), []).append((dt, (a[2] - b[2]) / 1000, pct, ma))
+    hours_on = set()
+    for h, parts in keep.items():
+        if screen is not None:
+            if any(x < h + 3600 and y > h for x, y in screen):
+                hours_on.add(h)
+        elif _mean_ma(parts) is not None and _mean_ma(parts) >= SCREEN_MA:
+            hours_on.add(h)
+    steady = [p for h, parts in keep.items() if h not in hours_on for p in parts]
+    secs = sum(p[0] for p in steady)
+    if secs < 20 * 60:
+        return None
+    return dict(mah_per_hour=sum(p[1] for p in steady) / secs * 3600, per_hour=sum(p[2] for p in steady) / secs * 3600,
+                ma=_mean_ma(steady), hours=secs / 3600, unplug_skipped_h=skipped_unplug / 3600,
+                screen_hours=len(hours_on), screen="logged" if screen is not None else "guessed from the current")
+
+
+def _mean_ma(parts: list[tuple[float, float, float, float | None]]) -> float | None:
+    """The time-weighted mean current (mA) of the stretches that have one."""
+    known = [(dt, ma) for dt, _, _, ma in parts if ma is not None]
+    secs = sum(dt for dt, _ in known)
+    return sum(dt * ma for dt, ma in known) / secs if secs else None
+
+
+def band_numbers(evs: list[Event]) -> dict | None:
+    """The headband's gauge by battery.py's one rule (DECISIONS 766): its readings, the stuck values left out, the
+    first and last believable ones, and the charge at the last reading by wear time (an estimate)."""
+    band = sorted((e.t, v) for e in evs if e.kind in ("connected", "samples", "stopped")
+                  and (v := _pct(e.g.get("bat"))) is not None)
+    if not band:
+        return None
+    stuck = battery.stuck_values(band)
+    good = [(t, v) for t, v in band if v not in stuck]
+    b: dict = dict(readings=len(band), stuck=len(band) - len(good), stuck_at=sorted({v for _, v in band if v in stuck}),
+                   first=None, last=None, first_t=None, last_t=None, low=None, per_hour=None, charged=False,
+                   estimate=battery.wear_estimate(band, band[-1][0]))
+    if good:
+        hours = (good[-1][0] - good[0][0]) / 3600
+        charged = any(v > u + 3 for (_, u), (_, v) in zip(good, good[1:]))  # a rise: charged in between
+        b.update(first=good[0][1], last=good[-1][1], first_t=good[0][0], last_t=good[-1][0],
+                 low=min(v for _, v in good), charged=charged,
+                 per_hour=(good[0][1] - good[-1][1]) / hours if hours * 60 >= 20 and not charged else None)
+    return b
+
+
 def battery_numbers(evs: list[Event]) -> dict:
     phone = [e for e in evs if e.kind == "phone_battery"]
-    out: dict = {"phone": None, "band": None, "summary": None}
-    pts = [(e.t, _pct(e.g["pct"]), _num(e.g["uah"]), e.g["plug"], _num(e.g["temp"])) for e in phone]
+    out: dict = {"phone": None, "band": band_numbers(evs), "summary": None}
+    pts = [(e.t, _pct(e.g["pct"]), _num(e.g["uah"]), e.g["plug"] != "unplugged", _num(e.g["temp"]),
+            abs(v) if (v := _num(e.g["ua"])) is not None else None) for e in phone]
     with_pct = [p for p in pts if p[1] is not None]
     if with_pct:
         a, z = with_pct[0], with_pct[-1]
@@ -651,23 +746,12 @@ def battery_numbers(evs: list[Event]) -> dict:
         out["phone"] = dict(first=a[1], last=z[1], hours=hours, readings=len(pts),
                             per_hour=(a[1] - z[1]) / hours if hours * 60 >= 20 else None,
                             mah_per_hour=mah / hours if mah is not None and hours * 60 >= 20 else None,
-                            plugged=any(p[3] != "unplugged" for p in pts),
-                            temp=(min(temps), max(temps)) if temps else None)
+                            plugged=any(p[3] for p in pts),
+                            temp=(min(temps), max(temps)) if temps else None,
+                            steady=phone_cost([(p[0], p[1], p[2], p[3], p[5]) for p in pts], screen_spans(evs)))
     summ = [e for e in evs if e.kind == "battery_summary"]
     if summ:
         out["summary"] = summ[-1].g["text"]
-    band = [(e.t, _pct(e.g.get("bat"))) for e in evs if e.kind in ("connected", "samples", "stopped")]
-    band = [(t, v) for t, v in band if v is not None]
-    good = [(t, v) for t, v in band if v not in STUCK]
-    if band:
-        b: dict = dict(readings=len(band), stuck=len(band) - len(good), first=None, last=None, low=None,
-                       per_hour=None, charged=False)
-        if good:
-            hours = (good[-1][0] - good[0][0]) / 3600
-            charged = any(v > u + 3 for (_, u), (_, v) in zip(good, good[1:]))  # a rise: charged in between
-            b.update(first=good[0][1], last=good[-1][1], low=min(v for _, v in good), charged=charged,
-                     per_hour=(good[0][1] - good[-1][1]) / hours if hours * 60 >= 20 and not charged else None)
-        out["band"] = b
     return out
 
 
@@ -1045,6 +1129,28 @@ def judge(s: dict) -> None:
     s["fixes"] = [t for _, t, _ in sorted(issues, key=lambda i: -i[0])[:3]]
 
 
+def band_issue(band: dict | None) -> str | None:
+    """What to say about the headband's charge, or None. Never a stuck gauge value as its level (the false "ended at
+    6 %" of 2026-11-19): the charge by wear time when a full reading is known, else a believable low reading."""
+    if not band:
+        return None
+    est = band["estimate"]
+    if est is not None:
+        if est["pct"] >= LOW_BAND_PCT:
+            return None
+        if est["hours"] > 0 and est["full"] - battery.DRAIN_PER_H * est["hours"] < 0:
+            return (f"The headband streamed {est['hours']:.1f} h after its {est['full']} % reading, longer than the "
+                    f"estimate of {battery.DRAIN_PER_H:g} %/h allows (so it drained under "
+                    f"{est['full'] / est['hours']:.1f} %/h): it is probably nearly empty. Charge it before the next "
+                    "night.")
+        return (f"The headband streamed {est['hours']:.1f} h after its {est['full']} % reading: about {est['pct']} % "
+                f"left by wear time (an estimate; the gauge is not reliable while it streams). Charge it before the "
+                "next night.")
+    if band["last"] is not None and band["last"] < LOW_BAND_PCT:
+        return f"The headband's gauge last read {band['last']} %: charge it before the next night."
+    return None
+
+
 def _setup_issues(s: dict, issues: list) -> None:
     c = s["contact"]
     if c["start"] is None:
@@ -1066,13 +1172,14 @@ def _setup_issues(s: dict, issues: list) -> None:
         if high:
             issues.append((35, f"Strong 50 Hz hum on {', '.join(high)}: keep chargers and mains cables away from the "
                            "bed.", None))
-    band = s["battery"]["band"]
-    if band and band["last"] is not None and band["last"] < 20:
-        issues.append((30, f"The headband ended at {band['last']} %: charge it fully before bed.", None))
+    band_fix = band_issue(s["battery"]["band"])
+    if band_fix:
+        issues.append((30, band_fix, None))
     ph = s["battery"]["phone"]
-    if ph and not ph["plugged"] and ph["per_hour"] is not None and ph["per_hour"] > 5:
-        issues.append((32, f"The phone used {ph['per_hour']:.1f} % an hour (about {ph['per_hour'] * 8:.0f} % for "
-                       "8 hours): charge it overnight.", None))
+    rate = ph and (ph["steady"]["per_hour"] if ph["steady"] else ph["per_hour"])
+    if ph and not ph["plugged"] and rate is not None and rate > 5:
+        issues.append((32, f"The phone used {rate:.1f} % an hour (about {rate * 8:.0f} % for 8 hours"
+                       f"{', screen off' if ph['steady'] else ''}): charge it overnight.", None))
     w = s["wifi"]
     if s["source"] == "phone" and w and w["shared"]:
         long = [(a, b) for a, b, _ in w["off"] if (b or s["last_line"]) - a >= WIFI_OFF_S]
@@ -1209,18 +1316,13 @@ def render(s: dict) -> str:
         plug = "charger connected at some point" if ph["plugged"] else "unplugged"
         out.append(f"  phone         {ph['first']} % to {ph['last']} % in {ph['hours']:.1f} h ({rate}{mah}), {plug}"
                    f"{temp}; {ph['readings']} readings")
+        out.append("  phone's cost  " + phone_cost_text(ph["steady"]))
     elif s["source"] == "phone":
         out.append("  phone         no phone battery lines")
     if s["battery"]["summary"]:
         out.append(f"  app's summary {s['battery']['summary']}")
     if band:
-        if band["first"] is None:
-            out.append(f"  headband      only the gauge's stuck values ({band['readings']} readings)")
-        else:
-            rate = f", {band['per_hour']:.1f} %/h" if band["per_hour"] is not None else ""
-            rate += ", charged in between" if band["charged"] else ""
-            stuck = f"; {band['stuck']} stuck readings left out (0-2 %, 100 %)" if band["stuck"] else ""
-            out.append(f"  headband      {band['first']} % to {band['last']} % (lowest {band['low']} %){rate}{stuck}")
+        out.append("  headband      " + band_text(band))
     c = s["contact"]
     out += ["", "Contact" + (f" at the start ({hm(c['start'][0])})" if c["start"] else "")]
     if c["start"]:
@@ -1238,6 +1340,39 @@ def render(s: dict) -> str:
     out += ["", f"Log: {s['lines']} lines read, " + (f"{len(unk)} not understood, e.g. '{unk[0][:100]}'" if unk
                                                        else "all understood.")]
     return "\n".join(out)
+
+
+def phone_cost_text(st: dict | None) -> str:
+    """`62 mAh/h (1.3 %/h, 61 mA) over 8.1 steady hours; left out: ...`: the phone's own cost (DECISIONS 767)."""
+    if st is None:
+        return "under 20 steady minutes (charging, the first hour after unplugging or the screen on)"
+    left = [f"the first {st['unplug_skipped_h']:.1f} h after unplugging"] if st["unplug_skipped_h"] else []
+    if st["screen_hours"]:
+        how = "the screen on" if st["screen"] == "logged" else f"over {SCREEN_MA:.0f} mA, the screen likely on"
+        left.append(f"{plural(st['screen_hours'], 'hour')} with {how}")
+    ma = f", {st['ma']:.0f} mA" if st["ma"] is not None else ""
+    return (f"{st['mah_per_hour']:.0f} mAh/h ({st['per_hour']:.1f} %/h{ma}) over {st['hours']:.1f} "
+            f"steady hours" + (f"; left out: {', '.join(left)}" if left else ""))
+
+
+def band_text(band: dict) -> str:
+    """The headband's gauge in words: believable readings, the stuck values left out, the charge by wear time."""
+    if band["first"] is None:
+        head = f"only the gauge's stuck values ({band['readings']} readings)"
+    elif band["first_t"] == band["last_t"]:
+        head = f"gauge {band['first']} % at {hm(band['first_t'])} (the only believable reading)"
+    else:
+        rate = f", {band['per_hour']:.1f} %/h" if band["per_hour"] is not None else ""
+        rate += ", charged in between" if band["charged"] else ""
+        head = f"{band['first']} % to {band['last']} % (lowest {band['low']} %){rate}"
+    if band["stuck"]:
+        head += (f"; {band['stuck']} stuck readings left out (stuck at "
+                 f"{', '.join(f'{v} %' for v in band['stuck_at'])})")
+    est = band["estimate"]
+    if est is not None:
+        head += (f"; about {est['pct']} % at the end by wear time (an estimate: {est['hours']:.1f} h streamed since "
+                 f"the {est['full']} % reading at {hm(est['since'])}, {battery.DRAIN_PER_H:g} %/h)")
+    return head
 
 
 def wifi_text(s: dict) -> str:

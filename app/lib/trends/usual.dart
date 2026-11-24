@@ -6,7 +6,7 @@
 //   - an arrow only from 14 days, and only when the day is at least 2 spreads away from the usual AND at least the
 //     measure's smallest change that matters (sleep 1 hour, a stage or falling asleep 15 minutes, efficiency 5 points,
 //     wake-ups 2, ratings 2 points, a day's mean rating 1 point, reaction
-//     time 10 %, jaw muscle bursts a quarter of the usual, a planning value): the research's
+//     time 10 %, jaw muscle bursts a quarter of the usual, pulse while asleep 5 a minute, a planning value): the research's
 //     "beyond normal spread" rules (early-warning pass 2, Q4). The band shown as "your normal range" is exactly
 //     the stretch with no arrow.
 // Alpha strength and the eyes-closed rise are judged on a log scale (a doubling counts the same up and down).
@@ -45,6 +45,13 @@ enum Scale {
 
   /// Counts an hour (jaw muscle bursts an hour asleep): 2 spreads and at least a quarter of the usual.
   rate(relChange: 0.25),
+
+  /// An amount that swings a lot from day to day (steps, DECISIONS 800-809): 2 spreads and at least a quarter of the
+  /// usual.
+  amount(relChange: 0.25),
+
+  /// Beats a minute (pulse while asleep, DECISIONS 817): 2 spreads and at least 5 a minute.
+  beats(minChange: 5),
 
   /// Powers and ratios: on a log scale, 2 spreads.
   log(logScale: true),

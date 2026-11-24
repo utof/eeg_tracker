@@ -6,6 +6,7 @@ import 'dart:isolate';
 import 'package:eeg_tracker/session_keeper.dart';
 import 'package:eeg_tracker/share/control.dart';
 import 'package:eeg_tracker/share/isolate.dart';
+import 'package:eeg_tracker/share/link.dart';
 import 'package:eeg_tracker/share/protocol.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -47,6 +48,47 @@ void main() {
   });
 
   Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 150));
+
+  test("Android 17's local-network permission refused: nothing serves, nothing pairs, the line says where to allow it", () async {
+    // DECISIONS 758: asked when the owner switches sharing on or pairs, not at every minute's look
+    var asked = 0;
+    var allow = false;
+    final blocked = ShareControl(
+      load: () async => saved,
+      save: (x) async => saved = x,
+      sendToRecorder: sent.add,
+      keepScreenOn: (on) async => awake.add(on),
+      clock: () => now,
+      localNetwork: () async {
+        asked++;
+        return allow;
+      },
+      host: (dir, onChange, wifiLock) =>
+          ShareHost(filesDir: dir, onLog: (_) {}, onChange: onChange, entry: fakeServer, wifiLock: wifiLock),
+    );
+    addTearDown(blocked.dispose);
+    await blocked.sync(night: false, filesDir: files.path);
+    expect(asked, 0, reason: 'off: nothing to ask');
+    await blocked.setOn(true);
+    await settle();
+    expect(asked, 1);
+    expect(blocked.status.up, isFalse);
+    expect(blocked.line().warn, isTrue);
+    expect(blocked.line().text, contains('Nearby devices'));
+    await blocked.sync(night: false, filesDir: files.path);
+    expect(asked, 1, reason: 'the minute\'s look does not ask again');
+    final outcome = await blocked.pair(PairLink.parse('eegtracker://pair?h=192.168.1.10&p=8771&s=AbCdEfGhIjKlMnOpQrStUv')!);
+    expect(outcome.failure, LinkFailure.localNetwork);
+    expect(asked, 2);
+    expect(saved.paired, isFalse);
+    // allowed in Settings: the next switch-on asks again and serves
+    allow = true;
+    await blocked.setOn(false);
+    await blocked.setOn(true);
+    await settle();
+    expect(blocked.status.up, isTrue);
+    await blocked.setOn(false);
+  });
 
   test('off by default: nothing serves, the line says what it is for', () async {
     await c.sync(night: false, filesDir: files.path);
@@ -91,7 +133,7 @@ void main() {
     expect(c.status.up, isFalse);
     await c.sync(night: true, filesDir: files.path);
     expect(c.line().text, 'Starting.');
-    c.onRecorderStatus((up: true, addresses: const ['10.0.0.7', '127.0.0.1'], port: 8765, note: ''));
+    c.onRecorderStatus(shareStatusWith(shareDown, up: true, addresses: const ['10.0.0.7', '127.0.0.1'], port: 8765));
     expect(c.line().text, 'On at 10.0.0.7:8765 until 10:05.');
 
     // the switch during a night goes to the recorder
@@ -126,10 +168,10 @@ void main() {
 
     await c.beforeNight();
     await c.sync(night: true, filesDir: files.path);
-    c.onRecorderStatus((up: true, addresses: const ['127.0.0.1'], port: 8765, note: ''));
+    c.onRecorderStatus(shareStatusWith(shareDown, up: true, addresses: const ['127.0.0.1'], port: 8765));
     expect(c.line().text, 'On, but no Wi-Fi address found. Join your home Wi-Fi, or use a USB cable: see Address and code.');
     expect(c.line().warn, isTrue);
-    c.onRecorderStatus((up: false, addresses: const [], port: 8765, note: 'sharing on Wi-Fi stopped by an error: x'));
+    c.onRecorderStatus(shareStatusWith(shareDown, note: 'sharing on Wi-Fi stopped by an error: x'));
     expect(c.line().text, 'Sharing stopped by itself. Switch it off and on again.');
     expect(c.line().warn, isTrue);
   });
