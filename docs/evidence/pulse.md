@@ -37,8 +37,8 @@ pulse; whether they are right is unknown until a watch's numbers are compared.
 - It is read only in part of the night (9-29 % of the time asleep on the first recordings) and almost never in deep
   sleep, where the large slow brain waves cover it. A night's number is the median of the minutes it could read.
 - Moving, walking and talking hide it, and the app says "no reading" then instead of guessing. Steps can make a rhythm
-  that looks like a pulse; the app turns down rhythms that look like steps, but a slow shuffle with a small shake could
-  still slip through.
+  that looks like a pulse; the app gives no reading in any half minute the walking detector calls walking and turns
+  down other rhythms that look like steps, but a slow shuffle with a small shake could still slip through.
 - A pulse under 42 or over 120 a minute is outside what it looks for: a very slow sleeping pulse is said as unclear
   rather than read at twice its rate.
 - It is not heart-rate variability, not a heart rhythm check and not a medical measurement.

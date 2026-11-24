@@ -267,6 +267,33 @@ at a third of their pace. With the two checks, no sleep epoch is walking in the 
 its walking minutes (80.8 of 81.7 between 19:08 and 21:14). A "no sleep while walking" veto may rely on this; a
 headband of another make may shake less when walking: the 300 µV is the owner's BrainBit's.
 
+**No sleep while walking** (DECISIONS 920, 923). The step shake reads as deep or dream sleep to a sleep model: on
+the owner's awake evening of 2026-11-20 the main model called 24 minutes sleep, 23 of them inside the walk, and the
+second opinion 110. So every place that scores sleep runs the walking detector on the same samples and scores an
+epoch awake when half or more of it lies in a walking or running stretch (`walking.epoch_flags` and `veto`,
+`walkingEpochs` and `walkingVeto` in Dart; a stop inside a walk is not walking): the laptop's sleep report (both
+models; `sleep.json` keeps the model's own word), the phone's report (its `walking` object and a line on the page) and
+the live scorer on the phone. There the detector runs in its `quick` mode: a window whose shake is under walking
+size is not transformed, so sleep costs almost nothing. The same per-epoch answer stops the pulse detector from
+reading while walking (`pulse-v2`, code `w`).
+
+| Recording (2026-11-20 unless said) | Scored asleep before | After |
+|---|---|---|
+| Awake 17:50-22:07, the laptop's report, main model | 24.0 min | 0.5 min |
+| the same, inside the walk 19:08-21:14 | 23.0 min | 0 |
+| the same, second opinion (YASA) | 110.0 min | 34.0 min |
+| Awake 17:50-22:07, the phone's report | 20.0 min | 1.0 min |
+| Awake 22:17-23:58, the phone's report | 0 | 0 |
+| Nap 15:59-17:49 | 79.5 min | 79.5 min |
+| Nights of 11-17, 11-18, 11-19 | 387.0, 549.0, 416.5 min | the same (no walking epoch in 4,140 epochs of sleep recordings) |
+
+Measured from the reports already made and the walking detector over the same samples. One walk of one person: a
+headband that shakes less when walking would not be caught.
+
+**The shared helper** (DECISIONS 921): `analysis/harmonic.py` and `app/lib/detectors/harmonic.dart` hold what walking
+and pulse both do (band-pass chain, spectrum size, Hann window, whitening, interpolation, the weighted sum over a
+rate's harmonics); each detector keeps its own numbers and rules.
+
 **What it cannot see** (the "i" note, `docs/evidence/walking.md`): slow strolling (under about 100 a minute), short
 walks indoors (under 30 s), stairs, cycling, a bus; and a whole walk read at half or double the pace (the stride) is
 the main way it can be wrong, which the phone's minutes catch.
@@ -294,6 +321,8 @@ How the choices were made, on the owner's recordings with no reference heart rat
   more channels is high by chance more often, hence the threshold growing with the channel count.
 - **The neighbours.** Readings with their neighbours added 40-60 % more readings; on the mistuned family they added
   0-0.3 % of unread epochs. Consecutive readings stayed within 5 a minute of each other in 94-100 % of pairs.
+- **Walking** (`pulse-v2`, DECISIONS 922). The walking detector reads the same samples; an epoch it calls walking
+  gets no reading (`w`) whatever the pulse's own checks say, and lends none to its neighbours.
 - **Steps.** On the owner's walk of 2026-11-20 (251 epochs walking) the movement rule alone left no reading; without
   it, about 160 epochs had a strong rhythm at 103-119 (the steps) or 53-58 (the stride), and the step checks turned
   104 of them down, while they turn down 7 of about 280 strong rhythms in the three sleep recordings. Made-up steps at 90-130 a minute, too small for the
@@ -310,6 +339,28 @@ How the choices were made, on the owner's recordings with no reference heart rat
 Medians a minute, with the readings in brackets (pulse-v1; the prototype of 2026-11-20 read 12 % and 3 % of the first
 two). Deep sleep is almost never read: its slow waves fill the same frequencies. Check against a watch:
 `scripts/compare_pulse.py` (app/README.md "Pulse").
+
+## Eating: a prototype (DECISIONS 925)
+
+`analysis/eating.py` (`eat-v1`, Python only, not in the app). Chewing tightens the jaw muscles once or twice a second
+for minutes; the temple channels sit on those muscles. The talking rule (2 or more jaw bursts in 30 s) misses it,
+because steady chewing reads as one long burst.
+
+| Step | Rule (planning values from two meals) |
+|---|---|
+| Channels | temples by name (T3 T4 T7 T8 F7 F8 FT7 FT8 TP7 TP8 FT9 FT10 T9 T10), every other channel is a "back" channel; any number, any layout; no temple channel or under 150 samples a second: not read |
+| Muscle | 20-70 Hz (mains notches at 50, 60, 100), the mean size per tenth of a second |
+| Windows | 10 s every 5 s; over 1 s missing: not read |
+| A window chews | muscle level 4 µV or more; a rhythm at 1.0-2.5 a second at least 8 times the usual level, with a fifth of the power at that rate or twice it; bursts with rests (spread at least 0.4 of the mean); left and right together (0.3); the temples' slow jaw movement (0.7-20 Hz) at least 1.5 times the back channels' |
+| A meal | a majority of 7 windows; runs under 3 minutes apart are one meal; at least 60 s of chewing |
+
+On the owner's recordings: both labelled meals found (85 s and 80 s of chewing, about 100 chews a minute), 3 of the 8
+labelled minutes flagged (2 of 3 for 22:03-22:06; 1 of 5 for 22:45-22:50, whose end was a guess), nothing else in
+the two awake recordings (6 hours, the walk included) and no asleep epoch in the nap and three nights (0 of 2,864).
+Without the back channels the walk would be 72 minutes of "eating": every step swells the muscle band at the step
+rate, which is also the owner's chewing rate. A tighter value of any of five thresholds loses a meal, and no talking
+was ever labelled. So it stays a prototype until there are more labels: 10 or more meals with start and end tapped at
+the time, of different food; 3 or more stretches of talking of 5 minutes; eating while walking.
 
 ## What still needs the owner
 
