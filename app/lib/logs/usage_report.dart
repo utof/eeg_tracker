@@ -5,7 +5,7 @@ import 'activity.dart' show featureLabel;
 
 /// The app's screens the owner can open, with their words: a screen not seen in the period is "not opened".
 const Map<String, String> knownScreens = {
-  'tab:Night': 'Night tab',
+  'tab:Record': 'Record tab',
   'tab:Sessions': 'Sessions tab',
   'tab:Signal': 'Signal tab',
   'tab:Trends': 'Trends tab',

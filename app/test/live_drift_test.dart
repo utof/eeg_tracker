@@ -163,7 +163,9 @@ const fast = RecorderTiming(
 
 List<Map<String, dynamic>> markersIn(Directory dir) => [
   for (final f in dir.listSync().whereType<File>().where((f) => f.path.endsWith('.markers.jsonl')))
-    for (final l in f.readAsLinesSync()) jsonDecode(l) as Map<String, dynamic>,
+    for (final l in f.readAsLinesSync())
+      // the sleep span's own start and end markers (Record first) are record_first_test's
+      if (!l.contains('"span: ')) jsonDecode(l) as Map<String, dynamic>,
 ];
 
 List<File> f32In(Directory dir) =>

@@ -711,6 +711,12 @@ class NightRecorder {
       sigSub = band.signal.listen((rows) => _onRows(w, rows));
       if (await _startSignal(band, w, isLost)) {
         w.log('recording started, 250 Hz');
+        if (_markOpenSpans) {
+          _markOpenSpans = false;
+          for (final s in _spans) {
+            if (!s.closed) _marker('span: ${s.kind} start', _now());
+          }
+        }
         _set(_status.copyWith(phase: Phase.recording, note: 'recording'));
         end = await _record(band, w, isLost);
       } else {
@@ -1769,6 +1775,9 @@ class NightRecorder {
   }
 
   bool _gaveUp = false;
+
+  /// The spans opened before the first file set still need their line in its log and markers.
+  bool _markOpenSpans = false;
   int? _awayFromMs;
 
   /// The recording's spans in order, as last written.
@@ -1792,7 +1801,8 @@ class NightRecorder {
       session: session,
     );
     _putSpan(span);
-    _marker('span: $kind start', t);
+    // before the first file set there is no log to write into in time order: the line comes when the set opens
+    if (_night.recording != null) _marker('span: $kind start', t);
     return span;
   }
 
@@ -1846,6 +1856,7 @@ class NightRecorder {
     for (final s in _spans) {
       _writeSpan(s);
     }
+    _markOpenSpans = true;
     if (_begun) _set(_status);
   }
 }

@@ -104,13 +104,13 @@ void main() {
       await tester.pumpAndSettle();
       final ev = usage();
       final views = [for (final e in ev) if (e['ev'] == 'view') e['screen']];
-      expect(views, ['tab:Night', 'FooScreen', 'tab:Night']);
+      expect(views, ['tab:Record', 'FooScreen', 'tab:Record']);
       final tap = ev.firstWhere((e) => e['ev'] == 'tap');
       expect(tap, containsPair('control', 'FilledButton'));
       expect(tap, containsPair('label', 'Start night #'));
       expect(tap, containsPair('id', 'start-night'));
-      expect(tap, containsPair('screen', 'tab:Night'));
-      expect(logs.screen, 'tab:Night');
+      expect(tap, containsPair('screen', 'tab:Record'));
+      expect(logs.screen, 'tab:Record');
     });
 
     testWidgets('a bare switch is named by its row; an icon button by its tooltip; typed text is never read', (tester) async {
@@ -147,7 +147,7 @@ void main() {
       expect(ev.where((e) => e['ev'] == 'drag' && e['screen'] == 'FooScreen'), isEmpty, reason: 'a scroll is not also a drag');
       final drag = ev.lastWhere((e) => e['ev'] == 'drag');
       expect(drag, containsPair('dir', 'left'));
-      expect(drag, containsPair('screen', 'tab:Night'));
+      expect(drag, containsPair('screen', 'tab:Record'));
     });
 
     testWidgets('the bottom bar\'s tabs name the home page', (tester) async {
@@ -164,7 +164,7 @@ void main() {
       await tester.tap(find.text('More'));
       await tester.pump();
       final views = [for (final e in usage()) if (e['ev'] == 'view') e['screen']];
-      expect(views, ['tab:Night', 'tab:Signal', 'tab:More']);
+      expect(views, ['tab:Record', 'tab:Signal', 'tab:More']);
     });
 
     testWidgets('a feature\'s start and its length go into the usage log', (tester) async {
@@ -247,15 +247,15 @@ void main() {
     String at(int min) => day.add(Duration(minutes: min)).toIso8601String();
     final ev = <Map<String, Object?>>[
       {'t': at(0), 'ev': 'app', 'state': 'front'},
-      {'t': at(0), 'ev': 'view', 'screen': 'tab:Night'},
-      {'t': at(2), 'ev': 'tap', 'screen': 'tab:Night', 'control': 'FilledButton', 'label': 'Start night'},
+      {'t': at(0), 'ev': 'view', 'screen': 'tab:Record'},
+      {'t': at(2), 'ev': 'tap', 'screen': 'tab:Record', 'control': 'FilledButton', 'label': 'Start night'},
       {'t': at(3), 'ev': 'view', 'screen': 'tab:Signal'},
       {'t': at(3), 'ev': 'feature', 'name': 'signal', 'on': true},
       {'t': at(13), 'ev': 'feature', 'name': 'signal', 'on': false, 's': 600},
       {'t': at(13), 'ev': 'view', 'screen': 'MeditationScreen'},
       {'t': at(14), 'ev': 'scroll', 'screen': 'MeditationScreen', 'axis': 'v', 'dir': 'down', 'px': 900, 'ms': 300, 'reach': 0.9},
       {'t': at(15), 'ev': 'tap', 'screen': 'MeditationScreen', 'control': 'FilledButton', 'label': 'Start'},
-      {'t': at(15), 'ev': 'tap', 'screen': 'tab:Night', 'control': 'FilledButton', 'label': 'Start night'},
+      {'t': at(15), 'ev': 'tap', 'screen': 'tab:Record', 'control': 'FilledButton', 'label': 'Start night'},
       {'t': at(20), 'ev': 'app', 'state': 'back'},
       // the work session's break hints: one followed by a break, one ignored
       {'t': at(60), 'ev': 'hint', 'kind': 'work-break', 'step': 'shown'},
@@ -294,7 +294,7 @@ void main() {
 
     test('features with their time, most tapped, not opened, scrolling', () {
       expect(s.features.single, (feature: 'signal', times: 1, total: const Duration(minutes: 10)));
-      expect(s.taps.first, (screen: 'tab:Night', control: 'Start night', taps: 2));
+      expect(s.taps.first, (screen: 'tab:Record', control: 'Start night', taps: 2));
       expect(s.notOpened, contains('NapScreen'));
       expect(s.notOpened, isNot(contains('MeditationScreen')));
       expect(s.notOpened, isNot(contains('tab:Signal')));
