@@ -252,6 +252,14 @@ AVD, the emulator and its adb server at the end. It prints PASS / FAIL / SKIP:
 
 Logs and details go to `/var/tmp/eeg-precheck-<time>/out/` (`--out`). About 12 minutes, 30 with (c) on the 2-core AVD.
 
+### The push's own check
+
+`python3 tool/push_smoke.py <release APK> [--work <folder on a disk with room>]` (heavy build slot, about 25
+minutes, adb port 5049) pairs a temporary emulator with a receiver on this laptop and checks the phone's own
+sending (DECISIONS 849): the spare port, the scheduled job run by Android itself with the app closed, forced
+runs, the laptop's own copy beside it, and that no notification is shown. It waits for Android's own run before
+it forces any: every run of a periodic job moves Android's next window 15 minutes on.
+
 ## Replay headband (test and replay builds only)
 
 `lib/headband/replay.dart` plays a recording in the app's own format (`.f32` plain or packed, `.idx`, the header) into
