@@ -70,7 +70,7 @@ def test_the_vocabulary_holds_the_owners_labels_and_every_detector_names_known_o
     assert set(VOCAB.kinds) >= {"state", "activity", "event", "rating", "measurement"}
     assert set(VOCAB.sources) >= {"owner_chat", "owner_app_tag", "owner_checkin", "owner_mark_button", "device_watch",
                                   "device_phone", "observer"}
-    assert list(VOCAB.confidences) == ["certain", "likely"]
+    assert list(VOCAB.confidences) == ["certain", "likely", "within"]
     assert VOCAB.labels["pulse"].unit == "bpm" and VOCAB.labels["pulse"].kind == "measurement"
     for d in vd.DETECTORS:
         assert (d.yes | d.no | d.mostly) <= set(VOCAB.labels), d.name
@@ -131,7 +131,7 @@ def test_good_rows_pass_and_numbers_keep_their_units(tmp_path: Path) -> None:
                                                                                      minutes=0, source="observer")]
     write_hand(tmp_path, good)
     rows, rejected, counts = truth.build(tmp_path)
-    assert rejected == [] and counts == {"hand": 5, "files": 0, "archive": 0, "confirm": 0}
+    assert rejected == [] and counts == {"hand": 5, "files": 0, "archive": 0, "confirm": 0, "spans": 0}
     assert {r["label_id"]: r["kind"] for r in rows} == {"a": "state", "b": "rating", "c": "measurement", "d": "event",
                                                          "e": "device"}
     assert truth.main(["--local", str(tmp_path), "check"], out=lambda _s: None) == 0
@@ -218,7 +218,7 @@ def test_archive_tags_marked_truth_and_watch_rows_join_the_hand_file(tmp_path: P
                                        value=str(60 + i), unit="bpm", source="device_watch") for i in range(3)],
                                   truth.COLUMNS))
     rows, rejected, counts = truth.build(tmp_path)
-    assert counts == {"hand": 1, "files": 3, "archive": 1, "confirm": 0}
+    assert counts == {"hand": 1, "files": 3, "archive": 1, "confirm": 0, "spans": 0}
     tag = next(r for r in rows if r["source"] == "owner_app_tag")
     assert tag["label"] == "walking" and tag["kind"] == "activity" and tag["owner_words"] == "walk"
     assert tag["recording"] == "2026-11-16-230000" and tag["origin"] == "phone/archive/2026-11-16-230000.tags.json"
@@ -230,7 +230,7 @@ def test_the_data_book_writes_the_truth_table(tmp_path: Path) -> None:
     local = tmp_path / "local"
     write_hand(local, [row("tl-1", label="awake"), row("tl-2", label="dozing")])
     book = db.build(local, local / "data", datetime.now().astimezone(), say=lambda _s: None)
-    assert book["rows"]["truth.tsv"] == 1 and book["truth_from"] == {"hand": 1, "files": 0, "archive": 0, "confirm": 0}
+    assert book["rows"]["truth.tsv"] == 1 and book["truth_from"] == {"hand": 1, "files": 0, "archive": 0, "confirm": 0, "spans": 0}
     assert len(book["truth_rejected"]) == 1 and "dozing" in book["truth_rejected"][0]
     df = pd.read_csv(local / "data" / "truth.tsv", sep="\t", parse_dates=["start", "end", "created"])
     assert str(df["start"].dtype).startswith("datetime64") and df.loc[0, "label"] == "awake"
