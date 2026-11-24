@@ -23,14 +23,14 @@ void main() {
   late List<Map<String, Object?>> sent;
   late List<bool> awake;
   late ShareControl c;
-  var now = DateTime(2026, 11, 22, 22, 5);
+  var now = DateTime(2099, 11, 22, 22, 5);
 
   setUp(() {
     files = Directory.systemTemp.createTempSync('share_control_test');
     saved = const ShareConfig();
     sent = [];
     awake = [];
-    now = DateTime(2026, 11, 22, 22, 5);
+    now = DateTime(2099, 11, 22, 22, 5);
     c = ShareControl(
       load: () async => saved,
       save: (x) async => saved = x,
@@ -171,7 +171,7 @@ void main() {
     expect((sent.last['config']! as Map)['token'], saved.token);
 
     // Stop: 15 more minutes, served by the app again
-    now = DateTime(2026, 11, 23, 7, 30);
+    now = DateTime(2099, 11, 23, 7, 30);
     await c.afterStop();
     expect(saved.offAtMs, now.add(const Duration(minutes: 15)).millisecondsSinceEpoch);
     await c.sync(night: false, filesDir: files.path);
