@@ -8,7 +8,8 @@ Seeds a made-up sleep report and a made-up walk file (no recording of anyone), s
   2. a tap on the card's first Yes writes a `card` line to files/confirm/answers.jsonl;
   3. the notification is there with the next question; its No and Not sure buttons write `notification` lines while
      the questions go by one after the other, and the notification leaves after the last;
-  4. back in the app the card is gone and files/confirm/labels.tsv holds the Yes and the No.
+  4. back in the app the card is gone, no second batch or notification came, and files/confirm/labels.tsv holds the
+     Yes and the No.
 The emulator, its adb server and the helpers are the pre-install check's (tool/precheck.py). Emulator only: run it
 inside `_local/build_slot.sh heavy`.
 """
@@ -94,7 +95,8 @@ def notification_title() -> str | None:
     dump = pc.sh("dumpsys notification --noredact", timeout=60, check=False)
     block = ""
     for part in dump.split("NotificationRecord(")[1:]:
-        if "confirm_questions" in part and pc.PKG in part:
+        head = part.split("\n", 1)[0]  # the record's own line; the last record's text runs on into other sections
+        if "confirm_questions" in head and pc.PKG in head:
             block = part
             break
     if not block:
@@ -140,7 +142,7 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
         return [pc.Result("the app", "FAIL", "its main screen did not come", pc.screen_words("no-main"))]
 
     card = pc.find_on_tab("Night", "Quick check", limit=180)
-    seen = [q for q in questions if wait(lambda q=q: emu.match(q, True), limit=20)]
+    seen = [q for q in questions if wait(lambda q=q: emu.match(q, False), limit=20)]
     details = pc.screen_words("card")
     results.append(pc.Result("1 the card shows the batch", "PASS" if card and len(seen) == 3 else "FAIL",
                              f"{len(seen)} of 3 questions on the Night tab: " + " / ".join(seen), details))
@@ -181,9 +183,12 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     labels = pc.sh(f"cat {CONFIRM}/labels.tsv 2>/dev/null", check=False)
     rows = [l.split("\t") for l in labels.splitlines()[1:]]
     present = sorted(r[14] for r in rows if len(r) >= 16)
-    results.append(pc.Result("4 the card is gone and the labels file has the Yes and the No",
-                             "PASS" if not still and present == ["0", "1"] else "FAIL",
-                             f"{len(rows)} label rows, present {present}; card {'still there' if still else 'gone'}",
+    shown = pc.sh(f"cat {CONFIRM}/asks.jsonl 2>/dev/null", check=False).count('"event":"shown"')
+    again = notification_title()
+    results.append(pc.Result("4 the card is gone, nothing is asked again, the labels file has the Yes and the No",
+                             "PASS" if not still and present == ["0", "1"] and shown == 1 and again is None else "FAIL",
+                             f"{len(rows)} label rows, present {present}; card {'still there' if still else 'gone'}; "
+                             f"batches shown {shown}; notification after reopening: {again!r}",
                              [l[:300] for l in labels.splitlines()] + pc.screen_words("after")))
     return results
 
