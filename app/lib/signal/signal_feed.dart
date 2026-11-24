@@ -9,6 +9,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../dream/band_link.dart';
+import '../headband/connection.dart' show HeadbandConnection;
 import '../logs/metrics.dart' show Metrics;
 import '../recorder/chunk_writer.dart' show Sample;
 import '../recorder/headband.dart' show HeadbandFinder;
@@ -68,6 +69,7 @@ class SignalPhone {
     required this.finderFor,
     this.disposeFinder,
     this.holdHeadband,
+    this.diyConnection,
     this.timing = const LinkTiming(),
     this.clock = DateTime.now,
     this.tickEvery = const Duration(seconds: 1),
@@ -91,6 +93,11 @@ class SignalPhone {
   /// The finder for a connection of the view's own (the BrainBit's switch, or the DIY board's listener).
   final HeadbandFinder Function(SignalDevice device) finderFor;
   final void Function(HeadbandFinder finder, {required bool anyLost})? disposeFinder;
+
+  /// The owner of the view's own connection to the DIY board (headband/connection.dart: the same class that owns the
+  /// BrainBit's one connection), when [finderFor] hands out its finder for that board: its status is the headband
+  /// card's on the Signal tab (DECISIONS 947). Null: no card for the board.
+  final HeadbandConnection? diyConnection;
 
   /// Tells the headband watcher of automatic recording (lib/auto, DECISIONS 602) that the view's own connection holds
   /// the headband ([on]: before its search; off once it let go), so no check of the watcher's starts meanwhile. Not for

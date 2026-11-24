@@ -10,6 +10,7 @@ import '../alphatheta/rules.dart';
 import '../logs/own_text.dart';
 import '../training/check.dart';
 import 'check_views.dart';
+import 'device_status.dart' show SharedDeviceCard;
 import 'form_parts.dart';
 import 'parts.dart';
 import 'reaction_test.dart';
@@ -265,6 +266,8 @@ class AtSetupView extends StatelessWidget {
             if (m.checkStatus != null) Para(m.checkStatus!, color: Night.inkMuted, top: 8),
           ],
         ],
+        // the one headband card (DECISIONS 854, 947); the session itself shows it through the meditation view
+        if (!paused && !m.needsDecision) const SharedDeviceCard(top: 24),
         const SectionHeading('Your stop plan'),
         OwnText(child: Text('Call: ${m.contact.isEmpty ? '–' : m.contact}', style: text.bodyLarge?.copyWith(height: 1.4))),
         const SizedBox(height: 6),

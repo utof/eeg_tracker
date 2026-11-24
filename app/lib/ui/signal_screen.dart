@@ -37,6 +37,7 @@ class _SignalScreenState extends State<SignalScreen> with WidgetsBindingObserver
     WidgetsBinding.instance.addObserver(this);
     widget.feed.addListener(_changed);
     HeadbandConnection.shared?.status.addListener(_changed);
+    widget.feed.phone.diyConnection?.status.addListener(_changed);
   }
 
   @override
@@ -71,6 +72,7 @@ class _SignalScreenState extends State<SignalScreen> with WidgetsBindingObserver
     WidgetsBinding.instance.removeObserver(this);
     widget.feed.removeListener(_changed);
     HeadbandConnection.shared?.status.removeListener(_changed);
+    widget.feed.phone.diyConnection?.status.removeListener(_changed);
     Activity.set('signal', on: false);
     unawaited(widget.feed.setActive(false));
     super.dispose();
@@ -105,8 +107,14 @@ class _SignalScreenState extends State<SignalScreen> with WidgetsBindingObserver
   @override
   Widget build(BuildContext context) {
     final f = widget.feed;
-    // the headband card every screen shares; its panel reads this page's own signal (the DIY board has no card yet)
-    final owner = f.device.diy ? null : HeadbandConnection.shared;
+    // the headband card every screen shares; its panel reads this page's own signal. The DIY board's own connection
+    // has an owner of its own (the same class), and its night is the recorder's, mirrored by the app's one connection
+    final owner = signalCardOwner(
+      diy: f.device.diy,
+      kind: f.kind,
+      shared: HeadbandConnection.shared,
+      diyOwner: f.phone.diyConnection,
+    );
     final card = owner == null
         ? null
         : DeviceCard(
@@ -126,6 +134,16 @@ class _SignalScreenState extends State<SignalScreen> with WidgetsBindingObserver
     );
   }
 }
+
+/// Whose status the Signal tab's headband card shows (DECISIONS 947): the app's one connection for the BrainBit and
+/// for any night (it mirrors the recorder, whatever board records); the board's own owner for the view's own
+/// connection to the DIY board. Null: no card.
+HeadbandConnection? signalCardOwner({
+  required bool diy,
+  required FeedKind kind,
+  required HeadbandConnection? shared,
+  required HeadbandConnection? diyOwner,
+}) => diy && kind != FeedKind.night ? diyOwner : shared;
 
 /// Places for sites outside the 10-10 names (a helmet's own): one line a site, checked before it is saved.
 class PositionsScreen extends StatefulWidget {

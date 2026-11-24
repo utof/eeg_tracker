@@ -10,6 +10,7 @@ import '../detectors/gestures.dart';
 import '../handsfree/calibration_controller.dart' show CalStage, LaneStep, calTries, laneSeconds;
 import '../handsfree/store.dart';
 import '../recorder/nights.dart' show nightLabel;
+import 'device_status.dart' show SharedDeviceCard;
 import 'form_parts.dart' show Para, PinnedAction;
 import 'parts.dart';
 import 'theme.dart';
@@ -447,6 +448,7 @@ class CalibrationView extends StatelessWidget {
             Text(m.message, style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4)),
             const SizedBox(height: 28),
             GestureLanes(jaw: const [], eyes: const [], clenchLine: m.clenchLine, glanceSize: m.glanceSize, yours: m.linesAreYours),
+            const SharedDeviceCard(top: 24),
           ],
           CalStage.still || CalStage.trying => _running(context),
           CalStage.result => _result(context),
@@ -486,6 +488,8 @@ class CalibrationView extends StatelessWidget {
         Para('The headband is busy with the night. Calibrate after Stop.', color: Night.caution)
       else
         Para('Nothing changes in your sessions until you switch hands-free on in Settings.', color: Night.inkMuted),
+      // the one headband card (DECISIONS 854, 947): is it connected, is the contact good, before the 90 seconds start
+      const SharedDeviceCard(top: 24),
     ];
   }
 
@@ -512,6 +516,7 @@ class CalibrationView extends StatelessWidget {
         'look counts past the faint lines.',
         style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.4),
       ),
+      const SharedDeviceCard(top: 24),
     ];
   }
 
