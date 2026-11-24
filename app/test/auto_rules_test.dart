@@ -119,23 +119,23 @@ void main() {
   group('the headband battery guard', () {
     final w = usualNight(const [], const AutoSettings()); // bed 23:00, wake 07:00: 8 h
 
-    test('tonight needs 8 h x 10 % + 15 % = 95 %', () {
-      expect(nightNeedPct(w), 95);
+    test('tonight needs 8 h x 11 % + 15 %: more than a full charge, so all of it', () {
+      expect(nightNeedPct(w), 100);
     });
 
     test('a night is never refused, only warned about', () {
       final low = guardBattery(WearKind.night, 30, DateTime(2026, 11, 20, 23, 0), w);
       expect(low.allowed, isTrue);
-      expect(low.note, 'headband at 30 %: about 3 h, the night needs about 8 h');
+      expect(low.note, 'headband at 30 %: about 2 h, the night needs about 8 h');
       expect(guardBattery(WearKind.night, 100, DateTime(2026, 11, 20, 23, 0), w).note, isNull);
-      expect(guardBattery(WearKind.night, 90, DateTime(2026, 11, 20, 23, 0), w).note, isNull, reason: '9 h for an 8-hour night');
+      expect(guardBattery(WearKind.night, 90, DateTime(2026, 11, 20, 23, 0), w).note, isNull, reason: '8.2 h for an 8-hour night');
       expect(guardBattery(WearKind.night, 70, DateTime(2026, 11, 20, 23, 0), w).note, isNotNull);
     });
 
     test('daytime, bedtime 4 hours away or more: down to 15 %, ending 4 hours before bed', () {
       final g = guardBattery(WearKind.work, 80, DateTime(2026, 11, 20, 10, 0), w);
       expect(g.allowed, isTrue);
-      expect(g.limit, const Duration(hours: 6, minutes: 30), reason: '(80 - 15) / 10 = 6.5 h; bed - 4 h is 9 h away');
+      expect(g.limit, const Duration(hours: 5, minutes: 54), reason: '(80 - 15) / 11 = 5.9 h; bed - 4 h is 9 h away');
       final late = guardBattery(WearKind.work, 80, DateTime(2026, 11, 20, 17, 0), w);
       expect(late.limit, const Duration(hours: 2), reason: 'ends at 19:00, 4 hours before 23:00');
     });
@@ -145,12 +145,12 @@ void main() {
       expect(refused.allowed, isFalse);
       expect(refused.note, 'Charge the headband for tonight.');
       final full = guardBattery(WearKind.other, 100, DateTime(2026, 11, 20, 20, 0), w);
-      expect(full.allowed, isFalse, reason: '100 - 95 = 5 % = 30 min, under the 40-minute minimum');
+      expect(full.allowed, isFalse, reason: 'tonight needs the whole charge');
     });
 
     test('too little to bother: under 40 minutes is refused', () {
-      expect(guardBattery(WearKind.work, 20, DateTime(2026, 11, 20, 10, 0), w).allowed, isFalse);
-      expect(guardBattery(WearKind.work, 22, DateTime(2026, 11, 20, 10, 0), w).allowed, isTrue);
+      expect(guardBattery(WearKind.work, 22, DateTime(2026, 11, 20, 10, 0), w).allowed, isFalse, reason: '7 % = 38 min');
+      expect(guardBattery(WearKind.work, 23, DateTime(2026, 11, 20, 10, 0), w).allowed, isTrue, reason: '8 % = 43 min');
     });
 
     test('battery not known: allowed, said so', () {

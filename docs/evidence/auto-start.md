@@ -41,8 +41,8 @@ so the app asks instead.
   off the head are seen on the phone.
 - The kind rules are guesses about one person's habits: working in bed late, an afternoon nap or a headband put on to
   test it will be guessed wrong. A wrong guess costs one quiet question, or one recording you delete.
-- The battery numbers (10 % an hour, 15 % margin, 4 hours to charge) are planning values, not measured on this
-  headband.
+- The battery numbers (15 % margin, 4 hours to charge) are planning values. The 11 % an hour was measured once on this
+  headband (99 % to 79 % in 1.8 hours).
 - The headband's own detectors (eyes closed, drowsy, asleep, jaw, movement) only confirm what happens inside a
   session; they are not used to decide whether to start.
 
@@ -70,7 +70,7 @@ so the app asks instead.
   on for automatic sessions). Never sounds, alarms, lucid or memory cues, neurofeedback, the dream catcher or the
   microphone.
 - The night comes first: a daytime session starts only while the headband keeps enough for tonight (your usual night
-  times 10 % an hour plus 15 %, or down to 15 % when bedtime is 4 hours or more away) and stops itself in time; else
+  times 11 % an hour plus 15 %, at most a full charge, or down to 15 % when bedtime is 4 hours or more away) and stops itself in time; else
   the app says "Charge the headband for tonight". A night is never refused, only warned about.
 - Every check, guess, question, answer and outcome is kept on the phone (Export data takes it), so the settings page
   can say how often the guess was right, and a personal model can learn from your answers later.

@@ -1648,7 +1648,7 @@ shows `docs/evidence/auto-start.md`).
   show on the screen and the lock-screen card; its chime only with **Chime in automatic work sessions** on. After 10
   yes in a row for the night or for work, the page (and a notification) offers to switch it to Automatic.
 - **The night comes first**: a work session starts by itself or is offered only while the headband keeps enough for
-  tonight (planning: 10 % an hour, plus 15 %; down to 15 % while bedtime is 4 hours or more away, ending 4 hours
+  tonight (11 % an hour, the app's one battery rule, plus 15 %; down to 15 % while bedtime is 4 hours or more away, ending 4 hours
   before bed), and it stops itself in time. Otherwise: "Charge the headband for tonight" (once a day). A night is never
   refused, only warned about in the question.
 - A night started this way says so in its log ("started automatically" or "started after Yes"). Stop it in the

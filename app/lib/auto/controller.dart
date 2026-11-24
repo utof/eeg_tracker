@@ -20,6 +20,7 @@ import 'dart:io';
 
 import '../recorder/nights.dart' show dateName, nightsIn;
 import '../sleep/report.dart' show isoLocal;
+import '../headband/battery_estimate.dart';
 import 'battery_guard.dart';
 import 'bedtime.dart';
 import 'laptop.dart';
@@ -129,6 +130,20 @@ class AutoWatch {
   late final AutoStore store = AutoStore(autoDirFor(recordings));
   late final AutoLog log = AutoLog(store.dir);
   late final LaptopStore laptop = LaptopStore(store.dir);
+
+  /// The headband's battery track shared with the card and the recorder (headband/battery_estimate.dart).
+  late final BandBatteryStore bandBattery = BandBatteryStore.forRecordings(recordings);
+
+  /// The charge to count with: [gauge], a new connection's reading, goes into the track, and the track's estimate is
+  /// the answer (the gauge itself when the track has none). Null without a reading: "not known", as before.
+  int? _believed(int? gauge, DateTime now) {
+    if (gauge == null) return null;
+    try {
+      return bandBattery.note(gauge, now, streaming: false).now.percent ?? gauge;
+    } catch (_) {
+      return gauge;
+    }
+  }
 
   HeadbandCheck? _check;
 
@@ -257,15 +272,18 @@ class AutoWatch {
       store.saveState(st);
       return _skip(now, t, 'asked this wearing (${kind.wire})');
     }
-    final guard = guardBattery(kind, result.battery, now, w);
+    // the charge the guard counts with is the headband card's estimate (the one battery rule, DECISIONS 946): the
+    // check's own reading goes into the shared track first; a gauge that sticks does not refuse or allow anything
+    final charge = _believed(result.battery, now);
+    final guard = guardBattery(kind, charge, now, w);
     if (!guard.allowed) {
       await probe.release();
-      log.add(now, 'declined', {'kind': kind.wire, 'why': guard.note, 'battery': result.battery});
+      log.add(now, 'declined', {'kind': kind.wire, 'why': guard.note, 'battery': result.battery, 'estimate': charge});
       final day = dateName(now);
       if (st.chargeNoticeDay != day) {
         await phone.notice(
           'Charge the headband for tonight',
-          'It is at ${result.battery} %; tonight needs about ${nightNeedPct(w)} %. Nothing is recorded now.',
+          'It is at about $charge %; tonight needs about ${nightNeedPct(w)} %. Nothing is recorded now.',
         );
         st = st.copyWith(chargeNoticeDay: day);
       }
