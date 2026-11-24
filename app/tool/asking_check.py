@@ -181,13 +181,26 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     if not card:
         return results
 
-    ok = tap("Walking")
+    chip = pc.find("Walking", exact=True)  # the blind card is the third: it may be below the screen's edge
+    ok = chip is not None
+    if chip:
+        pc.sh(f"input tap {chip[1]} {chip[2]}")
+        time.sleep(2)
     got = wait(lambda: line_of(ids["blind"]), limit=30)
     good = bool(got) and (got.get("answer"), got.get("card"), got.get("said"), got.get("guess")) == ("said", "blind", "walking", "walking")
     results.append(pc.Result("2 a blind card stores what you said, with the guess kept beside it",
                              "PASS" if ok and good else "FAIL", f"answers.jsonl: {json.dumps(got)}", pc.screen_words("blind-answered")))
 
-    opened = tap("Yes, but the times are off")
+    for _ in range(4):
+        emu.scroll("up")
+    # each card that shows its guess has the link: take the one right under the walk's question
+    question = wait(lambda: emu.match(want["walk"], False), limit=20)
+    links = [n for n in emu.nodes() if n[0].strip() == "Yes, but the times are off" and question and n[2] > question[2]]
+    opened = bool(links)
+    if links:
+        link = min(links, key=lambda n: n[2])
+        pc.sh(f"input tap {link[1]} {link[2]}")
+        time.sleep(2)
     strip = bool(wait(lambda: emu.match("set the times", False), limit=20))
     moved = tap("End 5 minutes earlier", limit=10)
     saved = tap("Save these times")
