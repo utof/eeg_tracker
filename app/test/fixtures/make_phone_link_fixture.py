@@ -1,7 +1,7 @@
 """Writes phone_link.json: the link's signatures (scripts/phone_auth.py <-> app/lib/share/auth.dart: the pairing
 proofs, the key both sides work out, the laptop's confirm, a signed request, the phone's reply, a delete re-check's
-proof; DECISIONS 750-759) and reference QR matrices for scripts/qr_code.py made by an independent encoder
-(python-qrcode, BSD).
+proof, the phone's signed push requests and the laptop's answers; DECISIONS 750-759) and reference QR matrices for
+scripts/qr_code.py made by an independent encoder (python-qrcode, BSD).
 
     /usr/bin/python3 app/test/fixtures/make_phone_link_fixture.py     # needs python-qrcode (Debian: python3-qrcode)
 
@@ -87,6 +87,31 @@ def rechecks() -> list[dict]:
     return out
 
 
+def pushes() -> list[dict]:
+    """The phone's signed requests to the laptop's receiver (scripts/push_receiver.py) and the laptop's proof over
+    the same nonce and its answer's bytes."""
+    key = "7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544"
+    cases = [
+        ("POST", "/push/hello", "/push/hello", "", 1763700000123, "cHVzaC1ub25jZS0wMDAwMQ", "", '{"error":"bad request"}'),
+        ("POST", "/push/begin", "/push/begin", "", 1763700000456, "cHVzaC1ub25jZS0wMDAwMg",
+         '{"v":1,"port":8765,"files":{"format":"eeg-tracker-phone-files","version":1,"files":[]},"asks":[]}',
+         '{"v":1,"session":"c2Vzc2lvbi1maXh0dXJlLTE","max_chunk":4194304,"want":[]}'),
+        ("POST", "/push/chunk?s=abc&p=recordings%2F2026-11-19-010000.f32&at=4096", "/push/chunk",
+         "s=abc&p=recordings/2026-11-19-010000.f32&at=4096", 1763700000789, "cHVzaC1ub25jZS0wMDAwMw",
+         "sixteen bytes \u00e9\u00e8", '{"v":1,"staged":4112}'),
+        ("POST", "/push/commit?s=abc", "/push/commit", "s=abc", 1763700001000, "cHVzaC1ub25jZS0wMDAwNA", '{"v":1}',
+         '{"error":"busy"}'),
+    ]
+    out = []
+    for method, target, path, query, t, nonce, body, reply_body in cases:
+        msg = "|".join(("eeg-tracker push v1", method, str(t), nonce, sha(body.encode()), sha(path.encode()),
+                        sha(query.encode())))
+        out.append({"key": key, "method": method, "target": target, "time_ms": t, "nonce": nonce, "body": body,
+                    "sign": hm(key, msg), "reply_body": reply_body,
+                    "reply": hm(key, f"eeg-tracker push reply v1|{nonce}|{sha(reply_body.encode())}")})
+    return out
+
+
 def matrix(text: str, level: str, version: int, mask: int) -> list[str]:
     q = qrcode.QRCode(version=version, error_correction=LEVELS[level], mask_pattern=mask, border=0)
     q.add_data(qu.QRData(text.encode("utf-8"), mode=qu.MODE_8BIT_BYTE))
@@ -110,6 +135,6 @@ def qr_cases() -> list[dict]:
 if __name__ == "__main__":
     OUT.write_text(json.dumps({"made_by": "make_phone_link_fixture.py (python-qrcode " +
                                getattr(qrcode, "__version__", "7.4.2 (Debian python3-qrcode)") + ")",
-                               "proofs": proofs(), "requests": requests(), "rechecks": rechecks(),
+                               "proofs": proofs(), "requests": requests(), "rechecks": rechecks(), "push": pushes(),
                                "qr": qr_cases()}, indent=1) + "\n")
     print(f"wrote {OUT}")

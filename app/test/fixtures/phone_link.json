@@ -115,6 +115,52 @@
    "mac": "162f851d77245c92e4cf59d12a65b9be6cc7ba76db1f02d6dd08549eba148d7f"
   }
  ],
+ "push": [
+  {
+   "key": "7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544",
+   "method": "POST",
+   "target": "/push/hello",
+   "time_ms": 1763700000123,
+   "nonce": "cHVzaC1ub25jZS0wMDAwMQ",
+   "body": "",
+   "sign": "047fed6b69dc81124354ee8e83eb93610fb1cb0624c5a2aad1a983ff3614a75e",
+   "reply_body": "{\"error\":\"bad request\"}",
+   "reply": "ab8578abd855daeb2540e28d3ac065148ca6c16ddeaf668def631e91c21cebb4"
+  },
+  {
+   "key": "7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544",
+   "method": "POST",
+   "target": "/push/begin",
+   "time_ms": 1763700000456,
+   "nonce": "cHVzaC1ub25jZS0wMDAwMg",
+   "body": "{\"v\":1,\"port\":8765,\"files\":{\"format\":\"eeg-tracker-phone-files\",\"version\":1,\"files\":[]},\"asks\":[]}",
+   "sign": "7b59694188195b35a75c676d94d4812554d448cf78cfa488c62e70cea6098c66",
+   "reply_body": "{\"v\":1,\"session\":\"c2Vzc2lvbi1maXh0dXJlLTE\",\"max_chunk\":4194304,\"want\":[]}",
+   "reply": "8d67440c9eede82ed0b6b161a2138d9f634752a5b0d3041a346cb286275611b4"
+  },
+  {
+   "key": "7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544",
+   "method": "POST",
+   "target": "/push/chunk?s=abc&p=recordings%2F2026-11-19-010000.f32&at=4096",
+   "time_ms": 1763700000789,
+   "nonce": "cHVzaC1ub25jZS0wMDAwMw",
+   "body": "sixteen bytes \u00e9\u00e8",
+   "sign": "2b9bc07aca1c2994e3c18030163a4a08f989285f7c16cde59b1ababa4df56273",
+   "reply_body": "{\"v\":1,\"staged\":4112}",
+   "reply": "c50d0790d5d4b49b438b8228af59339b0e092876db538602377444508c126175"
+  },
+  {
+   "key": "7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544",
+   "method": "POST",
+   "target": "/push/commit?s=abc",
+   "time_ms": 1763700001000,
+   "nonce": "cHVzaC1ub25jZS0wMDAwNA",
+   "body": "{\"v\":1}",
+   "sign": "c911279273c7dcf621e5185f3bfd3b411c8c55a159d413ca1fe8d6a1fff76361",
+   "reply_body": "{\"error\":\"busy\"}",
+   "reply": "88fb76a1598dc42ebfaf0325e60ce9b47f6eb25c7f2bd39fececc42c407f2f1f"
+  }
+ ],
  "qr": [
   {
    "text": "http://192.168.1.10:8771/p?s=AbCdEfGhIjKlMnOpQrStUv",

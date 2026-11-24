@@ -189,6 +189,12 @@ CueFactory nightCuesWith(String recordingsDir, NightScorer scorer) => oneKindANi
   memoryCuesFor(recordingsDir, scorer: scorer, bell: ChannelCueBell()),
 ]);
 
+/// How long after the recording's server ended by itself it is started again.
+const Duration shareRetryEvery = Duration(seconds: 60);
+
+/// Whether a server's last note says it ended by itself (not switched off, not its time).
+bool shareEndedByItself(String note) => note.contains('could not') || note.contains('stopped');
+
 Future<NightState> loadNight() async => _PrefsNightStore().load();
 
 @pragma('vm:entry-point')
@@ -227,6 +233,10 @@ class RecorderTaskHandler extends TaskHandler {
   /// above never waits for it and never sees it fail.
   ShareHost? _share;
   String? _filesDir;
+
+  /// The next try after the server ended by itself (2026-11-20: the port was taken for 80 s at the start, and nothing
+  /// tried again for the rest of a 1 h 40 min recording).
+  Timer? _shareRetry;
 
   /// The DIY board's night (DECISIONS rows 360-369), or null for the BrainBit.
   DiyNight? _diy;
@@ -336,6 +346,8 @@ class RecorderTaskHandler extends TaskHandler {
 
   /// Starts, restarts or stops the server to match [config].
   Future<void> _applyShare(ShareConfig config) async {
+    _shareRetry?.cancel();
+    _shareRetry = null;
     await _share?.stop();
     _share = null;
     final files = _filesDir;
@@ -350,6 +362,13 @@ class RecorderTaskHandler extends TaskHandler {
       onChange: (s) {
         FlutterForegroundTask.sendDataToMain(shareMessage(s));
         _shownAtMs = 0; // the notification's next line says where it is shared
+        // a server that ended by itself (the port taken, an error) is started again while the recording runs
+        if (!s.up && shareEndedByItself(s.note) && !_stopping) {
+          _shareRetry?.cancel();
+          _shareRetry = Timer(shareRetryEvery, () {
+            unawaited(_sharing(() async => _applyShare(await loadShareConfig())));
+          });
+        }
       },
       wifiLock: (on) {
         _wifiShare = on;
@@ -423,8 +442,11 @@ class RecorderTaskHandler extends TaskHandler {
     _wifiWatch?.stop();
     final r = _recorder;
     // Sharing in the background: its port is free again within about 4 s, while the recorder saves and stops.
+    _shareRetry?.cancel();
+    _shareRetry = null;
     unawaited(_sharing(() async => _share?.stop()));
     await r?.stop(endNight: endNight);
+    unawaited(Phone.pushSoon()); // the files are closed: the paired laptop gets them without waiting (DECISIONS 842)
     // The scanner kept for direct reconnects goes too, unless a headband was left out of range (the DIY board's
     // listener always goes).
     _finder?.dispose(anyLost: r == null || !r.finished || r.abandoned.isNotEmpty);

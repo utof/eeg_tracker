@@ -158,6 +158,22 @@ class Phone {
   /// This phone's IPv4 addresses on Wi-Fi with their prefix (`192.168.1.5/24`), as Android itself sees its networks
   /// (VPNs and mobile data left out), and a note of what each source returned (PhoneChannel.kt). Works from the
   /// recorder's engine too.
+  /// The push (lib/share/push/, PushJob.kt; DECISIONS 840-849): [on] arms Android's job that sends the paired laptop
+  /// what it lacks about every 15 minutes while the phone is on Wi-Fi (kept over a restart of the phone; arming it
+  /// again changes nothing), false ends it. Never throws.
+  static Future<void> pushSchedule({required bool on}) async {
+    try {
+      await _channel.invokeMethod<void>('pushSchedule', {'on': on});
+    } catch (_) {}
+  }
+
+  /// One push soon (a recording just ended): as soon as the phone is on Wi-Fi. Never throws.
+  static Future<void> pushSoon() async {
+    try {
+      await _channel.invokeMethod<void>('pushSoon');
+    } catch (_) {}
+  }
+
   static Future<WifiNets> wifiNets() async {
     final r = await _channel.invokeMapMethod<Object?, Object?>('wifiNets');
     final nets = r?['nets'], note = r?['note'];

@@ -80,6 +80,31 @@ String requestSign(
   ),
 );
 
+const String _pushTag = 'eeg-tracker push v1';
+const String _pushReplyTag = 'eeg-tracker push reply v1';
+
+/// The phone's own requests to the paired laptop's receiver (push/, scripts/push_receiver.py; DECISIONS 840-849):
+/// HMAC-SHA256(key, `eeg-tracker push v1|METHOD|time|nonce|sha256(body)|sha256(path)|sha256(query)`), [path] and
+/// [query] percent-decoded. Another tag than [requestSign], so neither side's requests pass for the other's.
+String pushSign(
+  String key, {
+  required String method,
+  required String path,
+  required String query,
+  required int timeMs,
+  required String nonce,
+  List<int> body = const [],
+}) => _hmac(
+  key,
+  utf8.encode(
+    [_pushTag, method.toUpperCase(), '$timeMs', nonce, _sha(body), _sha(utf8.encode(path)), _sha(utf8.encode(query))].join('|'),
+  ),
+);
+
+/// What the laptop's answer to a pushed request carries: HMAC-SHA256(key, `eeg-tracker push reply v1|<the request's
+/// nonce>|sha256(the answer's bytes)`), so the answer (what it wants, its acks) is the paired laptop's, unchanged.
+String pushReplyProof(String key, String nonce, List<int> body) => _hmac(key, utf8.encode('$_pushReplyTag|$nonce|${_sha(body)}'));
+
 /// What the phone's answer to a signed request carries: HMAC-SHA256(key, `eeg-tracker reply v2|<the request's nonce>`).
 String replyProof(String key, String nonce) => _hmac(key, utf8.encode('$_replyTag|$nonce'));
 
