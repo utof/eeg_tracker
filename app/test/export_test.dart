@@ -17,6 +17,7 @@ import 'package:eeg_tracker/meditation/store.dart';
 import 'package:eeg_tracker/morning/store.dart';
 import 'package:eeg_tracker/sleep/onnx_runs.dart' show modelsDirFor;
 import 'package:eeg_tracker/sleep/report.dart' show nightsDirFor;
+import 'package:eeg_tracker/spans/span.dart' show spansDirFor;
 import 'package:eeg_tracker/states/store.dart';
 import 'package:eeg_tracker/training/control.dart' show SessionKind;
 import 'package:flutter_test/flutter_test.dart';
@@ -149,6 +150,26 @@ void main() {
       ]);
       expect(storedFiles(files).first.bytes, '{"runS":900}'.length);
       expect(storedFiles(files).first.modifiedMs, t0.millisecondsSinceEpoch);
+    });
+
+    test('what you were doing in a recording leaves the phone too: its spans file, the answers, the tags', () {
+      // the same list is what Export data copies, what Share on Wi-Fi serves and what the phone pushes by itself
+      final spans = spansDirFor('${files.path}/recordings');
+      expect(spans.path, '${files.path}/spans');
+      const wanted = [
+        'archive/2026-11-24-230000.tags.json',
+        'confirm/answers.jsonl',
+        'confirm/estimates.jsonl',
+        'spans/2026-11-24-230000.spans.jsonl',
+      ];
+      for (final path in [...wanted, 'spans/2026-11-24-230000.spans.jsonl.tmp']) {
+        File('${files.path}/$path')
+          ..createSync(recursive: true)
+          ..writeAsStringSync('{}\n');
+      }
+      final paths = {for (final f in storedFiles(files)) f.path};
+      expect(wanted.where(paths.contains), wanted);
+      expect(paths, isNot(contains('spans/2026-11-24-230000.spans.jsonl.tmp')));
     });
   });
 

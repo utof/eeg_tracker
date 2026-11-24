@@ -1,6 +1,6 @@
 // The walking veto where the phone scores sleep (DECISIONS 920): the night's report (the detectors' pass finds the
-// walking epochs, the scorer scores them awake) and the live scorer (the walking detector beside the model). The
-// signal is the walking cross-check fixture's first case (walk, stop, run on O1 O2 T3 T4; the walking rule itself is
+// walking epochs, the scorer scores them awake) the live scorer (the walking detector beside the model) and "Sleep so far"
+// (the walking detector over each of its windows). The signal is the walking cross-check fixture's first case (walk, stop, run on O1 O2 T3 T4; the walking rule itself is
 // compared with the Python reference in walking_cross_check_test.dart), then quiet noise; the fake model calls every
 // epoch deep sleep.
 import 'dart:convert';
@@ -16,6 +16,7 @@ import 'package:eeg_tracker/sleep/model.dart';
 import 'package:eeg_tracker/sleep/prep.dart';
 import 'package:eeg_tracker/sleep/report.dart';
 import 'package:eeg_tracker/sleep/scorer.dart';
+import 'package:eeg_tracker/sleep/so_far.dart';
 import 'package:eeg_tracker/walking/detector.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -90,6 +91,27 @@ class _DeepModel implements LiveModel {
   Future<void> close() async {}
 }
 
+/// [rows] as one recorder file set in [recordings] that began at [start].
+void _write(Directory recordings, List<Float32List> rows, DateTime start) {
+  final rec = ByteData(rows.length * recordBytes);
+  for (var i = 0; i < rows.length; i++) {
+    rec.setUint32(i * recordBytes, i % 2048, Endian.little);
+    for (var c = 0; c < 4; c++) {
+      rec.setFloat32(i * recordBytes + 4 + 4 * c, rows[i][c], Endian.little);
+    }
+  }
+  final stem = fileStem(start);
+  File('${recordings.path}/$stem.f32').writeAsBytesSync(rec.buffer.asUint8List());
+  final seconds = rows.length ~/ _rate;
+  final idx = ByteData(seconds * indexBytes);
+  for (var k = 0; k < seconds; k++) {
+    idx
+      ..setFloat64(k * indexBytes, start.millisecondsSinceEpoch / 1000 + k + 1, Endian.little)
+      ..setUint64(k * indexBytes + 8, k * _rate, Endian.little);
+  }
+  File('${recordings.path}/$stem.idx').writeAsBytesSync(idx.buffer.asUint8List());
+}
+
 void main() {
   test("the night's report: walking epochs are scored awake, the rest stays as the model said", () async {
     final root = Directory.systemTemp.createTempSync('walk_veto');
@@ -98,23 +120,7 @@ void main() {
     final store = NightReportStore(nightsDirFor(recordings.path));
     final rows = _night(14);
     final start = DateTime(2026, 11, 20, 19, 0);
-    final rec = ByteData(rows.length * recordBytes);
-    for (var i = 0; i < rows.length; i++) {
-      rec.setUint32(i * recordBytes, i % 2048, Endian.little);
-      for (var c = 0; c < 4; c++) {
-        rec.setFloat32(i * recordBytes + 4 + 4 * c, rows[i][c], Endian.little);
-      }
-    }
-    final stem = fileStem(start);
-    File('${recordings.path}/$stem.f32').writeAsBytesSync(rec.buffer.asUint8List());
-    final seconds = rows.length ~/ _rate;
-    final idx = ByteData(seconds * indexBytes);
-    for (var k = 0; k < seconds; k++) {
-      idx
-        ..setFloat64(k * indexBytes, start.millisecondsSinceEpoch / 1000 + k + 1, Endian.little)
-        ..setUint64(k * indexBytes + 8, k * _rate, Endian.little);
-    }
-    File('${recordings.path}/$stem.idx').writeAsBytesSync(idx.buffer.asUint8List());
+    _write(recordings, rows, start);
 
     final scorer = SleepScorer(
       recordingsDir: recordings,
@@ -138,6 +144,32 @@ void main() {
     expect(scorer.olderScorer(report), isFalse);
     // a report from before the veto offers "Score again"
     expect(scorer.olderScorer(SleepReport(Map.of(report.json)..remove('walking'))), isTrue);
+  });
+
+  test('"Sleep so far" scores a walking epoch awake too; without the rule it is what the model said', () async {
+    final root = Directory.systemTemp.createTempSync('walk_so_far');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final rows = _night(14); // 28 epochs: walk, stop, run, then quiet
+    Future<List<String>> look(String name, {required bool rule}) async {
+      final recordings = Directory('${root.path}/$name/recordings')..createSync(recursive: true);
+      _write(recordings, rows, DateTime(2026, 11, 20, 19, 0));
+      final s = SoFarScorer(
+        recordingsDir: recordings,
+        openRun: (run) async => _DeepRun(),
+        plan: (d, since) async => planSoFar(d, since),
+        prepare: (l, w0, w1, to) async => prepareWindow(l, w0, w1, to),
+        walking: rule ? (l, w0, w1, to) async => walkingOfWindow(l, w0, w1, to) : null,
+      );
+      return (await s.update())!.stages;
+    }
+
+    final want = _walking(rows, 28);
+    final got = await look('rule', rule: true);
+    expect(got, hasLength(28 - soFarBehind));
+    expect(got, [for (var e = 0; e < got.length; e++) want[e] ? 'W' : 'N3']);
+    expect(got.take(5), ['W', 'W', 'W', 'N3', 'N3'], reason: 'walk 90 s, stop 60 s');
+    expect(got.where((s) => s == 'W').length, want.where((w) => w).length);
+    expect(await look('plain', rule: false), everyElement('N3'));
   });
 
   test('the live scorer hands a walking epoch out awake; without the veto it is what the model said', () async {

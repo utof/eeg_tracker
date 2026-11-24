@@ -4,7 +4,7 @@
 usage: python3 app/tool/confirm_check.py --apk <release or replay build> [--adb-port 5051] [--work DIR] [--out DIR] [--keep]
 
 Seeds a made-up sleep report and a made-up walk file (no recording of anyone), starts the app and checks:
-  1. the Night tab shows the "Quick check" card with the batch ("Did you ...?" lines);
+  1. the Record tab shows the "Quick check" card with the batch ("Did you ...?" lines);
   2. a tap on the card's first Yes writes a `card` line to files/confirm/answers.jsonl;
   3. the notification is there with the next question; its No and Not sure buttons write `notification` lines while
      the questions go by one after the other, and the notification leaves after the last;
@@ -141,11 +141,11 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     if not pc.wait_main(240):
         return [pc.Result("the app", "FAIL", "its main screen did not come", pc.screen_words("no-main"))]
 
-    card = pc.find_on_tab("Night", "Quick check", limit=180)
+    card = pc.find_on_tab("Record", "Quick check", limit=180)
     seen = [q for q in questions if wait(lambda q=q: emu.match(q, False), limit=20)]
     details = pc.screen_words("card")
     results.append(pc.Result("1 the card shows the batch", "PASS" if card and len(seen) == 3 else "FAIL",
-                             f"{len(seen)} of 3 questions on the Night tab: " + " / ".join(seen), details))
+                             f"{len(seen)} of 3 questions on the Record tab: " + " / ".join(seen), details))
     if not card:
         return results
 

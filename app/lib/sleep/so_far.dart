@@ -20,7 +20,9 @@
 // and closes them at its end. Before each model call it checks that the live sleep model is not running for the
 // smart alarm or the sound cues (live_log.dart): two models in one app would compete for memory and the guard's
 // 700 MB (DECISIONS 236), so the look pauses ([ScoringPaused]) and the live model's own epochs stand in for minutes
-// it leaves unscored. Plain Dart (the model behind [StageRun]); the joined layout and the preparation run in background
+// it leaves unscored. Nobody sleeps while walking: the walking detector reads each window's samples too (every
+// channel the night's recordings share, quick mode), and an asleep epoch it calls walking is kept awake, the rule of
+// the night's report and of the live model (DECISIONS 920, 836). Plain Dart (the model behind [StageRun]); the joined layout and the preparation run in background
 // isolates.
 import 'dart:convert';
 import 'dart:io';
@@ -28,8 +30,11 @@ import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import '../recorder/header.dart' show readHeader;
 import '../recorder/nights.dart';
+import '../walking/detector.dart' show WalkWindows, walkingEpochs, walkingVeto;
 import 'dsp.dart' show mneHighPassTaps;
+import 'extras.dart' show sharedChannels;
 import 'live_log.dart';
 import 'live_stager.dart' show behindEpochs;
 import 'model.dart';
@@ -56,8 +61,8 @@ const int soFarBehind = behindEpochs;
 const int epochInputSamples = 30 * sampleRate;
 
 /// What the kept stretches were made with; a cache of another is dropped.
-const String soFarMethod = '$phoneModelId so-far 64min+8min own windows';
-const int soFarVersion = 1;
+const String soFarMethod = '$phoneModelId so-far 64min+8min own windows, walking is awake';
+const int soFarVersion = 2;
 
 
 /// Model input [w0, w1) and the epochs kept from it [c0, c1).
@@ -118,6 +123,7 @@ class SoFarPlan {
     required this.epochs,
     required this.keys,
     required this.tailKey,
+    this.walkLayout,
   });
 
   final String night;
@@ -126,6 +132,9 @@ class SoFarPlan {
   final int epochs;
   final List<String> keys;
   final String tailKey;
+
+  /// The same joined night with every channel its recordings share, for the walking detector (null: no walking rule).
+  final NightLayout? walkLayout;
 
   int get startUnix => layout.startUnix;
   int get complete => keys.length;
@@ -144,7 +153,15 @@ SoFarPlan? planSoFar(String recordingsDir, int? sinceMs) {
   final layout = joinLayout(n.recordings, who: 'Sleep so far'); // O1 O2 T3 T4 by name or site, or MissingSites
   final epochs = layout.samples ~/ epochInputSamples;
   final complete = completeStretches(epochs);
+  // the walking detector reads every channel, as the night's report does (extras.dart): the model's four first
+  final h = readHeader(n.recordings.first);
+  final names = [...layout.names];
+  final have = {for (final name in names) h.indexOf(name)};
+  for (final name in sharedChannels(n.recordings)) {
+    if (have.add(h.indexOf(name))) names.add(name);
+  }
   return SoFarPlan(
+    walkLayout: names.length == layout.names.length ? layout : joinLayout(n.recordings, names: names, who: 'Sleep so far'),
     night: n.name,
     files: n.recordings.length,
     layout: layout,
@@ -159,12 +176,41 @@ SoFarPlan? planSoFar(String recordingsDir, int? sinceMs) {
 
 typedef PlanFn = Future<SoFarPlan?> Function(String recordingsDir, int? sinceMs);
 typedef WindowPrepFn = Future<ModelInput?> Function(NightLayout layout, int w0, int w1, int toSample);
+typedef WindowWalkFn = Future<List<bool>> Function(NightLayout layout, int w0, int w1, int toSample);
 
 Future<SoFarPlan?> planInBackground(String recordingsDir, int? sinceMs) =>
     Isolate.run(() => planSoFar(recordingsDir, sinceMs), debugName: 'so-far-plan');
 
 Future<ModelInput?> prepareWindowInBackground(NightLayout layout, int w0, int w1, int toSample) =>
     Isolate.run(() => prepareWindow(layout, w0, w1, toSample), debugName: 'so-far-prep');
+
+Future<List<bool>> walkingOfWindowInBackground(NightLayout layout, int w0, int w1, int toSample) =>
+    Isolate.run(() => walkingOfWindow(layout, w0, w1, toSample), debugName: 'so-far-walk');
+
+/// Whether each of the epochs [w0, w1) of the joined night is walking: the walking detector (quick mode) over samples
+/// [w0 * 7500, toSample) of every channel of [layout], read as a recording of its own. Its rule reads 40 s either
+/// side of an epoch, and a window keeps 8 minutes of context (2 at the newest end), so a kept epoch gets what the
+/// whole night gives.
+List<bool> walkingOfWindow(NightLayout layout, int w0, int w1, int toSample) {
+  final from = w0 * epochInputSamples, n = math.max(0, toSample - from);
+  final width = layout.names.length;
+  final channels = [for (var c = 0; c < width; c++) layout.channelRange(c, from, toSample)];
+  final missing = Uint8List(n);
+  for (final p in layout.parts) {
+    if (p.run != null) continue;
+    final lo = math.max(p.at, from), hi = math.min(p.at + p.length, toSample);
+    if (lo < hi) missing.fillRange(lo - from, hi - from, 1);
+  }
+  final walk = WalkWindows(width, sampleRate, quick: true);
+  final row = Float64List(width);
+  for (var i = 0; i < n; i++) {
+    for (var c = 0; c < width; c++) {
+      row[c] = channels[c][i];
+    }
+    walk.push(row, missing: missing[i] == 1);
+  }
+  return walkingEpochs(walk.windows, w1 - w0);
+}
 
 /// The model's input for epochs [w0, w1) of the joined night, prepared as a recording of its own made of samples
 /// [w0 * 7500, toSample): a night's preparation (prep.dart), so with w0 = 0 and [toSample] the night's last sample it
@@ -503,6 +549,7 @@ class SoFarScorer {
     this.runCount = 3,
     this.plan = planInBackground,
     this.prepare = prepareWindowInBackground,
+    this.walking = walkingOfWindowInBackground,
     this.log,
     SoFarStore? store,
     Directory? liveDir,
@@ -517,6 +564,9 @@ class SoFarScorer {
   final int runCount;
   final PlanFn plan;
   final WindowPrepFn prepare;
+
+  /// The walking detector over a window (null: no walking rule).
+  final WindowWalkFn? walking;
 
   /// One line per look (logcat on the phone: tag `flutter`).
   final void Function(String line)? log;
@@ -610,11 +660,17 @@ class SoFarScorer {
       await mayGo();
       final input = await prepare(p.layout, w0, w1, toSample);
       if (input == null) throw StateError('the window $w0-$w1 could not be prepared');
-      final List<String> stages;
+      List<String> stages;
       if (input.gap.where((g) => g).length * 2 > input.epochs) {
         stages = List.filled(input.epochs, gapStage); // mostly lost: its scaling would be noise (DECISIONS 172)
       } else {
         stages = stagesOf(await runs.probabilities(input, mayGo), input.gap).stages;
+        final walk = walking, all = p.walkLayout;
+        if (walk != null && all != null) {
+          // nobody sleeps while walking (DECISIONS 920): the night's report and the live model say the same
+          await mayGo();
+          stages = walkingVeto(stages, await walk(all, w0, w1, toSample)).$1;
+        }
       }
       return _letters(stages.sublist(k0 - w0, k1 - w0));
     }

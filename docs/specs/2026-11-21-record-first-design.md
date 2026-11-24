@@ -381,7 +381,8 @@ source `owner_activity_button`, confidence `likely` (you may have forgotten to s
   the sleep span starts), `alcohol_last` (the last drink's time) and `alcohol_from` (`utof`, `eeg_mark`, `checkin`).
   An empty cell means "not known" (no source covered that evening), 0 means "a source covered it and logged none".
   The laptop's report page shows one line: "Alcohol: 2 drinks, last at 20:00 (from utof_tracker)". The phone's report
-  cannot show it: the two phone apps do not talk to each other.
+  cannot show it yet: the link between the two phone apps is decided but not built (eeg_tracker keeps an outbox that
+  utof_tracker pulls and acks, DECISIONS 837), and it carries eeg_tracker's data to utof_tracker, not drinks back.
 - **Comparing nights.** A new `scripts/compare_nights.py --by drinking_alcohol` (it works for any event label:
   coffee after 16:00, medicine) writes `_local/data/compare/alcohol.md` and `.tsv` after each data book run:
   time asleep, deep sleep, dream sleep, wake-ups, time to fall asleep, pulse asleep, and the next morning's

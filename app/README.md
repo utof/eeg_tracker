@@ -250,9 +250,9 @@ AVD, the emulator and its adb server at the end. It prints PASS / FAIL / SKIP:
   the replay headband into a real work session for 6.5 minutes; no break may start by itself, and the saved session
   must name the replay as its headband. Catches the "calibrating, then on break" loop of 2026-11-20 (DECISIONS 680,
   735); the laptop's replay tests check the same with talking from the start and after calibration.
-- **(e) Signal, then Start night: one connection** (only with `--only ...e` and `--replay`): the Signal tab reaches
-  the replayed headband, then Start night must record that live connection: the night's log says it started on the
-  live connection and did not measure contact again, and names one connection (DECISIONS 855-856).
+- **(e) Signal, then Sleep: one connection** (only with `--only ...e` and `--replay`): the Signal tab reaches
+  the replayed headband, then **Sleep** on the Record tab must record that live connection: the night's log says it
+  started on the live connection and did not measure contact again, and names one connection (DECISIONS 855-856).
 - **(d) crashes, ANRs, exit reasons**: logcat, `/data/anr` and `dumpsys activity exit-info` are kept; a crash or an
   ANR fails, and the app's own `files/app-starts.log` must hold its starts with Android's exit reasons.
 
@@ -274,6 +274,9 @@ minutes, adb port 5049) pairs a temporary emulator with a receiver on this lapto
 sending (DECISIONS 849): the spare port, the scheduled job run by Android itself with the app closed, forced
 runs, the laptop's own copy beside it, and that no notification is shown. It waits for Android's own run before
 it forces any: every run of a periodic job moves Android's next window 15 minutes on.
+With `--replay <replay build>` it first makes a short recording with a sleep stretch on the replay build (the five
+steps of `tool/record_check.py`), installs the release APK over it, and checks that the push brings the recording's
+spans file and its tags to the laptop, where `scripts/spans.py` reads the sleep stretch (DECISIONS 836).
 
 ## Replay headband (test and replay builds only)
 

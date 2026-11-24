@@ -903,3 +903,55 @@ def test_the_mirror_finds_the_phone_at_a_fallback_port(tmp_path: Path, monkeypat
     finally:
         stranger.close()
         phone.close()
+
+
+# ---------- Record first: the spans files and the answers reach the laptop both ways ----------
+SPANS = "spans/2026-11-24-230000.spans.jsonl"
+SMALL = (SPANS, "confirm/estimates.jsonl", "confirm/answers.jsonl", "archive/2026-11-24-230000.tags.json")
+
+
+def _span_line(end: str | None) -> bytes:
+    return (json.dumps({"v": 1, "span": "r-1", "kind": "sleep", "start": "2026-11-24T23:10:00+03:00", "end": end,
+                        "source": "owner_button", "made": "2026-11-24T23:10:00+03:00"}) + "\n").encode()
+
+
+def _sleep_spans_on_laptop(dest: Path) -> list[tuple[str, bool]]:
+    import spans  # the laptop's reader of what just landed
+    f = spans.for_recording(dest, "2026-11-24-230000")
+    return [(s.kind, s.closed) for s in f.spans]
+
+
+def test_a_push_carries_the_spans_file_and_the_answers_and_a_later_push_the_longer_file(rig: Rig, tmp_path: Path) -> None:
+    files = {SPANS: _span_line(None), "confirm/estimates.jsonl": b'{"id": "e1"}\n',
+             "confirm/answers.jsonl": b'{"id": "e1", "answer": "yes"}\n',
+             "archive/2026-11-24-230000.tags.json": b'{"tags": []}'}
+    m = rig.send(files, *(row(p, files[p]) for p in SMALL))
+    assert m["summary"]["new"] == 4 and m["summary"]["damaged"] == 0
+    for p in SMALL:
+        assert (tmp_path / "phone" / p).read_bytes() == files[p], p
+    assert sorted(a["path"] for a in m["acks"]) == sorted(SMALL)
+    assert _sleep_spans_on_laptop(tmp_path) == [("sleep", False)]
+    # Stop sleep adds a line on the phone: the next push brings the file as it is now
+    longer = files[SPANS] + _span_line("2026-11-25T07:00:00+03:00")
+    m = rig.send({SPANS: longer}, row(SPANS, longer, modified=T0 + 60_000))
+    assert (tmp_path / "phone" / SPANS).read_bytes() == longer and m["summary"]["updated"] == 1
+    assert _sleep_spans_on_laptop(tmp_path) == [("sleep", True)]
+
+
+def test_the_laptops_own_copy_pass_carries_the_spans_file_and_the_answers(tmp_path: Path) -> None:
+    phone = FakePhone()
+    try:
+        first = _span_line(None)
+        phone.put(SPANS, first)
+        phone.put("confirm/estimates.jsonl", b'{"id": "e1"}\n')
+        phone.put("confirm/answers.jsonl", b'{"id": "e1", "answer": "no"}\n')
+        rep = pp.pull(pp.Phone(phone.base, "abcdefghjkmn"), tmp_path)
+        assert sorted(rep.new) == sorted(SMALL[:3]) and not rep.refused and not rep.damaged
+        assert _sleep_spans_on_laptop(tmp_path) == [("sleep", False)]
+        longer = first + _span_line("2026-11-25T07:00:00+03:00")
+        phone.put(SPANS, longer, modified=T0 + 60_000)
+        rep = pp.pull(pp.Phone(phone.base, "abcdefghjkmn"), tmp_path)
+        assert rep.updated == [SPANS] and (tmp_path / "phone" / SPANS).read_bytes() == longer
+        assert _sleep_spans_on_laptop(tmp_path) == [("sleep", True)]
+    finally:
+        phone.close()

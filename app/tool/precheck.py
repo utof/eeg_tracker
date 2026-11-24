@@ -18,7 +18,7 @@ which crashes ONNX Runtime with 4 cores), boots it headless, and checks what rea
   (c) a replayed noisy work session (the made-up "talking" recording through the replay build's headband, at real
       speed for 6.5 minutes): no break may start by itself. Runs when --replay is given (DECISIONS 735; the
       work-day fix it waited for is in main since integration 17).
-  (e) only with `--only ...e` and --replay: the Signal tab reaches the replayed headband, then Start night must record
+  (e) only with `--only ...e` and --replay: the Signal tab reaches the replayed headband, then Sleep (on the Record tab) must record
       that live connection (no search, no contact check; DECISIONS 855-856).
   (d) logcat, ANRs and Android's exit reasons are collected; a crash or an ANR of the app fails, and the app's own
       files/app-starts.log must have recorded its starts with the exit reasons.
@@ -782,7 +782,7 @@ def check_talking(replay: Path, stage: Path, also: list[Result]) -> Result:
     return Result(name, "PASS", f"{TALK_MIN} minutes of replayed talking: no break started", details)
 
 
-# ---- (e) Signal, then Start night: one connection ------------------------------------------------------------------
+# ---- (e) Signal, then Sleep: one connection ---------------------------------------------------------------------------
 
 
 def make_quiet(stage: Path) -> Path:
@@ -796,10 +796,10 @@ def make_quiet(stage: Path) -> Path:
 
 
 def check_one_connection(replay: Path, stage: Path) -> Result:
-    """(e) The Signal tab reaches the (replayed) headband; Start night must then record that live connection: the
+    """(e) The Signal tab reaches the (replayed) headband; Sleep on the Record tab ("Start night" before Record first) must then record that live connection: the
     night's log says it started on the live connection and did not measure contact again, and names one connection
     (DECISIONS 855-856)."""
-    name = "(e) Signal, then Start night: one connection"
+    name = "(e) Signal, then Sleep: one connection"
     f32 = make_quiet(stage)
     stem = f32.name[: -len(".f32")]
     install(replay)
@@ -811,7 +811,7 @@ def check_one_connection(replay: Path, stage: Path) -> Result:
         pairs.append((f32.with_name(stem + ext), f"replay/quiet/{stem}{ext}"))
     seed(pairs, stage / "push-quiet")
     sh("cmd bluetooth_manager enable", check=False)
-    sh(f"dumpsys deviceidle whitelist +{PKG}", check=False)  # Start night would open the battery settings page
+    sh(f"dumpsys deviceidle whitelist +{PKG}", check=False)  # Sleep would open the battery settings page
     before = set(sh(f"ls {FILES}/recordings/*.log 2>/dev/null", check=False).split())
     time.sleep(3)
     start_app()
@@ -833,12 +833,12 @@ def check_one_connection(replay: Path, stage: Path) -> Result:
         return Result(name, "FAIL", "the Signal tab did not get a live signal from the replay within 2 minutes", details)
     battery = [w for w in words if "about" in w and "%" in w]
     details.append(f"battery on the Signal tab: {battery[:1]}")
-    if not open_tab("Night"):
-        return Result(name, "FAIL", "the Night tab was not found", details)
+    if not open_tab("Record"):
+        return Result(name, "FAIL", "the Record tab was not found", details)
     t_start = time.time()
     hit = bar_button("Sleep") or find("Start night", exact=False, scrolls=2)
     if hit is None:
-        return Result(name, "FAIL", "Start night was not found", details + screen_words("e-night"))
+        return Result(name, "FAIL", "the Sleep button was not found on the Record tab", details + screen_words("e-night"))
     sh(f"input tap {hit[1]} {hit[2]}")
     log = ""
     newest = ""
@@ -867,7 +867,7 @@ def check_one_connection(replay: Path, stage: Path) -> Result:
             sh(f"input tap {confirm[1]} {confirm[2]}")
         time.sleep(6)
     if recording_after is None:
-        return Result(name, "FAIL", "the night did not start recording within 90 s of Start night", details)
+        return Result(name, "FAIL", "the night did not start recording within 90 s of Sleep", details)
     lent = "started on the connection that was already live" in log
     no_check = "not measured again" in log
     samples = [int(m.group(1)) for m in re.finditer(r"samples (\d+) \(\+", log)]
@@ -877,7 +877,7 @@ def check_one_connection(replay: Path, stage: Path) -> Result:
         return Result(name, "FAIL", "the night did not start on the Signal tab's live connection (it searched or checked contact again)", details)
     if connects != 1 or "reconnect try" in log:
         return Result(name, "FAIL", f"the night's log names {connects} connections or a reconnect try", details)
-    return Result(name, "PASS", f"recording {round(recording_after)} s after Start night, on the Signal tab's connection: no search, no contact check", details)
+    return Result(name, "PASS", f"recording {round(recording_after)} s after Sleep, on the Signal tab's connection: no search, no contact check", details)
 
 
 # ---- (d) what the run left -----------------------------------------------------------------------------------------
@@ -1015,9 +1015,9 @@ def main() -> int:
                 results += also
         if "e" in a.only:
             if not a.replay:
-                results.append(Result("(e) Signal, then Start night: one connection", "SKIP", "needs --replay <replay build>"))
+                results.append(Result("(e) Signal, then Sleep: one connection", "SKIP", "needs --replay <replay build>"))
             else:
-                say("(e) Signal, then Start night: one connection")
+                say("(e) Signal, then Sleep: one connection")
                 results.append(check_one_connection(a.replay, stage))
         if "d" in a.only:
             say("(d) crashes, ANRs, exit reasons")

@@ -3,6 +3,11 @@
 host 10.0.2.2) with no notification; the spare port when 8765 is taken; the laptop's own copy pass beside it.
 
     _local/build_slot.sh heavy python3 app/tool/push_smoke.py APK [--natural-min 32] [--work /var/tmp/share_smoke]
+        [--replay REPLAY_BUILD.apk]
+
+With --replay (needs dart on PATH): first the replay build makes a short recording with a sleep stretch, a Stop and
+a chip on the sheet (tool/record_check.py's five steps), then APK is installed over it; the push must bring the
+recording's spans file and its tags to the laptop, where scripts/spans.py reads the sleep stretch (DECISIONS 836).
 
 Own adb server on port 5049, own temporary AVD under the work folder, both removed at the end. About 30-45 minutes:
 most of it is the wait for Android's own second run of the regular job.
@@ -24,6 +29,8 @@ import precheck as pc  # noqa: E402
 import emu  # noqa: E402
 import phone_link as pl  # noqa: E402
 import phone_auth as pa  # noqa: E402
+import record_check  # noqa: E402
+import spans as laptop_spans  # noqa: E402
 
 WORK = Path("/var/tmp/share_smoke")
 DEST = WORK / "dest"
@@ -171,9 +178,37 @@ def replaced_are_older_beginnings() -> tuple[bool, str]:
     return not bad, f"{n} set aside" + (f"; not a beginning: {bad[:4]}" if bad else "")
 
 
+def record_with_sleep(replay: Path) -> list[str]:
+    """A recording with a sleep stretch made by the replay build (record_check's steps); the phone's spans files."""
+    for r in record_check.check(replay, WORK / "stage"):
+        note(f"recording first: {r.name}", r.verdict != "FAIL", f"{r.verdict}: {r.words}"[:300])
+    pc.stop_app()
+    names = [f.rsplit("/", 1)[1] for f in pc.sh(f"ls {pc.FILES}/spans/*.spans.jsonl 2>/dev/null", check=False).split()]
+    note("the phone has the recording's spans file", bool(names), ", ".join(names))
+    return names
+
+
+def spans_on_laptop(names: list[str]) -> None:
+    """The phone's spans files, tags and answers as they landed in the laptop's folders."""
+    for n in names:
+        f = DEST / "phone" / "spans" / n
+        same = f.is_file() and f.read_text() == pc.sh(f"cat {pc.FILES}/spans/{n}", check=False)
+        got = laptop_spans.read(f).spans if f.is_file() else []
+        sleep = [s for s in got if s.kind == "sleep" and s.closed]
+        note("the spans file landed on the laptop, the phone's bytes, and its sleep stretch reads there",
+             same and bool(sleep), f"phone/spans/{n}: there {f.is_file()}, same bytes {same}, spans {[s.kind for s in got]}")
+        tags = DEST / "phone" / "archive" / n.replace(".spans.jsonl", ".tags.json")
+        note("the recording's tags (the sheet's chip) landed on the laptop", tags.is_file() and "owner_stop_sheet" in tags.read_text(),
+             str(tags.relative_to(DEST)))
+    asked = pc.sh(f"ls {pc.FILES}/confirm 2>/dev/null", check=False).split()
+    here = sorted(p.name for p in (DEST / "phone" / "confirm").glob("*")) if (DEST / "phone" / "confirm").is_dir() else []
+    note("the questions' files on the phone are on the laptop too", set(asked) <= set(here), f"phone {sorted(asked)}; laptop {here}")
+
+
 def main() -> int:
     global WORK, DEST
     apk = Path(sys.argv[1])
+    replay = Path(sys.argv[sys.argv.index("--replay") + 1]) if "--replay" in sys.argv else None
     natural = float(sys.argv[sys.argv.index("--natural-min") + 1]) if "--natural-min" in sys.argv else 32
     if "--work" in sys.argv:
         WORK = Path(sys.argv[sys.argv.index("--work") + 1])
@@ -191,6 +226,7 @@ def main() -> int:
         pc.sh("nohup toybox nc -L -p 8765 sleep 100000 >/dev/null 2>&1 &", check=False)
         time.sleep(2)
         pc.say("holder of 8765: " + pc.sh("ss -ltn 2>/dev/null | grep 8765 || netstat -ltn | grep 8765", check=False).strip())
+        span_files = record_with_sleep(replay) if replay else []
         pc.install(apk)
         pc.start_app()
         note("the app's main screen shows", pc.wait_main(240))
@@ -246,6 +282,8 @@ def main() -> int:
         got_files = sorted(str(p.relative_to(DEST)) for p in DEST.rglob("*") if p.is_file() and "push-inbox" not in p.parts)
         note("files landed in the laptop's folders", any(f.startswith("phone/logs/") for f in got_files),
              f"{len(got_files)} files, e.g. {got_files[:4]}")
+        if replay:
+            spans_on_laptop(span_files)
         inbox = DEST / "phone" / "push-inbox"
         note("the inbox is empty after the commit", not inbox.exists() or not any(inbox.iterdir()))
         no_notification("no notification of sharing or the push after Android's own run")
