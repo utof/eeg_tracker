@@ -200,6 +200,17 @@ that one's last data or has the same evening date, and never 24 hours or more af
 `night_of`). While a night grows, its four files are replaced whole (never edited in place) once 10+ minutes of
 new samples exist; files of the same name made by hand are first renamed `<date>-manual.*`.
 
+A file set whose header has `recording` (Record first) is never chained like that. What was sleep in its recording
+is said by that recording's sleep spans (`spans/`, above): each closed span of kind `sleep` (source `owner_button`,
+`owner_confirmed` or `auto_start`) is a time window; windows are joined into one night by the same rule applied to
+spans (the next starts under 3 hours after the last one's end, or has the same evening date, within 24 hours of the
+first), named by the evening date of the first. Only the samples inside the windows are read. Spans of kind `nap` are
+naps and never join a night. A recording with no sleep span gives no night. Old file sets chain as before, except
+those a "Not sleep" line names. An old chain and a span night with the same evening date are one night. The report
+of such a night has `span`: `{recording: [ids], spans: [ids], kind, from, windows}` (`from`: `pressed`,
+`confirmed`, `auto`; `windows`: `[start, end]` in unix seconds); a report with `span` is out of date when its spans
+or windows change, not when its files grow.
+
 | Field | Meaning |
 |---|---|
 | `version` | 2 (since 2026-11-18: `extras` added, every other field as in 1); a report of another version is rebuilt |
@@ -1013,7 +1024,8 @@ line per ack (`acked`, `phone`, `files`) and the catalog's night rows `moved_fro
   (`laptop`, `phone`, `laptop+phone` or `diy`), `recordings` (runs with samples), `start` and `end` (first and last data), `hours_recorded`
   (samples at 250 Hz), `minutes_missing` (time between them without samples), `raw` (`false` for a phone report
   whose raw night is not on the laptop), `report` (`by` laptop or phone, `asleep_min`, `deep_min`, `dream_min`, or
-  `null`), `morning` (its check-in files), `files`, `bytes` and `file_list` (`path` from `_local/`, `bytes`,
+  `null`), for a night made from sleep spans `recording`, `span_ids` and `span_from` (as in nights.tsv; empty for an
+  old night, `span_from` `migrated`), `morning` (its check-in files), `files`, `bytes` and `file_list` (`path` from `_local/`, `bytes`,
   `mtime_ns`, `sha256`, `kind`: `raw` for `.f32 .f32.xz .idx .log .markers.jsonl .header.json`, else `derived`; a
   damaged `.header.json` is a PROBLEM ("damaged") on every run and its recording is counted in no night; for a packed
   `.f32.xz` also `original`: `path`, `bytes` and `sha256` of the `.f32` it holds). `missing`: raw files an earlier
@@ -1073,6 +1085,7 @@ are cut by `night_files.py`'s chain rule and named by the evening date, as the c
 | Column | Meaning |
 |---|---|
 | `night` | the night's id: its evening date (`2026-11-19`), `<date>-diy` for the DIY board |
+| `recording`, `span_ids`, `span_from` | for a night made from sleep spans: the recording ids and the span ids (space-separated) and where the spans came from (`pressed`, `confirmed`, `auto`); for an old night (cut by the chain rule) the first two are empty and `span_from` is `migrated`. A night "Not sleep" hides, which no recording makes any more, is left out even when the phone's report is on the laptop |
 | `kind` | `nap` when under 3 hours asleep (or recorded, when unscored), else `night` (DECISIONS 761) |
 | `source` | whose report the row holds: `laptop` (`nights/<date>.report.json`, or a laptop report kept in `analyses/`), `phone` (`phone/nights/`), or for a night with no report the catalog's `laptop`, `phone`, `laptop+phone`, `diy` |
 | `counts` | 1 for the one row per night that counts (days.tsv adds it up): scored before unscored, then the laptop's in `nights/`, a laptop report in `analyses/`, the phone's |

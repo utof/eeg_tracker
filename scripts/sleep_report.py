@@ -1,12 +1,13 @@
 """Automatic sleep report: score the nights recorded in the last hours and split them into sleep periods.
 
 usage: sleep_report.py [--recordings _local/recordings] [--nights _local/nights] [--export _local/export]
-                       [--hours 20] [--anysleep _local/vendor/AnySleep] [--device cpu] [--force]
+                       [--hours 20] [--spans DIR] [--anysleep _local/vendor/AnySleep] [--device cpu] [--force]
 Run with the analysis environment:  uv run --project analysis python scripts/sleep_report.py
 The recorder hub starts it from the Sleep page (POST /sleep-report) under systemd-run with MemoryMax=3500M.
 
-For every night with data in the last --hours hours (night_files.py: recordings chained in time, named by the
-evening date) whose report is missing or lacks 10+ minutes of newer samples, it joins the recordings with
+For every night with data in the last --hours hours (night_files.py: recordings chained in time or, for a phone
+recording with spans, its sleep spans joined, reading only the samples inside them; named by the evening date) whose
+report is missing or lacks 10+ minutes of newer samples (a span night: whose spans changed), it joins the recordings with
 to_bdf.py's code into <nights>/<date>.bdf, scores it with score_sleep.py's code (<date>.sleep.json and
 <date>.hypnogram.png), splits the AnySleep stages into sleep periods, runs the shared detectors over the same samples
 for the night extras (analysis/night_extras.py: jaw, movement and signal quality, as on the phone) and the
@@ -124,6 +125,9 @@ def make_report(name: str, night: nf.Night, scored: dict | None, seconds: float,
                      note=NOTE, validated=False,
                      rules=dict(split_min=SPLIT_MIN, min_period_sleep_min=MIN_PERIOD_SLEEP_MIN,
                                 wake_up_over_min=WAKE_UP_OVER_MIN))
+    if night.windows is not None:  # a night made from sleep spans (night_files.py): what it was made from
+        rep["span"] = dict(recording=night.recording_ids, spans=night.span_ids, kind="night", **{"from": night.span_from},
+                           windows=[list(w) for w in night.windows])
     if scored is None:
         rep.update(periods=[], total=dict(asleep_min=0.0, light_min=0.0, deep_min=0.0, dream_min=0.0, wake_ups=0,
                                           periods=0, recorded_min=round(length_s / 60, 1), missing_min=0.0,
@@ -219,7 +223,7 @@ def build(night: nf.Night, a: argparse.Namespace, status: nf.Job) -> dict:
     head = to_bdf.night_header(paths)  # the files hold the same channels, else refused here
     four = recording.pick(head, score_sleep.CHANNELS, score_sleep.WHO)  # refused here without O1 O2 T3 T4
     status.step(f"Night of {name}: joining {len(night.recs)} recordings ({hours:.1f} h)")
-    start, uv, notes = to_bdf.join(paths)
+    start, uv, notes = to_bdf.join(paths, night.windows)  # a span night reads only the samples inside its spans
     length_s = len(uv) / head.sample_rate
     if length_s < 10 * EPOCH:
         rep = make_report(name, night, None, time.time() - t_start, (start, length_s))
@@ -293,6 +297,8 @@ def _watchdog(status: nf.Job, max_s: float, max_mb: float, done: threading.Event
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--recordings", type=Path, default=Path("_local/recordings"))
+    ap.add_argument("--spans", type=Path, help="the phone's spans folder (default: spans/ beside a folder named "
+                                               "`recordings`, else none)")
     ap.add_argument("--nights", type=Path, default=Path("_local/nights"))
     ap.add_argument("--export", type=Path, default=Path("_local/export"))
     ap.add_argument("--hours", type=float, default=nf.WINDOW_H, help="nights with data in the last N hours")
@@ -314,7 +320,7 @@ def main(argv: list[str] | None = None) -> int:
         threading.Thread(target=_watchdog, args=(status, a.max_minutes * 60, a.max_mb, done), daemon=True).start()
         for p in a.nights.glob("*.part.bdf"):  # left by a run that was stopped
             p.unlink()
-        todo = [n for n in nf.recent_nights(a.recordings, time.time(), a.hours)
+        todo = [n for n in nf.recent_nights(a.recordings, time.time(), a.hours, a.spans)
                 if a.force or nf.is_stale(n, nf.read_report(a.nights, n.name))]
         if not todo:
             print("sleep reports are up to date", flush=True)

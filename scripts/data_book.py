@@ -505,7 +505,7 @@ def write_epochs(out: Path, groups: list[Group], metas: dict[str, dict], store: 
 # ---- nights.tsv -----------------------------------------------------------------------------------------------------
 
 NIGHT_COLUMNS = [
-    "night", "kind", "source", "counts", "scored", "wearer", "start", "end", "sleep_start", "sleep_end",
+    "night", "kind", "source", "recording", "span_ids", "span_from", "counts", "scored", "wearer", "start", "end", "sleep_start", "sleep_end",
     "recorded_min", "missing_min", "in_bed_min", "asleep_min", "light_min", "deep_min", "dream_min",
     "awake_in_sleep_min", "wake_ups", "periods", "efficiency_pct", "fall_asleep_min", "lights_off_from",
     "drift_detector_min", "drift_agree",
@@ -644,6 +644,18 @@ def _morning(row: dict | None, local: Path, hashes: Hashes) -> tuple[dict, list[
     return out, pairs
 
 
+def _span_info(nrow: dict, rep: Report | None) -> dict:
+    """`recording`, `span_ids`, `span_from` of a night: from the spans that made it (the catalog's row), else from the
+    report's own `span` field (a phone report), else an old night: empty but `span_from` = migrated."""
+    if nrow.get("span_from") and nrow.get("recording"):
+        return dict(recording=nrow["recording"], span_ids=nrow["span_ids"], span_from=nrow["span_from"])
+    sp = rep.data.get("span") if rep is not None else None
+    if isinstance(sp, dict) and isinstance(sp.get("recording"), list) and isinstance(sp.get("spans"), list):
+        return dict(recording=" ".join(map(str, sp["recording"])), span_ids=" ".join(map(str, sp["spans"])),
+                    span_from=sp.get("from") if isinstance(sp.get("from"), str) else None)
+    return dict(recording=None, span_ids=None, span_from="migrated")
+
+
 def night_rows(local: Path, nights: list[dict], reports: dict[str, list[Report]], groups: list[Group],
                metas: dict[str, dict], hashes: Hashes, cache: Path) -> tuple[list[dict], list[str]]:
     by_id = {g.id: g for g in groups}
@@ -662,6 +674,7 @@ def night_rows(local: Path, nights: list[dict], reports: dict[str, list[Report]]
         wearer = wearer_of(reps)
         for i, rep in enumerate(reps or [None]):
             base: dict = dict(night=nrow["id"], counts=i == 0, wearer=wearer, raw_files=len(g.f32) if g else 0,
+                              **_span_info(nrow, rep),
                               **{k: v for k, v in logs.items() if k != "contact"}, **morning)
             base.update({f"contact_{k}_ohm": v for k, v in (logs.get("contact") or {}).items()})
             pairs = raw + mpairs
@@ -1128,7 +1141,11 @@ def build(local: Path, out: Path, now: datetime, full: bool = False, say: Callab
     problems: list[str] = []
     nights = catalog.nights_on(local)
     reports = read_reports(local, hashes)
+    hidden = spans.hidden_nights(local)  # "Not sleep": a night no recording makes any more is left out, report and all
+    nights = [r for r in nights if r["raw"] or r["date"] not in hidden or r["source"] == "diy"]
     for nid, reps in reports.items():  # a report kept by hand whose night's raw files are gone: a row from it alone
+        if nid in hidden and not any(r["id"] == nid for r in nights):
+            continue
         if not any(r["id"] == nid for r in nights):
             nights.append(dict(catalog._row(nid, None, None), source=reps[0].source))  # noqa: SLF001
     nights.sort(key=lambda r: (r["date"], r["id"]))
