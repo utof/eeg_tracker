@@ -71,10 +71,25 @@ def test_steps_are_never_read_as_a_pulse(spm: int, uv: int):
     assert not any(e.read for e in eps), codes(eps)
 
 
-def test_big_steps_are_moving():
+def test_big_steps_are_moving_or_walking():
     x = mpf.background(4, 90, FS, seed=3)
     mpf.add_steps(x, FS, 0, 90, 112, 600, seed=4, gains=[1.0, 0.9, 0.6, 0.7])
-    assert codes(pl.epochs(x, FS)) == "mmm"
+    assert codes(pl.epochs(x, FS, walking=[False] * 3)) == "mmm"  # by its own movement rule
+    assert codes(pl.epochs(x, FS)) == "www"  # the walking detector says more: a walk
+
+
+def test_no_reading_while_the_walking_detector_says_walking():
+    x, fs, miss, _ = mpf.soft_walk()  # a pulse at 60 throughout; a walk on soft steps from 1:02 to 2:50
+    eps = pl.epochs(x, fs, miss)
+    assert codes(eps) == "rrwwwwrr"
+    assert all(math.isnan(e.bpm) and e.channel == -1 for e in eps[2:6])
+    assert all(abs(e.bpm - 60) <= 1 for e in eps if e.read)
+    # the caller's own answer is taken as given; a gap stays a gap; a walking epoch never carries a neighbour
+    told = pl.epochs(x, fs, miss, walking=[True] + [False] * 7)
+    assert codes(told)[0] == "w" and "w" not in codes(told)[1:]
+    miss[: int(5 * fs)] = True
+    assert codes(pl.epochs(x, fs, miss, walking=[True] * 8)) == "g" + "w" * 7
+    assert pl.VERSION == "pulse-v2"
 
 
 def test_noise_alone_gives_no_reading():
@@ -324,4 +339,6 @@ def test_the_fixture_matches_the_python_reference():
     assert {c["sample_rate"] for c in have["cases"]} == {250, 500, 256}
     assert {len(c["channels"]) for c in have["cases"]} == {1, 4, 8}
     seen = {e[0] for c in have["cases"] for e in c["epochs"]}
-    assert {"r", "n", "u", "g", "m", "s"} <= seen
+    assert {"r", "n", "u", "g", "m", "s", "w"} <= seen
+    walked = next(c for c in have["cases"] if "soft steps" in c["name"])
+    assert [e[0] == "w" for e in walked["epochs"]] == walked["walking"] and any(walked["walking"])

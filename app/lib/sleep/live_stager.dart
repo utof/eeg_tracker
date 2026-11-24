@@ -12,11 +12,17 @@
 // A window with over half of its epochs lost is not scored (its scaling would be set by the held stretches, which sit
 // at about 0 after the high-pass): its epochs come out as gaps, as do lost epochs in a scored window.
 // Callers must work without stages: a nap still ends at its length.
+//
+// The walking detector reads the same samples beside the model (walking/detector.dart, only as far as its veto needs):
+// an asleep epoch it calls walking is handed out awake, since nobody sleeps while walking and the step shake reads as
+// deep or dream sleep to the model (DECISIONS 920; analysis/live_stager.py `stages_at(walking=...)`). The 2 minutes
+// behind are more than the 40 s after an epoch that the walking rule reads, so it gives what the whole recording gives.
 import 'dart:async';
 import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import '../walking/detector.dart' show WalkWindows, walkEpochWalks, walkVetoStages;
 import 'live_prep.dart';
 import 'model.dart' show StageRun, addSoftmax;
 import 'periods.dart' show gapStage, stageNames;
@@ -43,11 +49,14 @@ enum LiveMode {
 
 /// One epoch's live stage: W N1 N2 N3 R, or `gap` (over 5 s of it was lost), read [behind] epochs behind the newest.
 class LiveStage {
-  const LiveStage(this.epoch, this.stage, this.confidence, this.behind);
+  const LiveStage(this.epoch, this.stage, this.confidence, this.behind, {this.walking = false});
   final int epoch;
   final String stage;
   final double confidence;
   final int behind;
+
+  /// The model called this epoch asleep and the walking detector called it walking: [stage] is W for that reason.
+  final bool walking;
 }
 
 /// One model call: the window's edge and size, the runs used, and how long it took (preparing and the model).
@@ -87,8 +96,11 @@ class LiveStager {
     this.onChange,
     this.fallback = 'the timer alone ends the nap',
     this.deadline,
+    bool walkingVeto = true,
+    int walkRate = 250,
     int Function()? clockMs,
   }) : prep = prep ?? LivePrep(),
+       _walk = walkingVeto ? WalkWindows(4, walkRate, quick: true) : null,
        _ms = clockMs ?? _wallMs;
 
   final LiveModel model;
@@ -114,6 +126,11 @@ class LiveStager {
   /// model is closed only once that call has ended. Null: no deadline.
   final Duration? deadline;
   Future<Float64List>? _hung;
+
+  /// The walking detector beside the model (null: no veto), each of its windows' answer so far, and the last row.
+  final WalkWindows? _walk;
+  final List<bool> _walks = [];
+  final List<double> _lastRow = List.filled(4, 0);
   final int Function() _ms;
 
   static final Stopwatch _wall = Stopwatch()..start();
@@ -134,6 +151,9 @@ class LiveStager {
   /// Windows not scored because over half of their epochs were lost.
   int skipped = 0;
 
+  /// Asleep epochs handed out awake because the walking detector called them walking.
+  int walkVetoed = 0;
+
   Future<void>? _running;
   int _slowInARow = 0;
   int _scoredUpTo = -1; // the last epoch handed out
@@ -145,6 +165,11 @@ class LiveStager {
   /// One row of µV (O1 O2 T3 T4); [missing]: a held value standing in for a lost sample.
   void push(List<double> row, {bool missing = false}) {
     final before = prep.epochs;
+    final walk = _walk;
+    if (walk != null) {
+      walk.push(row, missing: missing);
+      _lastRow.setRange(0, 4, row);
+    }
     prep.push(row, missing: missing);
     if (prep.epochs != before) _due();
   }
@@ -152,6 +177,12 @@ class LiveStager {
   /// A hole of [n] lost samples, held at the last value.
   void hold(int n) {
     final before = prep.epochs;
+    final walk = _walk;
+    if (walk != null) {
+      for (var i = 0; i < n; i++) {
+        walk.push(_lastRow, missing: true);
+      }
+    }
     prep.hold(n);
     if (prep.epochs != before) _due();
   }
@@ -193,7 +224,7 @@ class LiveStager {
       calls.add(LiveCall(w.end, w.epochs, runs, ms, prepMs));
       if (_closed) return;
       for (var e = math.max(_scoredUpTo + 1, w.first); e <= newest; e++) {
-        stages.add(_stageOf(p, e - w.first, e, w.end - 1 - e, w.gap[e - w.first]));
+        stages.add(_vetoed(_stageOf(p, e - w.first, e, w.end - 1 - e, w.gap[e - w.first])));
         onStage?.call(stages.last);
       }
       _scoredUpTo = math.max(_scoredUpTo, newest);
@@ -228,6 +259,18 @@ class LiveStager {
         throw _NoAnswer(d);
       },
     );
+  }
+
+  /// [s], or awake in its place when it is asleep and the walking detector calls its epoch walking.
+  LiveStage _vetoed(LiveStage s) {
+    final walk = _walk;
+    if (walk == null || !walkVetoStages.contains(s.stage)) return s;
+    for (var i = _walks.length; i < walk.windows.length; i++) {
+      _walks.add(walk.windows[i].walks);
+    }
+    if (!walkEpochWalks(_walks, s.epoch)) return s;
+    walkVetoed++;
+    return LiveStage(s.epoch, 'W', s.confidence, s.behind, walking: true);
   }
 
   static String _seconds(Duration d) =>

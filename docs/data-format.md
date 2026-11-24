@@ -187,7 +187,7 @@ and the nights' chaining reads the last `.idx` row of every recording). Files un
 
 `start` (local, no zone), `epoch_s` (30), `scorer` (how AnySleep went over the night: `pytorch one-pass` up to
 14 hours, `onnx-f16 two-pass-64min+8min` for a longer night, as the phone scores; DECISIONS 310; absent in files from
-before 2026-11-19), `summary` (minutes per stage, sleep onset, total sleep, agreement of the two models) and `epochs`: one object per 30 s with `t`, `anysleep` and `yasa` (`W N1 N2 N3 R`, or
+before 2026-11-19), `summary` (minutes per stage, sleep onset, total sleep, agreement of the two models) and `epochs`: one object per 30 s with `t`, `anysleep` and `yasa` (after the walking veto; an epoch the walking detector calls walking has `walking: true`, and where the veto changed a stage the model's own word is kept as `anysleep_model` / `yasa_model`; `W N1 N2 N3 R`, or
 `gap` when over 5 s of the epoch is filled in), and `p` (AnySleep probabilities in the order W N1 N2 N3 R).
 
 ## `<date>.report.json` (the Sleep page)
@@ -220,6 +220,7 @@ new samples exist; files of the same name made by hand are first renamed `<date>
 | `stages` | one character per 30 s from `data_start`: `W 1 2 3 R` by AnySleep, `-` where over 5 s of the epoch was missing (the phone's from the start; the laptop's since 2026-11-20, `""` when unscored) |
 | `probs` | AnySleep's mean probabilities per 30 s epoch, the same epochs as `stages` (below); `null` when unscored. Added 2026-11-20 without a new `version` |
 | `rem_check` | the dream sleep check (below); `null` when unscored. Added 2026-11-20 without a new `version`: a version-2 report without this key was written before it; the laptop rebuilds it once, the phone keeps it and offers "Score again" |
+| `walking`, `walking_error` | the walking veto (DECISIONS 920): `detector` (`walk-v2`), `rule` (in words), `epochs` (one character per 30 s epoch from `data_start`: `1` walking), `walking_min`, `changed_min` (minutes the veto turned from asleep to awake; the stages, periods and totals are counted after it), and on the laptop `cross_check_changed_min` (the same for the second opinion); `null` when unscored or when the walking detector did not run (the laptop's `walking_error` says why; the phone's runs in the detectors' pass, so `extras_error` does). Added 2026-11-24 without a new `version`: the laptop rebuilds a report without this key once, the phone keeps it and offers "Score again" |
 
 A sleep period is a stretch of asleep epochs (N1 N2 N3 R by AnySleep) that no 60+ minutes of wake or missing data
 interrupt; a stretch with under 10 minutes asleep is scorer noise and only counts in `stray_sleep_min`. Each period
@@ -757,12 +758,12 @@ pass that could not run keeps only `format`, `version`, `detector`, `recording`,
 
 | Field | Content |
 |---|---|
-| `format`, `version`, `detector` | `eeg-tracker-pulse`, 1, the detector's version (`pulse-v1`); a file of another detector is made again while the raw signal is there |
+| `format`, `version`, `detector` | `eeg-tracker-pulse`, 1, the detector's version (`pulse-v2`: no reading while walking); a file of another detector is made again while the raw signal is there |
 | `recording`, `start`, `start_ms` | the id; the joined signal's first sample (a whole second): local ISO time with offset, and unix ms |
 | `epoch_s`, `epochs` | 30; whole 30 s epochs from the first sample (a last part is not one) |
 | `channels`, `sample_rate` | every channel the header names (all of them are read), the rate |
 | `read`, `coverage`, `median_bpm` | epochs with a reading, their share, the readings' median a minute (`null` without one) |
-| `codes` | one letter per epoch: `r` a reading, `n` a reading with its neighbours; no reading: `g` over 1 s missing, `x` no usable channel, `m` moving, `s` steps, `u` unclear, `o` the odd one out |
+| `codes` | one letter per epoch: `r` a reading, `n` a reading with its neighbours; no reading: `g` over 1 s missing, `x` no usable channel, `m` moving, `s` steps, `w` walking (the walking detector's epoch, DECISIONS 922), `u` unclear, `o` the odd one out |
 | `bpm`, `conf`, `channel` | per epoch: the pulse a minute (0.1), its confidence (0.01) and the index of the channel read; `null` without a reading |
 | `key` | what it was made from: the detector and every raw file's and index's name, size and modified time |
 
@@ -1295,6 +1296,7 @@ minutes (a nap scored twice by hand), the first in the book's counting order is 
 | `moving` | 3 or more seconds of movement in 30 s (the Archive's rule) | `epochs.tsv.gz` `movement_s` | walking, running, stairs, exercise / - / meditating |
 | `no_signal` | quality `m` | `epochs.tsv.gz` `quality` | headband_off / - / - |
 | `eyes_closed` | eyes closed | the phone's work sessions' epochs | eyes_closed / meditating / focused_work, working, meeting, walking, running, cycling |
+| `walking` | walking or running: over half of the epoch in such a stretch | the walk files (`walking/`, `phone/walking/`) | walking, running / - / asleep, meditating, sitting, lying, resting, focused_work, working, meeting |
 
 One row per detector version and truth row it overlaps (`scope` `label`), and per detector version and label over all
 its rows (`scope` `all`):
@@ -1316,6 +1318,13 @@ its rows (`scope` `all`):
 
 `validation.md` says the same in words: a sentence per detector and label, the totals, each truth row, and what could
 not be compared (truth rows no detector covers, detectors with no truth in their time, rows left out of `truth.tsv`).
+
+A walking label's stops count as missed minutes (the owner's walks have bench stops). A sleep report made with the
+walking veto is its own detector version (`<model>, walking veto walk-v2`), so reports from before and after it are
+separate rows. `pulse` is a measurer: the pulse files' reading per epoch (`pulse/`, `phone/pulse/`) against `pulse`
+truth readings in bpm within 30 s; while none lies in its time, `validation.md` says "no reference yet" (a sentence
+and a row of the totals table with the number of readings that wait) and `validation.tsv` has no pulse row.
+`validation_version` is `validate-v2` since these were added (DECISIONS 924).
 
 The extension point (`DETECTORS`, `MEASURERS` in the script): a new detector gives its answers per epoch (`Output`; a
 detector that gives stretches, such as walking, through `from_spans`) and names the truth labels it expects yes and
