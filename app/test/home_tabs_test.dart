@@ -146,7 +146,7 @@ void main() {
     final key = GlobalKey<HomeTabsState>();
     await _pump(tester, _tabs(_model(running: false), key: key), height: 873);
     expect(key.currentState!.tab, HomeTab.night);
-    expect(find.text('Sleep'), findsOneWidget);
+    expect(find.ancestor(of: find.text('Sleep'), matching: find.bySubtype<FilledButton>()), findsOneWidget);
     expect(find.byType(NavigationDestination), findsNWidgets(5));
     for (final t in HomeTab.values) {
       expect(find.text(t.label), findsWidgets);
@@ -154,12 +154,12 @@ void main() {
     await tester.tap(find.text('Sessions'));
     await tester.pump(const Duration(milliseconds: 100));
     expect(key.currentState!.tab, HomeTab.sessions);
-    expect(find.text('Sleep'), findsNothing); // pinned only on Night
+    expect(find.ancestor(of: find.text('Sleep'), matching: find.bySubtype<FilledButton>()), findsNothing); // pinned only on Night
     expect(find.byIcon(Icons.settings_outlined), findsNothing);
     await tester.binding.handlePopRoute();
     await tester.pump(const Duration(milliseconds: 100));
     expect(key.currentState!.tab, HomeTab.night);
-    expect(find.text('Sleep'), findsOneWidget);
+    expect(find.ancestor(of: find.text('Sleep'), matching: find.bySubtype<FilledButton>()), findsOneWidget);
     expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
   });
 
