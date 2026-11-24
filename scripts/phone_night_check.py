@@ -309,7 +309,7 @@ def load_runs(folder: Path) -> list[Run]:
 
 # ---- nights ----------------------------------------------------------------------------------------------------------
 def nights_of(runs: list[Run], recs: dict[str, nf.Rec], source: str) -> list[nf.Night]:
-    return nf.nights([recs[r.stem] for r in runs if r.source == source and r.stem in recs])
+    return nf.nights([recs[r.stem] for r in runs if r.source == source and r.stem in recs], include_recorded=True)
 
 
 def night_runs(runs: list[Run], nights: list[nf.Night], night: nf.Night, source: str) -> list[Run]:
