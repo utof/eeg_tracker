@@ -15,7 +15,7 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 | The phone over Wi-Fi | `GET /files`, `GET /files/<path>` on the phone; mirrored into `_local/recordings/` and `_local/phone/`, with `_local/phone/pull-state.json` and `pulls.jsonl` | the phone app's Share on Wi-Fi (`app/lib/share/`); read by `scripts/pull_phone.py` |
 | The laptop's work sessions | `_local/laptop/work/<stamp>.work.json`, `labels.jsonl` (below) | the laptop tray (`scripts/tray.py`, `scripts/laptop_work.py`) from ActivityWatch |
 | Catalog of nights | `_local/catalog/catalog.json`, `<date>.sha256`, `catalog.txt`, `history.log` | `scripts/catalog.py` (below) |
-| The data book | `_local/data/nights.tsv`, `sessions.tsv`, `days.tsv`, `epochs.tsv.gz`, `labels.tsv`, `truth.tsv`, `book.json`, `README.md` | `scripts/data_book.py`, after each copy from the phone through `scripts/after_pull.py` (below) |
+| The data book | `_local/data/nights.tsv`, `sessions.tsv`, `days.tsv`, `epochs.tsv.gz`, `labels.tsv`, `truth.tsv`, `spans.tsv`, `book.json`, `README.md` | `scripts/data_book.py`, after each copy from the phone through `scripts/after_pull.py` (below) |
 | Truth labels | `_local/analyses/truth-labels.tsv` (the hand file), `_local/truth/*.tsv`, the Archive's tags marked "This is what I was doing"; the vocabulary `scripts/truth_vocabulary.tsv` | the assistant from chat, the owner by hand or on the phone; checked by `scripts/truth.py` (below) |
 | Detectors against the truth | `_local/data/validation.tsv`, `validation.md` | `scripts/validate_detectors.py`, after each data book build (below) |
 | Raw recordings packed after a day | `<stamp>.f32.xz` on the laptop, `<stamp>.f32.gz` on the phone, in place of `<stamp>.f32`; `_local/packing.jsonl`, `files/packing.jsonl` | `scripts/pack_old.py` (daily), the phone app between nights (`app/lib/recorder/packed.dart`); below |
@@ -1026,7 +1026,7 @@ line per ack (`acked`, `phone`, `files`) and the catalog's night rows `moved_fro
 
 ## The data book (`_local/data/`)
 
-`scripts/data_book.py` (DECISIONS 760-769) turns everything eeg_tracker measured on the laptop into six tidy tables, so
+`scripts/data_book.py` (DECISIONS 760-769) turns everything eeg_tracker measured on the laptop into seven tidy tables, so
 hundreds of days can be read in one place and every number traced to the files it came from. It reads `_local/` and
 writes only into `_local/data/` (or `--out`); nothing reads the book back as input, and it can always be built again
 from `_local/` (`uv run --project analysis python scripts/data_book.py`; `--full` works out everything again). The
@@ -1302,6 +1302,24 @@ The extension point (`DETECTORS`, `MEASURERS` in the script): a new detector giv
 detector that gives stretches, such as walking, through `from_spans`) and names the truth labels it expects yes and
 no for; a measurer (the pulse detector) gives `(time, value)` pairs and is scored against `measurement` rows of its
 label within `within_s` seconds.
+
+### `spans.tsv`
+
+One row per span of every recording (Record first, DECISIONS 880-899): what you were doing while the headband
+recorded, read by `scripts/spans.py` from the phone's `phone/spans/*.spans.jsonl` (format above, "What you were doing
+in a recording"). The last line of a span is the span; open spans have no `end`. A column that does not apply is empty.
+
+| Column | Meaning |
+|---|---|
+| `span_id`, `recording` | the span's id (`2026-11-21-110200-1`), and the recording it is in (the spans file's name) |
+| `kind`, `label` | `sleep`, `nap`, `work`, `meditate`, ... (a kind the reader does not know is kept); the shared vocabulary's label for it |
+| `start`, `end`, `minutes` | the span's times and length; empty `end` and `minutes` while it is open |
+| `source` | `owner_button`, `owner_confirmed`, `auto_start` |
+| `started_recording` | 1 when this span's button also started the recording |
+| `ended_by` | `owner`, `activity`, `other_activity`, `recording_stopped`, `headband_off`, `phone_restart` |
+| `session` | the activity's own file, relative to the phone's `files/` |
+| `paused_minutes` | minutes the activity was paused while the span stayed open (Work during a nap); empty when never paused |
+| `estimate` | the confirm-questions estimate a confirmed span answers |
 
 ### After each copy from the phone (`scripts/after_pull.py`)
 
