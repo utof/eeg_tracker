@@ -858,7 +858,7 @@ const List<TryCard> tryCards = [
     steps: [
       'Leave python3 scripts/phone_link.py running on the laptop with Share on Wi-Fi on; it says "told the phone N files are safe here".',
       'Four days later open More, Storage: On the laptop has grown and the oldest nights no longer count on the phone.',
-      'Open last week\'s sleep report on the Night tab and Trends: both still show everything.',
+      'Open last week\'s sleep report on the Record tab and Trends: both still show everything.',
       'On the laptop run python3 scripts/catalog.py: those nights say "moved from phone".',
     ],
     tell: [

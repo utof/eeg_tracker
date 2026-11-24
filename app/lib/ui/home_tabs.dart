@@ -4,6 +4,7 @@
 // first tab and the app opens on it, with Start night pinned as before; system Back on another tab returns to Night.
 import 'package:flutter/material.dart';
 
+import '../confirm/phone.dart' show quickChecksWaiting;
 import '../logs/usage.dart' show Usage;
 
 enum HomeTab {
@@ -87,7 +88,7 @@ class HomeTabsState extends State<HomeTabs> {
             onDestinationSelected: (i) => go(HomeTab.values[i]),
             destinations: [
               for (final t in HomeTab.values)
-                NavigationDestination(icon: Icon(t.icon), selectedIcon: Icon(t.selectedIcon), label: t.label),
+                NavigationDestination(icon: _badged(t, Icon(t.icon)), selectedIcon: _badged(t, Icon(t.selectedIcon)), label: t.label),
             ],
           ),
         ],
@@ -95,3 +96,12 @@ class HomeTabsState extends State<HomeTabs> {
     ),
   );
 }
+
+/// The Record tab's icon with how many quick checks wait on its card (lib/confirm; nothing when none).
+Widget _badged(HomeTab t, Widget icon) => t != HomeTab.night
+    ? icon
+    : ValueListenableBuilder<int>(
+        valueListenable: quickChecksWaiting,
+        // the count is left out of the tab's spoken label, which stays "Night" (the emulator checks find the tab by it)
+        builder: (_, n, _) => Badge(isLabelVisible: n > 0, label: ExcludeSemantics(child: Text('$n')), child: icon),
+      );

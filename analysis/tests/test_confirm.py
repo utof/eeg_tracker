@@ -52,10 +52,14 @@ def test_the_golden_file_is_a_truth_file_pandas_reads_typed(tmp_path: Path) -> N
     assert truth.main(["check", str(FIXTURE / "labels.tsv")], out=lambda _s: None) == 0
     df = pd.read_csv(FIXTURE / "labels.tsv", sep="\t", parse_dates=["start", "end", "created"], keep_default_na=False)
     assert list(df.columns) == truth.COLUMNS and str(df["start"].dtype).startswith("datetime64")
-    assert df["present"].tolist() == [1, 1, 0, 1, 0] and df["present"].dtype.kind == "i"
-    assert df["label"].tolist() == ["nap", "walking", "asleep", "asleep", "walking"]
+    assert df["present"].tolist() == [1, 1, 0, 1, 0, 1, 1, 1, 1, 0] and df["present"].dtype.kind == "i"
+    assert df["label"].tolist() == ["nap", "walking", "asleep", "asleep", "walking", "walking", "working", "asleep",
+                                    "walking", "walking"]
     assert set(df["source"]) == {"owner_app_prompt", "owner_stop_sheet"} and set(df["source"]) <= set(VOCAB.sources)
-    assert df["confidence"].tolist() == ["certain", "certain", "certain", "likely", "certain"]
+    # a plain Yes is `likely` (the times are the detector's), a No `certain`
+    assert df["confidence"].tolist() == ["likely", "likely", "certain", "likely", "certain", "likely", "likely",
+                                         "likely", "likely", "certain"]
+    assert df["times_confirmed"].tolist() == [0, 0, 0, 0, 0, 0, 0, 1, 0, 0] and df["times_confirmed"].dtype.kind == "i"
     assert df.loc[2, "owner_words"] == 'No: I was "walking" then'  # the quotes survive
     assert (df["estimate_id"].str.replace("est:", "confirm:") == df["label_id"]).all()
 
@@ -63,14 +67,63 @@ def test_the_golden_file_is_a_truth_file_pandas_reads_typed(tmp_path: Path) -> N
 def test_yes_no_and_not_sure_and_undo_read_as_the_app_reads_them(tmp_path: Path) -> None:
     phone(tmp_path)
     got = {c.estimate["label"] + " " + c.estimate["start"][5:16]: c for c in truth.read_confirm(tmp_path)}
-    assert len(got) == 7
+    assert len(got) == 15
     assert got["nap 11-20T15:59"].answer == "yes" and got["asleep 11-20T19:20"].answer == "no"  # the first answer stands
     assert got["walking 11-20T19:08"].note == "walked to the shop and back"
-    assert (got["asleep 11-20T23:41"].via, got["walking 11-21T08:10"].answer) == ("notification", "skip")
+    assert (got["asleep 11-20T23:41"].via, got["walking 11-21T08:10"].answer) == ("notification", "not_sure")
     undone = got["walking 11-21T09:00"]
     assert (undone.answer, undone.via, undone.at) == ("no", "stop_sheet", "2026-11-21T09:45:00+03:00")
     assert got["nap 11-21T13:00"].answer == ""
     assert truth.confirm_row(got["walking 11-21T08:10"]) is None and truth.confirm_row(got["nap 11-21T13:00"]) is None
+
+
+def test_what_an_answer_means_on_the_laptop(tmp_path: Path) -> None:
+    """DECISIONS 960-963: Not sure is its own answer and no label; no answer is neither; a plain Yes does not confirm
+    the times; a blind card's answer is what the owner said."""
+    phone(tmp_path)
+    got = {c.estimate["label"] + " " + c.estimate["start"][5:16]: c for c in truth.read_confirm(tmp_path)}
+    # Not sure, in the old word and the new: stored, never a truth row
+    for key in ("walking 11-21T08:10", "nap 11-22T13:00"):
+        assert got[key].answer == "not_sure" and truth.confirm_row(got[key]) is None
+    # silence: kept apart with its reason, never a row; a real answer given later stands
+    gone = got["walking 11-22T11:00"]
+    assert (gone.answer, gone.why_not, gone.via) == ("not_answered", "short_and_old", "card")
+    assert truth.confirm_row(gone) is None
+    assert (got["walking 11-22T12:00"].answer, got["walking 11-22T12:00"].why_not) == ("no", "")
+    assert got["nap 11-21T13:00"].answer == "", "a blind answer that says nothing is no answer"
+    # a plain Yes: it happened; the times stay the detector's and are not confirmed
+    plain = got["walking 11-22T10:00"]
+    row = truth.confirm_row(plain)
+    assert (plain.times_confirmed, row["times_confirmed"], row["confidence"], row["start"][11:16]) == (False, "0", "likely",
+                                                                                                    "10:00")
+    # "Yes, but the times are off": the owner's times, confirmed
+    night = got["asleep 11-21T23:55"]
+    row = truth.confirm_row(night)
+    assert night.times_confirmed and (row["times_confirmed"], row["start"][5:16], row["end"][5:16]) == (
+        "1", "11-22T00:20", "11-22T08:05")
+    # blind cards: the label the owner picked; agreement with the guess is worked out, not stored
+    assert (got["walking 11-21T14:05"].said, got["walking 11-21T14:05"].agrees) == ("walking", True)
+    other = got["nap 11-21T15:30"]
+    assert (other.said, other.agrees, other.card) == ("working", False, "blind")
+    assert (truth.confirm_row(other)["label"], truth.confirm_row(other)["kind"]) == ("working", "activity")
+    words = got["walking 11-21T17:00"]
+    assert (words.said, words.words, words.agrees) == ("", "cooking dinner", None) and truth.confirm_row(words) is None
+    # the card itself: guess, confidence, kind, seconds, age, where
+    card = got["walking 11-22T12:00"]
+    assert (card.card, card.seconds, card.age_min, card.via, card.estimate["confidence"]) == ("normal", 3.1, 49, "card", 0.9)
+
+
+def test_not_sure_and_silence_never_reach_what_scores_a_detector(tmp_path: Path) -> None:
+    local = tmp_path / "local"
+    phone(local)
+    rows, rejected, _ = truth.build(local)
+    assert rejected == []
+    ids = {r["estimate_id"] for r in rows}
+    quiet = {c.estimate["id"] for c in truth.read_confirm(local) if c.answer in ("not_sure", "not_answered", "")}
+    assert len(quiet) == 4 and not (ids & quiet)
+    by = {r["estimate_id"]: r for r in rows}
+    assert sum(r["times_confirmed"] == "1" for r in rows) == 1  # only the night whose times the owner set
+    assert by["est:88fde4ecc5c9a3de"]["times_confirmed"] == "0"
 
 
 def test_the_truth_table_takes_the_answers_and_old_files_still_read(tmp_path: Path) -> None:
@@ -79,11 +132,11 @@ def test_the_truth_table_takes_the_answers_and_old_files_still_read(tmp_path: Pa
     old = [c for c in truth.COLUMNS if c not in truth.ADDED_LATER]  # the hand file as written before these columns
     write_hand(local, [row("tl-1", label="awake")], old)
     rows, rejected, counts = truth.build(local)
-    assert rejected == [] and counts == {"hand": 1, "files": 0, "archive": 0, "confirm": 5, "spans": 0}
+    assert rejected == [] and counts == {"hand": 1, "files": 0, "archive": 0, "confirm": 10, "spans": 0}
     hand = next(r for r in rows if r["label_id"] == "tl-1")
-    assert (hand["present"], hand["estimate_id"]) == ("1", "")
+    assert (hand["present"], hand["estimate_id"], hand["times_confirmed"]) == ("1", "", "1")
     no = [r for r in rows if r["present"] == "0"]
-    assert [r["label"] for r in no] == ["asleep", "walking"] and all(r["active"] == "1" for r in rows)
+    assert [r["label"] for r in no] == ["asleep", "walking", "walking"] and all(r["active"] == "1" for r in rows)
     assert all(r["origin"] == "phone/confirm/answers.jsonl" for r in rows if r["label_id"] != "tl-1")
 
 
@@ -101,20 +154,23 @@ def test_the_data_book_lists_estimates_and_labels(tmp_path: Path) -> None:
     local = tmp_path / "local"
     phone(local)
     book = db.build(local, local / "data", datetime.now().astimezone(), say=lambda _s: None)
-    assert book["rows"]["estimates.tsv"] == 7 and book["rows"]["truth.tsv"] == 5
-    assert book["truth_from"]["confirm"] == 5 and book["truth_rejected"] == []
+    assert book["rows"]["estimates.tsv"] == 15 and book["rows"]["truth.tsv"] == 10
+    assert book["truth_from"]["confirm"] == 10 and book["truth_rejected"] == []
     est = pd.read_csv(local / "data" / "estimates.tsv", sep="\t", parse_dates=["start", "end"], keep_default_na=False)
     assert list(est.columns) == db.ESTIMATE_COLUMNS and str(est["start"].dtype).startswith("datetime64")
-    assert est["answer"].tolist() == ["yes", "yes", "no", "yes", "skip", "no", ""]
+    assert est["answer"].tolist() == ["yes", "yes", "no", "yes", "not_sure", "no", "", "said", "said", "said", "yes",
+                                      "yes", "not_answered", "no", "not_sure"]
     assert est["detector"].tolist()[:3] == ["sleep-periods", "walking", "sleep-periods"]
     assert est.loc[2, "confidence"] == "0.555" and est.loc[5, "confidence"] == ""
-    assert (est["label_id"] != "").tolist() == [True, True, True, True, False, True, False]
+    assert (est["label_id"] != "").tolist() == [True, True, True, True, False, True, False, True, True, False, True,
+                                                True, False, True, False]
     tr = pd.read_csv(local / "data" / "truth.tsv", sep="\t", keep_default_na=False)
     assert set(est.loc[est["label_id"] != "", "label_id"]) == set(tr["label_id"])
     assert set(tr["estimate_id"]) <= set(est["estimate_id"])
     labels = pd.read_csv(local / "data" / "labels.tsv", sep="\t", keep_default_na=False)
     mine = labels[labels["source"] == "confirm"]
-    assert sorted(mine["value"]) == ["asleep", "nap", "not asleep", "not sure", "not walking", "walking"]
+    assert sorted(mine["value"]) == ["asleep", "asleep", "cooking dinner", "nap", "not asleep", "not sure", "not sure",
+                                     "not walking", "not walking", "walking", "walking", "walking", "working"]
     assert set(mine["how_asked"]) == {"question (card)", "question (notification)", "question (stop_sheet)"}
     assert "walking walk-v2" in set(mine["detector_version"])
     # a second run adds nothing: answers are append-only on the phone and the ids are stable

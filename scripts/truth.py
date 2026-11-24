@@ -26,7 +26,9 @@ The truth table (`_local/data/truth.tsv`, written by scripts/data_book.py) is bu
     confirmed, with a label, is one row (source `owner_activity_button`, confidence `likely`).
   - the phone's confirmation questions (`<local>/phone/confirm/`, DECISIONS 860-869): a Yes to "Did you walk
     19:08-21:14?" is a row over the detector's stretch, a No the same row with `present` 0 (it did not happen: the
-    detector was wrong there), both naming the estimate in `estimate_id`; Not sure makes no row.
+    detector was wrong there), both naming the estimate in `estimate_id`; Not sure and a question nobody answered
+    make no row. `times_confirmed` 0 on a row: its start and end are the detector's, not the owner's (a plain Yes says
+    "it happened", not "these times are right"): do not train or score edges on it.
 Rows that break the schema are left out of the table and listed with the reason. Standard library only.
 """
 from __future__ import annotations
@@ -46,8 +48,10 @@ HAND_FILE = Path("analyses") / "truth-labels.tsv"  # from <local>
 IMPORT_FOLDER = Path("truth")  # from <local>: more truth files in the same schema
 COLUMNS = ["label_id", "start", "end", "recording", "kind", "label", "value", "unit", "source", "confidence", "created",
            "supersedes", "owner_words", "context",
-           "present", "estimate_id"]
-ADDED_LATER = {"present": "1", "estimate_id": ""}  # a file written before these columns reads with these values
+           "present", "estimate_id", "times_confirmed"]
+# a file written before these columns reads with these values (the times of a row written by hand, or of a tag, are the
+# owner's own: confirmed)
+ADDED_LATER = {"present": "1", "estimate_id": "", "times_confirmed": "1"}
 TABLE_COLUMNS = COLUMNS + ["origin", "active", "superseded_by"]  # truth.tsv: where each row came from, and its state
 FREE_TEXT = ("owner_words", "context")
 NUMBERED_KINDS = ("rating", "measurement")  # value and unit required
@@ -161,6 +165,9 @@ def row_errors(r: dict[str, str], vocab: Vocabulary) -> list[str]:
         errs.append(f"present {r['present']!r} is not 1 (it happened) or 0 (it did not)")
     if r["estimate_id"] and not ID.fullmatch(r["estimate_id"]):
         errs.append(f"estimate_id {r['estimate_id']!r} is not an id")
+    if r["times_confirmed"] not in ("1", "0"):
+        errs.append(f"times_confirmed {r['times_confirmed']!r} is not 1 (the owner set or checked the times) or 0 "
+                    "(the times are a detector's)")
     if r["present"] == "0" and lab is not None and lab.kind in NUMBERED_KINDS + ("correction",):
         errs.append(f"present 0 has no meaning for a {lab.kind}")
     if r["supersedes"] == r["label_id"]:
@@ -237,6 +244,7 @@ def read_file(path: Path, origin: str, vocab: Vocabulary, out: Read) -> None:
             continue
         r = {**ADDED_LATER, **dict(zip(head, cells))}
         r["present"] = r["present"] or "1"
+        r["times_confirmed"] = r["times_confirmed"] or "1"
         out.ids.add(r["label_id"])
         errs = row_errors(r, vocab)
         if errs:
@@ -270,7 +278,8 @@ def archive_rows(local: Path, vocab: Vocabulary, out: Read) -> None:
             r = dict(label_id=tid, start=_iso(t.get("start")), end=_iso(t.get("end")),
                      recording=str(j.get("id") or ""), kind=lab.kind, label=lab.id, value="", unit="",
                      source="owner_app_tag", confidence="certain", created=_iso(t.get("made")), supersedes="",
-                     owner_words=word, context=ARCHIVE_CONTEXT, present="1", estimate_id="")
+                     owner_words=word, context=ARCHIVE_CONTEXT, present="1", estimate_id="",
+                     times_confirmed="1")
             if isinstance(t.get("source"), str):  # the stop sheet's tags: their own source, confidence and words
                 words = t.get("words")
                 r.update(source=t["source"], owner_words=words if isinstance(words, str) else "",
@@ -299,7 +308,7 @@ def span_rows(local: Path, vocab: Vocabulary, out: Read) -> None:
                      kind=lab.kind if lab else "", label=s.label, value="", unit="", source=BUTTON_SOURCE,
                      confidence="likely", created=_unix_iso(s.made_unix if s.made_unix is not None else s.end_unix),
                      supersedes="", owner_words="", context=f"activity button: {s.kind}", present="1",
-                     estimate_id="")
+                     estimate_id="", times_confirmed="1")
             errs = row_errors(r, vocab)
             if errs:
                 out.rejected.append(Rejected(rel, 0, tid, "; ".join(errs)))
@@ -329,17 +338,44 @@ def _jsonl(path: Path) -> list[dict]:
 
 
 CONFIRM_FOLDER = Path("phone") / "confirm"
-CONFIRM_ANSWERS = {"yes": "Yes", "no": "No", "skip": "Not sure"}  # the buttons' words (app/lib/confirm/store.dart)
+# the words kept after "Saved:" (packages/shared_labels/lib/src/store.dart); `skip` is the older word for `not_sure`
+CONFIRM_ANSWERS = {"yes": "Yes", "no": "No", "not_sure": "Not sure", "said": "Said"}
+CONFIRM_WHY_NOT = ("dismissed", "expired", "never_seen", "short_and_old", "too_many")
+CONFIRM_CLOSES = tuple(w for w in CONFIRM_WHY_NOT if w != "dismissed")  # the question is closed: asked no more
+ONE_QUESTION = {"asleep", "nap", "night_sleep"}  # vocabulary.dart `sameAs`: the clock tells these apart, not the owner
 
 
 @dataclass
 class Confirmed:
-    """One estimate of the phone's confirmation questions and what the owner answered (DECISIONS 860-869)."""
+    """One estimate of the phone's confirmation questions and what the owner answered (DECISIONS 860-869, 960-979).
+
+    `answer` is yes, no, not_sure (its own answer: never a label), said (a blind card: `said` is the label picked,
+    `words` the owner's own), not_answered (no answer came, `why_not` says why: never read as a Yes or a No), or ""
+    (still waiting). `times_confirmed` is True only when the owner set the times himself (`start`, `end`): a plain Yes
+    says it happened, not that the detector's times are right."""
     estimate: dict
-    answer: str = ""  # yes, no, skip, or "" (not answered)
+    answer: str = ""
     at: str = ""
     via: str = ""
     note: str = ""
+    card: str = ""  # normal, blind, or "" (no card was shown)
+    said: str = ""
+    words: str = ""
+    times_confirmed: bool = False
+    start: str = ""
+    end: str = ""
+    shown: str = ""
+    seconds: float | None = None
+    age_min: int | None = None
+    why_not: str = ""
+
+    @property
+    def agrees(self) -> bool | None:
+        """A blind card: whether what the owner said is what the detector thought; None when it cannot be told."""
+        if self.answer != "said" or not self.said:
+            return None
+        guess = self.estimate["label"]
+        return self.said == guess or {self.said, guess} <= ONE_QUESTION
 
 
 def clean_note(words: str) -> str:
@@ -347,16 +383,44 @@ def clean_note(words: str) -> str:
     return re.sub(r"\s+", " ", words).strip()[:200].rstrip()
 
 
-def read_confirm(local: Path) -> list[Confirmed]:
+def _not_negative(v: object) -> float | None:
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else None
+
+
+def _answer_line(c: Confirmed, a: dict, labels: set[str]) -> bool:
+    """Fills `c` from one answer line as packages/shared_labels/lib/src/store.dart reads it; False for a line that says
+    nothing (a blind answer with neither a known label nor words)."""
+    answer = "not_sure" if a["answer"] == "skip" else a["answer"]
+    said = a["said"] if answer == "said" and a.get("said") in labels else ""
+    words = clean_note(a["words"]) if answer == "said" and isinstance(a.get("words"), str) else ""
+    if answer == "said" and not said and not words:
+        return False
+    c.answer, c.at, c.said, c.words = answer, a["at"], said, words
+    c.via = a["via"] if isinstance(a.get("via"), str) else "card"
+    c.card = a["card"] if a.get("card") in ("normal", "blind") else ""
+    s, e = parse_time(a.get("start")), parse_time(a.get("end"))
+    c.times_confirmed = bool(answer == "yes" and a.get("times_confirmed") is True and s and e and e > s)
+    c.start, c.end = (a["start"], a["end"]) if c.times_confirmed else ("", "")
+    c.shown = a["shown"] if parse_time(a.get("shown")) else ""
+    c.seconds = _not_negative(a.get("seconds"))
+    age = _not_negative(a.get("age_min"))
+    c.age_min = None if age is None else round(age)
+    return True
+
+
+def read_confirm(local: Path, vocab: Vocabulary | None = None) -> list[Confirmed]:
     """The phone's estimates (`estimates.jsonl`, the first line of an id counts) with their standing answers
-    (`answers.jsonl`: the first yes, no or skip stands, `undo` takes it back, a `note` adds the owner's words), in the
-    order registered. The same reading as app/lib/confirm/store.dart."""
+    (`answers.jsonl`: the first yes, no, not_sure or said stands, `undo` takes it back, a `note` adds the owner's
+    words, `not_answered` is kept apart and gives way to any answer), in the order registered. The same reading as
+    packages/shared_labels/lib/src/store.dart."""
+    labels = set((vocab or read_vocabulary()).labels)
     got: dict[str, Confirmed] = {}
     for j in _jsonl(local / CONFIRM_FOLDER / "estimates.jsonl"):
         if isinstance(j.get("id"), str) and isinstance(j.get("label"), str):
             got.setdefault(j["id"], Confirmed(j))
     notes: dict[str, str] = {}
-    answers: dict[str, dict] = {}
+    answers: dict[str, Confirmed] = {}
+    silent: dict[str, dict] = {}
     for j in _jsonl(local / CONFIRM_FOLDER / "answers.jsonl"):
         i = j.get("estimate_id")
         if not isinstance(i, str):
@@ -366,42 +430,61 @@ def read_confirm(local: Path) -> list[Confirmed]:
         elif j.get("answer") == "undo":
             answers.pop(i, None)
             notes.pop(i, None)
-        elif j.get("answer") in CONFIRM_ANSWERS and parse_time(j.get("at")) and i not in answers:
-            answers[i] = j
-    for i, a in answers.items():
-        if i in got:
+        elif not parse_time(j.get("at")):
+            continue
+        elif j.get("answer") == "not_answered":
+            if j.get("why") in CONFIRM_WHY_NOT:
+                silent[i] = j
+        elif j.get("answer") in (*CONFIRM_ANSWERS, "skip") and i not in answers and i in got:
+            c = Confirmed(got[i].estimate)
+            if _answer_line(c, j, labels):
+                answers[i] = c
+    for i, c in answers.items():
+        c.note = notes.get(i, "")
+        got[i] = c
+    for i, j in silent.items():
+        if i in got and i not in answers:
             c = got[i]
-            c.answer, c.at, c.note = a["answer"], a["at"], notes.get(i, "")
-            c.via = a["via"] if isinstance(a.get("via"), str) else "card"
+            c.answer, c.why_not, c.at = "not_answered", j["why"], j["at"]
+            c.via = j["via"] if isinstance(j.get("via"), str) else "card"
     return list(got.values())
 
 
-def confirm_row(c: Confirmed) -> dict[str, str] | None:
-    """An answered estimate as a truth row (the columns of COLUMNS); None for Not sure or no answer. A Yes says the
-    estimate's stretch was what the detector thought (`present` 1), a No that it was not (`present` 0). The same row
-    app/lib/confirm/labels.dart writes into the phone's own `confirm/labels.tsv`; one golden file checks both."""
-    if c.answer not in ("yes", "no"):
+def confirm_row(c: Confirmed, vocab: Vocabulary | None = None) -> dict[str, str] | None:
+    """An answered estimate as a truth row (the columns of COLUMNS); None for Not sure, for no answer, and for a blind
+    card's words that name no label. A Yes says it happened (`present` 1), a No that it did not (`present` 0), a blind
+    card's answer is a row of the label the owner picked. `times_confirmed` 0: the start and end are the detector's (a
+    plain Yes does not confirm them, so the row is `likely`); 1: the owner set them, and the row carries his. The same
+    row packages/shared_labels/lib/src/labels.dart writes into the phone's own `confirm/labels.tsv`; one golden file
+    checks both."""
+    if c.answer not in ("yes", "no") and not (c.answer == "said" and c.said):
         return None
     e = c.estimate
-    yes = c.answer == "yes"
+    label, kind = e["label"], str(e.get("kind") or "")
+    if c.answer == "said":
+        label, kind = c.said, (vocab or read_vocabulary()).labels[c.said].kind
     conf = e.get("confidence")
     sure = f", confidence {conf:.2f}" if isinstance(conf, (int, float)) and not isinstance(conf, bool) else ""
-    word = CONFIRM_ANSWERS[c.answer]
-    return dict(label_id="confirm:" + e["id"][4:], start=_iso(e.get("start")), end=_iso(e.get("end")),
-                recording=e.get("recording") or "", kind=str(e.get("kind") or ""), label=e["label"], value="", unit="",
+    means = e.get("yes_means") if e.get("yes_means") in ("certain", "likely") else "certain"
+    word = (c.words or label) if c.answer == "said" else ("Yes, with my times" if c.times_confirmed
+                                                          else CONFIRM_ANSWERS[c.answer])
+    asked = "the app asked without showing its guess" if c.answer == "said" else "the app asked"
+    return dict(label_id="confirm:" + e["id"][4:], start=_iso(c.start if c.times_confirmed else e.get("start")),
+                end=_iso(c.end if c.times_confirmed else e.get("end")),
+                recording=e.get("recording") or "", kind=kind, label=label, value="", unit="",
                 source="owner_stop_sheet" if c.via == "stop_sheet" else "owner_app_prompt",
-                confidence=(e.get("yes_means") if e.get("yes_means") in ("certain", "likely") else "certain") if yes
-                else "certain",
+                confidence="certain" if c.answer == "no" else (means if c.times_confirmed else "likely"),
                 created=_iso(c.at), supersedes="", owner_words=f"{word}: {c.note}" if c.note else word,
-                context=f"the app asked; {e.get('detector')} ({e.get('version')}) said {e['label']}{sure}",
-                present="1" if yes else "0", estimate_id=e["id"])
+                context=f"{asked}; {e.get('detector')} ({e.get('version')}) said {e['label']}{sure}",
+                present="0" if c.answer == "no" else "1", estimate_id=e["id"],
+                times_confirmed="1" if c.times_confirmed else "0")
 
 
 def confirm_rows(local: Path, vocab: Vocabulary, out: Read) -> None:
     """The phone's answered confirmation questions as truth rows (`<local>/phone/confirm/`)."""
     rel = (CONFIRM_FOLDER / "answers.jsonl").as_posix()
-    for c in read_confirm(local):
-        r = confirm_row(c)
+    for c in read_confirm(local, vocab):
+        r = confirm_row(c, vocab)
         if r is None:
             continue
         out.ids.add(r["label_id"])

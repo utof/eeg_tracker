@@ -530,7 +530,7 @@ renamed. A missing or damaged file reads as "off" and "not calibrated".
 
 | File | Content |
 |---|---|
-| `settings.json` | `on` (the one switch, off by default) and `changed` (local ISO time) |
+| `settings.json` | `{"version": 2, "on", "per_batch" (2-4), "per_day" (1-2), "quiet_start_min", "quiet_end_min", "quiet_from_sleep"}` |
 | `calibration.json` | `made`; `settings`: `clenchX` (the clench line, times the jaw's rest level, 10-60), `glanceUv` (the look size, µV, 70-250), `leftSign` (+1 or -1: the sign of T3 minus T4's step when the eyes go left; 0 = not known), `clenchOn`, `glanceOn` (a gesture is used only when 2 of its 3 tries were caught); `tries` (each `kind` `clench`/`glance`, `cue` second, `level`, `sign`, `why`: `ok` or the rule it broke); `clenchSeen`, `glanceSeen`, `leftKnown`, `others` (gestures recognised outside the cued windows); `recording` (the stem of its EEG); `rules` (the timing limits it was judged with) |
 | `events.jsonl` | one line per change: `switched on`, `switched off`, `calibrated: ...` |
 | `recordings/<stamp>.*` | the calibration's EEG in the recorder's format, with a marker per cue (`hands-free calibration: try 2 of 6, clench twice now`); never joined to a night |
@@ -792,15 +792,18 @@ by `ConfirmPrompts.kt`. Lines are only ever added; times are local with their UT
 | File | Holds |
 |---|---|
 | `estimates.jsonl` | one line per estimate: `{"id": "est:<16 hex>", "detector": "walking", "version": "walk-v2", "confidence": 0.9 or null, "start", "end", "recording": "2026-11-20-175012" or null, "kind": "activity", "label": "walking", "yes_means": "certain" or "likely", "made"}`. `label` and `kind` are the vocabulary's (`scripts/truth_vocabulary.tsv`). The id is the SHA-1 of detector, label, start, end and recording, so the same finding is never kept twice, whatever the detector's version |
-| `answers.jsonl` | one line per tap: `{"estimate_id", "answer": "yes" or "no" or "skip" or "undo", "at", "via": "card" or "notification" or "stop_sheet"}`, or your own words: `{"estimate_id", "note", "at"}`. The first yes, no or skip of an estimate stands; `undo` takes it (and its note) back, as if never answered |
-| `asks.jsonl` | one line per batch that went out as a notification: `{"at", "via": "notification", "estimates": [ids], "why": {id: "unsure" or "long" or "rare" or "few"}}`; and what the Android side did with it: `{"at", "event": "shown" or "held" or "late" or "skipped" or "dismissed", "batch", "reason"}` |
+| `answers.jsonl` | one line per answer: `{"estimate_id", "answer", "at", "via": "card" or "notification" or "stop_sheet"}` plus, when a card was shown, what the card was: `"card"` (`normal`, or `blind`: the guess was not shown), `"guess"` and `"confidence"` (what the detector said), `"shown"`, `"seconds"` (from shown to answered), `"age_min"` (how old the stretch was when shown). `answer` is `yes` (it happened; with `"times_confirmed": false` the start and end are still the detector's, with `true` and `"start"`, `"end"` they are the ones you set under "Yes, but the times are off"), `no`, `not_sure` (its own answer: never a label, never asked again; the older word `skip` reads the same), `said` (a blind card: `"said"` is the label you picked, `"words"` your own), `undo`, or `not_answered` with `"why"`: `dismissed` (the notification was swiped away; the question stays on the card), `expired` (asked, then too old), `never_seen`, `short_and_old`, `too_many` (dropped unasked). A `not_answered` line is never read as Yes or No, and a real answer given later stands. Your own words: `{"estimate_id", "note", "at"}`. The first yes, no, not_sure or said of an estimate stands; `undo` takes it (and its note) back, as if never answered |
+| `asks.jsonl` | one line per batch that went out as a notification: `{"at", "via": "notification", "estimates": [ids], "why": {id: "newest" or "unsure" or "long" or "rare" or "few"}, "blind": [ids made blind by rule]}`; what the Android side did with it: `{"at", "event": "shown" or "held" or "late" or "skipped" or "dismissed", "batch", "reason"}`; and every back-off step with its reason: `{"at", "event": "backoff", "step": "pause" or "one_a_day" or "normal" or "skip_hour" or "blind_batch", "reason", "until", "hour"}` (DECISIONS 972) |
 | `armed.json` | the batch waiting for its moment (written whole) |
 | `settings.json` | `{"version": 1, "on", "per_batch" (3-5), "per_day" (1-6), "quiet_start_min", "quiet_end_min"}` |
-| `labels.tsv` | your Yes and No answers as truth rows in the truth schema below (the 16 columns), rebuilt whole by the app: a file pandas reads without the laptop |
+| `labels.tsv` | your answers as truth rows in the truth schema below (the 17 columns), rebuilt whole by the app: a file pandas reads without the laptop |
 | `estimates.tsv` | every estimate with its answer, in the columns of the data book's `estimates.tsv` below, rebuilt whole by the app. With `labels.tsv` it is what another app (utof_tracker, once linked) takes as data, so it never asks the same thing again |
 
-A Yes is a truth row over the estimate's stretch (`present` 1); a No is the same row with `present` 0: it did not
-happen, the detector was wrong there. Not sure makes no row, and is never asked again. The laptop does not read
+A Yes is a truth row that it happened (`present` 1, `likely`, `times_confirmed` 0: the times are still the
+detector's; with "Yes, but the times are off" the row carries your times and `times_confirmed` 1); a No is the same
+row with `present` 0: it did not happen, the detector was wrong there. A blind card's answer is a row of the label
+you picked. Not sure makes no row and is never asked again; a question nobody answered makes no row either
+(DECISIONS 960-963). The laptop does not read
 `labels.tsv`: it builds the same rows from `estimates.jsonl` and `answers.jsonl` (answers given from the notification
 while the app was closed are in those two first), and one golden file
 (`packages/shared_labels/test/fixtures/confirm/`) checks the phone's and the laptop's rows against each other.
@@ -1284,7 +1287,7 @@ an electrode. utof_tracker's labels are not here (its opt-in feed comes later).
 | `replaces` | for `removed`: the label taken back |
 | `added` | when the data book first saw it |
 
-### `estimates.tsv` (DECISIONS 860-869)
+### `estimates.tsv` (DECISIONS 860-869, 960-963)
 
 What the phone's detectors thought happened and what you answered when the app asked, rebuilt whole from
 `phone/confirm/estimates.jsonl` and `answers.jsonl`. An estimate is not a label until it has a yes or a no.
@@ -1298,14 +1301,26 @@ What the phone's detectors thought happened and what you answered when the app a
 | `confidence` | how sure the detector was, 0 to 1; empty when it does not say |
 | `yes_means` | the confidence a Yes gets as a truth row: `certain`, or `likely` when the detector itself found minutes that do not fit (a night with wake-ups) |
 | `made` | when the estimate was first kept |
-| `answer`, `answered`, `via` | `yes`, `no`, `skip` (Not sure) or empty (not answered yet); when; `card`, `notification` or `stop_sheet` |
+| `answer`, `answered`, `via` | `yes`, `no`, `not_sure` (its own answer, no label), `said` (a blind card), `not_answered` (no answer came: never a Yes or a No) or empty (still waiting); when; `card`, `notification` or `stop_sheet` |
 | `label_id` | the truth row a yes or a no made (`confirm:...` in `truth.tsv`) |
-| `owner_words` | the few words you added |
+| `owner_words` | a blind card's own words, and the few words you added |
+| `card` | what the card showed: `normal` (the guess), `blind` (no guess); empty when no card was shown (a stop-sheet chip) |
+| `said`, `agrees` | a blind card: the label you picked, and 1 when it is the detector's `label` (sleep and a nap count as one), 0 when not; empty when your words name no label |
+| `times_confirmed` | on a `yes`: 1 when you set the times yourself, 0 when the Yes only says it happened. **Do not take `start` and `end` as truth unless this is 1** |
+| `confirmed_start`, `confirmed_end` | the times you set (`start`, `end` stay the detector's) |
+| `shown`, `seconds_to_answer`, `age_min` | when the card came on screen, the seconds to the answer, and how many minutes old the stretch was then |
+| `why_not` | on `not_answered`: `dismissed`, `expired`, `never_seen`, `short_and_old`, `too_many` |
 
 ```python
 import pandas as pd
 e = pd.read_csv("_local/data/estimates.tsv", sep="\t", parse_dates=["start", "end"])
 e[e.answer == "no"].groupby(["detector", "detector_version"]).size()   # where each detector was wrong
+```
+
+`python3 scripts/asking_check.py` prints a monthly self-check from this table (DECISIONS 973): the Yes rate against
+the detector's confidence, blind cards against cards that show the guess, and "Not sure" by kind and by age.
+
+```python
 ```
 
 ### `truth.tsv` (truth labels, DECISIONS 820-829)
@@ -1362,6 +1377,7 @@ named; exit 1 on any bad row), `python3 scripts/truth.py vocabulary` prints the 
 | `context` | free text: whoever recorded the row describes it (`walk outside with bench stops; phone in front right pocket`) |
 | `present` | 1: it happened (every row before 2026-11-21, and a file without this column); 0: it did **not** happen in this span: you answered No when the app asked about a detector's estimate (DECISIONS 866). Never 0 for a rating, a measurement or a correction |
 | `estimate_id` | the estimate this row answers (`est:...`, a row of `estimates.tsv`); empty for every other row |
+| `times_confirmed` | 1: the start and end are the owner's own (every row before 2026-11-24, and a file without this column); 0: they are a detector's, and the owner only said it happened (a plain Yes to a confirmation question, DECISIONS 961): do not train or score edges on such a row |
 | `origin` | `truth.tsv` only: the source file from `_local/` |
 | `active` | `truth.tsv` only: 1 when no later row supersedes it (the one to use), else 0 |
 | `superseded_by` | `truth.tsv` only: the row that supersedes it (two corrections of one row: the first made) |

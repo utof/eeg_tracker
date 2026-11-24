@@ -8,7 +8,7 @@ import 'package:eeg_tracker/archive/tags.dart';
 import 'package:eeg_tracker/confirm/phone.dart';
 import 'package:eeg_tracker/confirm/questions.dart';
 import 'package:eeg_tracker/confirm/sources.dart';
-import 'package:eeg_tracker/sleep/report.dart';
+import 'package:eeg_tracker/sleep/report.dart' hide isoLocal;
 import 'package:eeg_tracker/walking/pass.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_labels/shared_labels.dart';
@@ -16,9 +16,13 @@ import 'package:shared_labels/shared_labels.dart';
 class FakePhone implements ConfirmPhone {
   final List<(DateTime, List<String>, List<String>)> armed = [];
   final List<String> answeredIds = [];
+  final List<List<Map<String, Object?>>> cards = [];
 
   @override
-  Future<void> arm(DateTime at, List<String> ids, List<String> texts) async => armed.add((at, ids, texts));
+  Future<void> arm(DateTime at, List<String> ids, List<String> texts, {List<Map<String, Object?>> cards = const []}) async {
+    armed.add((at, ids, texts));
+    this.cards.add(cards);
+  }
 
   @override
   Future<void> answered(String id) async => answeredIds.add(id);
@@ -71,11 +75,11 @@ void main() {
   group('the question', () {
     test('is short, with the times in local time and a day word only when it is not today', () {
       final nap = est(Labels.nap, at(15, 59), 110);
-      expect(questionOf(nap, at(18)), 'Did you nap 15:59-17:49?');
-      expect(questionOf(est(Labels.walking, at(19, 8), 126), at(22)), 'Did you walk 19:08-21:14?');
-      expect(questionOf(est(Labels.asleep, at(23, 41), 444), at(32)), 'Did you sleep 23:41-07:05?', reason: 'a night ended today');
-      expect(questionOf(nap, at(32)), 'Did you nap yesterday 15:59-17:49?');
-      expect(questionOf(nap, at(24 * 3 + 8)), 'Did you nap on Fri 20 Nov 15:59-17:49?');
+      expect(questionOf(nap, at(18)), '15:59-17:49. The headband thinks you napped. Did you?');
+      expect(questionOf(est(Labels.walking, at(19, 8), 126), at(22)), '19:08-21:14. The headband thinks you walked. Did you?');
+      expect(questionOf(est(Labels.asleep, at(23, 41), 444), at(32)), '23:41-07:05. The headband thinks you slept. Did you?', reason: 'a night ended today');
+      expect(questionOf(nap, at(32)), 'Yesterday 15:59-17:49. The headband thinks you napped. Did you?');
+      expect(questionOf(nap, at(24 * 3 + 8)), 'Fri 20 Nov 15:59-17:49. The headband thinks you napped. Did you?');
     });
 
     test('an estimate keeps its id across detector versions and reads back from its line', () {
@@ -92,21 +96,25 @@ void main() {
   });
 
   group('the queue', () {
-    test('picks the most valuable few and shows them in time order', () {
+    test('with more waiting than a batch holds: the newest and the least sure, in time order', () {
       final q = make();
       final sure = est(Labels.walking, at(9), 20, confidence: 0.9);
       final unsure = est(Labels.walking, at(11), 20, confidence: 0.4);
-      final long = est(Labels.walking, at(13), 150, confidence: 0.9);
+      final long = est(Labels.walking, at(13), 150, confidence: 0.8);
       final rare = est(Labels.nap, at(16), 30, confidence: 0.9);
       q.register([sure, unsure, long, rare]);
       q.store.saveSettings(const ConfirmSettings(perBatch: 3));
       final got = q.pending();
-      expect([for (final x in got) x.id], [unsure.id, long.id, rare.id], reason: 'the short, sure walk waits');
-      expect({for (final x in got) x.id: x.why}, {unsure.id: 'unsure', long.id: 'long', rare.id: 'rare'});
-      expect(got.first.text, 'Did you walk 11:00-11:20?');
-      // answered ones leave; the one that waited comes
+      expect([for (final x in got) x.id], [unsure.id, long.id, rare.id], reason: 'the older, sure walk is dropped');
+      expect({for (final x in got) x.id: x.why}, {unsure.id: 'unsure', long.id: 'newest', rare.id: 'newest'});
+      expect(got.first.guessText, '11:00-11:20. The headband thinks you walked. Did you?');
+      // the one there was no room for is written down as not answered, never asked, and is no label
+      expect(q.close(), 1);
+      final s = q.store.read();
+      expect((s.unanswered[sure.id]!.why, s.closed(sure.id)), (WhyNot.tooMany, true));
       q.answer(unsure.id, Answer.yes);
-      expect([for (final x in q.pending()) x.id], [sure.id, long.id, rare.id]);
+      expect([for (final x in q.pending()) x.id], [long.id, rare.id], reason: 'it does not come back');
+      expect(quickChecksWaiting.value, 2, reason: 'the Night tab\'s badge');
     });
 
     test('a kind with few answers so far comes before one with many', () {
@@ -186,7 +194,7 @@ void main() {
       await q.plan();
       expect(phone.armed.single.$1, at(21, 24), reason: '10 minutes after the walk ended');
       expect(phone.armed.single.$2, [walk.id]);
-      expect(phone.armed.single.$3, ['Did you walk 19:08-21:14?']);
+      expect(phone.armed.single.$3, ['19:08-21:14. The headband thinks you walked. Did you?']);
       await q.plan();
       expect(phone.armed, hasLength(1), reason: 'the same batch is not armed again');
       now = at(21, 30); // its moment passed: it went out
@@ -231,7 +239,7 @@ void main() {
       const s = ConfirmSettings(perDay: 2);
       expect(planTime(batch(), state([at(21)]), s, at(21, 30)), at(22).add(const Duration(hours: 10)), reason: '22:00 is quiet: the morning');
       expect(planTime(batch(), state([at(12)]), s, at(21, 30)), at(21, 30));
-      expect(planTime(batch(), state([at(10), at(12)]), s, at(21, 30)), isNull, reason: 'two went out today');
+      expect(planTime(batch(), state([at(10), at(12)]), s, at(21, 30)), at(32), reason: 'two went out today: tomorrow, after the quiet hours');
     });
   });
 
@@ -247,9 +255,9 @@ void main() {
       q.answer(a.id, Answer.no); // already answered: nothing written
       final lines = [for (final l in q.store.answersFile.readAsLinesSync()) jsonDecode(l) as Map];
       expect(lines, [
-        {'estimate_id': a.id, 'answer': 'yes', 'at': '2026-11-20T22:01:00+03:00', 'via': 'card'},
-        {'estimate_id': b.id, 'answer': 'no', 'at': '2026-11-20T22:01:00+03:00', 'via': 'card'},
-        {'estimate_id': c.id, 'answer': 'skip', 'at': '2026-11-20T22:01:00+03:00', 'via': 'card'},
+        {'estimate_id': a.id, 'answer': 'yes', 'at': '2026-11-20T22:01:00+03:00', 'via': 'card', 'guess': 'nap', 'confidence': null, 'age_min': 252, 'times_confirmed': false},
+        {'estimate_id': b.id, 'answer': 'no', 'at': '2026-11-20T22:01:00+03:00', 'via': 'card', 'guess': 'walking', 'confidence': null, 'age_min': 47},
+        {'estimate_id': c.id, 'answer': 'not_sure', 'at': '2026-11-20T22:01:00+03:00', 'via': 'card', 'guess': 'asleep', 'confidence': null, 'age_min': 131},
       ]);
       var s = q.store.read();
       expect({for (final e in s.answers.entries) e.key: e.value.answer}, {a.id: Answer.yes, b.id: Answer.no, c.id: Answer.skip});
@@ -292,6 +300,7 @@ void main() {
         'context': 'the app asked; d (v1) said asleep, confidence 0.80',
         'present': '1',
         'estimate_id': a.id,
+        'times_confirmed': '0',
       });
       expect((row(2)['label'], row(2)['present'], row(2)['confidence'], row(2)['owner_words'], row(2)['recording']), (
         'walking',
@@ -309,10 +318,53 @@ void main() {
         File('${from.path}/$n').copySync('${files.path}/confirm/$n');
       }
       final state = ConfirmStore(files).read();
-      expect(state.estimates, hasLength(7));
+      expect(state.estimates, hasLength(15));
       expect(labelsTsv(state), File('${from.path}/labels.tsv').readAsStringSync());
+      expect(estimatesTsv(state), File('${from.path}/estimates.tsv').readAsStringSync());
       expect(tsvCell('a "b"'), '"a ""b"""');
       expect(tsvCell('plain, with a comma'), 'plain, with a comma');
+    });
+
+    test('a question nobody answered is written down as that, once, and is not a label', () async {
+      final q = make(phone: FakePhone());
+      q.store.saveSettings(const ConfirmSettings(quietStartMin: 23 * 60));
+      final pushed = est(Labels.walking, at(19, 8), 126), unseen = est(Labels.nap, at(21), 30);
+      q.register([pushed]);
+      now = at(21, 30);
+      await q.plan(); // armed for 21:30
+      now = at(21, 40);
+      await q.plan(); // it went out
+      q.register([unseen]);
+      expect(q.store.read().notified, {pushed.id});
+      now = at(48 + 21, 20);
+      expect(q.close(), 1, reason: 'the walk ended 48 h and 6 minutes ago');
+      now = at(48 + 21, 31);
+      await q.plan();
+      expect(q.close(), 0, reason: 'each once');
+      final s = q.store.read();
+      expect((s.unanswered[pushed.id]!.why, s.unanswered[unseen.id]!.why), (WhyNot.expired, WhyNot.neverSeen));
+      expect((s.answered(pushed.id), s.closed(pushed.id), s.closed(unseen.id)), (false, true, true));
+      expect(q.pending(), isEmpty);
+      expect(q.store.labelsFile.readAsLinesSync(), hasLength(1), reason: 'silence is no label');
+      final table = q.store.estimatesTable.readAsStringSync();
+      expect(RegExp('not_answered').allMatches(table), hasLength(2));
+      expect(table, isNot(contains('\tyes\t')));
+    });
+
+    test('the card\'s answer keeps what the card was; every answer reaches the hook with whose the times are', () {
+      final got = <(String, Answer, bool)>[];
+      ConfirmQuestions.onAnswered = (e, a) => got.add((e.id, a.answer, a.timesConfirmed));
+      addTearDown(() => ConfirmQuestions.onAnswered = null);
+      final q = make();
+      final a = est(Labels.nap, at(15, 59), 110, confidence: 0.8), b = est(Labels.walking, at(19, 8), 126);
+      q.register([a, b]);
+      now = at(22, 0).add(const Duration(seconds: 3));
+      q.answer(a.id, Answer.yes, card: CardKind.normal, shown: at(22));
+      q.answer(b.id, Answer.yes, card: CardKind.normal, shown: at(22), start: at(19, 20), end: at(21));
+      final s = q.store.read();
+      expect((s.answers[a.id]!.card, s.answers[a.id]!.seconds, s.answers[a.id]!.ageMin, s.answers[a.id]!.guessConfidence), (CardKind.normal, 3.0, 251, 0.8));
+      expect(got, [(a.id, Answer.yes, false), (b.id, Answer.yes, true)]);
+      expect((s.answers[b.id]!.start, s.answers[b.id]!.end), (at(19, 20), at(21)));
     });
 
     test('a Yes calls the hook with the estimate (record-first makes a sleep stretch of it)', () {
@@ -375,7 +427,120 @@ void main() {
       now = at(22, 30); // quiet: goes out at 08:00 tomorrow
       await q.plan();
       expect(phone.armed.single.$1, at(32));
-      expect(phone.armed.single.$3, ['Did you walk yesterday 19:08-21:14?']);
+      expect(phone.armed.single.$3, ['Yesterday, about 19:00 to 21:00. The headband thinks you walked. Did you?']);
+    });
+  });
+
+  group('the asking rules through the door (DECISIONS 960-979)', () {
+    // 16:14 draws a blind card (1 in 5, by id); 15:59 and 19:08 do not
+    final hidden = est(Labels.nap, at(16, 14), 40, confidence: 0.6), walk = est(Labels.walking, at(19, 8), 126, confidence: 0.9);
+    void lineOf(ConfirmQuestions q, Map<String, Object?> j) => q.store.asksFile.writeAsStringSync('${jsonEncode(j)}\n', mode: FileMode.append);
+
+    test('1 card in 5 is blind on the card and in the notification; the stop sheet shows the guess', () async {
+      final phone = FakePhone();
+      final q = make(phone: phone);
+      q.store.saveSettings(const ConfirmSettings(quietFromSleep: false, quietStartMin: 23 * 60));
+      q.register([hidden, walk]);
+      now = at(21, 30);
+      final cards = q.pending();
+      expect([for (final c in cards) (c.kind, c.text)], [
+        (CardKind.blind, 'What were you doing 16:14-16:54?'),
+        (CardKind.normal, '19:08-21:14. The headband thinks you walked. Did you?'),
+      ]);
+      expect(q.pendingFor('rec-a', at(0), at(22)).map((c) => c.kind), everyElement(CardKind.normal));
+      await q.plan();
+      expect(phone.armed.single.$3, ['What were you doing 16:14-16:54?', '19:08-21:14. The headband thinks you walked. Did you?']);
+      expect(phone.cards.single, [
+        {'card': 'blind', 'yes': '', 'no': '', 'guess': 'nap', 'confidence': 0.6, 'end_ms': at(16, 54).millisecondsSinceEpoch},
+        {'card': 'normal', 'yes': 'I walked', 'no': 'I did not walk', 'guess': 'walking', 'confidence': 0.9, 'end_ms': at(21, 14).millisecondsSinceEpoch},
+      ]);
+      // the notification's own lines (ConfirmPrompts.kt) read like the card's
+      q.store.answersFile.writeAsStringSync(
+        '{"estimate_id":"${walk.id}","answer":"yes","at":"2026-11-20T21:40:03+03:00","via":"notification","card":"normal","guess":"walking","confidence":0.9,"shown":"2026-11-20T21:40:00+03:00","seconds":3.2,"age_min":26,"times_confirmed":false}\n'
+        '{"estimate_id":"${hidden.id}","answer":"not_answered","why":"dismissed","at":"2026-11-20T21:41:00+03:00","via":"notification"}\n',
+        mode: FileMode.append,
+      );
+      final s = q.store.read();
+      expect((s.answers[walk.id]!.seconds, s.answers[walk.id]!.timesConfirmed, s.answers[walk.id]!.via), (3.2, false, 'notification'));
+      expect((s.unanswered[hidden.id]!.why, s.closed(hidden.id)), (WhyNot.dismissed, false));
+      expect([for (final c in q.pending()) c.id], [hidden.id], reason: 'swiped away: still on the card');
+    });
+
+    test('at most 2 pushed batches a day: the third is planned for tomorrow and waits on the card', () async {
+      final phone = FakePhone();
+      final q = make(phone: phone);
+      q.store.saveSettings(const ConfirmSettings(quietFromSleep: false));
+      lineOf(q, {'at': '2026-11-20T10:00:00+03:00', 'via': 'notification', 'estimates': ['a']});
+      lineOf(q, {'at': '2026-11-20T13:00:00+03:00', 'via': 'notification', 'estimates': ['b']});
+      q.register([walk]);
+      now = at(21, 30);
+      await q.plan();
+      expect(phone.armed.single.$1, at(32), reason: 'tomorrow at the end of the quiet hours');
+      expect([for (final c in q.pending()) c.id], [walk.id]);
+      // an answer on the stop sheet is no push: the count stays
+      q.answer(walk.id, Answer.yes, via: AnswerVia.stopSheet);
+      expect(q.store.read().batches, hasLength(2));
+    });
+
+    test('backing off is written down once with its reason, and a pause arms nothing', () async {
+      final phone = FakePhone();
+      final q = make(phone: phone);
+      q.store.saveSettings(const ConfirmSettings(quietFromSleep: false));
+      for (var d = 15; d < 20; d++) {
+        lineOf(q, {'at': '2026-11-${d}T12:00:00+03:00', 'via': 'notification', 'estimates': ['old$d']});
+      }
+      q.register([walk]);
+      now = at(21, 30);
+      await q.plan();
+      await q.plan();
+      final steps = [for (final e in q.store.read().events) if (e.event == 'backoff') (e.step, e.reason, e.until)];
+      expect(steps, [('pause', '0 % of 5 batches answered in 7 days', at(21, 30).add(const Duration(days: 7)))]);
+      expect(phone.armed, isEmpty, reason: 'no pushes for 7 days; by then the walk is too old to ask');
+      expect([for (final c in q.pending()) c.id], [walk.id], reason: 'it waits in the app');
+      expect(quickChecksWaiting.value, 1);
+      // the pause is over: one a day, written down too
+      now = at(21, 31).add(const Duration(days: 7));
+      final later = est(Labels.walking, now.subtract(const Duration(hours: 2)), 30);
+      q.register([later]);
+      await q.plan();
+      expect([for (final e in q.store.read().events) e.step], ['pause', 'one_a_day']);
+      expect(phone.armed.single.$2, [later.id]);
+    });
+
+    test('after 10 fast all-Yes batches the next batch is blind cards, and says so in the log', () async {
+      final phone = FakePhone();
+      final q = make(phone: phone);
+      q.store.saveSettings(const ConfirmSettings(quietFromSleep: false, quietStartMin: 23 * 60));
+      for (var i = 0; i < 10; i++) {
+        final a = est(Labels.walking, at(-240 + i * 20), 30, recording: 'a$i'), b = est(Labels.nap, at(-240 + i * 20 + 1), 30, recording: 'b$i');
+        q.store.register([a, b]);
+        final when = a.end.add(const Duration(hours: 2));
+        lineOf(q, {'at': isoLocal(when), 'via': 'notification', 'estimates': [a.id, b.id]});
+        q.store.answer(a.id, Answer.yes, at: when.add(const Duration(minutes: 3)), shown: when, via: AnswerVia.notification);
+        q.store.answer(b.id, Answer.yes, at: when.add(const Duration(minutes: 3, seconds: 1)), shown: when.add(const Duration(minutes: 3, milliseconds: 200)), via: AnswerVia.notification);
+      }
+      q.register([walk]);
+      now = at(21, 30);
+      await q.plan();
+      expect(phone.cards.single.single['card'], 'blind');
+      expect(phone.armed.single.$3, ['What were you doing 19:08-21:14?']);
+      expect(q.pending().single.kind, CardKind.blind, reason: 'blind on the card too');
+      expect([for (final e in q.store.read().events) e.step], ['blind_batch']);
+      now = at(21, 40);
+      await q.plan();
+      expect(q.store.read().pushes.last.blind, [walk.id]);
+    });
+
+    test('the other app\'s say comes last and can only make a push wait (the seam for the link to utof_tracker)', () async {
+      final phone = FakePhone();
+      final q = make(phone: phone);
+      q.store.saveSettings(const ConfirmSettings(quietFromSleep: false, quietStartMin: 23 * 60));
+      q.register([walk]);
+      now = at(21, 30);
+      ConfirmQuestions.otherApp = (t) => t.isBefore(at(21, 47)) ? at(21, 47) : null;
+      addTearDown(() => ConfirmQuestions.otherApp = null);
+      await q.plan();
+      expect(phone.armed.single.$1, at(21, 47));
     });
   });
 
@@ -453,7 +618,7 @@ void main() {
       expect(got.first.recording, '2026-11-20-155527');
       expect((got.first.detector, got.first.version), ('sleep-periods', 'anysleep-test'));
       expect(got.first.confidence, closeTo(0.9, 1e-9));
-      expect(questionOf(got.first, DateTime(2026, 11, 20, 18)), 'Did you nap 15:59-17:49?');
+      expect(questionOf(got.first, DateTime(2026, 11, 20, 18)), '15:59-17:49. The headband thinks you napped. Did you?');
     });
 
     test('a night someone else wore asks nothing', () {
@@ -497,7 +662,7 @@ void main() {
       final got = walkEstimates(w!);
       expect(got, hasLength(1));
       expect((got.single.label, got.single.recording, got.single.confidence, got.single.version), (Labels.walking, '2026-11-20-175012', 0.7, 'walk-v2'));
-      expect(questionOf(got.single, DateTime(2026, 11, 20, 22)), 'Did you walk 19:08-21:14?');
+      expect(questionOf(got.single, DateTime(2026, 11, 20, 22)), '19:08-21:14. The headband thinks you walked. Did you?');
     });
 
     test('gathering reads the reports and walk files on disk, once', () {
@@ -508,17 +673,17 @@ void main() {
       final q = make();
       expect(q.gather(), 1);
       expect(q.gather(), 0);
-      expect(q.pending().single.text, 'Did you nap 15:59-17:49?');
+      expect(q.pending().single.text, '15:59-17:49. The headband thinks you napped. Did you?');
     });
   });
 
   test('settings: defaults, kept whole, and anything out of range falls back', () {
     final q = make();
-    expect((q.settings.on, q.settings.perBatch, q.settings.perDay, q.settings.quietStartMin, q.settings.quietEndMin), (true, 4, 3, 1320, 480));
-    q.store.saveSettings(const ConfirmSettings(on: false, perBatch: 5, perDay: 1, quietStartMin: 60, quietEndMin: 120));
-    expect((q.settings.on, q.settings.perBatch, q.settings.perDay, q.settings.quietStartMin, q.settings.quietEndMin), (false, 5, 1, 60, 120));
+    expect((q.settings.on, q.settings.perBatch, q.settings.perDay, q.settings.quietStartMin, q.settings.quietEndMin), (true, 4, 2, 1320, 480));
+    q.store.saveSettings(const ConfirmSettings(on: false, perBatch: 3, perDay: 1, quietStartMin: 60, quietEndMin: 120));
+    expect((q.settings.on, q.settings.perBatch, q.settings.perDay, q.settings.quietStartMin, q.settings.quietEndMin), (false, 3, 1, 60, 120));
     q.store.settingsFile.writeAsStringSync('{"per_batch": 50, "per_day": 0}');
-    expect((q.settings.on, q.settings.perBatch, q.settings.perDay), (true, 4, 3));
+    expect((q.settings.on, q.settings.perBatch, q.settings.perDay), (true, 4, 2));
     q.store.settingsFile.writeAsStringSync('not json');
     expect(q.settings.perBatch, 4);
   });

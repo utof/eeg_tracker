@@ -783,7 +783,7 @@ class _QuickChecks extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Soon after the app thinks you slept or walked, it asks you: Yes, No or Not sure. How many, and when not.',
+          'Soon after the headband thinks you slept or walked, the app asks you, one tap an answer. How many, and when not.',
           style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
         ),
         const SizedBox(height: 16),

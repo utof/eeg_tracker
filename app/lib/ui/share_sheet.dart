@@ -223,7 +223,7 @@ class _ShareSheetState extends State<ShareSheet> {
           Text(
             'If the laptop cannot reach the phone, nothing is lost: the night stays on the phone and the laptop copies '
             'what it missed once it reaches the phone again. Some phones turn Wi-Fi off with the screen off: the Phone '
-            'section of the Night tab names the settings to check.',
+            'section of the Record tab names the settings to check.',
             style: muted,
           ),
           if (address != null) ...[

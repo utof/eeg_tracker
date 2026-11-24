@@ -113,10 +113,13 @@ Each line says what it does. In brackets: how well the research backs it **for t
   `_local/analyses/truth-labels.tsv` (`python3 scripts/truth.py check`) and the Archive's tags marked "This is what I
   was doing", into `_local/data/truth.tsv`; `scripts/validate_detectors.py` writes `validation.tsv` and `validation.md`
   (agreement, false minutes per detector and label). ([docs/data-format.md](docs/data-format.md), "`truth.tsv`")
-- Quick checks (the phone app; DECISIONS 860-869): soon after the app thinks you slept or walked it asks "Did you
-  walk 19:08-21:14?", several at once, Yes / No / Not sure, on a card (Night, Archive) and in a notification whose
-  buttons answer without opening the app. Until answered a detector's output is an estimate; a Yes is a truth label, a
-  No a label that it did not happen (`present` 0), Not sure nothing; never asked twice. The laptop takes the answers
+- Quick checks (the phone app; DECISIONS 860-869, 960-975): soon after the headband thinks you slept or walked the
+  app asks "19:08-21:14. The headband thinks you walked. Did you?", several at once, with buttons that name the thing
+  ("I walked" / "I did not walk" / "Not sure"), on a card (Night, Archive) and in a notification whose buttons answer
+  without opening the app; 1 card in 5 hides the guess; at most 2 notifications a day, fewer by itself when they go
+  unanswered. Until answered a detector's output is an estimate; a Yes is a truth label that it happened (the times
+  count as yours only after "Yes, but the times are off"), a No a label that it did not happen (`present` 0), Not
+  sure its own answer and no label; never asked twice. `python3 scripts/asking_check.py` is the monthly self-check. The laptop takes the answers
   into `truth.tsv`, lists every estimate in `estimates.tsv` and scores the detectors against a No too. The reusable
   parts are the package `packages/shared_labels/` (vocabulary, model, queue, the exports, the question card), for
   utof_tracker too; eeg_tracker always asks its own questions, and its answers are data another app can read.

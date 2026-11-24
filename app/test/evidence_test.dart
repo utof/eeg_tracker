@@ -30,6 +30,7 @@ void main() {
       'auto-start',
       'signal-quality',
       'confirm-questions',
+      'asking',
       'share-on-wifi',
       'walking',
       'pulse',

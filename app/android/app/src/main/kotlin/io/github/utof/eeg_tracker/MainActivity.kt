@@ -132,6 +132,7 @@ class MainActivity : FlutterActivity() {
                                 call.argument<Number>("at")?.toLong() ?: 0L,
                                 call.argument<List<String>>("ids") ?: emptyList(),
                                 call.argument<List<String>>("texts") ?: emptyList(),
+                                call.argument<List<String>>("cards") ?: emptyList(),
                             )
                             result.success(null)
                         }

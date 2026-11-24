@@ -8,8 +8,9 @@
 //   settle(recording, label, start, end) the stop sheet says a chip already answered it: never asked again
 //   refresh()                           gather what the detectors left on disk, rewrite the labels file, arm the phone
 //
-// Until answered, a detector's output is an estimate, not a label. Yes makes a truth label over the estimate's
-// stretch, No a label that it was not so, Not sure nothing; none is asked twice. Works offline: all of it is files in
+// Until answered, a detector's output is an estimate, not a label. Yes makes a truth label that it happened (the
+// times stay the detector's unless you set them), No a label that it was not so, Not sure is kept as its own answer
+// and makes no label; none is asked twice. A question nobody answered is written down as that, never as Yes or No. Works offline: all of it is files in
 // `files/confirm/` (store.dart) that the normal copy to the laptop takes.
 import 'dart:async';
 import 'dart:io';
@@ -47,8 +48,28 @@ class ConfirmQuestions {
     ];
   }
 
-  List<ConfirmQuestion> _questions(List<Pick> picks, DateTime now) => [
-    for (final p in picks) ConfirmQuestion(p.estimate, questionOf(p.estimate, now), p.why),
+  /// The other app's say on when a push may go out (queue.dart [OtherAsker]); null: nobody else asks. The link to
+  /// utof_tracker will set it.
+  static OtherAsker? otherApp;
+
+  /// The cards for [picks]: 1 in 5 is blind, drawn by the estimate's id (or made blind by rule), unless [guessShown];
+  /// the times are asked about only on the stretch's own day.
+  List<ConfirmQuestion> _questions(List<Pick> picks, DateTime now, ConfirmState state, {bool guessShown = false}) => [
+    for (final p in picks)
+      () {
+        final e = p.estimate;
+        final exact = timesAsked(e, now);
+        final blind = !guessShown && (state.forcedBlind.contains(e.id) || blindByDraw(e.id));
+        final guess = questionOf(e, now, exact: exact);
+        return ConfirmQuestion(
+          e,
+          blind ? blindQuestionOf(e, now, exact: exact) : guess,
+          p.why,
+          kind: blind ? CardKind.blind : CardKind.normal,
+          exactTimes: exact,
+          guessText: guess,
+        );
+      }(),
   ];
 
   /// A detector's one call. Returns how many estimates were new.
@@ -57,8 +78,14 @@ class ConfirmQuestions {
   /// The card's batch; empty when switched off.
   List<ConfirmQuestion> pending() {
     final now = _clock();
-    return _questions(cardBatch(store.read(), store.settings(), now, labelled: labelled()), now);
+    final state = store.read();
+    final got = _questions(cardBatch(state, store.settings(), now, labelled: labelled()), now, state);
+    quickChecksWaiting.value = got.length;
+    return got;
   }
+
+  /// What else was found around the card's questions, for the timeline of "Yes, but the times are off".
+  List<Estimate> around() => store.read().estimates.values.toList();
 
   /// The open questions of recording [recordingId] between [start] and [end], most valuable first up to [max], in time
   /// order: the stop sheet shows them under its chips, whatever the switch or the hour.
@@ -69,18 +96,40 @@ class ConfirmQuestions {
       for (final e in openEstimates(state, now, labelled: labelled(), recording: recordingId))
         if (!e.end.isBefore(start) && !e.start.isAfter(end)) e,
     ];
-    return _questions(pickBatch(open, state, max), now);
+    return _questions(pickBatch(open, state, max), now, state, guessShown: true);
   }
 
-  void answer(String estimateId, Answer a, {AnswerVia via = AnswerVia.card}) {
+  /// Called for every answer with the estimate and what was answered: [Answered.timesConfirmed] says whether the
+  /// times are yours ([Answered.start], [Answered.end]) or still the detector's; a blind card's answer has
+  /// [Answered.said].
+  static void Function(Estimate estimate, Answered answer)? onAnswered;
+
+  /// Your answer. [card] and [shown]: the card that asked and when it came on screen. [start] and [end] with a Yes:
+  /// the times you set ("Yes, but the times are off"); without them a Yes says only that it happened. [said] and
+  /// [words]: a blind card's answer ([Answer.said]).
+  void answer(
+    String estimateId,
+    Answer a, {
+    AnswerVia via = AnswerVia.card,
+    CardKind? card,
+    DateTime? shown,
+    DateTime? start,
+    DateTime? end,
+    Label? said,
+    String? words,
+  }) {
     final state = store.read();
     if (state.answered(estimateId)) return;
-    store.answer(estimateId, a, via: via, at: _clock());
+    final e = state.estimates[estimateId];
+    final label = said ?? (a == Answer.said && words != null ? Label.named(words) : null);
+    store.answer(estimateId, a, via: via, at: _clock(), card: card, shown: shown, estimate: e, start: start, end: end, said: label, words: words);
     _afterChange();
     final p = phone;
     if (p != null) unawaited(p.answered(estimateId).catchError((Object _) {}).then((_) => plan()));
-    final e = state.estimates[estimateId];
-    if (a == Answer.yes && e != null) onYes?.call(e);
+    if (e == null) return;
+    if (a == Answer.yes) onYes?.call(e);
+    final kept = store.read().answers[estimateId];
+    if (kept != null) onAnswered?.call(e, kept);
   }
 
   /// Takes an answer back; the question is open again.
@@ -149,14 +198,41 @@ class ConfirmQuestions {
     return added;
   }
 
+  /// Writes down which questions nobody answered and are now closed (too old to ask), each once, with why. Stored apart
+  /// from the answers: silence is never a Yes or a No. Returns how many.
+  int close() {
+    final now = _clock();
+    final state = store.read();
+    var n = 0;
+    void write(Estimate e, WhyNot why) {
+      store.notAnswered(e.id, why, via: state.notified.contains(e.id) ? AnswerVia.notification : AnswerVia.card, at: now);
+      n++;
+    }
+
+    for (final e in state.estimates.values) {
+      final why = closedWhy(e, state, now);
+      if (why != null) write(e, why);
+    }
+    final settings = store.settings();
+    if (settings.on) {
+      for (final e in overflow(state, settings, now, labelled: labelled())) {
+        write(e, WhyNot.tooMany);
+      }
+    }
+    if (n > 0) _afterChange();
+    return n;
+  }
+
   /// Arms the next notification batch, or cancels the one waiting when nothing is left to ask.
   Future<void> plan() async {
     final now = _clock();
     store.settleArmed(now);
+    close();
     final state = store.read();
     final settings = store.settings();
+    final rules = _backoff(state, settings, now);
     final batch = notificationBatch(state, settings, now, labelled: labelled());
-    final at = planTime(batch, state, settings, now);
+    final at = planTime(batch, state, settings, now, backoff: rules, other: otherApp);
     final p = phone;
     if (at == null) {
       if (store.armed() != null) {
@@ -166,10 +242,44 @@ class ConfirmQuestions {
       return;
     }
     final ids = [for (final b in batch) b.estimate.id];
+    final blind = rules.blindNext ? ids : const <String>[];
     final old = store.armed();
-    if (old != null && old.at == at && old.ids.join(' ') == ids.join(' ')) return;
-    store.saveArmed(Armed(at, ids, {for (final b in batch) b.estimate.id: b.why}));
+    if (old != null && old.at == at && old.ids.join(' ') == ids.join(' ') && old.blind.join(' ') == blind.join(' ')) return;
+    if (blind.isNotEmpty && (old == null || old.blind.isEmpty)) {
+      store.logBackoff('blind_batch', '${BackoffRule.autopilotBatches} batches in a row were all Yes within about a second a card', at: now);
+    }
+    store.saveArmed(Armed(at, ids, {for (final b in batch) b.estimate.id: b.why}, blind));
     // the words as read at the batch's moment ("yesterday" counts from then)
-    await p?.arm(at, ids, [for (final b in batch) questionOf(b.estimate, at)]).catchError((Object _) {});
+    final cards = _questions(batch, at, store.read());
+    await p
+        ?.arm(at, ids, [for (final c in cards) c.text], cards: [
+          for (final c in cards)
+            {
+              'card': c.kind.name,
+              'yes': c.kind == CardKind.blind ? '' : c.yes,
+              'no': c.kind == CardKind.blind ? '' : c.no,
+              'guess': c.estimate.label.id,
+              'confidence': c.estimate.confidence,
+              'end_ms': c.estimate.end.millisecondsSinceEpoch,
+            },
+        ])
+        .catchError((Object _) {});
+  }
+
+  /// The back-off rules as of [now] (backoff.dart); each step is written down once with its reason.
+  Backoff _backoff(ConfirmState state, ConfirmSettings settings, DateTime now) {
+    final b = backoffOf(state, now, maxPerDay: settings.perDay);
+    final steps = [for (final e in state.events) if (e.event == 'backoff') e];
+    final level = steps.where((e) => const ['pause', 'one_a_day', 'normal'].contains(e.step)).lastOrNull?.step ?? 'normal';
+    if (b.startsPause) {
+      store.logBackoff('pause', b.reason, at: now, until: b.pausedUntil);
+    } else if (b.step != level) {
+      store.logBackoff(b.step, b.reason.isEmpty ? 'the answers are back' : b.reason, at: now);
+    }
+    for (final h in b.skipHours.entries) {
+      if (steps.any((e) => e.step == 'skip_hour' && e.hour == h.key && e.until == h.value)) continue;
+      store.logBackoff('skip_hour', '${BackoffRule.dismissalsInARow} batches in a row were swiped away in this hour', at: now, until: h.value, hour: h.key);
+    }
+    return b;
   }
 }
