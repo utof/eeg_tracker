@@ -121,6 +121,13 @@ RecordingHeader headerOf(Headband band) => band is OtherBoard ? (band as OtherBo
 /// stream (that would start the mending over, every 10 s); its own no-data rule stays the backstop.
 abstract class MendsDrops {}
 
+/// A headband that already has a contact reading in force (a handle to the one live connection, headband/connection.dart;
+/// a connection lent to the night, headband/lend.dart): the reading and when it was measured, or null when a check is
+/// due. With one, no new contact check is made: the stream is not interrupted (DECISIONS 855).
+abstract class KnownContact {
+  ({Map<String, double?> ohms, DateTime at})? get knownContact;
+}
+
 /// This connection can reach that headband only through a scan, not directly (BrainBit's SDK and a headband that
 /// our own connection reached: its id has no SDK sensor family). The recorder then scans in the same try.
 class NeedsScan implements Exception {
@@ -163,6 +170,7 @@ class NightState {
     this.runs = 0,
     this.contactTried = false,
     this.contactOhms = const {},
+    this.contactAtMs,
     this.slots = const {},
     this.band,
     this.directPending = false,
@@ -185,6 +193,9 @@ class NightState {
   final int runs;
   final bool contactTried;
   final Map<String, double?> contactOhms;
+
+  /// When [contactOhms] was measured (unix ms); null: at this night's start.
+  final int? contactAtMs;
 
   /// Samples saved per half hour of clock time: key = unix ms ~/ slotMs (status.dart).
   final Map<int, int> slots;
@@ -260,6 +271,7 @@ class NightState {
     int? runs,
     bool? contactTried,
     Map<String, double?>? contactOhms,
+    int? contactAtMs,
     Map<int, int>? slots,
     BandId? band,
     bool? directPending,
@@ -280,6 +292,7 @@ class NightState {
     runs: runs ?? this.runs,
     contactTried: contactTried ?? this.contactTried,
     contactOhms: contactOhms ?? this.contactOhms,
+    contactAtMs: contactAtMs ?? this.contactAtMs,
     slots: slots ?? this.slots,
     band: band ?? this.band,
     directPending: directPending ?? this.directPending,
@@ -307,6 +320,7 @@ class NightState {
       for (final e in contactOhms.entries)
         e.key: e.value == null || e.value!.isInfinite || e.value!.isNaN ? null : e.value,
     },
+    'contactAtMs': contactAtMs,
     'slots': {for (final e in slots.entries) '${e.key}': e.value},
     'band': band?.toJson(),
     'directPending': directPending,
@@ -334,6 +348,7 @@ class NightState {
       runs: (j['runs'] as num?)?.toInt() ?? 0,
       contactTried: j['contactTried'] == true,
       contactOhms: c is Map ? {for (final e in c.entries) '${e.key}': (e.value as num?)?.toDouble()} : const {},
+      contactAtMs: (j['contactAtMs'] as num?)?.toInt(),
       slots: sl is Map
           ? {
               for (final e in sl.entries)

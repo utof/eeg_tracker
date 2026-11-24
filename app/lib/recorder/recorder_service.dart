@@ -13,6 +13,10 @@ import '../alarm/record.dart';
 import '../alarm/rule.dart';
 import '../auto/channel.dart' show AutoChannel;
 import '../handsfree/store.dart' show nightGestures;
+import '../headband/battery_estimate.dart';
+import '../headband/connection.dart';
+import '../headband/lend.dart';
+import '../headband/lost_watch.dart';
 import '../headband/diy/night.dart';
 import '../logs/activity.dart' show Activity;
 import '../logs/engine.dart' show EngineRecords;
@@ -63,6 +67,9 @@ Map<String, Object?> openSpanCommand(String kind, {String? session}) => {
   'session': ?session,
 };
 Map<String, Object?> closeSpanCommand(String id, {String by = 'owner'}) => {'kind': 'span', 'op': 'close', 'id': id, 'by': by};
+/// A night started while the screen's engine holds a live connection: its offer to lend it (headband/lend.dart,
+/// DECISIONS 856). Read once by the recorder at its start, then removed.
+const String _lendKey = 'lend';
 
 /// Messages from the screen to the recorder.
 const String stopCommand = 'stop';
@@ -180,13 +187,24 @@ Future<ServiceRequestResult> startRecorderService(
   } else {
     await FlutterForegroundTask.saveData(key: _alarmKey, value: jsonEncode(alarm.toJson()));
   }
-  return FlutterForegroundTask.startService(
+  // the one connection, when it is live, is lent to the night: no search, no new contact check (DECISIONS 856); one
+  // that is only kept is let go here, so the recorder's own search finds the headband
+  final owner = fromWatcher ? null : HeadbandConnection.shared;
+  final offer = await owner?.lendToNight();
+  if (offer == null) {
+    await FlutterForegroundTask.removeData(key: _lendKey);
+  } else {
+    await FlutterForegroundTask.saveData(key: _lendKey, value: jsonEncode(offer.toJson()));
+  }
+  final result = await FlutterForegroundTask.startService(
     serviceId: _serviceId,
     serviceTypes: [ForegroundServiceTypes.connectedDevice],
     notificationTitle: 'EEG Tracker',
-    notificationText: 'Looking for the headband',
+    notificationText: offer == null ? 'Looking for the headband' : 'Starting on the live connection',
     callback: callback,
   );
+  if (result is! ServiceRequestSuccess) owner?.cancelLend();
+  return result;
 }
 
 /// The night's one live sleep model in the recorder's isolate: AnySleep's runs on ONNX (the plugin is registered in
@@ -266,6 +284,15 @@ class RecorderTaskHandler extends TaskHandler {
   final Duration wifiEvery;
   NightRecorder? _recorder;
   BrainBitFinder? _finder;
+
+  /// The night's finder when it may start on a connection lent by the screen's engine (headband/lend.dart).
+  LendFinder? _lend;
+
+  /// The headband-lost notices (headband/lost_watch.dart, DECISIONS 857), and the newest one for /state's `alert`.
+  LostWatch? _lostWatch;
+  Map<String, Object?>? _alert;
+  Timer? _lostTimer;
+  BandBatteryStore? _bandBattery;
   Phase? _shownPhase;
   int _shownAtMs = 0;
   bool _stopping = false;
@@ -307,14 +334,23 @@ class RecorderTaskHandler extends TaskHandler {
     final diy = _diy = this.finder == null ? diyNightFor(rec) : null;
     final dir = diy?.dir.path ?? rec;
     _filesDir = Directory(rec).parent.path;
-    final HeadbandFinder finder;
+    final HeadbandFinder own;
     if (this.finder != null) {
-      finder = this.finder!();
+      own = this.finder!();
     } else {
       final b = diy == null ? BrainBitFinder(recorder: true) : BrainBitFinder(pick: () async => diy.finder());
       _finder = b;
-      finder = b;
+      own = b;
     }
+    // a start by hand may come with the screen's live connection (never a restart by Android, never the DIY board)
+    final offer = diy == null && starter != TaskStarter.system ? await _lendOffer() : null;
+    final HeadbandFinder finder = diy == null
+        ? _lend = LendFinder(inner: own, toScreen: FlutterForegroundTask.sendDataToMain, offer: offer)
+        : own;
+    final bandBattery = _bandBattery = diy == null ? BandBatteryStore.forRecordings(rec) : null;
+    final lostFile = LostSettings.fileFor(rec);
+    _lostWatch = LostWatch(settings: () => LostSettings.load(lostFile), tell: _bandNotice, what: 'The recording');
+    _lostTimer = Timer.periodic(const Duration(seconds: 5), (_) => _watchLost());
     // the night's one live sleep model: none for the DIY board (it reads BrainBit's O1 O2 T3 T4), so neither the smart
     // alarm's model nor the sound cues run with it
     final scorer = diy == null ? nightScorer(rec) : null;
@@ -338,7 +374,6 @@ class RecorderTaskHandler extends TaskHandler {
       // the lucid dream cues or the memory cues, one kind a night: the shared model, the phone's media player
       // (DECISIONS 303, 507); neither in a night the headband watcher started (DECISIONS 604)
       cues: scorer == null || auto != null ? null : cues(rec, scorer),
-      startNotes: [...?diy?.notes, if (starter != TaskStarter.system) ...?auto],
       spanLog: SpanLog(spansDirFor(rec)),
       // a sleep started later gets a model of its own: a closed one is not started again
       kit: diy != null
@@ -350,6 +385,12 @@ class RecorderTaskHandler extends TaskHandler {
       onGiveUp: () => unawaited(_giveUp()),
       sleep: sleep,
       sleepSource: auto != null ? 'auto_start' : 'owner_button',
+      startNotes: [
+        ...?diy?.notes,
+        if (starter != TaskStarter.system) ...?auto,
+        if (offer != null) 'started on the connection that was already live on the screen: no search, no new contact check',
+      ],
+      bandBattery: bandBattery,
     );
     _recorder = recorder;
     // what this night runs, for the battery samples and the usage log (lib/logs/activity.dart, DECISIONS 715)
@@ -417,7 +458,7 @@ class RecorderTaskHandler extends TaskHandler {
       wifi: Phone.wifiNets,
     );
     final r = _recorder;
-    if (r != null) host.setLive(r.status.toMap(nowMs: DateTime.now().millisecondsSinceEpoch));
+    if (r != null) host.setLive(_liveMap(r.status));
     await host.start(config);
   }
 
@@ -456,6 +497,8 @@ class RecorderTaskHandler extends TaskHandler {
       _spanCommand(data);
     } else if (nightTapLeaseFrom(data) case final on?) {
       _signalTap(on: on);
+    } else if (data is Map && data['kind'] == lendKind) {
+      _lend?.onMessage(data);
     }
   }
 
@@ -497,6 +540,58 @@ class RecorderTaskHandler extends TaskHandler {
     _send(r.status);
   }
 
+  static Future<LendOffer?> _lendOffer() async {
+    try {
+      final raw = await FlutterForegroundTask.getData<String>(key: _lendKey);
+      if (raw == null) return null;
+      await FlutterForegroundTask.removeData(key: _lendKey);
+      return LendOffer.fromJson(jsonDecode(raw));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Every 5 s, and with every status: no data for the chosen minutes while the night runs is worth one notice; the
+  /// battery estimate reaching empty another. Never once Stop was tapped.
+  void _watchLost() {
+    final r = _recorder, w = _lostWatch;
+    if (r == null || w == null) return;
+    final s = r.status;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final last = s.lastDataMs;
+    final expecting = !_stopping && s.phase != Phase.idle && s.phase != Phase.stopping;
+    final store = _bandBattery;
+    var empty = false;
+    if (store != null && expecting && now - _batteryLookMs >= 60000) {
+      _batteryLookMs = now;
+      final t = store.load();
+      empty = t.now.empty;
+      if (t.takeEmpty()) {
+        store.save(t);
+        w.batteryEmpty(t.now.percent);
+      }
+      _batteryEmpty = empty;
+    }
+    w.update(expecting: expecting, dataFresh: last != null && now - last < 10000, batteryEmpty: _batteryEmpty);
+  }
+
+  int _batteryLookMs = 0;
+  bool _batteryEmpty = false;
+
+  void _bandNotice(BandNotice n) {
+    _alert = n.toMap();
+    _recorder?.note('notice: ${n.title}. ${n.text}');
+    unawaited(Phone.bandNotice(n.title, n.text));
+    final r = _recorder;
+    if (r != null) _share?.setLive(_liveMap(r.status));
+  }
+
+  /// The status for Share on Wi-Fi's /state, with the newest headband notice (the laptop's tray shows it).
+  Map<Object?, Object?> _liveMap(RecorderStatus s) => {
+    ...s.toMap(nowMs: DateTime.now().millisecondsSinceEpoch),
+    'alert': ?_alert,
+  };
+
   /// The Signal view took or renewed its lease ([on]), or let it go.
   void _signalTap({required bool on}) {
     _tap.lease(on: on && !_stopping);
@@ -520,6 +615,7 @@ class RecorderTaskHandler extends TaskHandler {
   Future<void> _stop({required bool endNight}) async {
     if (_stopping) return;
     _stopping = true;
+    _lostTimer?.cancel();
     _endTap();
     _wifiWatch?.stop();
     final r = _recorder;
@@ -544,7 +640,8 @@ class RecorderTaskHandler extends TaskHandler {
     _send(s);
     Activity.set('headband', on: s.phase == Phase.recording); // streaming from the headband (DECISIONS 715)
     final now = DateTime.now().millisecondsSinceEpoch;
-    _share?.setLive(s.toMap(nowMs: now));
+    _watchLost();
+    _share?.setLive(_liveMap(s));
     if (s.phase != _shownPhase || now - _shownAtMs >= 10000) {
       _shownPhase = s.phase;
       _shownAtMs = now;

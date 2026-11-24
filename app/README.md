@@ -250,6 +250,9 @@ AVD, the emulator and its adb server at the end. It prints PASS / FAIL / SKIP:
   the replay headband into a real work session for 6.5 minutes; no break may start by itself, and the saved session
   must name the replay as its headband. Catches the "calibrating, then on break" loop of 2026-11-20 (DECISIONS 680,
   735); the laptop's replay tests check the same with talking from the start and after calibration.
+- **(e) Signal, then Start night: one connection** (only with `--only ...e` and `--replay`): the Signal tab reaches
+  the replayed headband, then Start night must record that live connection: the night's log says it started on the
+  live connection and did not measure contact again, and names one connection (DECISIONS 855-856).
 - **(d) crashes, ANRs, exit reasons**: logcat, `/data/anr` and `dumpsys activity exit-info` are kept; a crash or an
   ANR fails, and the app's own `files/app-starts.log` must hold its starts with Android's exit reasons.
 

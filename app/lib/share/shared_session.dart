@@ -4,3 +4,11 @@
 import 'package:flutter/foundation.dart';
 
 final ValueNotifier<Map<String, Object?>?> sharedSession = ValueNotifier<Map<String, Object?>?>(null);
+
+/// The newest headband notice of a daytime session (lost, back, battery nearly empty; lib/headband/lost_watch.dart,
+/// DECISIONS 857), for /state's `alert`: it travels beside the session's summary. Null: none in this app run.
+final ValueNotifier<Map<String, Object?>?> sharedAlert = ValueNotifier<Map<String, Object?>?>(null);
+
+/// What the server gets as the session: [session] with [alert] beside it (null when there is neither).
+Map<String, Object?>? sessionWithAlert(Map<String, Object?>? session, Map<String, Object?>? alert) =>
+    alert == null ? session : {...?session, 'alert': alert};

@@ -91,6 +91,10 @@ class PhoneSessionKeeper implements SessionKeeper {
   /// its own any more (DECISIONS 678 replaces row 589).
   static bool get held => _holder != null;
 
+  /// A session that streams the headband holds the keeper now: the headband-lost notices watch it (DECISIONS 857).
+  static bool get heldWithHeadband => _holder != null && (_heldSpec?.headband ?? false);
+  static KeepSpec? _heldSpec;
+
   @override
   void Function()? onStop;
 
@@ -182,6 +186,7 @@ class PhoneSessionKeeper implements SessionKeeper {
     _mark(spec);
     _listen();
     _holder = this;
+    _heldSpec = spec;
     return _next(() => _hold(spec));
   }
 
@@ -190,6 +195,7 @@ class PhoneSessionKeeper implements SessionKeeper {
     if (!identical(_holder, this)) return Future<void>.value();
     _mark(null);
     _holder = null;
+    _heldSpec = null;
     return _next(() async {
       if (_holder != null) return; // another session took over meanwhile
       await _release();

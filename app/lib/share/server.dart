@@ -491,6 +491,18 @@ class ShareServer {
   void setSession(Map<Object?, Object?>? session) => _session = session;
   Map<Object?, Object?>? _session;
 
+  /// /state's `alert`: the newest headband notice (lost, back, battery nearly empty; lib/headband/lost_watch.dart,
+  /// DECISIONS 857), the known fields only, or null. A night's comes inside its live status, a daytime session's beside
+  /// its summary. The laptop's tray shows each new one once.
+  Map<String, Object?>? _alertState() {
+    final live = _live['alert'], day = _session?['alert'];
+    final a = live is Map ? live : day;
+    if (a is! Map) return null;
+    final kind = a['kind'], at = a['at'], title = a['title'], text = a['text'];
+    if (kind is! String || at is! num || title is! String || text is! String) return null;
+    return {'kind': kind, 'at': at.toInt(), 'title': title, 'text': text};
+  }
+
   /// /state's `session`: the known fields only, and `age`, the seconds since the headband's last data by this
   /// phone's clock, so the laptop sees a session whose data stopped (or whose screen froze) as stale.
   Map<String, Object?>? _sessionState() {
@@ -566,6 +578,7 @@ class ShareServer {
       'contact_t': _contactT,
       'data': data,
       'session': _sessionState(),
+      'alert': _alertState(),
     };
   }
 

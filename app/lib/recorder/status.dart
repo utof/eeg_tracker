@@ -29,12 +29,20 @@ class RecorderStatus {
     this.alarm,
     this.board,
     this.rec = const RecordingLive(),
+    this.quality,
+    this.contactAtMs,
   });
 
   /// The recording's id, whether a sleep span runs, and its spans (Record first).
   final RecordingLive rec;
 
   final Phase phase;
+
+  /// Each electrode's word from the recorder's judge while it records (signal/quality.dart); null before.
+  final QualityVerdict? quality;
+
+  /// When [contactOhms] was measured (unix ms); null: at the night's start.
+  final int? contactAtMs;
 
   /// When Start was pressed (unix ms); 0 when no night is running.
   final int nightStartMs;
@@ -99,6 +107,8 @@ class RecorderStatus {
     Map<int, int>? slots,
     BoardLive? board,
     RecordingLive? rec,
+    QualityVerdict? quality,
+    int? contactAtMs,
   }) => RecorderStatus(
     phase: phase ?? this.phase,
     nightStartMs: nightStartMs ?? this.nightStartMs,
@@ -117,6 +127,8 @@ class RecorderStatus {
     alarm: alarm,
     board: board ?? this.board,
     rec: rec ?? this.rec,
+    quality: quality ?? this.quality,
+    contactAtMs: contactAtMs ?? this.contactAtMs,
   );
 
   /// The same status with the smart alarm replaced (null: none).
@@ -138,6 +150,8 @@ class RecorderStatus {
     alarm: alarm,
     board: board,
     rec: rec,
+    quality: quality,
+    contactAtMs: contactAtMs,
   );
 
   /// The same status with the drift-off fields replaced (null clears them).
@@ -159,6 +173,8 @@ class RecorderStatus {
     alarm: alarm,
     board: board,
     rec: rec,
+    quality: quality,
+    contactAtMs: contactAtMs,
   );
 
   Map<String, Object?> toMap({required int nowMs}) => {
@@ -183,6 +199,8 @@ class RecorderStatus {
     'alarm': alarm?.toMap(),
     'board': board?.toMap(),
     'rec': rec.toMap(),
+    'quality': quality?.toMap(),
+    'contactAtMs': contactAtMs,
   };
 
   /// Parses a message from the recorder; returns null for anything else.
@@ -217,6 +235,8 @@ class RecorderStatus {
       alarm: AlarmStatus.fromMap(data['alarm']),
       board: BoardLive.fromMap(data['board']),
       rec: RecordingLive.fromMap(data['rec']),
+      quality: QualityVerdict.fromMap(data['quality']),
+      contactAtMs: _int(data['contactAtMs']),
     );
   }
 }

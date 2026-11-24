@@ -14,6 +14,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import '../phone.dart';
 import '../recorder/brainbit.dart' show SdkFinder;
 import '../recorder/headband.dart';
+import 'connection.dart';
 import 'diy/board.dart' show DiyFinder;
 import 'diy/settings.dart';
 import 'own/own_headband.dart';
@@ -83,10 +84,17 @@ OwnFinder ownFinderFor(OwnBleSettings settings, OwnBleStore? store, Directory? r
 
 class BrainBitFinder implements HeadbandFinder {
   /// [recorder]: the recorder's service asks (only it may record a replay whose layout is not the BrainBit's).
-  BrainBitFinder({Future<HeadbandFinder> Function()? pick, bool recorder = false})
-    : _pickWith = pick ?? (() => _default(recorder: recorder));
+  /// In the screen's engine a finder made without [pick] is a door to the one connection (headband/connection.dart,
+  /// DECISIONS 855): its headbands are handles to the connection every screen shares, and [dispose] leaves that
+  /// connection to its owner. [own]: a finder of its own all the same (the owner's real one).
+  BrainBitFinder({Future<HeadbandFinder> Function()? pick, bool recorder = false, bool own = false})
+    : _pickWith = pick ?? (() => _default(recorder: recorder)),
+      _shared = pick == null && !recorder && !own ? HeadbandConnection.shared : null;
 
   final Future<HeadbandFinder> Function() _pickWith;
+
+  /// The one connection's owner, when this finder is a door to it.
+  final HeadbandConnection? _shared;
   Future<HeadbandFinder>? _picked;
   HeadbandFinder? _finder;
 
@@ -120,6 +128,8 @@ class BrainBitFinder implements HeadbandFinder {
       diy.useDiy ? const DiyRefusal() : choose(settings, store, recordings);
 
   Future<HeadbandFinder> _pick() => _picked ??= () async {
+    final shared = _shared;
+    if (shared != null) return _finder = shared.finder; // the owner's real finder asks the watcher to let go
     try {
       await beforeUse?.call();
     } catch (_) {}

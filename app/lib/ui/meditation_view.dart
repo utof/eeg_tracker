@@ -11,7 +11,6 @@ import '../meditation/controller.dart' show Stage;
 import '../meditation/learning.dart';
 import '../meditation/silent_block.dart' show SilentBlock;
 import '../meditation/tracker.dart';
-import '../recorder/contact.dart';
 import '../recorder/nights.dart' show nightLabel;
 import '../sound/audio_route.dart';
 import '../training/check.dart';
@@ -20,6 +19,7 @@ import 'check_views.dart';
 import 'form_parts.dart';
 import 'parts.dart';
 import 'phase_track.dart';
+import 'device_status.dart';
 import 'theme.dart';
 
 /// Session lengths on offer (minutes).
@@ -550,7 +550,7 @@ class MeditationView extends StatelessWidget {
       case Stage.ending:
         return [
           if (m.live == TrackPart.open) const _Spot(),
-          if (m.contact.isNotEmpty) ...[const SectionHeading('Contact at the start'), _Contact(m.contact)],
+          const SharedDeviceCard(top: 24),
         ];
       case Stage.report:
         return _report(context, m.report!);
@@ -843,16 +843,6 @@ class _Note extends StatelessWidget {
     );
     return onTap == null ? row : InkWell(onTap: onTap, borderRadius: BorderRadius.circular(6), child: row);
   }
-}
-
-class _Contact extends StatelessWidget {
-  const _Contact(this.contact);
-  final Map<String, double?> contact;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [for (final n in channelNames) Expanded(child: ContactCell(n, classifyOhms(contact[n])))],
-  );
 }
 
 /// One line of the report: a muted label, the value right-aligned, an optional detail under the value.

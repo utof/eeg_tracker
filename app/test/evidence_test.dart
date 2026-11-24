@@ -29,6 +29,7 @@ void main() {
       'memory-cues',
       'auto-start',
       'confirm-questions',
+      'signal-quality',
       'share-on-wifi',
       'walking',
       'pulse',
