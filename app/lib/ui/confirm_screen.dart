@@ -301,5 +301,6 @@ class _ConfirmSettingsScreenState extends State<ConfirmSettingsScreen> with Widg
     onNotificationSettings: () => unawaited(widget.phone?.openChannelSettings().catchError((Object _) {})),
     onPickTime: _pickTime,
     onInfo: () => showEvidence(context, 'confirm-questions'),
+    onHow: () => showEvidence(context, 'asking'),
   );
 }

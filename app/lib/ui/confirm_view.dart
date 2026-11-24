@@ -25,6 +25,7 @@ class ConfirmSettingsView extends StatelessWidget {
     this.onNotificationSettings,
     this.onPickTime,
     this.onInfo,
+    this.onHow,
   });
 
   final ConfirmSettings settings;
@@ -40,6 +41,9 @@ class ConfirmSettingsView extends StatelessWidget {
   /// Asks for a time of day (minutes), starting from the given one; null when cancelled.
   final Future<int?> Function(int minutes)? onPickTime;
   final VoidCallback? onInfo;
+
+  /// Opens the note on why it asks this way (docs/evidence/asking.md).
+  final VoidCallback? onHow;
 
   Future<void> _pick(bool start) async {
     final now = start ? settings.quietStartMin : settings.quietEndMin;
@@ -95,6 +99,11 @@ class ConfirmSettingsView extends StatelessWidget {
             'walked. Did you?" One tap. Now and then it asks without saying its guess. Until you answer, it is only a guess.',
             style: text.bodyLarge?.copyWith(height: 1.45),
           ),
+          if (onHow != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(onPressed: onHow, icon: const Icon(Icons.info_outline), label: const Text('Why it asks this way')),
+            ),
           SwitchListTile(
             contentPadding: const EdgeInsets.only(top: 12),
             title: const Text('Ask me'),

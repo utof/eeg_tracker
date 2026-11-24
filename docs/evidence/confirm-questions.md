@@ -2,8 +2,10 @@
 
 ## What it does
 
-Soon after the app thinks you slept or walked, it asks: "Did you walk 19:08-21:14?" You tap Yes, No or Not sure.
-Until you answer, it is only the app's guess. A Yes or a No becomes a fact the app's detectors are checked against.
+Soon after the headband thinks you slept or walked, the app asks: "19:08-21:14. The headband thinks you walked. Did
+you?" You tap "I walked", "I did not walk" or "Not sure". Until you answer, it is only a guess. A Yes or a No
+becomes a fact the app's detectors are checked against. Why it asks in these words, this seldom, and sometimes
+without showing its guess is in the note "How the app asks".
 
 ## Evidence for this headband: some
 
@@ -28,21 +30,21 @@ this headband's guesses is not known yet: that is exactly what your answers will
 ## Where the data does not support it
 
 - None of these studies used an EEG headband's sleep or walking guesses. The numbers are about phones and watches.
-- A Yes confirms the app's times as they are. If you slept 16:10-17:30 and the app says 15:59-17:49, a Yes is a
-  little wrong at the ends. A night with wake-ups inside is stored as "likely", not "certain".
+- A plain Yes does not confirm the times. If you slept 16:10-17:30 and the app says 15:59-17:49, tap "Yes, but the
+  times are off" and move the ends; otherwise the times stay marked as the headband's guess.
 - Seeing the app's guess can pull your answer toward it. When you do not remember, "Not sure" is the right answer.
 - Only what a detector found is asked about. What it missed completely needs your own tag in the Archive.
 
 ## How the app uses this
 
-- **Yes**: the stretch becomes a label of what really happened. **No**: a label that it did not happen, which shows
-  where a detector gives false alarms; just as useful. **Not sure**: nothing is stored as a fact, and the app never
-  asks about that stretch again.
-- At most 4 questions at a time and 3 notifications a day (both can be changed in More, Quick checks), 10 minutes
-  after the stretch ended, never in the quiet hours (22:00-08:00 unless changed) and never while a recording runs
-  with the screen off. The card in the app shows the same questions whenever you open it.
-- Asked first: what the detector is unsure of, long stretches, rare kinds, and kinds with few answers so far. Nothing
-  older than two days, nothing twice, and nothing you already tagged yourself.
+- **Yes**: a label that it happened. **No**: a label that it did not happen, which shows where a detector gives
+  false alarms; just as useful. **Not sure**: kept as its own answer, not as a fact, and the app never asks about
+  that stretch again.
+- At most 4 questions at a time and 2 notifications a day (More, Quick checks), 10 minutes after the stretch ended,
+  never in the quiet hours (your usual sleep, or 22:00-08:00) and never while a recording runs with the screen off.
+  The card in the app shows the same questions whenever you open it.
+- When more than 4 wait: the newest and the ones the detector is least sure of. Nothing older than two days, nothing
+  twice, and nothing you already tagged yourself.
 - Works without a network. Answers are files on the phone and reach the laptop with the normal copy, where each
   detector is scored against them.
 - You can add a few words to an answer; they are kept exactly as you write them.
