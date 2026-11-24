@@ -109,6 +109,9 @@ RULES = [(k, re.compile(p)) for k, p in [
     ("stream_restarted", r"stream restarted(?:, battery \S+%)?"),  # P L
     ("stream_restart_failed", r"stream restart failed: .*"),  # P L
     ("still_no_data", r"still no data; (?P<what>reconnecting|exiting so record_night\.sh starts a fresh recorder)"),
+    # Record first (DECISIONS 899): the headband gone for long: what was marked ends, then the recording stops itself
+    ("away_spans", r"no data for (?P<min>\d+) min: what was marked ends at the last data"),  # P
+    ("away_stop", r"no data for (?P<h>\d+) h: the recording stops itself"),  # P
     ("mending", r"no data; the headband is mending the link itself \(check \d+\)"),  # P with our own connection
     ("out_of_range", r"headband out of range; (?:saving|leaving it without SDK calls)"),  # P
     ("laptop_drop", r"headband (?P<state>\S+); saving and exiting so record_night\.sh starts a fresh recorder"),  # L
