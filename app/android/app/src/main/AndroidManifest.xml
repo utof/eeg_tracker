@@ -180,6 +180,10 @@
         <receiver
             android:name=".SharpPromptReceiver"
             android:exported="false" />
+        <!-- The confirmation questions (ConfirmPrompts.kt): the batch's alarm and the Yes / No / Not sure buttons. -->
+        <receiver
+            android:name=".ConfirmPromptReceiver"
+            android:exported="false" />
         <receiver
             android:name=".SharpBootReceiver"
             android:exported="true">

@@ -305,7 +305,10 @@ class SharpPromptReceiver : BroadcastReceiver() {
 class SharpBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
-            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> SharpPrompts.armNext(context)
+            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {
+                SharpPrompts.armNext(context)
+                ConfirmPrompts.rearm(context) // the confirmation questions' kept batch (ConfirmPrompts.kt)
+            }
         }
     }
 }

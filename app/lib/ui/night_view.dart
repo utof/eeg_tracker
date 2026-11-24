@@ -175,6 +175,8 @@ class NightView extends StatelessWidget {
     this.onRetrySleep,
     this.onSleepSoFar,
     this.morning,
+    this.confirm,
+    this.onConfirmSettings,
     this.onLightsOff,
     this.onSettings,
     this.onStorage,
@@ -213,6 +215,11 @@ class NightView extends StatelessWidget {
 
   /// The Morning section (check-in and trends; morning_section.dart), shown between nights after Sleep.
   final Widget? morning;
+
+  /// The confirmation questions (DECISIONS 867): the card at the top of Night, which draws nothing when nothing is
+  /// asked, and the link to their settings on More.
+  final Widget? confirm;
+  final VoidCallback? onConfirmSettings;
 
   /// Lights off while a night records (DECISIONS 180).
   final VoidCallback? onLightsOff;
@@ -268,6 +275,7 @@ class NightView extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
         children: sectionsFor(tab, [
           _Status(m),
+          ?confirm,
           if (m.minutes != null) ...[const SizedBox(height: 28), _Readouts(m)],
           if (m.rows.isNotEmpty) ...[SectionHeading(m.stripTitle), NightStrip(rows: m.rows)],
           // While a night records, the night so far right under its strip: scored only when its page opens.
@@ -328,6 +336,10 @@ class NightView extends StatelessWidget {
           if (onStorage != null && (tab == null || tab == HomeTab.more)) ...[
             const SectionHeading('Storage'),
             _Storage(onStorage: onStorage),
+          ],
+          if (onConfirmSettings != null && (tab == null || tab == HomeTab.more)) ...[
+            const SectionHeading('Quick checks'),
+            _QuickChecks(onOpen: onConfirmSettings),
           ],
           if (tab == HomeTab.more) ...[const SectionHeading('Settings'), _More(onSettings: onSettings, onLicences: onLicences)],
           // the app's log, how it is used and what costs battery (lib/logs, DECISIONS 712-716)
@@ -730,6 +742,28 @@ class _Storage extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         OutlinedButton.icon(onPressed: onStorage, icon: const Icon(Icons.storage_outlined), label: const Text('Storage')),
+      ],
+    );
+  }
+}
+
+/// More: the confirmation questions' settings.
+class _QuickChecks extends StatelessWidget {
+  const _QuickChecks({required this.onOpen});
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Soon after the app thinks you slept or walked, it asks you: Yes, No or Not sure. How many, and when not.',
+          style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(onPressed: onOpen, icon: const Icon(Icons.fact_check_outlined), label: const Text('Quick checks')),
       ],
     );
   }

@@ -14,6 +14,10 @@ dependencies:
   # DECISIONS rows 410-413.
   neurosdk2:
     path: packages/neurosdk2
+  # The labels shared with utof_tracker (DECISIONS 868): the vocabulary, estimates and answers, the queue and the
+  # Yes / No / Not sure card. Our own package in this repo; pure Dart and Flutter widgets.
+  shared_labels:
+    path: ../packages/shared_labels
   # Foreground service whose TaskHandler isolate owns the whole BrainBit session (DECISIONS row 2).
   flutter_foreground_task: ^11.0.3
   permission_handler: ^13.0.2
