@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The confirmation questions on a temporary emulator (DECISIONS 860-869): a batch on the card and in the notification.
 
-usage: python3 app/tool/confirm_check.py --apk <release or replay build> [--adb-port 5051] [--out DIR] [--keep]
+usage: python3 app/tool/confirm_check.py --apk <release or replay build> [--adb-port 5051] [--work DIR] [--out DIR] [--keep]
 
 Seeds a made-up sleep report and a made-up walk file (no recording of anyone), starts the app and checks:
   1. the Night tab shows the "Quick check" card with the batch ("Did you ...?" lines);
@@ -194,11 +194,13 @@ def main() -> int:
     p.add_argument("--out", type=Path)
     p.add_argument("--keep", action="store_true")
     p.add_argument("--adb-port", type=int, default=5051)
+    p.add_argument("--work", type=Path, default=Path("/var/tmp"),
+                   help="where the run's folder (emulator, staged files, logs) is made; a disk with 8 GB free")
     a = p.parse_args()
     if not a.apk.is_file():
         p.error(f"{a.apk} is not there")
     pc.use_adb_port(a.adb_port)
-    work = Path(f"/var/tmp/eeg-confirm-check-{time.strftime('%Y-%m-%d-%H%M%S')}")
+    work = a.work / f"eeg-confirm-check-{time.strftime('%Y-%m-%d-%H%M%S')}"
     out = a.out or work / "out"
     out.mkdir(parents=True, exist_ok=True)
     pc.OUT = out
