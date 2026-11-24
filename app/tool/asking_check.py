@@ -83,9 +83,12 @@ def made_up(stage: Path, now: datetime) -> tuple[list[tuple[Path, str]], dict]:
     v1 = now - timedelta(minutes=15)
     v0 = next(now - timedelta(minutes=36 + k) for k in range(60)
               if blind(estimate_id("walking", "walking", now - timedelta(minutes=36 + k), v1, rec)) and 36 + k < 44)
-    sleep_id = estimate_id("sleep-periods", "nap" if nap else "asleep", s0, s1, rec)
-    if blind(sleep_id):
-        raise SystemExit("the made-up sleep period draws a blind card at this minute: run the check again in a minute")
+    for shift in range(40):  # the sleep card must show its guess too: start it a minute earlier while it draws blind
+        s0 = now - timedelta(minutes=200 + shift)
+        nap = 9 <= s0.hour < 20
+        sleep_id = estimate_id("sleep-periods", "nap" if nap else "asleep", s0, s1, rec)
+        if not blind(sleep_id):
+            break
     night = (now - timedelta(hours=12)).strftime("%Y-%m-%d")
     report = {
         "version": 2, "night_of": night, "built": iso(now), "scoring_s": 1.0, "data_start": iso(s0 - timedelta(minutes=4)),
