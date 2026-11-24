@@ -31,6 +31,7 @@ import '../sleep/live_stager.dart';
 import '../sleep/night_scorer.dart';
 import '../sleep/onnx_runs.dart';
 import '../spans/span.dart' show spansDirFor;
+import '../spans/after_restart.dart';
 import '../spans/span_log.dart';
 import 'brainbit.dart';
 import 'chunk_writer.dart' show ChunkWriter;
@@ -114,6 +115,19 @@ ShareStatus? shareStatusFrom(Object? data) {
     copiedBy: by is String ? by : '',
   );
 }
+
+/// Sleep (or Nap) on the running recording, and Stop sleep (Record first, DECISIONS 904): the recorder opens or closes
+/// the sleep span and attaches or detaches the sleep kit; [alarm] is that sleep's smart alarm.
+Map<String, Object?> startSleepCommand({String kind = 'sleep', AlarmPlan? alarm}) => {
+  'kind': 'sleep',
+  'op': 'start',
+  'span_kind': kind,
+  'alarm': alarm?.toJson(),
+};
+const Map<String, Object?> stopSleepCommand = {'kind': 'sleep', 'op': 'stop'};
+
+/// Sent by the recorder when it stopped by itself after hours without the headband (DECISIONS 899).
+const Map<String, Object> gaveUpMessage = {'kind': 'gaveUp'};
 
 /// Sent by the recorder once its files are closed after [stopCommand].
 const Map<String, Object> stoppedMessage = {'kind': 'stopped'};
@@ -207,6 +221,22 @@ CueFactory nightCuesWith(String recordingsDir, NightScorer scorer) => oneKindANi
 ]);
 
 Future<NightState> loadNight() async => _PrefsNightStore().load();
+
+/// The saved night with a recording that ended without a Stop put right (spans/after_restart.dart): call only while
+/// the service does not run. True in the second place: a recording was just ended that way.
+Future<(NightState, bool)> loadEndedNight(String? recordingsDir) async {
+  final store = _PrefsNightStore();
+  final s = await store.load();
+  if (recordingsDir == null) return (s, false);
+  try {
+    final fixed = endedWithoutStop(s, Directory(recordingsDir));
+    if (fixed == null) return (s, false);
+    await store.save(fixed);
+    return (fixed, true);
+  } catch (_) {
+    return (s, false);
+  }
+}
 
 @pragma('vm:entry-point')
 void recorderEntryPoint() {
@@ -310,6 +340,14 @@ class RecorderTaskHandler extends TaskHandler {
       cues: scorer == null || auto != null ? null : cues(rec, scorer),
       startNotes: [...?diy?.notes, if (starter != TaskStarter.system) ...?auto],
       spanLog: SpanLog(spansDirFor(rec)),
+      // a sleep started later gets a model of its own: a closed one is not started again
+      kit: diy != null
+          ? null
+          : () {
+              final s = nightScorer(rec);
+              return (scorer: s, alarm: alarm(rec, s), cues: cues(rec, s));
+            },
+      onGiveUp: () => unawaited(_giveUp()),
       sleep: sleep,
       sleepSource: auto != null ? 'auto_start' : 'owner_button',
     );
@@ -412,11 +450,39 @@ class RecorderTaskHandler extends TaskHandler {
       } else {
         _alarmOffEarly = true;
       }
+    } else if (data is Map && data['kind'] == 'sleep') {
+      unawaited(_sleepCommand(data));
     } else if (data is Map && data['kind'] == 'span') {
       _spanCommand(data);
     } else if (nightTapLeaseFrom(data) case final on?) {
       _signalTap(on: on);
     }
+  }
+
+  Future<void> _sleepCommand(Map<Object?, Object?> data) async {
+    final r = _recorder;
+    if (r == null || _stopping) return;
+    if (data['op'] == 'start') {
+      AlarmPlan? plan;
+      try {
+        plan = data['alarm'] == null ? null : AlarmPlan.fromJson(data['alarm']);
+      } catch (_) {}
+      final kind = data['span_kind'];
+      r.startSleep(kind: kind is String && kind.isNotEmpty ? kind : 'sleep', plan: plan);
+      Activity.begin('live-model');
+    } else if (data['op'] == 'stop') {
+      await r.stopSleep();
+      Activity.set('live-model', on: false);
+      Activity.set('cues', on: false);
+    }
+    _send(r.status);
+  }
+
+  /// Hours without the headband: the recording is ended as by Stop, and the service goes.
+  Future<void> _giveUp() async {
+    await _stop(endNight: true);
+    FlutterForegroundTask.sendDataToMain(gaveUpMessage);
+    await FlutterForegroundTask.stopService();
   }
 
   void _spanCommand(Map<Object?, Object?> data) {

@@ -848,6 +848,27 @@ report is hidden when no other recording is left in them (the phone moves it to 
 the laptop leaves that night out). A later line `{"v": 1, "reviewed": "sleep", ...}` takes it back. The last
 `reviewed` line counts.
 
+**Nights and naps from sleep spans** (the phone's `app/lib/recorder/nights.dart`, the laptop's
+`scripts/night_files.py`; DECISIONS 886-888, 904-907). A file set whose header names a recording is never chained by
+time. Its recording's closed spans of kind `sleep` are joined into nights by the chain rule applied to spans (the next
+starts under 3 hours after the last one's end, or has the same evening date, within 24 hours of the first); the night
+is named by the evening date of the first span's start and keeps its file, `nights/<evening date>.report.json`. A span
+of kind `nap` is a nap: scored by itself, never part of a night, its report in `nights/naps/<span start stamp>.report.json`
+(same format; its `night_of` is that stamp). Only the samples inside the spans are read. On the phone a span still
+open ends at the recording's last data. A report made from spans carries
+
+```json
+"span": {"recording": ["2026-11-21-110200"], "spans": ["2026-11-21-110200-3"], "kind": "night", "from": "pressed"}
+```
+
+(`kind` `night` or `nap`; `from` `pressed`, `confirmed` or `auto`, the first span's source); a report without it is
+an old night's. Its `inputs` list each file's bytes inside the spans, so a recording that goes on after the sleep does
+not make the report stale.
+
+**When the app ends a span by itself** (planning values, DECISIONS 899, 906): the headband lost for 60 minutes: every
+open span ends at the last data (`headband_off`); 6 hours without data: the recording stops itself; the phone
+restarted: at the next app start open spans end at the recording's last saved sample (`phone_restart`).
+
 - **Writers**: the recorder while the recording runs, the screen once it has stopped (`app/lib/spans/span_log.dart`
   `SpanLog`, which refuses the screen while the recorder's saved state says the recording is active). Each span start
   and end is also one line in the open file set's `.log` and `.markers.jsonl` (`span: sleep start`).

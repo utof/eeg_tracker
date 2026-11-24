@@ -16,6 +16,7 @@ import '../archive/items.dart';
 import '../archive/raw_remover.dart' show OnLaptop;
 import '../archive/seen.dart';
 import '../archive/tags.dart';
+import '../spans/not_sleep.dart';
 import '../walking/pass.dart' show Walked, walkInBackground;
 import '../pulse/pass.dart' show PulseResult, Pulsed, pulseInBackground;
 import 'archive_screen.dart' show deleteInBackground, phoneArchiveBusy;
@@ -70,6 +71,24 @@ class _RecordingScreenState extends State<RecordingScreen> {
   PulseResult? _pulse;
   String? _pulseWhy;
   bool _changed = false;
+
+  static bool _oldNight(ArchiveItem i) =>
+      i.kind == ArchiveKind.night && i.sets.isNotEmpty && i.sets.every((s) => s.recording == null && s.folder == 'recordings');
+
+  void _toggleNotSleep() {
+    final i = _item;
+    final files = Directory(widget.filesPath);
+    final now = isNotSleep(files, i.id);
+    try {
+      setNotSleep(files, i.id, [for (final s in i.sets) s.stem], notSleep: !now);
+    } on FileSystemException {
+      _say('That could not be saved: the phone is full.');
+      return;
+    }
+    _changed = true;
+    setState(() {});
+    _say(now ? 'Counted as sleep again. Its report comes back, or is made again.' : 'Not sleep: it is in no night now.');
+  }
 
   Directory get _files => Directory(widget.filesPath);
 
@@ -307,6 +326,9 @@ class _RecordingScreenState extends State<RecordingScreen> {
         onAddTag: () => _editTag(),
         onTag: (t) => _editTag(tag: t),
         onRemove: i.hasRaw && i.laptop == OnLaptop.yes ? _remove : null,
+        // only a recording from before Record first can be a night by mistake: a new one has its spans
+        onNotSleep: _oldNight(i) ? _toggleNotSleep : null,
+        notSleep: _oldNight(i) && isNotSleep(Directory(widget.filesPath), i.id),
         onDanger: _danger,
         onSignal: () => _signal(i.start),
       ),

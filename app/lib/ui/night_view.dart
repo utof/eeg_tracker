@@ -194,8 +194,11 @@ class NightView extends StatelessWidget {
     this.onLicences,
     this.onArchive,
     this.onRecord,
+    this.onSleepNow,
   });
 
+  /// Sleep on the recording that runs.
+  final VoidCallback? onSleepNow;
   final NightViewModel model;
 
   /// Record: the recording alone, no sleep span (null: no such button, the layout of before).
@@ -374,7 +377,7 @@ class NightView extends StatelessWidget {
               top: false,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-                child: _Action(m, onStart: onStart, onRecord: onRecord, onStop: onStop, onLightsOff: onLightsOff, onAlarm: onAlarm),
+                child: _Action(m, onStart: onStart, onRecord: onRecord, onSleepNow: onSleepNow, onStop: onStop, onLightsOff: onLightsOff, onAlarm: onAlarm),
               ),
             ),
     );
@@ -971,9 +974,9 @@ class _Sound extends StatelessWidget {
 }
 
 class _Action extends StatelessWidget {
-  const _Action(this.m, {required this.onStart, required this.onStop, this.onRecord, this.onLightsOff, this.onAlarm});
+  const _Action(this.m, {required this.onStart, required this.onStop, this.onRecord, this.onSleepNow, this.onLightsOff, this.onAlarm});
   final NightViewModel m;
-  final VoidCallback? onRecord;
+  final VoidCallback? onRecord, onSleepNow;
   final VoidCallback onStart;
   final VoidCallback onStop;
   final VoidCallback? onLightsOff;
@@ -994,10 +997,30 @@ class _Action extends StatelessWidget {
             style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.35),
           ),
           const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: m.busy ? null : onStop,
-            icon: const Icon(Icons.stop_rounded),
-            label: Text(m.busy ? 'Stopping…' : 'Stop'),
+          if (m.alarmLine != null && onSleepNow != null) ...[
+            AlarmLine(line: m.alarmLine!, action: m.alarmAction ?? 'Set alarm', onAction: m.busy ? null : onAlarm),
+            const SizedBox(height: 4),
+          ],
+          Row(
+            children: [
+              if (onSleepNow != null) ...[
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: m.busy ? null : onSleepNow,
+                    icon: const Icon(Icons.bedtime_outlined),
+                    label: const Text('Sleep'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: m.busy ? null : onStop,
+                  icon: const Icon(Icons.stop_rounded),
+                  label: Text(m.busy ? 'Stopping…' : 'Stop'),
+                ),
+              ),
+            ],
           ),
         ],
       );

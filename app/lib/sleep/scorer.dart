@@ -17,6 +17,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import '../recorder/header.dart' show legacyHeader, tryHeader;
 import '../recorder/nights.dart';
 import '../recorder/packed.dart' show rawExists, rawLength;
 import '../recorder/remove.dart' show RawUse;
@@ -30,6 +31,13 @@ typedef PrepareFn = Future<ModelInput?> Function(List<File> recordings);
 
 Future<ModelInput?> prepareInBackground(List<File> recordings) =>
     Isolate.run(() => prepareNight(recordings), debugName: 'sleep-prep');
+
+/// The same for a night or nap of sleep spans (Record first, DECISIONS 886): only the samples inside [windows]
+/// (unix seconds) are read.
+typedef PrepareSpanFn = Future<ModelInput?> Function(List<File> recordings, List<(double, double)> windows);
+
+Future<ModelInput?> prepareSpanInBackground(List<File> recordings, List<(double, double)> windows) =>
+    Isolate.run(() => prepareNight(recordings, windows: windows), debugName: 'sleep-prep');
 
 /// Ends a go early on purpose ([SleepScorer.score]'s `between` throws it: a night or a session starts). Not a
 /// failure: the progress of the last model call stays, and the night goes on from there later.
@@ -65,6 +73,9 @@ class SleepScorer {
     this.runCount = 3,
     this.prepare = prepareInBackground,
     this.see = seeInBackground,
+    this.prepareSpan = prepareSpanInBackground,
+    this.seeSpan = seeSpanInBackground,
+    this.spansDir,
     this.model = phoneModelId,
     this.log,
     ScoringProgressStore? progress,
@@ -81,6 +92,14 @@ class SleepScorer {
 
   /// The detectors' pass for the extras.
   final SeeFn see;
+  final PrepareSpanFn prepareSpan;
+  final SeeSpanFn seeSpan;
+
+  /// The spans files (the sibling `spans/` of the recordings unless said).
+  final Directory? spansDir;
+
+  /// The nights and the naps, newest first: everything that gets a report.
+  List<NightFiles> _sleeps() => [...nightsIn(recordingsDir, spansDir: spansDir), ...napsIn(recordingsDir, spansDir: spansDir)];
   final String model;
 
   /// One line when a go starts, pauses or ends (logcat on the phone: tag `flutter`).
@@ -91,17 +110,35 @@ class SleepScorer {
   final DateTime Function() _clock;
 
   /// The night's `.f32` names and lengths, packed or not (a night packed after a day keeps its report).
+  /// For a night of sleep spans: each file's bytes inside the spans (worked out from its start and length, whole
+  /// seconds), so a recording that goes on after the sleep does not make its report stale.
   static Map<String, int> inputsOf(NightFiles night) => {
     for (final f in night.recordings)
-      if (rawExists(f)) f.uri.pathSegments.last: rawLength(f),
+      if (rawExists(f)) f.uri.pathSegments.last: night.windows == null ? rawLength(f) : _bytesInside(f, night.windows!),
   };
+
+  static int _bytesInside(File f32, List<(DateTime, DateTime)> windows) {
+    final h = tryHeader(f32) ?? legacyHeader;
+    final start = stemTime(f32.uri.pathSegments.last);
+    final length = rawLength(f32);
+    if (start == null) return length;
+    final end = start.add(Duration(microseconds: (length ~/ h.recordBytes * 1e6 / h.sampleRate).round()));
+    var seconds = 0;
+    for (final (a, b) in windows) {
+      final from = a.isAfter(start) ? a : start, to = b.isBefore(end) ? b : end;
+      if (to.isAfter(from)) seconds += to.difference(from).inSeconds;
+    }
+    final bytes = (seconds * h.sampleRate).floor() * h.recordBytes;
+    return bytes < length ? bytes : length;
+  }
 
   /// The `.scoring` markers: night -> what it says.
   Map<String, String> _markers() {
     final out = <String, String>{};
     if (!store.dir.existsSync()) return out;
-    for (final f in store.dir.listSync().whereType<File>()) {
-      final name = f.uri.pathSegments.last;
+    final naps = Directory('${store.dir.path}/naps');
+    for (final f in [...store.dir.listSync(), if (naps.existsSync()) ...naps.listSync()].whereType<File>()) {
+      final name = f.path.substring(store.dir.path.length + 1); // `naps/<stamp>.scoring` for a nap
       if (!name.endsWith('.scoring')) continue;
       final night = name.substring(0, name.length - 8);
       try {
@@ -119,7 +156,7 @@ class SleepScorer {
   List<_Night> _nights({bool tidy = false}) {
     final markers = _markers();
     final out = <_Night>[];
-    for (final n in nightsIn(recordingsDir).reversed) {
+    for (final n in _sleeps().reversed) {
       // a night whose raw files left the phone (remove.dart) keeps its report: never scored again from what is left
       if (n.recordings.isEmpty || n.removed.isNotEmpty) continue;
       final inputs = inputsOf(n);
@@ -169,7 +206,7 @@ class SleepScorer {
 
   /// "Score again" for a night with a report (from an older scorer): scored once more from the start.
   void request(String night) {
-    final n = nightsIn(recordingsDir).where((n) => n.name == night).firstOrNull;
+    final n = _sleeps().where((n) => n.name == night).firstOrNull;
     if (n == null || n.recordings.isEmpty || n.removed.isNotEmpty) return;
     progressStore.write(night, NightProgress(inputs: inputsOf(n), model: model, requested: true));
     final m = store.markerFor(night);
@@ -196,7 +233,7 @@ class SleepScorer {
     Future<void> Function()? between,
   ) async {
     final inputs = inputsOf(night);
-    store.dir.createSync(recursive: true);
+    store.fileFor(night.name).parent.createSync(recursive: true);
     final saved = progressStore.read(night.name);
     final p = saved != null && saved.matches(inputs, model) ? saved : NightProgress(inputs: inputs, model: model);
     final triesBefore = p.tries;
@@ -227,7 +264,9 @@ class SleepScorer {
       // the owner's "Was this you?" answer belongs to the night, not to this scoring: read just before the write
       final answered = store.read(night.name)?.json['wearer'];
       if (answered != null) rep['wearer'] = answered;
-      store.write(rep);
+      final span = night.spanField;
+      if (span != null) rep['span'] = span; // which sleep spans it covers (docs/data-format.md)
+      store.write(rep, name: night.name);
       marker.deleteSync();
       progressStore.delete(night.name);
       log?.call(
@@ -278,7 +317,8 @@ class SleepScorer {
             ? 'Preparing the recording: new data since its report'
             : 'Preparing the recording',
       );
-      final input = await prepare(night.recordings);
+      final w = _unixWindows(night);
+      final input = await (w == null ? prepare(night.recordings) : prepareSpan(night.recordings, w));
       if (input != null) {
         facts = (
           startUnix: input.startUnix,
@@ -311,7 +351,7 @@ class SleepScorer {
       // under 5 minutes: an unscored report, as the laptop's
       keep();
       return buildReport(
-        nightOf: night.name,
+        nightOf: night.napStamp ?? night.name,
         built: _clock(),
         scoringSeconds: p.seconds,
         start: night.start,
@@ -323,13 +363,14 @@ class SleepScorer {
     final s = stagesOf(probs, facts.gap);
     await between?.call();
     progress?.call('Counting jaw, movement and signal');
-    final (found, whyNot) = await Future.sync(() => see(night.recordings)).then<(NightSeen?, String?)>(
+    final w = _unixWindows(night);
+    final (found, whyNot) = await Future.sync(() => w == null ? see(night.recordings) : seeSpan(night.recordings, w)).then<(NightSeen?, String?)>(
       (s) => (s, null),
       onError: (Object e) => (null, '$e'),
     );
     keep();
     return buildReport(
-      nightOf: night.name,
+      nightOf: night.napStamp ?? night.name,
       built: _clock(),
       scoringSeconds: p.seconds,
       start: DateTime.fromMillisecondsSinceEpoch(facts.startUnix * 1000),
@@ -343,6 +384,10 @@ class SleepScorer {
       extrasError: whyNot,
     );
   }
+
+  static List<(double, double)>? _unixWindows(NightFiles night) => night.windows == null
+      ? null
+      : [for (final (a, b) in night.windows!) (a.microsecondsSinceEpoch / 1e6, b.microsecondsSinceEpoch / 1e6)];
 
   static String _pct(int done, int of) => '${of == 0 ? 0 : (100 * done / of).floor()} %';
 }

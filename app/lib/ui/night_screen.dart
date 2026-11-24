@@ -21,7 +21,7 @@ import '../recorder/packed.dart' show packInBackground, packOldRecordings;
 import '../storage/clear.dart' show ClearMode, autoClear, planClear;
 import '../recorder/recorder_service.dart';
 import '../recorder/status.dart';
-import '../spans/span.dart' show spansLine;
+import '../spans/span.dart' show Span, spansLine;
 import '../session_keeper.dart' show PhoneSessionKeeper;
 import '../share/control.dart';
 import '../share/isolate.dart' show shareAddress;
@@ -414,7 +414,11 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
 
   /// Why the night's sleep scoring must not run now, or null.
   String? _scoringStop({bool? running}) {
-    if (running ?? _running) return 'a night records';
+    // a recording with no sleep span open runs no live sleep model: a closed sleep span is scored while it goes on
+    // (DECISIONS 887); the status must be fresh, since the headband watcher can start a night from its own engine
+    final at = _statusAtMs;
+    final awake = _status?.rec.sleep == false && at != null && DateTime.now().millisecondsSinceEpoch - at < 15000;
+    if ((running ?? _running) && !awake) return 'a night records';
     if (dreamSessionRunning || soundSessionRunning || napSessionRunning || PhoneSessionKeeper.held) {
       return 'a session runs';
     }
@@ -428,7 +432,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     final now = _scoringStop();
     if (now != null) return now;
     try {
-      if (await FlutterForegroundTask.isRunningService) return 'a night records';
+      if (await FlutterForegroundTask.isRunningService && _scoringStop(running: true) != null) return 'a night records';
     } catch (_) {}
     return null;
   }
@@ -538,9 +542,11 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     final phone = await _safe(Phone.snapshot, const PhoneSnapshot({}));
     final nearby = await nearbyAllowed(phone.sdkInt);
     final running = await FlutterForegroundTask.isRunningService;
-    final last = await loadNight();
     final xiaomiDone = await FlutterForegroundTask.getData<bool>(key: _xiaomiDoneKey) ?? false;
     final dir = _dir ?? await _safe<String?>(Phone.recordingsDir, null);
+    // a recording that ended without a Stop (the phone restarted) is closed here: its spans end at its last sample
+    final (last, endedAlone) = running || !_gate.trusts(asked) ? (await loadNight(), false) : await loadEndedNight(dir);
+    if (endedAlone && mounted) _say('The recording stopped when the phone restarted. What was marked ends at its last data.');
     // the nights' chaining opens every recording's index (and a packed one's header): off the screen's thread
     final nights = dir == null || running ? const <NightFiles>[] : await _listNights(dir);
     final now = DateTime.now();
@@ -576,7 +582,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
           log: debugPrint,
         ),
         nightStartMs: () {
-          final ms = _status?.nightStartMs ?? 0;
+          // the sleep so far counts from the sleep span, not from a recording that began hours before it
+          final ms = _status?.rec.openSleep?.start.millisecondsSinceEpoch ?? _status?.nightStartMs ?? 0;
           return ms > 0 ? ms : null;
         },
       )..addListener(_onScoring);
@@ -802,11 +809,61 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     FlutterForegroundTask.sendDataToTask(lightsOffCommand);
   }
 
+  /// Sleep on the recording that runs: the alarm is set as for a night, then the recorder opens the sleep span.
+  Future<void> _sleepNow() async {
+    if (!_running || _busy) return;
+    setState(() => _busy = true);
+    try {
+      _soFar?.reset();
+      _scoring?.halt(); // the live sleep model comes first
+      final plan = await _setAlarmClock(_dir);
+      FlutterForegroundTask.sendDataToTask(startSleepCommand(alarm: plan));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Stop while a sleep span is open. Sleep started the recording: Stop everything (the default) or Keep recording.
+  /// Record started it: Stop ends the sleep only. True: go on and stop the whole recording.
+  Future<bool> _stopSleep(Span sleep) async {
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Stop sleep?'),
+        content: Text(
+          sleep.startedRecording
+              ? 'Stop everything ends the recording too. Keep recording ends only the sleep: its report is made and '
+                    'the headband goes on recording.'
+              : 'The sleep ends and its report is made. The recording goes on until you stop it.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Not yet')),
+          if (sleep.startedRecording) TextButton(onPressed: () => Navigator.pop(c, 'sleep'), child: const Text('Keep recording')),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, sleep.startedRecording ? 'all' : 'sleep'),
+            child: Text(sleep.startedRecording ? 'Stop everything' : 'Stop sleep'),
+          ),
+        ],
+      ),
+    );
+    if (choice == 'sleep' && mounted) {
+      _soFar?.nightEnded();
+      _lightsOffSentMs = null;
+      FlutterForegroundTask.sendDataToTask(stopSleepCommand);
+      unawaited(_refresh());
+    }
+    return choice == 'all';
+  }
+
   Future<void> _stop() async {
+    final sleep = _status?.rec.openSleep;
+    final asked = sleep != null;
+    if (asked && !await _stopSleep(sleep)) return;
+    if (!mounted) return;
     final end = _clockState.endMs;
     final rings = end != null && end > DateTime.now().millisecondsSinceEpoch && _clockState.awakeMs == null;
     final at = rings ? DateTime.fromMillisecondsSinceEpoch(end) : null;
-    final ok = await showDialog<bool>(
+    final ok = asked ? true : await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
         title: Text(_status?.rec.sleep == false ? 'Stop recording?' : 'Stop the night?'),
@@ -1146,6 +1203,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       model: model,
       onStart: _start,
       onRecord: () => unawaited(_start(sleep: false)),
+      onSleepNow: () => unawaited(_sleepNow()),
       onStop: _stop,
       onFix: _fix,
       onExport: _export,

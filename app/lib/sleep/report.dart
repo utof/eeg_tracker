@@ -365,9 +365,10 @@ class NightReportStore {
     return r;
   }
 
-  void write(Map<String, dynamic> report) {
-    dir.createSync(recursive: true);
-    final name = report['night_of'] as String;
+  /// [name]: where it goes when that is not its `night_of` (a nap's `naps/<stamp>`, Record first).
+  void write(Map<String, dynamic> report, {String? name}) {
+    name ??= report['night_of'] as String;
+    fileFor(name).parent.createSync(recursive: true);
     final tmp = File('${dir.path}/$name.report.tmp');
     tmp.writeAsStringSync(const JsonEncoder.withIndent(' ').convert(report), flush: true);
     tmp.renameSync(fileFor(name).path);

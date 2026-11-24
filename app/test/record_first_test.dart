@@ -3,10 +3,12 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:eeg_tracker/alarm/rule.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/header.dart';
 import 'package:eeg_tracker/recorder/night_recorder.dart';
 import 'package:eeg_tracker/recorder/status.dart';
+import 'package:eeg_tracker/sleep/night_scorer.dart';
 import 'package:eeg_tracker/spans/span.dart';
 import 'package:eeg_tracker/spans/span_log.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -14,6 +16,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'night_recorder_test.dart' show FakeBand, FakeFinder, fast;
 
 void main() {
+  group('sleep on a running recording', sleepOnARecording);
   late Directory files, dir;
   late MemoryNightStore store;
   late List<RecorderStatus> statuses;
@@ -175,5 +178,141 @@ void main() {
     expect(old.spans, isEmpty);
     final now = NightState.fromJson(jsonDecode(jsonEncode(const NightState(active: true, recording: 'r', sleepKit: false).toJson())));
     expect((now.recording, now.sleepKit), ('r', false));
+  });
+}
+
+// ---- step 2: Sleep on a running recording, the headband gone for long ----------------------------------------------
+
+class _Scorer implements NightScorer {
+  int adds = 0, closes = 0;
+  @override
+  dynamic noSuchMethod(Invocation i) {
+    if (i.memberName == #add) adds++;
+    if (i.memberName == #close) {
+      closes++;
+      return Future<void>.value();
+    }
+    if (i.memberName == #takeEvents) return const <String>[];
+    return null;
+  }
+}
+
+void sleepOnARecording() {
+  late Directory files, dir;
+  late MemoryNightStore store;
+  late List<RecorderStatus> statuses;
+  var now = DateTime(2026, 11, 21, 11, 2);
+  DateTime clock() => now;
+
+  setUp(() {
+    files = Directory.systemTemp.createTempSync('record_first_test');
+    dir = Directory('${files.path}/recordings')..createSync();
+    store = MemoryNightStore();
+    statuses = [];
+    now = DateTime(2026, 11, 21, 11, 2);
+  });
+  tearDown(() => files.deleteSync(recursive: true));
+
+  Future<void> wait(int ms) => Future<void>.delayed(Duration(milliseconds: ms));
+  SpansFile spans() => spansIn(spansDirFor(dir.path)).values.single;
+
+  test('Sleep 3 hours into a recording: a span from then, a fresh kit, the alarm at the span; Stop sleep keeps recording', () async {
+    final kits = <_Scorer>[];
+    final band = FakeBand('a');
+    final r = NightRecorder(
+      finder: FakeFinder([band]),
+      dir: dir,
+      store: store,
+      onStatus: statuses.add,
+      onStuck: (_) async {},
+      timing: fast,
+      watch: null,
+      clock: clock,
+      spanLog: SpanLog(spansDirFor(dir.path), clock: clock),
+      sleep: false,
+      kit: () {
+        kits.add(_Scorer());
+        return (scorer: kits.last, alarm: null, cues: null);
+      },
+    );
+    final running = r.run(restartedBySystem: false);
+    await wait(200);
+    expect(statuses.last.rec.sleep, isFalse);
+    expect(statuses.last.alarm, isNull);
+    now = now.add(const Duration(hours: 3));
+    final plan = AlarmPlan(endMs: now.add(const Duration(hours: 8)).millisecondsSinceEpoch, windowMin: 30);
+    final span = r.startSleep(plan: plan)!;
+    expect(span.start, now);
+    expect(span.startedRecording, isFalse);
+    expect(r.startSleep(kind: 'nap')!.id, span.id); // Sleep and Nap never run together
+    expect(kits, hasLength(1));
+    expect(statuses.last.rec.sleep, isTrue);
+    expect(statuses.last.alarm!.endMs, plan.endMs);
+    r.lightsOff();
+    await wait(50);
+    expect(store.state.sleepKit, isTrue);
+    expect(statuses.last.lightsOffMs, now.millisecondsSinceEpoch);
+
+    now = now.add(const Duration(hours: 7));
+    final before = band.emitted;
+    final closed = (await r.stopSleep())!;
+    expect(closed.end, now);
+    expect(closed.endedBy, 'owner');
+    expect(kits.single.closes, 1);
+    expect(statuses.last.rec.sleep, isFalse);
+    expect(statuses.last.alarm, isNull);
+    expect(statuses.last.lightsOffMs, isNull);
+    await wait(150);
+    expect(band.emitted, greaterThan(before)); // the recording goes on
+    expect(statuses.last.phase, Phase.recording);
+
+    // a second sleep in the same recording gets its own span and its own model
+    final second = r.startSleep(kind: 'nap')!;
+    expect(second.id, isNot(span.id));
+    expect(kits, hasLength(2));
+    await r.stop();
+    await running;
+    expect([for (final s in spans().spans) (s.kind, s.endedBy)], [('sleep', 'owner'), ('nap', 'recording_stopped')]);
+    expect(Directory(dir.path).listSync().where((f) => f.path.endsWith('.f32')), hasLength(1));
+  });
+
+  test('the headband gone 60 minutes: open spans end at the last data; 6 hours: the recording stops itself', () async {
+    final band = FakeBand('a');
+    var gaveUp = 0;
+    late NightRecorder r;
+    r = NightRecorder(
+      finder: FakeFinder([band]),
+      dir: dir,
+      store: store,
+      onStatus: statuses.add,
+      onStuck: (_) async {},
+      timing: fast,
+      watch: null,
+      clock: clock,
+      spanLog: SpanLog(spansDirFor(dir.path), clock: clock),
+      onGiveUp: () {
+        gaveUp++;
+        r.stop();
+      },
+    );
+    final running = r.run(restartedBySystem: false);
+    await wait(200);
+    r.openSpan('work');
+    final lastData = now;
+    band.goOutOfRange();
+    await wait(100);
+    expect(statuses.last.rec.spans.every((s) => !s.closed), isTrue); // a short loss: the spans stay open
+    now = now.add(const Duration(minutes: 61));
+    await wait(150);
+    final after = statuses.last.rec;
+    expect([for (final s in after.spans) (s.kind, s.endedBy, s.end)], [('sleep', 'headband_off', lastData), ('work', 'headband_off', lastData)]);
+    expect(after.sleep, isFalse);
+    expect(gaveUp, 0);
+    now = now.add(const Duration(hours: 5));
+    await wait(150);
+    await running;
+    expect(gaveUp, 1);
+    expect(store.state.active, isFalse);
+    expect(File('${dir.path}/${after.id}.log').readAsStringSync(), contains('no data for 6 h: the recording stops itself'));
   });
 }
