@@ -29,6 +29,10 @@ strong WPA3 password it is safe enough; on a shared Wi-Fi others can read what i
 - A browser never sends the part of a link after `#`
   ([RFC 3986, section 3.5](https://www.rfc-editor.org/rfc/rfc3986#section-3.5)), so a code there stays between the
   laptop's screen, the camera and the app.
+- Android lets an app do short background work on a schedule without showing anything, but no more often than about
+  every 15 minutes, and it picks the exact moment to save battery
+  ([Android: JobInfo.Builder.setPeriodic](https://developer.android.com/reference/android/app/job/JobInfo.Builder),
+  [Android: Doze and App Standby](https://developer.android.com/training/monitoring-device-state/doze-standby)).
 - The lasting fix is encryption with certificates both devices check against each other, as Syncthing does
   ([Syncthing protocol](https://docs.syncthing.net/specs/bep-v1.html)).
 
@@ -36,6 +40,8 @@ strong WPA3 password it is safe enough; on a shared Wi-Fi others can read what i
 
 - Nothing here is encrypted. Someone who controls your home Wi-Fi at the moment you scan the laptop's code could
   still step in between the two devices.
+- How punctual the 15 minutes are on this phone is not measured yet: phone makers add their own battery limits, and
+  a phone lying unused may wait longer. Nothing is lost by a late job; the files go at the next one.
 - The phone cannot read your Wi-Fi's name without the location permission, which this app does not ask for. It
   learns that a network is home from the paired laptop, which recognises its own router.
 
@@ -46,6 +52,9 @@ strong WPA3 password it is safe enough; on a shared Wi-Fi others can read what i
 - After pairing the laptop signs every request with that key (with the time and a number used once, so a copied
   request cannot be sent again), and the phone answers with a proof of the same key. The phone's code is not used.
 - Away from home the phone shares nothing until you tap Share here; that lasts 12 hours and only on that Wi-Fi.
+- Between recordings the phone sends new files to the paired laptop by itself, about every 15 minutes at home and
+  right after a recording, with the app closed and with no notification. It first makes the laptop prove the pairing
+  and say it is at home; nothing goes anywhere else.
 - The Share on Wi-Fi sheet shows where it shares and when the laptop last copied, and cannot be screenshotted. The
   laptop's tray shows the same.
 - Before the phone removes a raw recording by itself, it asks the laptop to prove it still holds those exact bytes
@@ -55,6 +64,8 @@ strong WPA3 password it is safe enough; on a shared Wi-Fi others can read what i
 ## Sources
 
 - [OWASP MASWE-0050](https://mas.owasp.org/MASWE/MASVS-NETWORK/MASWE-0050/)
+- [Android: JobInfo.Builder.setPeriodic](https://developer.android.com/reference/android/app/job/JobInfo.Builder)
+- [Android: Doze and App Standby](https://developer.android.com/training/monitoring-device-state/doze-standby)
 - [Android: cleartext communications](https://developer.android.com/privacy-and-security/risks/cleartext-communications)
 - [Wireshark: Wi-Fi decryption](https://www.wireshark.org/docs/wsug_html_chunked/Ch80211Keys.html)
 - [HPE Aruba: WPA3-Personal](https://arubanetworking.hpe.com/techdocs/aos/wifi-design-deploy/security/modes/wpa3-personal/)

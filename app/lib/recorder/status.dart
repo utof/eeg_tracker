@@ -27,9 +27,17 @@ class RecorderStatus {
     this.driftOnsetMs,
     this.alarm,
     this.board,
+    this.quality,
+    this.contactAtMs,
   });
 
   final Phase phase;
+
+  /// Each electrode's word from the recorder's judge while it records (signal/quality.dart); null before.
+  final QualityVerdict? quality;
+
+  /// When [contactOhms] was measured (unix ms); null: at the night's start.
+  final int? contactAtMs;
 
   /// When Start was pressed (unix ms); 0 when no night is running.
   final int nightStartMs;
@@ -93,6 +101,8 @@ class RecorderStatus {
     String? note,
     Map<int, int>? slots,
     BoardLive? board,
+    QualityVerdict? quality,
+    int? contactAtMs,
   }) => RecorderStatus(
     phase: phase ?? this.phase,
     nightStartMs: nightStartMs ?? this.nightStartMs,
@@ -110,6 +120,8 @@ class RecorderStatus {
     driftOnsetMs: driftOnsetMs,
     alarm: alarm,
     board: board ?? this.board,
+    quality: quality ?? this.quality,
+    contactAtMs: contactAtMs ?? this.contactAtMs,
   );
 
   /// The same status with the smart alarm replaced (null: none).
@@ -130,6 +142,8 @@ class RecorderStatus {
     driftOnsetMs: driftOnsetMs,
     alarm: alarm,
     board: board,
+    quality: quality,
+    contactAtMs: contactAtMs,
   );
 
   /// The same status with the drift-off fields replaced (null clears them).
@@ -150,6 +164,8 @@ class RecorderStatus {
     driftOnsetMs: onsetMs,
     alarm: alarm,
     board: board,
+    quality: quality,
+    contactAtMs: contactAtMs,
   );
 
   Map<String, Object?> toMap({required int nowMs}) => {
@@ -173,6 +189,8 @@ class RecorderStatus {
     'driftOnsetMs': driftOnsetMs,
     'alarm': alarm?.toMap(),
     'board': board?.toMap(),
+    'quality': quality?.toMap(),
+    'contactAtMs': contactAtMs,
   };
 
   /// Parses a message from the recorder; returns null for anything else.
@@ -206,6 +224,8 @@ class RecorderStatus {
       driftOnsetMs: _int(data['driftOnsetMs']),
       alarm: AlarmStatus.fromMap(data['alarm']),
       board: BoardLive.fromMap(data['board']),
+      quality: QualityVerdict.fromMap(data['quality']),
+      contactAtMs: _int(data['contactAtMs']),
     );
   }
 }

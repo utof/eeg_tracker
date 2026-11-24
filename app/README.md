@@ -247,10 +247,21 @@ AVD, the emulator and its adb server at the end. It prints PASS / FAIL / SKIP:
   the replay headband into a real work session for 6.5 minutes; no break may start by itself, and the saved session
   must name the replay as its headband. Catches the "calibrating, then on break" loop of 2026-11-20 (DECISIONS 680,
   735); the laptop's replay tests check the same with talking from the start and after calibration.
+- **(e) Signal, then Start night: one connection** (only with `--only ...e` and `--replay`): the Signal tab reaches
+  the replayed headband, then Start night must record that live connection: the night's log says it started on the
+  live connection and did not measure contact again, and names one connection (DECISIONS 855-856).
 - **(d) crashes, ANRs, exit reasons**: logcat, `/data/anr` and `dumpsys activity exit-info` are kept; a crash or an
   ANR fails, and the app's own `files/app-starts.log` must hold its starts with Android's exit reasons.
 
 Logs and details go to `/var/tmp/eeg-precheck-<time>/out/` (`--out`). About 12 minutes, 30 with (c) on the 2-core AVD.
+
+### The push's own check
+
+`python3 tool/push_smoke.py <release APK> [--work <folder on a disk with room>]` (heavy build slot, about 25
+minutes, adb port 5049) pairs a temporary emulator with a receiver on this laptop and checks the phone's own
+sending (DECISIONS 849): the spare port, the scheduled job run by Android itself with the app closed, forced
+runs, the laptop's own copy beside it, and that no notification is shown. It waits for Android's own run before
+it forces any: every run of a periodic job moves Android's next window 15 minutes on.
 
 ## Replay headband (test and replay builds only)
 
@@ -1989,6 +2000,16 @@ paused. No notification comes with it (row 678): the line under the switch and t
 when the laptop last copied, and so does the laptop tray's menu. The sheet cannot be screenshotted, and its QR code
 holds only the address. **New code** shuts out every device that has the old one; the paired laptop does not use
 the code: **Forget this laptop** shuts it out.
+
+**The phone also sends by itself** (DECISIONS 840-849, `../docs/phone-link.md`). With a laptop paired, the phone
+does not wait to be asked: about every 15 minutes while it is on your home Wi-Fi, and a few seconds after each
+recording or session ends, it sends the laptop whatever the laptop lacks. This works with the app closed and the
+screen off, and there is no notification: Android runs it as a short background job. It goes only to the paired
+laptop (which must prove the pairing first) and only at home (the laptop recognises its own router). During a
+recording the laptop can also still ask the phone, as before; the two ways use the same rules and never copy a file
+twice. The Share sheet says so in one sentence, and the laptop tray shows "Phone: sent its files by itself 14:05".
+If something else on the phone holds port 8765, the app now serves on the next free port (8766-8768) and keeps
+trying during a recording; before, one failed start meant no sharing until Stop.
 
 **Connecting the laptop by one scan** (DECISIONS rows 530-539 and 753, `../docs/phone-link.md`). The square code on
 the laptop works once, for 5 minutes. The app asks before anything is sent; the laptop proves it showed that square

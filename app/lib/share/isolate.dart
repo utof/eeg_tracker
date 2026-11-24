@@ -29,6 +29,35 @@ const Duration _wifiWait = Duration(seconds: 3);
 /// the night screen lets go of the app's server at its once-a-minute sync. So tries cover 80 s.
 const int _bindTries = 40;
 
+/// After this many tries (about 15 s) the next ports are tried too.
+const int _spareAfter = 7;
+
+/// How many ports after the asked one may be used instead (8766-8768 for 8765).
+const int sparePorts = 3;
+
+/// What holds [port] on this phone, in words for the log: asked on the phone itself, at most about 4 s.
+Future<String> whoHolds(int port) async {
+  Socket? s;
+  try {
+    s = await Socket.connect(InternetAddress.loopbackIPv4, port, timeout: const Duration(seconds: 2));
+  } catch (_) {
+    return 'nothing answers there, yet Android says it is in use';
+  }
+  try {
+    s.write('GET / HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n');
+    await s.flush();
+    final first = await s.timeout(const Duration(seconds: 2)).first;
+    final text = String.fromCharCodes(first.take(400));
+    return text.contains('"error"') && text.startsWith('HTTP/1.')
+        ? 'an EEG Tracker server already answers there'
+        : 'another program answers there';
+  } catch (_) {
+    return 'something listens there and does not answer';
+  } finally {
+    s.destroy();
+  }
+}
+
 /// How long after its last file request the laptop still counts as copying.
 const Duration copyingQuiet = Duration(seconds: 15);
 const Duration _bindWait = Duration(seconds: 2);
@@ -232,21 +261,34 @@ Future<void> serveShare(List<Object?> args, void Function(void Function(Object e
   });
   toHost.send(['port', inbox.sendPort]);
 
-  for (var attempt = 1; ; attempt++) {
-    try {
-      await (binding = server.listen());
-      bound = true;
-      break;
-    } catch (e) {
-      if (attempt >= _bindTries) {
-        await end('could not listen on port ${server.port}: $e');
-        return;
+  // The port asked for; when it stays taken for [_spareAfter] tries, also the next [sparePorts] ones (the paired
+  // laptop looks at them too: scripts/phone_link.py), so something else holding the port never ends sharing.
+  for (var attempt = 1; !bound; attempt++) {
+    Object? why;
+    for (final p in [server.port, if (attempt > _spareAfter) for (var k = 1; k <= sparePorts; k++) server.port + k]) {
+      try {
+        await (binding = server.listen(on: p));
+        bound = true;
+        break;
+      } catch (e) {
+        why ??= e;
+        if (closing) return;
       }
-      await Future<void>.delayed(_bindWait);
-      if (closing) return;
     }
+    if (bound) break;
+    if (attempt >= _bindTries) {
+      await end('could not listen on port ${server.port} or the next $sparePorts: $why; ${await whoHolds(server.port)}');
+      return;
+    }
+    await Future<void>.delayed(_bindWait);
+    if (closing) return;
   }
   if (closing) return; // stopped while binding: end() closed what was bound
+  if (server.boundPort != server.port) {
+    final holder = await whoHolds(server.port);
+    if (closing) return;
+    toHost.send(['log', 'sharing on Wi-Fi: port ${server.port} is taken ($holder); using port ${server.boundPort}']);
+  }
   var said = 0;
   setOnError((e) {
     if (closing || ++said > 5) return; // the first few are enough to find it
@@ -306,7 +348,8 @@ File _copiedFile(String filesDir) => File('$filesDir/transfer/copied.json');
   return (atMs: 0, by: '');
 }
 
-void _writeCopied(String filesDir, int atMs, String by) {
+/// Also the push (push/run.dart), when the laptop took files from it.
+void writeCopied(String filesDir, int atMs, String by) {
   try {
     final f = _copiedFile(filesDir);
     f.parent.createSync(recursive: true);
@@ -568,7 +611,7 @@ class ShareHost {
           final again = now - _status.copiedAtMs < 60000 && by == _status.copiedBy;
           _status = shareStatusWith(_status, copiedAtMs: now, copiedBy: by);
           if (!again) {
-            _writeCopied(filesDir, now, by); // once a minute at most
+            writeCopied(filesDir, now, by); // once a minute at most
             onChange?.call(_status);
           }
         case 'marker':

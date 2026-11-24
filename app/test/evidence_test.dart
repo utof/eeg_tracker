@@ -28,6 +28,7 @@ void main() {
       'work-session',
       'memory-cues',
       'auto-start',
+      'signal-quality',
       'confirm-questions',
       'asking',
       'share-on-wifi',

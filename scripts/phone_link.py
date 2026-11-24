@@ -3,6 +3,7 @@
 usage: python3 scripts/phone_link.py [--dest _local] [--every 2] [--no-pages] [--no-mirror]
        less common: [--address <this laptop's Wi-Fi address>] [--port 8771] [--pages-port 8770] [--qr web|app]
                     [--phone-at http://127.0.0.1:8765] [--name <shown on the phone>]
+                    [--push-port 8772] [--no-push] [--push-loopback-home]
        the tray's:  --keep   (a remembered phone, quietly: DECISIONS 677) [--no-after-pull]
 
 The owner's steps (app/README.md, "Share on Wi-Fi"): run this, point the phone's camera at the code it shows, tap the
@@ -32,6 +33,11 @@ How it works (DECISIONS rows 530-539, 750-759; docs/phone-link.md):
   one is asked for on this laptop (`POST http://127.0.0.1:8771/new`: the page's button, or the tray's "Pair phone…",
   which then opens the page); while that code is shown it also listens on the laptop's Wi-Fi address (none when the
   laptop has no home-network address). It ends by itself when the pairing is forgotten (`link.json` deleted).
+- With `--keep` the phone may also send its files by itself (scripts/push_receiver.py, port 8772): it opens the
+  connection, signs every request with the pairing's key, and this laptop only takes what it lacks, through the same
+  pull_phone.py pass and lock. That port listens on 127.0.0.1 and, only while this laptop is on its home network, on
+  its home-network address. When the phone does not answer at its port, its three fallback ports (8766-8768) are
+  tried at the same address before the network is looked around.
 - With `--keep`, the laptop's after-pull jobs (scripts/after_pull.py: pack old raw recordings, the daily export for
   utof_tracker, the data book) start in the background after a copy that brought something new, at most once every
   30 minutes, and once a day without one (DECISIONS 768); `--no-after-pull` leaves them out.
@@ -74,6 +80,7 @@ MAX_BODY = 4096
 HOME_CHECK_S = 30.0  # how long a look at this laptop's network (its router) is trusted
 SWEEP_EVERY_S = 600.0  # at most one look around the home network for a phone that moved, this often
 SWEEP_TIMEOUT_S = 0.4
+PHONE_PORTS = (8765, 8766, 8767, 8768)  # the phone's Share on Wi-Fi port, and the ones it falls back to when taken
 
 _LAN = tuple(ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"))
 _NOT_WIFI = re.compile(r"^(lo|tun|tap|wg|docker|br-|virbr|veth|vmnet|vboxnet|zt|tailscale|ppp|wwan)")
@@ -248,6 +255,7 @@ class Link:
         self.answering = False  # the last mirror pass reached the phone
         self.sharing: str | None = None  # what the phone said of its Wi-Fi: home, here (allowed by hand), paused
         self.last_copy: str | None = None  # when the last pass reached the phone (local time, ISO)
+        self.last_push: str | None = None  # when the phone last sent its files by itself (push_receiver.py)
         self.swept = -1e18  # when the home network was last looked around for the phone
         self._nonces: dict[str, tuple[str, float]] = {}  # laptop nonce -> (phone nonce, until)
         self.key: str | None = None
@@ -366,12 +374,12 @@ class Link:
                 return (u.hostname or "127.0.0.1", u.port or p.port)
             return (p.address, p.port)
 
-    def moved_to(self, address: str) -> None:
-        """The phone was found at a new address (by its proof of the key)."""
+    def moved_to(self, address: str, port: int | None = None) -> None:
+        """The phone was found at a new address, or at another port (by its proof of the key)."""
         with self.lock:
-            if self.phone is None:
+            if self.phone is None or self.phone == PhoneAt(address, port or self.phone.port):
                 return
-            phone = self.phone = PhoneAt(address, self.phone.port)
+            phone = self.phone = PhoneAt(address, port or self.phone.port)
             self._save(paired=False)
         for f in list(self.listeners):
             f(phone, False)
@@ -488,7 +496,7 @@ def status(link: Link) -> dict:
     t = link.target()
     return {"connected": link.answering, "phone": None if t is None else f"{t[0]}:{t[1]}",
             "code_valid": link.code_valid(), "name": link.name, "sharing": link.sharing,
-            "last_copy": link.last_copy, "home": link.at_home(), "repair": link.old}
+            "last_copy": link.last_copy, "last_push": link.last_push, "home": link.at_home(), "repair": link.old}
 
 
 def local_page(link: Link) -> bytes:
@@ -683,7 +691,7 @@ def mirror_pass(link: Link, dest: Path, say: Say, last: list[str | None], raw_on
         try:
             rep = pp.pull(phone, dest, raw_only=raw_only, now=now, key=link.key)
         except pp.PhoneError as e:
-            if isinstance(e, pp.Paused) or not _look_around(link, hosts):
+            if isinstance(e, pp.Paused) or not (_other_port(link) or _look_around(link, hosts)):
                 raise
             phone = phone_of(link)
             assert phone is not None
@@ -717,6 +725,24 @@ def mirror_pass(link: Link, dest: Path, say: Say, last: list[str | None], raw_on
         say(msg)
         last[0] = msg
     return None
+
+
+def _other_port(link: Link) -> bool:
+    """The phone's server takes one of three other ports when its own is taken: they are tried at the same address
+    with a signed `GET /who`. True when one proved the key (link.json then holds it)."""
+    t, key = link.target(), link.key
+    if t is None or key is None or link.override:
+        return False
+    for port in PHONE_PORTS:
+        if port == t[1] or not _port_open(t[0], port, SWEEP_TIMEOUT_S):
+            continue
+        try:
+            if pp.Phone(f"http://{t[0]}:{port}", key=key, home=link.at_home).who() is not None:
+                link.moved_to(t[0], port)
+                return True
+        except pp.PhoneError:
+            continue
+    return False
 
 
 def _look_around(link: Link, hosts: Callable[[], list[str]] | None) -> bool:
@@ -787,6 +813,20 @@ def show_code(link: Link, say: Say, qr: str, color: bool) -> None:
         "laptop's browser.", stamp=False)  # the code itself is never written out: the log keeps it
 
 
+def start_push(link: Link, a: argparse.Namespace, say: Say, after: Callable[[bool], object] | None = None):
+    """The receiver of what the phone sends by itself (scripts/push_receiver.py), on this laptop's own address; its
+    listener, or None when the port is taken. [after] is called with "something changed" after each of its passes."""
+    import push_receiver
+    r = push_receiver.Receiver(link, a.dest, say, client_ok=allowed_client, is_loopback=is_loopback,
+                               allow_loopback_home=a.push_loopback_home, raw_only=a.raw_only, after=after)
+    listener = push_receiver.Listener(r, a.push_port)
+    if listener.loop is None:
+        say(f"The phone cannot send its files by itself: port {a.push_port} is taken (--push-port). The copying from "
+            "this laptop goes on.")
+        return None
+    return listener
+
+
 KEEP_LOOK_S = 30.0  # --keep: how often this laptop's home-network address is looked at again
 
 
@@ -810,6 +850,17 @@ def keep(a: argparse.Namespace, out: Callable[[str], object], *, find: Callable[
     say = Say(out)
     stop = stop or threading.Event()
     lan = LanListener(link, a.port)
+    # the after-pull jobs follow a copy that brought something new, whichever way it came (one at a time)
+    kicker = None if a.no_after_pull else after_pull.Kicker(a.dest)
+    kick_lock = threading.Lock()
+
+    def after(changed: bool) -> bool:
+        if kicker is None:
+            return False
+        with kick_lock:
+            return kicker(changed)
+
+    push = None if a.no_push else start_push(link, a, say, after)
     home: list[str | None] = [None]   # this laptop's home-network address now, or None while there is none
 
     def look() -> None:
@@ -828,7 +879,6 @@ def keep(a: argparse.Namespace, out: Callable[[str], object], *, find: Callable[
     if not a.no_pages:
         start_pages(link, a.pages_port, a.recordings or a.dest / "recordings", say)
     if not a.no_mirror:
-        after = None if a.no_after_pull else after_pull.Kicker(a.dest)
         threading.Thread(target=mirror_loop, args=(link, a.dest, a.every, say, stop, a.raw_only, after), daemon=True,
                          name="mirror").start()
     say("Remembered phone: copying whenever it answers.")
@@ -844,6 +894,8 @@ def keep(a: argparse.Namespace, out: Callable[[str], object], *, find: Callable[
             if time.monotonic() >= next_look:
                 next_look = time.monotonic() + look_s
                 look()
+            if push is not None:
+                push.sync(home[0])  # the phone's own sending: on the home network only while this laptop is there
             was = lan.bound
             lan.sync(home[0])
             if lan.bound != was:
@@ -854,6 +906,8 @@ def keep(a: argparse.Namespace, out: Callable[[str], object], *, find: Callable[
         stop.set()
         link.changed.set()
         lan.close()
+        if push is not None:
+            push.close()
         for srv in loop:
             srv.shutdown(); srv.server_close()
 
@@ -877,6 +931,11 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--phone-at", help="reach the phone here instead (adb forward: http://127.0.0.1:8765)")
     ap.add_argument("--name", help="this laptop's name on the phone (default: the computer's name)")
     ap.add_argument("--recordings", type=Path, help="the page server's results folder (default: <dest>/recordings)")
+    ap.add_argument("--push-port", type=int, default=8772,
+                    help="with --keep: the port the phone sends its files to by itself (default 8772)")
+    ap.add_argument("--no-push", action="store_true", help="with --keep: do not take files the phone sends by itself")
+    ap.add_argument("--push-loopback-home", action="store_true",
+                    help="for tests and the emulator: a client on this computer counts as on the home network")
     ap.add_argument("--keep", action="store_true",
                     help="the tray's way: a remembered phone, quietly, following this laptop's address, until forgotten")
     ap.add_argument("--no-after-pull", action="store_true",

@@ -6,6 +6,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../walking/detector.dart' show walkDetector;
 import '../wearer/check.dart' show nightSignal, wearerAnswerIn;
 import 'drift.dart';
 import 'extras.dart';
@@ -16,6 +17,7 @@ import 'rem_check.dart';
 /// 2026-11-19 also `drift_off` (drift.dart) and `wearer_signal` ("Was this you?", wearer/check.dart), added without a
 /// new version; and `wearer`, the owner's answer, which a rebuilt report keeps. Since 2026-11-20 also `probs` (the
 /// model's per-epoch probabilities) and `rem_check` (the dream sleep check, rem_check.dart), without a new version.
+/// Since 2026-11-24 also `walking` (the epochs the walking detector calls walking, scored awake; DECISIONS 920).
 /// On the phone a report of an older version is kept as it is and offers "Score again" (DECISIONS row 580; the
 /// laptop rebuilds it).
 const int reportVersion = 2;
@@ -130,6 +132,13 @@ class SleepReport {
   /// The model's per-epoch probabilities in permille (W N1 N2 N3 R), or null in a report from before 2026-11-20.
   List<List<int>>? get probabilities => decodeProbs(json['probs']);
 
+  /// Minutes the walking veto turned from asleep to awake (0 when none), or null in a report from before it or when
+  /// the walking detector did not look.
+  double? get walkingChangedMin => switch (json['walking']) {
+    {'changed_min': final num m} => m.toDouble(),
+    _ => null,
+  };
+
   /// The owner's answer to "Was this you?" (`me` or `someone else`), or null (wearer/wearer.dart).
   String? get wearerAnswer => wearerAnswerIn(json);
 
@@ -162,7 +171,8 @@ class SleepReport {
 /// joined night (gaps and padding included); [inputs] the `.f32` names and sizes read. [probabilities]: the model's
 /// mean probabilities, epochs x 5 (W N1 N2 N3 R), for `probs` and the dream sleep check. [seen]: what the detectors
 /// saw over the same samples, for `extras`, `drift_off` and the check's eye movements; [extrasError]: why that pass
-/// failed.
+/// failed. [stages] come with the walking veto already on ([walking]: the walking detector's answer per epoch, null
+/// when it did not look; [walkingChanged]: how many asleep epochs it turned awake), for `walking`.
 Map<String, dynamic> buildReport({
   required String nightOf,
   required DateTime built,
@@ -176,6 +186,8 @@ Map<String, dynamic> buildReport({
   List<double>? probabilities,
   NightSeen? seen,
   String? extrasError,
+  List<bool>? walking,
+  int walkingChanged = 0,
 }) {
   final rep = <String, dynamic>{
     'version': reportVersion,
@@ -220,6 +232,7 @@ Map<String, dynamic> buildReport({
         'wearer_signal': null,
         'probs': null,
         'rem_check': null,
+        'walking': null,
       });
   }
   // the laptop takes the confidence from probabilities rounded to 3 decimals (sleep.json)
@@ -319,8 +332,22 @@ Map<String, dynamic> buildReport({
       'wearer_signal': wearer,
       'probs': probs,
       'rem_check': check,
+      'walking': walking == null ? null : walkingReport(walking, walkingChanged),
     });
 }
+
+/// The rule of the report's `walking`, in words (the laptop's report says the same).
+const String walkingRule = 'an asleep epoch with half or more of it in a walking stretch is scored awake';
+
+/// The report's `walking` object: the walking detector's answer per epoch ([walking], one character each: 1
+/// walking), the minutes walking, and the minutes its veto turned from asleep to awake ([changed] epochs).
+Map<String, Object?> walkingReport(List<bool> walking, int changed) => {
+  'detector': walkDetector,
+  'rule': walkingRule,
+  'epochs': walking.map((w) => w ? '1' : '0').join(),
+  'walking_min': walking.where((w) => w).length * epochMinutes,
+  'changed_min': changed * epochMinutes,
+};
 
 /// `files/nights/`: one report per night, replaced whole (written to a temporary file, then renamed).
 class NightReportStore {
@@ -404,9 +431,11 @@ bool isStale(Map<String, int> files, SleepReport? report, {int newDataMinutes = 
 }
 
 /// Whether [report] came from an older scorer than [model] (the phone's): another report version, made before
-/// `drift_off` or the dream sleep check (`rem_check`) existed, or a scored night by another model.
+/// `drift_off`, the dream sleep check (`rem_check`) or the walking veto (`walking`) existed, or a scored night by
+/// another model.
 bool scoredByOlder(SleepReport report, {required String model}) =>
     report.json['version'] != reportVersion ||
     !report.json.containsKey('drift_off') ||
     !report.json.containsKey('rem_check') ||
+    !report.json.containsKey('walking') ||
     (report.scored && report.json['model'] != model);

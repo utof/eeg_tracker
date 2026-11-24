@@ -946,6 +946,7 @@ class PhoneLook:
     copying: bool = False      # phone_link.py on this laptop copies its files now
     copied: datetime | None = None   # when phone_link.py last reached the phone
     sharing: str | None = None       # what the phone says of its Wi-Fi: home, here (allowed by hand), paused
+    pushed: datetime | None = None   # when the phone last sent its files by itself (phone/push-state.json)
 
 
 def phone_state(address: str, port: int, key: str, home: str | None = None, timeout: float = PHONE_TIMEOUT_S
@@ -978,12 +979,17 @@ def look_at_phone(local: Path, now: datetime, ask: Callable[..., tuple[str, dict
         return PhoneLook(now, "repair" if _old_pairing(local) else "unpaired")
     result, state, code = ask(*t)
     copying, copied, sharing = False, None, None
+    try:  # read from the disk: the phone may send its files while its own server does not answer
+        push = json.loads((local / "phone" / "push-state.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        push = None
+    pushed = _aware(push.get("last_push")) if isinstance(push, dict) else None
     if result == "ok":
         st = probe()
         copying = bool(st and st.get("connected"))
         copied = _aware(st.get("last_copy")) if st else None
         sharing = st.get("sharing") if st and st.get("sharing") in ("home", "here", "paused") else None
-    return PhoneLook(now, result, t[0], state, code, copying, copied, sharing)
+    return PhoneLook(now, result, t[0], state, code, copying, copied, sharing, pushed)
 
 
 def _num(v: object) -> float | None:
@@ -1006,6 +1012,24 @@ WORK_LEVELS = {"alert": "alert", "getting_drowsy": "getting drowsy", "drowsy": "
 WORK_SIGNALS = {"good": "signal good", "noisy": "signal noisy", "no_eyes": "an electrode has no contact",
                 "lost": "signal lost", "off": "not on the head"}
 HINT_WHY = {"drowsy": "drowsiness", "eyes_closed": "eyes closed a while", "stretch": "time", "snooze": "time, snoozed"}
+
+
+ALERT_KINDS = ("lost", "back", "battery")
+ALERT_FRESH_S = 30 * 60        # an older notice is never shown (the tray started long after it)
+
+
+def headband_alert(state: dict | None) -> tuple[str, int, str, str] | None:
+    """The phone's newest headband notice in its /state ("alert": kind, at in unix seconds, title, text) as (kind,
+    at, title, text) with the title cut to 80 and the text to 300 characters; None when there is none or it is not
+    as the app writes it."""
+    a = state.get("alert") if isinstance(state, dict) else None
+    if not isinstance(a, dict):
+        return None
+    kind, at, title, text = a.get("kind"), a.get("at"), a.get("title"), a.get("text")
+    if (kind not in ALERT_KINDS or isinstance(at, bool) or not isinstance(at, int)
+            or not isinstance(title, str) or not isinstance(text, str) or not title.strip() or not text.strip()):
+        return None
+    return kind, at, title.strip()[:80], text.strip()[:300]
 
 
 def work_session(state: dict) -> dict | None:
@@ -1096,9 +1120,27 @@ class PhoneView:
     lines: tuple[str, ...] = ()
 
 
+def pushed_line(look: PhoneLook | None) -> str | None:
+    """When the phone last sent its files by itself: the time today, the day too when it was another day."""
+    if look is None or look.pushed is None:
+        return None
+    t = look.pushed.astimezone()
+    day = "" if t.date() == look.at.astimezone().date() else f"{t.day} {t.strftime('%b')}, "
+    return f"Phone: sent its files by itself {day}{hm(t)}"
+
+
 def phone_view(last: PhoneLook | None, ok: PhoneLook | None, misses: int) -> PhoneView:
     """The menu's phone lines and the icon's ring from the latest look and the last answered one: one failed look
-    after an answer keeps that answer (a Wi-Fi blip); [PHONE_MISSES] in a row, or none answered, is the failure."""
+    after an answer keeps that answer (a Wi-Fi blip); [PHONE_MISSES] in a row, or none answered, is the failure.
+    When the phone sent its files by itself, a line says when (also while it is not reachable)."""
+    v = _phone_view(last, ok, misses)
+    sent = pushed_line(last)
+    if sent is None or v.kind not in ("unreachable", "refused", "reachable") or not v.lines:
+        return v
+    return PhoneView(v.kind, v.ring, v.lines[:1] + (sent,) + v.lines[1:])
+
+
+def _phone_view(last: PhoneLook | None, ok: PhoneLook | None, misses: int) -> PhoneView:
     if last is None:
         return PhoneView("checking", "none", ())
     if last.result == "unpaired":
@@ -1249,6 +1291,7 @@ class WorkTray:
         self.keeper = keeper                    # phone_link.py --keep while a phone is paired (DECISIONS 677)
         self.phone_last: PhoneLook | None = None; self.phone_ok: PhoneLook | None = None
         self.phone_misses = 0; self.phone_told = False
+        self.alert_seen: tuple[str, int] | None = None   # the phone's newest headband notice already dealt with
         self.work_signal = work_signal          # tells the paired phone a session started (True) or ended (False)
         self.session: WorkSession | None = None
         self.spans: list[Span] = []; self.window: list[dict] = []
@@ -1320,6 +1363,7 @@ class WorkTray:
         self.phone_last = look
         if look.result == "ok":
             self.phone_ok = look; self.phone_misses = 0; self._close("phone")
+            self._headband_alert(look, now)
         elif look.result in ("unpaired", "repair"):
             self.phone_ok = None; self.phone_misses = 0
         else:
@@ -1337,6 +1381,18 @@ class WorkTray:
                         "The phone is on another Wi-Fi (sharing paused there), or no longer knows this laptop: Pair "
                         "phone… in the tray's menu pairs them again.")
                 self._notify("phone", "Phone not reachable", body, [], lambda _k: None, low=True)
+
+    def _headband_alert(self, look: PhoneLook, now: datetime) -> None:
+        """The phone's newest headband notice, once: shown as a notification (one key, so a newer one replaces the
+        older) when notifications are on and it is under 30 minutes old; an older or switched-off one only counts as
+        seen, so it never comes later."""
+        a = headband_alert(look.state)
+        if a is None or (a[0], a[1]) == self.alert_seen:
+            return
+        self.alert_seen = (a[0], a[1])
+        if self.s.notifications and look.at.timestamp() - a[1] <= ALERT_FRESH_S:
+            self.log.append(f"{hm(now)} headband notice from the phone ({a[0]})")
+            self._notify("headband-alert", a[2], a[3], [], lambda _k: None)
 
     def phone_now(self) -> PhoneView:
         if self.phone is None:

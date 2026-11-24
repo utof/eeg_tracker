@@ -46,6 +46,7 @@ import '../recorder/acks.dart';
 import '../recorder/recheck.dart';
 import 'auth.dart';
 import 'protocol.dart';
+import 'push/state.dart' show writeLaptopAt;
 
 const List<String> _brainBit = ['O1', 'O2', 'T3', 'T4'];
 const int _fs = 250;
@@ -404,9 +405,10 @@ class ShareServer {
   /// Listens on every IPv4 address of the phone (DECISIONS row 562): Wi-Fi, the phone itself for `adb forward`, and
   /// mobile data and a VPN too, which [isServedClient] turns away. So the server does not depend on finding the
   /// Wi-Fi address, and a new lease needs no new socket. Throws when the port is taken.
-  Future<void> listen() async {
+  /// [on]: another port than [port] (the spare ones, when something else holds it: isolate.dart).
+  Future<void> listen({int? on}) async {
     if (_server != null) return;
-    final socket = await ServerSocket.bind(InternetAddress.anyIPv4, port, shared: false);
+    final socket = await ServerSocket.bind(InternetAddress.anyIPv4, on ?? port, shared: false);
     final s = HttpServer.listenOn(_CappedSocket(socket, total: serverConnectionsMax, perClient: serverConnectionsPerClient));
     s.idleTimeout = const Duration(seconds: 30);
     s.defaultResponseHeaders.clear();
@@ -491,6 +493,18 @@ class ShareServer {
   void setSession(Map<Object?, Object?>? session) => _session = session;
   Map<Object?, Object?>? _session;
 
+  /// /state's `alert`: the newest headband notice (lost, back, battery nearly empty; lib/headband/lost_watch.dart,
+  /// DECISIONS 857), the known fields only, or null. A night's comes inside its live status, a daytime session's beside
+  /// its summary. The laptop's tray shows each new one once.
+  Map<String, Object?>? _alertState() {
+    final live = _live['alert'], day = _session?['alert'];
+    final a = live is Map ? live : day;
+    if (a is! Map) return null;
+    final kind = a['kind'], at = a['at'], title = a['title'], text = a['text'];
+    if (kind is! String || at is! num || title is! String || text is! String) return null;
+    return {'kind': kind, 'at': at.toInt(), 'title': title, 'text': text};
+  }
+
   /// /state's `session`: the known fields only, and `age`, the seconds since the headband's last data by this
   /// phone's clock, so the laptop sees a session whose data stopped (or whose screen froze) as stale.
   Map<String, Object?>? _sessionState() {
@@ -566,6 +580,7 @@ class ShareServer {
       'contact_t': _contactT,
       'data': data,
       'session': _sessionState(),
+      'alert': _alertState(),
     };
   }
 
@@ -599,6 +614,7 @@ class ShareServer {
       final path = req.uri.path;
       final loopback = _loopback(client);
       if (!loopback) _vouch(caller);
+      if (!loopback && caller.laptop) _noteLaptopAt(who);
       if (path == '/who' || path == '/who/') {
         if (!caller.laptop) return await _json(res, 403, {'error': 'the paired laptop signs this'});
         return await _json(res, 200, {'app': 'eeg-tracker', 'v': 2, 'here': here});
@@ -622,7 +638,7 @@ class ShareServer {
       }
       if (path == '/recheck' || path == '/recheck/') {
         if (!caller.laptop) return await _json(res, 403, {'error': 'the paired laptop signs this'});
-        return method == 'POST' ? await _recheck(res, body) : await _json(res, 200, _questions());
+        return method == 'POST' ? await _recheck(res, body) : await _json(res, 200, questions());
       }
       if (path == '/ack' || path == '/ack/') {
         if (method != 'POST') return await _json(res, 405, {'error': 'POST {"v":1,"files":[...]}'});
@@ -808,6 +824,12 @@ class ShareServer {
   /// The paired laptop's acks (recorder/acks.dart), in a request it signed: refused whole without a well-formed
   /// body; then each file on its own (kept only when it holds what the laptop says it checked).
   Future<void> _ack(HttpResponse res, List<int> body) async {
+    final r = await takeAcks(body);
+    return _json(res, r.code, r.json);
+  }
+
+  /// The acks of a `POST /ack` body, or of a push's answer (push/run.dart): the status and the answer.
+  Future<({int code, Map<String, Object?> json})> takeAcks(List<int> body) async {
     final asked = <({String path, String sha256})>[];
     try {
       final Object? j = jsonDecode(utf8.decode(body));
@@ -817,7 +839,7 @@ class ShareServer {
         asked.add((path: f['path'] as String, sha256: f['sha256'] as String));
       }
     } catch (_) {
-      return _json(res, 400, {'error': 'send {"v":1,"files":[{"path":...,"sha256":...}]}'});
+      return (code: 400, json: <String, Object?>{'error': 'send {"v":1,"files":[{"path":...,"sha256":...}]}'});
     }
     _readCache();
     final now = _now();
@@ -836,13 +858,22 @@ class ShareServer {
     try {
       AckStore(filesDir).add(kept);
     } catch (e) {
-      return _json(res, 500, {'error': 'the acks could not be kept: $e'});
+      return (code: 500, json: <String, Object?>{'error': 'the acks could not be kept: $e'});
     }
-    return _json(res, 200, {'v': 1, 'acked': acked, 'refused': refused});
+    return (code: 200, json: <String, Object?>{'v': 1, 'acked': acked, 'refused': refused});
+  }
+
+  /// Where the paired laptop's signed requests come from, kept in `transfer/laptop-at.json` for the push
+  /// (push/run.dart): the laptop's address may have changed since the pairing.
+  String? _laptopAt;
+  void _noteLaptopAt(String address) {
+    if (address == _laptopAt) return;
+    _laptopAt = address;
+    writeLaptopAt(filesDir.path, address);
   }
 
   /// GET /recheck: the open questions before deleting (recheck.dart), for the paired laptop.
-  Map<String, Object?> _questions() => {
+  Map<String, Object?> questions() => {
     'v': 1,
     'asks': [for (final a in RecheckStore(filesDir).open().values) a.toJson()..remove('asked_ms')],
   };
@@ -850,13 +881,19 @@ class ShareServer {
   /// POST /recheck: the laptop's answers. Each is checked against the phone's own bytes; a laptop that does not hold a
   /// file, or holds other bytes, loses that file's ack (nothing is deleted on it; the laptop copies and acks it again).
   Future<void> _recheck(HttpResponse res, List<int> body) async {
+    final r = takeProofs(body);
+    return _json(res, r.code, r.json);
+  }
+
+  /// The proofs of a `POST /recheck` body, or of a push's answer: the status and the answer.
+  ({int code, Map<String, Object?> json}) takeProofs(List<int> body) {
     final List<Map<Object?, Object?>> answers;
     try {
       final Object? j = jsonDecode(utf8.decode(body));
       if (j is! Map || j['v'] != 1 || j['proofs'] is! List) throw const FormatException();
       answers = [for (final a in j['proofs'] as List) if (a is Map) a else throw const FormatException()];
     } catch (_) {
-      return _json(res, 400, {'error': 'send {"v":1,"proofs":[{"path","nonce","mac"}]}'});
+      return (code: 400, json: <String, Object?>{'error': 'send {"v":1,"proofs":[{"path","nonce","mac"}]}'});
     }
     final store = RecheckStore(filesDir), open = store.open(), now = _now();
     final proven = <String>[], failed = <Map<String, String>>[], lost = <String>[];
@@ -893,7 +930,7 @@ class ShareServer {
         onProved?.call(proven.length);
       } catch (_) {}
     }
-    return _json(res, 200, {'v': 1, 'proven': proven, 'failed': failed});
+    return (code: 200, json: <String, Object?>{'v': 1, 'proven': proven, 'failed': failed});
   }
 
   /// A plain file's SHA-256 for an ack: the kept one while the file is unchanged, else read now.
@@ -1024,6 +1061,8 @@ class ShareServer {
   /// The list Export data's manifest holds (`path`, `bytes`, `sha256`, `modified_ms`), made now from the folder.
   /// A file still being written has `sha256: null` and `growing: true`; so has every file with [hash] false
   /// unless its SHA-256 is already known.
+  Future<Map<String, Object?>> fileList({bool hash = true}) => _fileList(hash: hash);
+
   Future<Map<String, Object?>> _fileList({required bool hash}) async {
     _readCache();
     final stored = storedFiles(filesDir);

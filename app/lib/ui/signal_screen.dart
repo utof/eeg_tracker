@@ -5,10 +5,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../headband/connection.dart';
 import '../logs/activity.dart' show Activity;
 import '../phone.dart';
 import '../signal/layout.dart';
 import '../signal/signal_feed.dart';
+import 'device_status.dart';
 import 'evidence_sheet.dart' show showEvidence;
 import 'signal_phone.dart';
 import 'signal_view.dart';
@@ -34,6 +36,7 @@ class _SignalScreenState extends State<SignalScreen> with WidgetsBindingObserver
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.feed.addListener(_changed);
+    HeadbandConnection.shared?.status.addListener(_changed);
   }
 
   @override
@@ -67,6 +70,7 @@ class _SignalScreenState extends State<SignalScreen> with WidgetsBindingObserver
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.feed.removeListener(_changed);
+    HeadbandConnection.shared?.status.removeListener(_changed);
     Activity.set('signal', on: false);
     unawaited(widget.feed.setActive(false));
     super.dispose();
@@ -101,13 +105,22 @@ class _SignalScreenState extends State<SignalScreen> with WidgetsBindingObserver
   @override
   Widget build(BuildContext context) {
     final f = widget.feed;
+    // the headband card every screen shares; its panel reads this page's own signal (the DIY board has no card yet)
+    final owner = f.device.diy ? null : HeadbandConnection.shared;
+    final card = owner == null
+        ? null
+        : DeviceCard(
+            status: owner.status,
+            panel: PanelSource(signal: () => f.signal, frames: f.frames),
+            onMeasure: f.canMeasure ? () => unawaited(f.measureAgain()) : null,
+          );
     return SignalView(
-      model: SignalViewModel.of(f),
+      model: SignalViewModel.of(f).withQuality(owner?.status.value.quality),
+      device: card,
       signal: f.signal,
       frames: f.frames,
       pose: f.pose,
       onAction: (a) => unawaited(_action(a)),
-      onMeasure: () => unawaited(f.measureAgain()),
       onPositions: () => unawaited(_positions()),
       onInfo: () => showEvidence(context, 'sleep-recording'),
     );

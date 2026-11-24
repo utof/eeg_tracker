@@ -6,7 +6,6 @@
 import 'package:flutter/material.dart';
 
 import '../detectors/drift_off.dart' show DriftState;
-import '../recorder/contact.dart';
 import '../recorder/nights.dart' show nightLabel;
 import '../sound/audio_route.dart';
 import '../states/controller.dart' show SoundStage;
@@ -22,6 +21,7 @@ import 'meditation_view.dart' show MarkShape, StateMark;
 import 'parts.dart';
 import 'sound_score.dart';
 import 'states_weeks_view.dart';
+import 'device_status.dart';
 import 'theme.dart';
 
 class StatesViewModel {
@@ -527,7 +527,7 @@ class StatesView extends StatelessWidget {
                   '${m.quietS} of ${m.quietTarget} clean seconds',
                   style: text.bodyMedium?.copyWith(color: faceMuted, fontFeatures: tabular),
                 ),
-                if (m.contact.isNotEmpty) ...[const SizedBox(height: 24), Opacity(opacity: 0.72, child: _Contact(m.contact))],
+                const Opacity(opacity: 0.72, child: SharedDeviceCard(top: 24)),
               ],
               if (sounding) ...[
                 const SizedBox(height: 16),
@@ -689,13 +689,3 @@ class _Note extends StatelessWidget {
   }
 }
 
-/// Contact at the start, one cell per channel (the dream catcher's quiet face does the same).
-class _Contact extends StatelessWidget {
-  const _Contact(this.ohms);
-  final Map<String, double?> ohms;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [for (final n in const ['O1', 'O2', 'T3', 'T4']) Expanded(child: ContactCell(n, classifyOhms(ohms[n])))],
-  );
-}

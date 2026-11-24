@@ -19,18 +19,18 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import '../detectors/filters.dart' show Chain, highPass, lowPass, notch;
+import '../detectors/filters.dart' show Chain;
+import '../detectors/harmonic.dart';
 import '../feedback/features.dart' show median;
-import '../sleep/dsp.dart' show Fft;
+import '../walking/detector.dart' show WalkWindows, walkingEpochs;
 
 /// The detector's version: a pulse file of another one is made again.
-const String pulseDetector = 'pulse-v1';
+const String pulseDetector = 'pulse-v2'; // v2: no reading while walking (the walking detector's veto; DECISIONS 922)
 
 /// The planning values (DECISIONS 810-819), the same as analysis/pulse.py.
 abstract final class PulseRule {
   static const double epochS = 30;
   static const double highPassHz = 0.5, lowPassHz = 20;
-  static final List<double> butterQ = [1 / (2 * math.cos(math.pi / 8)), 1 / (2 * math.cos(3 * math.pi / 8))];
   static const List<double> notchesHz = [50, 60];
   static const double notchQ = 8;
   static const double segmentS = 8, segmentHopS = 4;
@@ -63,6 +63,9 @@ abstract final class PulseRule {
 abstract final class PulseCode {
   static const String read = 'r', withNeighbours = 'n';
   static const String gap = 'g', noChannel = 'x', moving = 'm', steps = 's', unclear = 'u', oddOne = 'o';
+
+  /// The walking detector calls the epoch walking (walking/detector.dart on the same samples).
+  static const String walking = 'w';
   static bool isRead(String c) => c == read || c == withNeighbours;
 }
 
@@ -70,24 +73,10 @@ abstract final class PulseCode {
 const Set<String> asleepStages = {'N1', 'N2', 'N3', 'R'};
 
 /// The smallest power of two whose bins are at most [PulseRule.binHz] wide (4096 at 250 a second).
-int pulseNfft(num rate) {
-  var n = 1;
-  while (rate / n > PulseRule.binHz * (1 + 1e-12)) {
-    n *= 2;
-  }
-  return n;
-}
-
-/// Python's round(): halves go to the even neighbour.
-int _roundEven(double v) {
-  final f = v.floorToDouble(), d = v - f;
-  if (d > 0.5) return f.toInt() + 1;
-  if (d < 0.5) return f.toInt();
-  return f.toInt().isEven ? f.toInt() : f.toInt() + 1;
-}
+int pulseNfft(num rate) => harmonicNfft(rate, PulseRule.binHz);
 
 /// The odd number of bins nearest to [PulseRule.whitenHz] (15 at 250 a second).
-int pulseWhitenBins(num rate) => 2 * _roundEven((PulseRule.whitenHz / (rate / pulseNfft(rate)) - 1) / 2) + 1;
+int pulseWhitenBins(num rate) => harmonicWhitenBins(rate, PulseRule.binHz, PulseRule.whitenHz);
 
 /// The candidate rates (Hz): 0.7, 0.705, ... 2.0.
 final Float64List pulseRates = Float64List.fromList([
@@ -106,17 +95,7 @@ int pulseTopBin(num rate) =>
         .floor() +
     2;
 
-/// Linear interpolation of [w] (bin k at k * [bin]) at [x]: np.interp's formula.
-double _interp(double x, double bin, Float64List w) {
-  var j = (x / bin).floor();
-  if ((j + 1) * bin <= x) {
-    j++;
-  } else if (j * bin > x) {
-    j--;
-  }
-  final x0 = j * bin, x1 = (j + 1) * bin;
-  return (w[j + 1] - w[j]) / (x1 - x0) * (x - x0) + w[j];
-}
+final List<double> _family = List<double>.filled(PulseRule.harmonics, 1);
 
 /// A channel's local peak of the harmonic score: its confidence, the channel and the rate's index.
 typedef PulsePeak = ({double conf, int channel, int rate});
@@ -158,48 +137,51 @@ class PulseEpoch {
 }
 
 /// The epochs of a recording, sample by sample (every channel of its rows, µV): [push] each row, then [finish].
+/// The walking detector reads the same rows beside it ([WalkWindows], only as far as its veto needs): an epoch it
+/// calls walking is [PulseCode.walking], whatever its own spectrum says, and never carries a neighbour. [walking]
+/// false: the caller gives the walking epochs to [finish] itself, or none.
 class PulseEpochs {
-  PulseEpochs(this.channels, this.rate)
-    : size = _roundEven(PulseRule.epochS * rate),
-      segment = _roundEven(PulseRule.segmentS * rate),
-      hop = _roundEven(PulseRule.segmentHopS * rate),
+  PulseEpochs(this.channels, this.rate, {bool walking = true})
+    : size = roundEven(PulseRule.epochS * rate),
+      segment = roundEven(PulseRule.segmentS * rate),
+      hop = roundEven(PulseRule.segmentHopS * rate),
       nfft = pulseNfft(rate),
       wb = pulseWhitenBins(rate),
-      top = pulseTopBin(rate) {
-    final lo = math.min(PulseRule.lowPassHz, 0.4 * rate);
+      top = pulseTopBin(rate),
+      _walk = walking ? WalkWindows(channels, rate, quick: true) : null {
     _chains = [
       for (var c = 0; c < channels; c++)
-        Chain([
-          for (final f in PulseRule.notchesHz)
-            if (f < 0.45 * rate) notch(f, PulseRule.notchQ, sampleRate: rate),
-          for (final q in PulseRule.butterQ) highPass(PulseRule.highPassHz, q: q, sampleRate: rate),
-          for (final q in PulseRule.butterQ) lowPass(lo, q: q, sampleRate: rate),
-        ]),
+        bandPass(
+          rate,
+          highPassHz: PulseRule.highPassHz,
+          lowPassHz: PulseRule.lowPassHz,
+          notchesHz: PulseRule.notchesHz,
+          notchQ: PulseRule.notchQ,
+        ),
     ];
     _y = [for (var c = 0; c < channels; c++) Float64List(size)];
     _railed = List<bool>.filled(channels, false);
     _bin = rate / nfft;
-    _hann = Float64List.fromList([for (var i = 0; i < segment; i++) 0.5 - 0.5 * math.cos(2 * math.pi * i / segment)]);
-    _fft = Fft(nfft);
-    _re = Float64List(nfft);
-    _im = Float64List(nfft);
+    _hann = hannWindow(segment);
+    _pair = PairSpectrum(nfft);
   }
 
   final int channels;
   final int rate;
   final int size, segment, hop, nfft, wb, top;
+  final WalkWindows? _walk;
   late final List<Chain> _chains;
   late final List<Float64List> _y;
   late final List<bool> _railed;
   late final double _bin;
   late final Float64List _hann;
-  late final Fft _fft;
-  late final Float64List _re, _im;
+  late final PairSpectrum _pair;
   var _at = 0, _missing = 0;
   final List<PulseEpoch> _epochs = [];
   bool _done = false;
 
   void push(List<double> row, {bool missing = false}) {
+    _walk?.push(row, missing: missing);
     if (missing) _missing++;
     for (var c = 0; c < channels; c++) {
       final v = row[c];
@@ -215,9 +197,18 @@ class PulseEpochs {
     }
   }
 
-  /// The epochs after the neighbours' rules (a last part of an epoch is not one).
-  List<PulseEpoch> finish() {
+  /// The epochs after the walking veto and the neighbours' rules (a last part of an epoch is not one). [walking]:
+  /// the walking detector's answer per epoch, when the caller has it; else its own.
+  List<PulseEpoch> finish({List<bool>? walking}) {
     if (!_done) {
+      final w = _walk;
+      final walks = walking ?? (w == null ? const <bool>[] : walkingEpochs(w.windows, _epochs.length));
+      for (var e = 0; e < _epochs.length && e < walks.length; e++) {
+        final ep = _epochs[e];
+        if (walks[e] && ep.code != PulseCode.gap && ep.code != PulseCode.noChannel) {
+          _epochs[e] = PulseEpoch(PulseCode.walking, channels: ep.channels);
+        }
+      }
       pulseNeighbours(_epochs);
       _done = true;
     }
@@ -277,73 +268,44 @@ class PulseEpochs {
     return PulseEpoch(PulseCode.unclear, conf: q, best: bpm, channels: n, peaks: peaks());
   }
 
-  /// Bins 0..[top] of each used channel's whitened Welch spectrum; two channels share one complex transform (the
-  /// first in the real part, the second in the imaginary part).
+  /// Bins 0..[top] of each used channel's whitened Welch spectrum; two channels share one complex transform.
   List<Float64List> _whitened(List<int> used) {
     final p = [for (final _ in used) Float64List(nfft ~/ 2 + 1)];
+    final pair = _pair;
     for (var u = 0; u < used.length; u += 2) {
       final a = used[u], b = u + 1 < used.length ? used[u + 1] : -1;
       for (var s = 0; s + segment <= size; s += hop) {
-        _re.fillRange(0, nfft, 0);
-        _im.fillRange(0, nfft, 0);
-        _load(_y[a], s, _re);
-        if (b >= 0) _load(_y[b], s, _im);
-        _fft.transform(_re, _im);
+        pair.clear();
+        pair.load(_y[a], s, _hann);
+        if (b >= 0) pair.load(_y[b], s, _hann, second: true);
+        pair.transform();
         final pa = p[u];
         for (var k = 0; k <= top; k++) {
-          final j = k == 0 ? 0 : nfft - k;
-          final xr = (_re[k] + _re[j]) / 2, xi = (_im[k] - _im[j]) / 2;
-          pa[k] += xr * xr + xi * xi;
+          pa[k] += pair.first(k);
         }
         if (b >= 0) {
           final pb = p[u + 1];
           for (var k = 0; k <= top; k++) {
-            final j = k == 0 ? 0 : nfft - k;
-            final yr = (_im[k] + _im[j]) / 2, yi = -(_re[k] - _re[j]) / 2;
-            pb[k] += yr * yr + yi * yi;
+            pb[k] += pair.second(k);
           }
         }
       }
     }
-    final half = wb ~/ 2;
     return [
       for (final pc in p)
         () {
           final w = Float64List(top + 1);
-          for (var k = 0; k <= top; k++) {
-            var sum = 0.0;
-            for (var j = math.max(0, k - half); j <= k + half; j++) {
-              sum += pc[j];
-            }
-            w[k] = pc[k] / (sum / wb);
-          }
+          whitenInto(pc, 0, top, wb, w);
           return w;
         }(),
     ];
-  }
-
-  /// [segment] samples of [y] from [from], their mean removed and the Hann window on, into [out] (zero-padded).
-  void _load(Float64List y, int from, Float64List out) {
-    var sum = 0.0;
-    for (var i = 0; i < segment; i++) {
-      sum += y[from + i];
-    }
-    final mean = sum / segment;
-    for (var i = 0; i < segment; i++) {
-      out[i] = (y[from + i] - mean) * _hann[i];
-    }
   }
 
   /// The harmonic score of every candidate rate: the mean of the whitened power at f0, 2 f0, ... harmonics x f0.
   Float64List _scores(Float64List w) {
     final out = Float64List(PulseRule.rates);
     for (var i = 0; i < PulseRule.rates; i++) {
-      final f = pulseRates[i];
-      var acc = _interp(f, _bin, w);
-      for (var k = 2; k <= PulseRule.harmonics; k++) {
-        acc = acc + _interp(k * f, _bin, w);
-      }
-      out[i] = acc / PulseRule.harmonics;
+      out[i] = familyAt(pulseRates[i], _bin, w, _family) / PulseRule.harmonics;
     }
     return out;
   }
@@ -352,17 +314,17 @@ class PulseEpochs {
 /// Why a strong rhythm at [f0] (Hz) in the whitened spectrum [w] (bins [bin] wide) is no pulse reading: [PulseCode.steps]
 /// it looks like steps, [PulseCode.unclear] it may be twice a rhythm slower than the range; null: it is a reading.
 String? pulseDoubt(Float64List w, double bin, double f0) {
-  if ((_interp(0.5 * f0, bin, w) + _interp(1.5 * f0, bin, w)) / 2 >= PulseRule.halfMax) {
+  if ((interpAt(0.5 * f0, bin, w) + interpAt(1.5 * f0, bin, w)) / 2 >= PulseRule.halfMax) {
     return f0 >= PulseRule.stepRateHz ? PulseCode.steps : PulseCode.unclear;
   }
   if (f0 >= PulseRule.strideLoHz && f0 <= PulseRule.strideHiHz) {
-    final odd = _interp(f0, bin, w) + _interp(3 * f0, bin, w);
-    final even = _interp(2 * f0, bin, w) + _interp(4 * f0, bin, w);
+    final odd = interpAt(f0, bin, w) + interpAt(3 * f0, bin, w);
+    final even = interpAt(2 * f0, bin, w) + interpAt(4 * f0, bin, w);
     if (odd < PulseRule.oddEvenMin * even) return PulseCode.steps;
   }
   var sharp = 0.0;
   for (final k in PulseRule.sharp) {
-    sharp += _interp(k * f0, bin, w);
+    sharp += interpAt(k * f0, bin, w);
   }
   return sharp / PulseRule.sharp.length >= PulseRule.sharpMax ? PulseCode.steps : null;
 }

@@ -193,6 +193,14 @@
             </intent-filter>
         </receiver>
 
+        <!-- The push (PushJob.kt, DECISIONS 840-849): Android's scheduler runs it on Wi-Fi about every 15 minutes
+             and soon after a recording; it sends the paired laptop what it lacks. No foreground service, no
+             notification. -->
+        <service
+            android:name=".PushJobService"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="false" />
+
         <!-- The headband watcher (AutoWatch.kt): the check service with its own engine, Android's presence binding,
              the bedtime checks' alarms and the notification buttons, and the re-arm after a restart or an update. -->
         <service

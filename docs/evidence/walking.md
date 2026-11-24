@@ -40,6 +40,9 @@ minutes the steps are labelled "not yet checked".
 - The heartbeat also leaves a rhythm in these electrodes, strongest asleep: its 2nd and 3rd harmonics fall at
   walking paces. The first version called parts of a nap walking because of it; now a walk also needs a
   walking-sized shake and no heartbeat-like family, and on 3 nights and a nap no minute of sleep was called walking.
+- It also guards the sleep chart: steps look like deep or dream sleep to the sleep model, so a half minute found
+  walking is counted as awake. On one awake evening with a 2-hour walk that took the falsely "asleep" time from 24
+  minutes to half a minute, and it took nothing from a nap and three nights. It is one walk of one person so far.
 - The thresholds were set on one walk of the owner's (2026-11-20, about 81 minutes, 114 steps a minute), 3 nights and
   a nap of his, and on public data from a wet, cabled cap, not on a dry headband over weeks.
 

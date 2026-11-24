@@ -41,6 +41,10 @@ sleep, against a usual 20-25 %.
   guess.
 - Light sleep (N1) is missed by every headband. Dry electrodes may record extra slow waves, which can push light
   sleep into "deep", so treat deep-sleep minutes with care.
+- Walking fooled the model: on an awake evening with a 2-hour walk it called 24 minutes sleep, nearly all of them
+  during the walk, because steps shake the headband in slow waves. The app now finds walking by its step rhythm and
+  counts those half minutes as awake (half a minute of false sleep was left; a nap and three nights lost nothing),
+  and the report says how many minutes it changed. Other shaking (a bus, a bike) is not caught this way.
 - When the two models agree, that shows they are consistent, not that they are right.
 - YASA was trained on a top-of-head channel; back and side electrodes are outside its training.
 - AnySleep looks about 7 minutes forward and back, so the night's chart is scored afterwards. Read live, 2 minutes

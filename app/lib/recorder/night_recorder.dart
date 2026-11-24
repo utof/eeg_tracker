@@ -29,8 +29,11 @@ import 'dart:math';
 import '../alarm/live_alarm.dart';
 import '../alarm/rule.dart';
 import '../cues/night_cues.dart';
+import '../headband/battery_estimate.dart';
+import '../headband/lend.dart' show LentBand;
 import '../logs/log.dart' show AppLog;
 import '../logs/metrics.dart' show Metrics;
+import '../signal/quality.dart' show QualityJudge, SecondMaker;
 import '../sleep/night_scorer.dart';
 import 'battery.dart';
 import 'chunk_writer.dart';
@@ -152,9 +155,18 @@ class NightRecorder {
     this.cues,
     this.liveLimits = const GuardLimits(),
     this.startNotes = const [],
+    this.bandBattery,
     DateTime Function()? clock,
   }) : _now = clock ?? DateTime.now,
        _steps = stepProbe == null ? null : StepLog(stepProbe, clock ?? DateTime.now);
+
+  /// The headband's battery track shared with the screens (headband/battery_estimate.dart): every gauge reading goes
+  /// in. Null: none kept.
+  final BandBatteryStore? bandBattery;
+
+  /// The one judge of electrode quality (signal/quality.dart) over this run's signal, for the screens' status.
+  QualityJudge? _judge;
+  SecondMaker? _seconds;
 
   final HeadbandFinder finder;
   final Directory dir;
@@ -405,6 +417,7 @@ class NightRecorder {
         nightSamples: _night.samples,
         runs: _night.runs,
         contactOhms: _night.contactOhms,
+        contactAtMs: _night.contactAtMs,
         slots: Map.of(_slots),
         note: restartedBySystem && prior.active ? 'restarted by Android; reconnecting' : 'looking for the headband',
       ).withDrift(lightsOffMs: _night.lightsOffMs).withAlarm(_alarmStatus()),
@@ -611,7 +624,7 @@ class NightRecorder {
       _logReconnected(w);
       await _save();
       final other = band is OtherBoard ? band as OtherBoard : null;
-      final battery = other == null ? await _battery(band) : null;
+      final battery = other == null ? await _battery(band, streaming: band is LentBand) : null;
       final rssi = band.rssi;
       _log.info('connected ${band.name}', {'battery': battery, 'rssi': rssi, 'run': _night.runs});
       w.log(
@@ -638,6 +651,13 @@ class NightRecorder {
           board: other?.board,
         ),
       );
+      final names = w.header.names;
+      _judge = QualityJudge(names: names, clock: _now)..fit();
+      _seconds = SecondMaker(channels: names.length);
+      if (_night.contactOhms.isNotEmpty) {
+        final at = _night.contactAtMs ?? _night.startMs;
+        _judge!.ohms(_night.contactOhms, at: DateTime.fromMillisecondsSinceEpoch(at));
+      }
       if (!_night.contactTried && other == null) await _contactCheck(band, w);
       sigSub = band.signal.listen((rows) => _onRows(w, rows));
       if (await _startSignal(band, w, isLost)) {
@@ -705,6 +725,7 @@ class NightRecorder {
     final slot = ms ~/ slotMs;
     _slots[slot] = (_slots[slot] ?? 0) + rows.length;
     _status = _status.copyWith(nightSamples: _status.nightSamples + rows.length, lastDataMs: ms, slots: _slots);
+    _judgeRows(rows);
     // the detectors read O1 O2 T3 T4 in that order, picked by name; with them off nothing reads these
     final sites = _noDetectors ? rows : inOrder(rows, _siteMap);
     if (_drift != null) {
@@ -723,6 +744,26 @@ class NightRecorder {
       _cueCall((c) => c.add(t, sites, firstOfFile: firstOfFile), t);
     });
     _liveTidy();
+  }
+
+  /// The run's signal through the one judge: each finished second may change an electrode's word in the status.
+  void _judgeRows(List<Sample> rows) {
+    final maker = _seconds, judge = _judge;
+    if (maker == null || judge == null) return;
+    final row = List<double>.filled(maker.channels, 0);
+    var changed = false;
+    for (final s in rows) {
+      if (s.volts.length != row.length) return;
+      for (var c = 0; c < row.length; c++) {
+        row[c] = s.volts[c] * 1e6;
+      }
+      final sec = maker.push(row);
+      if (sec != null) {
+        judge.second(sec);
+        changed = true;
+      }
+    }
+    if (changed) _status = _status.copyWith(quality: judge.verdict);
   }
 
   /// The guard is on while the smart alarm or the cues run.
@@ -1175,6 +1216,18 @@ class NightRecorder {
   }
 
   Future<void> _contactCheck(Headband band, ChunkWriter w) async {
+    // a connection that is already live comes with the reading in force: no new check, no pause (DECISIONS 855-856)
+    final known = band is KnownContact ? (band as KnownContact).knownContact : null;
+    if (known != null) {
+      final at = known.at.millisecondsSinceEpoch;
+      _night = _night.copyWith(contactTried: true, contactOhms: known.ohms, contactAtMs: at);
+      w.log('contact ohms ${ohmsLine(known.ohms)} (measured ${logTime(known.at)} on the live connection; not measured again)');
+      Metrics.write({'kind': 'contact', 'source': 'night', 'ohms': known.ohms});
+      _judge?.ohms(known.ohms, at: known.at);
+      _set(_status.copyWith(contactOhms: known.ohms, contactAtMs: at));
+      await _save();
+      return;
+    }
     _set(_status.copyWith(phase: Phase.checkingContact, note: 'checking contact'));
     final last = <String, double>{};
     final sub = band.resistance.listen(last.addAll);
@@ -1191,13 +1244,18 @@ class NightRecorder {
     }
     // Tried once a night only: on the laptop a stream started right after a check once sent nothing.
     final ohms = <String, double?>{for (final n in channelNames) n: last[n]};
-    _night = _night.copyWith(contactTried: true, contactOhms: last.isEmpty ? const {} : ohms);
+    _night = _night.copyWith(
+      contactTried: true,
+      contactOhms: last.isEmpty ? const {} : ohms,
+      contactAtMs: _now().millisecondsSinceEpoch,
+    );
     if (last.isEmpty) {
       w.log('contact check: no resistance data arrived');
     } else {
       w.log('contact ohms ${ohmsLine(ohms)}');
       Metrics.write({'kind': 'contact', 'source': 'night', 'ohms': ohms});
-      _set(_status.copyWith(contactOhms: ohms));
+      _judge?.ohms(ohms, at: _now());
+      _set(_status.copyWith(contactOhms: ohms, contactAtMs: _night.contactAtMs));
     }
     await _save();
     await _pause(timing.settle);
@@ -1431,9 +1489,14 @@ class NightRecorder {
       call().timeout(timing.sdkTimeout, onTimeout: () => throw SdkStuck(what, timing.sdkTimeout));
 
   /// Battery in percent, or null if the read failed (a stuck read still counts as stuck).
-  Future<int?> _battery(Headband band) async {
+  /// [streaming] false: a new connection's first reading (the gauge is believed most then, battery_estimate.dart).
+  Future<int?> _battery(Headband band, {bool streaming = true}) async {
     try {
-      return await _sdk('battery', band.battery);
+      final g = await _sdk('battery', band.battery);
+      try {
+        bandBattery?.note(g, _now(), streaming: streaming);
+      } catch (_) {}
+      return g;
     } on SdkStuck {
       rethrow;
     } catch (_) {

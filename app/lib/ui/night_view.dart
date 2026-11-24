@@ -1,7 +1,6 @@
 // The night screen's layout, from a plain view model, so it can be rendered in tests without a phone.
 import 'package:flutter/material.dart';
 
-import '../recorder/contact.dart';
 import '../recorder/status.dart' show BoardLive;
 import 'alarm_view.dart';
 import 'archive_view.dart' show ArchiveEntry;
@@ -17,6 +16,7 @@ import 'records_parts.dart' show RecordsLinks;
 import 'share_sheet.dart';
 import 'sleep_report_view.dart' show durationParts, nightTitle;
 import 'sleep_so_far_view.dart' show SoFarSection;
+import 'device_status.dart';
 import 'theme.dart';
 import 'try_these_screen.dart' show TryTheseEntry;
 
@@ -532,51 +532,19 @@ class _Headband extends StatelessWidget {
     if (m.diyNames != null) return DiyIdleBlock(names: m.diyNames!);
     final text = Theme.of(context).textTheme;
     final muted = text.bodyMedium?.copyWith(color: Night.inkMuted);
-    final value = text.titleLarge?.copyWith(fontFeatures: tabular);
     final rssi = m.rssi;
-    final connected = m.battery != null || rssi != null;
+    // state, battery, each electrode and the signal panel: the one headband card (ui/device_status.dart)
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (!connected) Text(m.running ? 'Not connected yet.' : 'Not connected.', style: text.bodyLarge),
-        if (connected)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Battery', style: muted),
-                    const SizedBox(height: 4),
-                    Text(m.battery == null ? '–' : '${m.battery} %', style: value),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Signal at connect', style: muted),
-                    const SizedBox(height: 4),
-                    Text(
-                      rssi == null ? '–' : '${_signalWord(rssi)}, ${rssi < 0 ? '−${-rssi}' : '$rssi'} dBm',
-                      style: value,
-                    ),
-                  ],
-                ),
-              ),
-            ],
+        const SharedDeviceCard(heading: null),
+        if (rssi != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            'Bluetooth signal at connect: ${_signalWord(rssi)}, ${rssi < 0 ? '−${-rssi}' : '$rssi'} dBm',
+            style: muted?.copyWith(fontFeatures: tabular),
           ),
-        const SizedBox(height: 24),
-        Text(m.running ? 'Contact' : 'Contact at the start of the last night', style: muted),
-        const SizedBox(height: 10),
-        if (m.contactOhms.isEmpty)
-          Text('Checked once, when the night starts.', style: text.bodyLarge)
-        else
-          Row(
-            children: [for (final n in channelNames) Expanded(child: ContactCell(n, classifyOhms(m.contactOhms[n])))],
-          ),
+        ],
       ],
     );
   }

@@ -260,7 +260,7 @@ class HeadPainter extends CustomPainter {
     switch (contact) {
       case Contact.good:
         canvas.drawCircle(at, 7, Paint()..color = Night.live);
-      case Contact.fair:
+      case Contact.ok:
         canvas.drawCircle(at, 6.5, _stroke(Night.caution, 2));
         canvas.drawCircle(at, 2.6, Paint()..color = Night.caution);
       case Contact.poor:

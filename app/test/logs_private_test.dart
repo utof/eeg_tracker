@@ -219,7 +219,6 @@ void main() {
             pose: ValueNotifier(HeadPose.initial),
             initialPart: SignalPart.head,
             onAction: (_) {},
-            onMeasure: () {},
             onPositions: () {},
             onInfo: () {},
           ),

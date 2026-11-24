@@ -31,6 +31,56 @@ def found_of(make):
 
 # ---- the method ------------------------------------------------------------------------------------------------
 
+def _epochs_by_stretches(found: wk.Found, n: int) -> list[bool]:
+    """Walking per epoch from the whole recording's stretches: the rule epoch_walks reads locally."""
+    moving = {i for s in found.moving for i in range(s.first, s.last + 1)}
+    return [sum(i in moving for i in range(max(0, 6 * e - 1), 6 * e + 5)) >= 3 for e in range(n)]
+
+
+def test_walking_per_epoch_is_half_or_more_of_it_in_a_walking_stretch():
+    found, _ = found_of(mwf.four_channels)  # 250 s: a walk 15-95 s, a stop, a run 160-240 s
+    flags = wk.epoch_flags(found.windows, 8)
+    assert flags == [True, True, True, False, False, True, True, True]
+    assert flags == _epochs_by_stretches(found, 8)
+    assert wk.epoch_flags(found.windows, 12)[8:] == [False] * 4  # past the signal: not walking
+    assert wk.epoch_flags([], 3) == [False] * 3
+
+
+def test_walking_per_epoch_reads_only_the_windows_near_it():
+    rng = np.random.default_rng(5)
+    for _ in range(30):
+        raw = []
+        while len(raw) < 400:  # runs of walking and not, 1 to 20 windows long
+            raw += [bool(rng.integers(2))] * int(rng.integers(1, 21))
+        ws = [wk.Window(5.0 * i + 5, 8.0 if f else 1.0, 110.0, 500.0, 4, True, 0.5) for i, f in enumerate(raw)]
+        n = len(ws) // 6
+        want = _epochs_by_stretches(wk.find(ws), n)
+        assert wk.epoch_flags(ws, n) == want
+        # the live scorer at epoch e knows the windows up to 2 minutes past it: the same answer
+        for e in range(0, n - 4, 7):
+            assert wk.epoch_walks(raw[:6 * (e + 5)], e) == want[e]
+
+
+def test_quick_windows_walk_exactly_where_the_full_ones_do():
+    skipped = 0
+    for make in mwf.CASES.values():
+        x, fs, miss, _, _ = make()
+        full, quick = wk.windows(x, fs, miss), wk.windows(x, fs, miss, quick=True)
+        assert [w.walks for w in quick] == [w.walks for w in full]
+        assert [(w.t, w.read, w.channels) for w in quick] == [(w.t, w.read, w.channels) for w in full]
+        skipped += sum(w.read and math.isnan(w.score) for w in quick)  # under walking size: no spectrum worked out
+        assert all(math.isnan(q.score) or q.score == f.score for q, f in zip(quick, full))
+    assert skipped > 10
+
+
+def test_the_veto_scores_walking_sleep_awake_and_nothing_else():
+    stages = ["W", "N1", "N2", "N3", "R", "gap", "N2", "N2"]
+    out, changed = wk.veto(stages, [True, True, True, True, True, True, False])
+    assert out == ["W", "W", "W", "W", "W", "gap", "N2", "N2"] and changed == 4
+    assert stages[1] == "N1"  # a copy
+    assert wk.veto(stages, []) == (stages, 0)
+
+
 def test_a_walk_a_stop_and_a_run_on_four_channels():
     found, info = found_of(mwf.four_channels)
     kinds = [s.kind for s in found.moving]
