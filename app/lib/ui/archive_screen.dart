@@ -65,6 +65,7 @@ class ArchiveScreen extends StatefulWidget {
     this.delete,
     this.now,
     this.onStorage,
+    this.confirm,
   });
 
   /// Tests: the app's `files/`; null: the phone's.
@@ -77,6 +78,9 @@ class ArchiveScreen extends StatefulWidget {
   /// Tests: the pulse pass without an isolate.
   final Future<pulses.Pulsed> Function(String filesPath, String id, List<String> paths)? pulse;
   final Future<ArchiveBusy> Function()? busy;
+
+  /// The confirmation questions' card for the top of the list, given what changed (a pass finished); null: none.
+  final Widget Function(Object? changed)? confirm;
   final Future<DeleteOutcome> Function(String filesPath, ArchiveItem item, DeleteMode mode, List<ArchiveItem> all, ArchiveBusy busy)? delete;
   final DateTime Function()? now;
 
@@ -314,5 +318,6 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     onFilter: (g) => setState(() => _filter = g),
     onDay: _day,
     onStorage: widget.onStorage,
+    top: widget.confirm?.call(_page?.toWalk.length),
   );
 }

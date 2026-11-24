@@ -46,7 +46,7 @@ void main() {
         save: (x) async => saved = x,
         sendToRecorder: (_) {},
         keepScreenOn: (_) async {},
-        clock: () => DateTime(2026, 11, 22, 22, 5),
+        clock: () => DateTime(2099, 11, 22, 22, 5),
         host: (dir, onChange, wifiLock) =>
             ShareHost(filesDir: dir, onLog: (_) {}, onChange: onChange, entry: _fakeServer, wifiLock: wifiLock),
       );

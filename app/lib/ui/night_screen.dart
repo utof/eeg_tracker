@@ -31,6 +31,8 @@ import '../sleep/scorer.dart';
 import '../sleep/so_far.dart' show SoFarScorer;
 import 'alarm_view.dart';
 import 'archive_screen.dart' show ArchiveScreen;
+import '../confirm/phone.dart';
+import 'confirm_screen.dart';
 import '../sharp/prompts.dart' show ChannelSharpPhone;
 import '../study/arm.dart' show rearmInBackground;
 import 'dream_screen.dart';
@@ -872,9 +874,28 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
 
   /// The Archive: every recording and session on the phone, during a night too (deleting refuses what is in use;
   /// DECISIONS 700-709).
-  Future<void> _archive() async {
+  /// The confirmation questions' notification side (ConfirmPrompts.kt).
+  final ConfirmPhone _confirmPhone = ChannelConfirmPhone();
+
+  Future<void> _confirmSettings() async {
+    final files = _filesDir;
+    if (files == null) return;
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => ArchiveScreen(onStorage: _dir == null ? null : () => unawaited(_storage()))),
+      MaterialPageRoute<void>(builder: (_) => ConfirmSettingsScreen(filesPath: files, phone: _confirmPhone)),
+    );
+    unawaited(_refresh());
+  }
+
+  Future<void> _archive() async {
+    final files = _filesDir;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ArchiveScreen(
+          onStorage: _dir == null ? null : () => unawaited(_storage()),
+          // the confirmation questions' card leads the Archive too (DECISIONS 867)
+          confirm: files == null ? null : (changed) => ConfirmCardHost(filesPath: files, phone: _confirmPhone, changed: changed),
+        ),
+      ),
     );
     unawaited(_refresh());
   }
@@ -1172,6 +1193,18 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onHeadbandPage: () => unawaited(_refresh()),
       onLicences: () => showLicensePage(context: context, applicationName: 'EEG Tracker'),
       onArchive: _archive,
+      // the confirmation questions (lib/confirm, DECISIONS 860-869): gathered again when a recording stops or the
+      // newest report changes, not on the screen's every rebuild
+      confirm: _filesDir == null
+          ? null
+          : ConfirmCardHost(
+              filesPath: _filesDir!,
+              phone: _confirmPhone,
+              takesOpen: true,
+              passes: recentWalkPasses,
+              changed: (_running, sleep?.nightOf, sleep?.scored, sleep?.scoringStep == null),
+            ),
+      onConfirmSettings: _filesDir == null ? null : _confirmSettings,
     );
     // the bottom bar (DECISIONS 597); the alarm's wake face fills the screen with none
     if (model.ringing != null) return page(null);
