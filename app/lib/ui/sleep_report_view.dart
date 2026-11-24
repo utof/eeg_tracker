@@ -233,6 +233,14 @@ class SleepReportView extends StatelessWidget {
           style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
         ),
       ],
+      if ((r.walkingChangedMin ?? 0) > 0) ...[
+        const SizedBox(height: 16),
+        Text(
+          '${durationText(r.walkingChangedMin!)} that looked like sleep to the sleep model were counted as awake: '
+          'you were walking then.',
+          style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
+        ),
+      ],
       if (dream != null) DreamSleepCheck(check: dream, onInfo: onDreamInfo),
       if (drift != null)
         FallingAsleepSection(drift: drift, check: driftCheck([r, ...others]), onInfo: onDriftInfo),

@@ -121,6 +121,7 @@ void main() {
         'inputs': [for (final e in inputs.entries) {'file': e.key, 'bytes': e.value}],
         'drift_off': null,
         'rem_check': null,
+        'walking': null,
       });
       const min = 60 * 250 * 20; // bytes per minute
       final files = {'a.f32': 60 * min, 'b.f32': 30 * min};
@@ -137,6 +138,7 @@ void main() {
         report(files, version: 0),
         SleepReport({...phone.json}..remove('drift_off')),
         SleepReport({...phone.json}..remove('rem_check')),
+        SleepReport({...phone.json}..remove('walking')),
         SleepReport({...phone.json, 'model': 'old pieces'}),
       ];
       for (final r in older) {
