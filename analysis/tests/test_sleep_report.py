@@ -96,12 +96,13 @@ def test_stale_when_missing_old_or_10_minutes_behind():
     night = nf.Night("2026-11-17", [_rec("a.f32", 0, 1, 60), _rec("b.f32", 2, 3, 30)])
     rep = {"version": nf.VERSION, "inputs": [{"file": "a.f32", "bytes": night.recs[0].size},
                                              {"file": "b.f32", "bytes": night.recs[1].size}], "drift_off": None,
-           "rem_check": None}
+           "rem_check": None, "walking": None}
     assert nf.is_stale(night, None)
     assert nf.is_stale(night, dict(rep, version=0))
     assert not nf.is_stale(night, rep)
     assert nf.is_stale(night, {k: v for k, v in rep.items() if k != "drift_off"})  # written before drift_off: once
     assert nf.is_stale(night, {k: v for k, v in rep.items() if k != "rem_check"})  # before the dream sleep check: once
+    assert nf.is_stale(night, {k: v for k, v in rep.items() if k != "walking"})  # before the walking veto: once
     def behind(minutes: float) -> dict:
         b = {"file": "b.f32", "bytes": int((30 - minutes) * 60 * nf.FS) * nf.REC_BYTES}
         return dict(rep, inputs=[rep["inputs"][0], b])
@@ -212,6 +213,38 @@ def test_a_second_run_skips_an_up_to_date_night(tmp_path, fake_scorer, capsys):
     assert len(fake_scorer) == 2 and len(rep["inputs"]) == 2
     ev = events(export)
     assert len(ev) == 2 and ev[1]["data"]["replaces"] == ev[0]["id"]
+
+
+def test_sleep_scored_while_walking_becomes_awake(tmp_path, fake_scorer):
+    """The walking detector over the night's own samples (analysis/walking.py): the model's sleep in a walking epoch
+    is scored awake, in the report and in sleep.json (DECISIONS 920)."""
+    import make_walking_fixture as mwf
+    rec, nights, export, args = dirs(tmp_path)
+    start = datetime.now().replace(microsecond=0) - timedelta(minutes=40)
+    f = write_rec(rec, start, 24)
+    d = np.fromfile(f, dtype=[("pack", "<u4"), ("v", "<f4", 4)])
+    x = np.zeros((4, 300 * nf.FS))
+    mwf.add_steps(x, float(nf.FS), 62, 242, 112, 500, seed=7, gains=[1.0, 0.9, 0.6, 0.7])  # a walk, minutes 1 to 4
+    d["v"][: x.shape[1]] += (x.T * 1e-6).astype("<f4")
+    d.tofile(f)
+    assert sr.main(args) == 0
+    name = nf.evening_date(start.timestamp())
+    rep = json.loads((nights / f"{name}.report.json").read_text())
+    w = rep["walking"]
+    assert rep["walking_error"] is None and w["detector"] == "walk-v2"
+    assert w["epochs"] == "00" + "1" * 6 + "0" * 40  # epochs 2-7: 60 to 240 s
+    block = "WW" + "2" * 12 + "3" * 4 + "R" * 4 + "WW"
+    assert rep["stages"] == "WW" + "W" * 6 + "2" * 6 + "3" * 4 + "R" * 4 + "WW" + block  # PATTERN had N2 there
+    assert (w["walking_min"], w["changed_min"], w["cross_check_changed_min"]) == (3.0, 3.0, 3.0)
+    assert rep["total"]["asleep_min"] == 17 and rep["periods"][0]["light_min"] == 9
+    sj = json.loads((nights / f"{name}.sleep.json").read_text())
+    ep = sj["epochs"]
+    assert [e.get("walking", False) for e in ep] == [c == "1" for c in w["epochs"]]
+    assert (ep[2]["anysleep"], ep[2]["anysleep_model"], ep[2]["yasa"], ep[2]["yasa_model"]) == ("W", "N2", "W", "N2")
+    assert "anysleep_model" not in ep[8] and "walking" not in ep[8]
+    assert sj["summary"]["total_sleep_min"] == 17.0 and sj["walking"]["changed_min"] == 3.0
+    plain = json.loads((nights / f"{name}.report.json").read_text())
+    assert "walking" in plain and not nf.is_stale(nf.nights(nf.recordings(rec))[0], plain)
 
 
 def test_a_lights_off_marker_sets_where_the_detector_and_the_model_count_from(tmp_path, fake_scorer, capsys):

@@ -7,7 +7,6 @@ import 'dart:ui' as ui;
 
 import 'package:eeg_tracker/meditation/tracker.dart';
 import 'package:eeg_tracker/morning/controller.dart';
-import 'package:eeg_tracker/morning/live.dart';
 import 'package:eeg_tracker/morning/store.dart';
 import 'package:eeg_tracker/recorder/contact.dart';
 import 'package:eeg_tracker/sleep/report.dart';
@@ -139,10 +138,10 @@ TrendInputs _days(int n) {
 final _month = buildTrends(_days(30), DateTime(2026, 11, 18, 13));
 
 List<ContactLine> _contact({bool noisy = false}) => [
-  (channel: 'O1', contact: Contact.good, grade: Grade.good, word: 'good', spread: 14),
-  (channel: 'O2', contact: Contact.good, grade: noisy ? Grade.bad : Grade.good, word: noisy ? 'noisy' : 'good', spread: noisy ? 74 : 17),
-  (channel: 'T3', contact: Contact.fair, grade: Grade.fair, word: 'fair', spread: 38),
-  (channel: 'T4', contact: Contact.none, grade: Grade.bad, word: 'not touching', spread: 0),
+  (channel: 'O1', grade: Contact.good, ohms: 120e3),
+  (channel: 'O2', grade: noisy ? Contact.poor : Contact.good, ohms: 150e3),
+  (channel: 'T3', grade: Contact.ok, ohms: 600e3),
+  (channel: 'T4', grade: Contact.none, ohms: null),
 ];
 
 MorningOutcome _outcome(TrendInputs inputs) => outcomeFor(inputs.mornings.last, inputs);

@@ -43,11 +43,14 @@ class ShareControl extends ChangeNotifier {
     ValueListenable<Map<String, Object?>?>? session,
     Stream<void>? networkChanges,
     Future<bool> Function()? localNetwork,
+    Future<void> Function(bool on)? pushSchedule,
   }) : _makeHost = host ?? _appHost,
+       pushSchedule = pushSchedule ?? ((on) => Phone.pushSchedule(on: on)),
        _localNetwork = localNetwork ?? ensureLocalNetwork,
        _now = clock ?? DateTime.now,
        _session = session ?? sharedSession {
     _session.addListener(_sessionChanged);
+    sharedAlert.addListener(_alertChanged);
     _network = networkChanges?.listen((_) => unawaited(_host?.networkChanged()), onError: (Object _) {});
   }
 
@@ -69,13 +72,19 @@ class ShareControl extends ChangeNotifier {
     return _lan!;
   }
 
+  /// Arms or ends Android's push job (`Phone.pushSchedule`; tests count the calls).
+  final Future<void> Function(bool on) pushSchedule;
+
   /// The daytime session that holds the headband (lib/share/shared_session.dart), for /state (DECISIONS 671).
   final ValueListenable<Map<String, Object?>?> _session;
 
   StreamSubscription<void>? _network;
 
-  /// The session's summary to the server (/state's `session`).
-  void _sessionChanged() => _host?.setSession(_session.value);
+  /// The session's summary to the server (/state's `session`), with the newest headband notice beside it (`alert`,
+  /// DECISIONS 857).
+  void _sessionChanged() => _host?.setSession(sessionWithAlert(_session.value, sharedAlert.value));
+
+  void _alertChanged() => _sessionChanged();
 
   final Future<ShareConfig> Function() load;
   final Future<void> Function(ShareConfig config) save;
@@ -147,6 +156,7 @@ class ShareControl extends ChangeNotifier {
       await _serveFromApp();
     }
     await _keepAwake(_config.activeAt(now) && !night && now < _config.awakeUntilMs, front: front);
+    _armPush();
     notifyListeners();
   });
 
@@ -233,7 +243,18 @@ class ShareControl extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Android's job that sends the paired laptop what it lacks (push/; DECISIONS 840-849): armed while sharing is on
+  /// and a laptop is paired, ended otherwise; told to Android only when that changes.
+  bool? _pushArmed;
+  void _armPush() {
+    final want = _config.paired && _config.activeAt(_now().millisecondsSinceEpoch);
+    if (want == _pushArmed) return;
+    _pushArmed = want;
+    unawaited(pushSchedule(want));
+  }
+
   Future<void> _apply() async {
+    _armPush();
     if (_night) {
       await _stopHost();
       sendToRecorder({'kind': 'share', 'config': _config.toJson()});
@@ -267,7 +288,7 @@ class ShareControl extends ChangeNotifier {
     }, wifiLock);
     host.onProved = (n) => proofs.value += n;
     host.setLive(const {});
-    host.setSession(_session.value);
+    host.setSession(sessionWithAlert(_session.value, sharedAlert.value));
     await host.start(_config);
   }
 
@@ -339,6 +360,7 @@ class ShareControl extends ChangeNotifier {
   void dispose() {
     proofs.dispose();
     _session.removeListener(_sessionChanged);
+    sharedAlert.removeListener(_alertChanged);
     unawaited(_network?.cancel());
     unawaited(_stopHost());
     super.dispose();

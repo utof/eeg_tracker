@@ -23,10 +23,17 @@ the data book's counting order is kept, so no minute counts twice.
   moving       3 or more seconds of movement in 30 s  epochs.tsv.gz `movement_s` (the Archive's moving rule)
   no_signal    no usable signal (quality `m`)         epochs.tsv.gz `quality`
   eyes_closed  eyes closed                            the phone's work sessions' epochs
+  walking      walking or running                     the walk files' stretches (`walking/`, `phone/walking/`)
 
-The extension point: `DETECTORS` (yes or no per epoch) and `MEASURERS` (a number against `measurement` truth rows, such
-as a pulse in bpm against a watch's). The walking detector (feat/walking, `<local>/walking/<id>.walk.json`) and the pulse
-detector (feat/pulse) each add one entry; `from_spans` turns a detector's stretches into epochs.
+A sleep report made with the walking veto (its `walking` object: walking epochs scored awake, DECISIONS 920) is its
+own detector version (`..., walking veto walk-v2`), so reports from before and after it are told apart in the table.
+
+`MEASURERS` give a number against `measurement` truth rows: `pulse` is the pulse files' reading per 30 s epoch
+(`pulse/`, `phone/pulse/`) against a `pulse` reading in bpm (a watch's). While no such reading lies in its time the
+summary says "no reference yet" and counts the readings that wait.
+
+The extension point: `DETECTORS` (yes or no per epoch; `from_spans` turns a detector's stretches into epochs) and
+`MEASURERS`.
 """
 from __future__ import annotations
 
@@ -47,14 +54,14 @@ import data_book as db  # noqa: E402  (the reports in counting order, their stag
 import day_summary as ds  # noqa: E402
 import truth  # noqa: E402
 
-VERSION = "validate-v1"  # of the rules below: a change of any of them is a new version
+VERSION = "validate-v2"  # of the rules below: a change of any of them is a new version
 EPOCH_S = 30.0
 MIN_PER_EPOCH = EPOCH_S / 60
 TALKING_JAW = 2  # app/lib/archive/seen.dart ActivityRule.talkingJaw: jaw bursts in 30 s that read as talking or chewing
 MOVING_S = 3  # ActivityRule.movingS: seconds of movement in 30 s that read as moving
 YES, NO, UNREAD = 1, 0, -1
-COLUMNS = ["detector", "detector_version", "yes_means", "label", "truth_expects", "scope", "label_id", "periods",
-           "start", "end", "recording", "truth_source", "truth_confidence", "sources", "epochs", "truth_min", "yes_min",
+COLUMNS = ["detector", "detector_version", "yes_means", "label", "truth_present", "truth_expects", "scope",
+           "label_id", "periods", "start", "end", "recording", "truth_source", "truth_confidence", "sources", "epochs", "truth_min", "yes_min",
            "no_min", "not_read_min", "agreement_pct", "false_pos_min", "false_neg_min", "values", "mean_abs_error",
            "mean_error", "unit", "validation_version"]
 
@@ -88,8 +95,14 @@ class Detector:
     mostly: frozenset[str]
     read: Callable[[Book], Iterable[Output]]
 
-    def expects(self, label: str) -> str | None:
-        return "yes" if label in self.yes else "no" if label in self.no else "mostly" if label in self.mostly else None
+    def expects(self, label: str, present: str = "1") -> str | None:
+        """What the detector should say during a truth row of `label`. A row with `present` 0 says the label did NOT
+        happen there (the owner's No to a confirmation question, DECISIONS 866): a detector that says yes during the
+        label should then say no; one that says no during it is told nothing."""
+        e = "yes" if label in self.yes else "no" if label in self.no else "mostly" if label in self.mostly else None
+        if present == "0":
+            return "no" if e in ("yes", "mostly") else None
+        return e
 
 
 @dataclass(frozen=True)
@@ -174,13 +187,19 @@ def _t(v: object) -> float | None:
 STAGE_SAYS = {"W": NO, "N1": YES, "N2": YES, "N3": YES, "R": YES}
 
 
+def _veto(report: dict) -> str:
+    """`, walking veto walk-v2` for a report whose walking epochs were scored awake (its `walking` object), else ``."""
+    w = report.get("walking")
+    return f", walking veto {w.get('detector') or 'unknown'}" if isinstance(w, dict) else ""
+
+
 def read_anysleep(book: Book) -> Iterable[Output]:
     for rep, stages, _ in book.reports():
         t0 = _t(rep.data["data_start"])
         if stages and t0 is not None:
             says = np.array([STAGE_SAYS.get(s, UNREAD) for s in stages], np.int8)
-            yield Output(rep.rel, str(rep.data.get("model") or "unknown model"), t0 + EPOCH_S * np.arange(len(says)),
-                         says)
+            yield Output(rep.rel, str(rep.data.get("model") or "unknown model") + _veto(rep.data),
+                         t0 + EPOCH_S * np.arange(len(says)), says)
 
 
 def read_yasa(book: Book) -> Iterable[Output]:
@@ -192,7 +211,8 @@ def read_yasa(book: Book) -> Iterable[Output]:
         pairs = [(t, s) for t, s in pairs if t is not None]
         if pairs:
             cross = rep.data.get("cross_check") if isinstance(rep.data.get("cross_check"), dict) else {}
-            yield Output(db.sleep_json_of(rep, book.local) or rep.rel, str(cross.get("model") or "yasa"),
+            yield Output(db.sleep_json_of(rep, book.local) or rep.rel,
+                         str(cross.get("model") or "yasa") + _veto(rep.data),
                          np.array([t for t, _ in pairs]), np.array([STAGE_SAYS.get(s, UNREAD) for _, s in pairs],
                                                                    np.int8))
 
@@ -271,6 +291,53 @@ def read_eyes_closed(book: Book) -> Iterable[Output]:
                          np.array([t for t, _ in rows]), np.array([s for _, s in rows], np.int8))
 
 
+WALK_FOLDERS = ("walking", "phone/walking")  # the laptop's walk files (scripts/walks.py), then the phone's
+MOVING_KINDS = ("walking", "running")
+
+
+def read_walking(book: Book) -> Iterable[Output]:
+    """The walk files: yes where over half of an epoch lies in a walking or running stretch (a stop inside a walk is
+    no), from the recording's first sample to its last. A file of a pass that could not run (`why`) gives nothing."""
+    for folder in WALK_FOLDERS:
+        for f in sorted((book.local / folder).glob("*.walk.json")):
+            j = db._json(f)  # noqa: SLF001
+            if not isinstance(j, dict) or j.get("format") != "eeg-tracker-walking" or j.get("why"):
+                continue
+            a, b = _t(j.get("start")), _t(j.get("end"))
+            if a is None or b is None:
+                continue
+            spans = []
+            for w in j.get("walks") if isinstance(j.get("walks"), list) else []:
+                for st in (w.get("stretches") if isinstance(w, dict) and isinstance(w.get("stretches"), list) else []):
+                    if isinstance(st, dict) and st.get("kind") in MOVING_KINDS:
+                        x, y = _t(st.get("start")), _t(st.get("end"))
+                        if x is not None and y is not None:
+                            spans.append((x, y))
+            yield from_spans(f.relative_to(book.local).as_posix(), str(j.get("detector") or "unknown"), a, b, spans)
+
+
+PULSE_FOLDERS = ("pulse", "phone/pulse")  # scripts/compare_pulse.py --out, then the phone's
+PULSE_WITHIN_S = 30.0  # a truth reading is compared with the epochs within half a minute of it
+
+
+def read_pulse(book: Book) -> Iterable[Values]:
+    """The pulse files: each epoch's reading (beats a minute) at the epoch's middle; epochs without one give nothing."""
+    for folder in PULSE_FOLDERS:
+        for f in sorted((book.local / folder).glob("*.pulse.json")):
+            j = db._json(f)  # noqa: SLF001
+            if not isinstance(j, dict) or j.get("format") != "eeg-tracker-pulse" or not isinstance(j.get("bpm"), list):
+                continue
+            t0 = j.get("start_ms")
+            if not isinstance(t0, (int, float)) or isinstance(t0, bool):
+                continue
+            step = float(j.get("epoch_s") or EPOCH_S)
+            pairs = [(t0 / 1000 + step * (e + 0.5), float(v)) for e, v in enumerate(j["bpm"])
+                     if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)]
+            if pairs:
+                yield Values(f.relative_to(book.local).as_posix(), str(j.get("detector") or "unknown"),
+                             np.array([t for t, _ in pairs]), np.array([v for _, v in pairs]))
+
+
 AWAKE_DOING = frozenset({"awake", "walking", "running", "stairs", "cycling", "exercise", "eating", "drinking_coffee",
                          "drinking_alcohol", "talking", "meeting", "focused_work", "working", "standing"})
 SLEEP = dict(yes=frozenset({"asleep"}), no=AWAKE_DOING, mostly=frozenset({"nap"}))
@@ -287,8 +354,13 @@ DETECTORS: list[Detector] = [
     Detector("eyes_closed", "eyes closed", yes=frozenset({"eyes_closed"}),
              no=frozenset({"focused_work", "working", "meeting", "walking", "running", "cycling"}),
              mostly=frozenset({"meditating"}), read=read_eyes_closed),
+    # the owner's walks have stops ("with breaks sitting"): those minutes count as missed, so read the false-no
+    # minutes of a walking label as "stops and misses"
+    Detector("walking", "walking or running", yes=frozenset({"walking", "running"}),
+             no=frozenset({"asleep", "meditating", "sitting", "lying", "resting", "focused_work", "working", "meeting"}),
+             mostly=frozenset(), read=read_walking),
 ]
-MEASURERS: list[Measurer] = []  # the pulse detector adds itself here (feat/pulse): Measurer("pulse", "pulse", "bpm", ...)
+MEASURERS: list[Measurer] = [Measurer("pulse", "pulse", "bpm", PULSE_WITHIN_S, read=read_pulse)]
 
 
 # ---- comparing ------------------------------------------------------------------------------------------------------
@@ -379,7 +451,7 @@ class Truth:
 
 def binary_rows(det: Detector, truth: Truth, outputs: list[Output]) -> list[dict]:
     rows: list[dict] = []
-    want = [i for i, r in enumerate(truth.rows) if det.expects(r["label"])]
+    want = [i for i, r in enumerate(truth.rows) if det.expects(r["label"], r.get("present", "1"))]
     if not want:
         return rows
     idx = np.array(want)
@@ -392,15 +464,16 @@ def binary_rows(det: Detector, truth: Truth, outputs: list[Output]) -> list[dict
             if yes + no + unread == 0:
                 continue
             r = truth.rows[i]
-            expects = det.expects(r["label"]) or ""
+            present = r.get("present", "1")
+            expects = det.expects(r["label"], present) or ""
             used = tl.sources if len(tl.sources) == 1 else sorted({tl.sources[s] for s in tl.source[lo[j]:hi[j]]})
-            rows.append(dict(_base(det.name, ver, det.yes_means, r["label"], expects), scope="label",
+            rows.append(dict(_base(det.name, ver, det.yes_means, r["label"], expects, present), scope="label",
                              label_id=r["label_id"], periods=1, start=r["start"], end=r["end"],
                              recording=r["recording"], truth_source=r["source"], truth_confidence=r["confidence"],
                              sources=" ".join(used), epochs=yes + no,
                              truth_min=round((truth.b[i] - truth.a[i]) / 60, 1),
                              **_minutes(yes, no, unread), **judge(expects, yes, no)))
-            t = totals.setdefault(r["label"], dict(expects=expects, periods=0, yes=0, no=0, unread=0, truth_s=0.0,
+            t = totals.setdefault((r["label"], present), dict(expects=expects, periods=0, yes=0, no=0, unread=0, truth_s=0.0,
                                                    start=r["start"], end=r["end"], ta=truth.a[i], tb=truth.b[i]))
             t["periods"] += 1
             t["yes"] += yes
@@ -411,17 +484,18 @@ def binary_rows(det: Detector, truth: Truth, outputs: list[Output]) -> list[dict
                 t["ta"], t["start"] = truth.a[i], r["start"]
             if truth.b[i] > t["tb"]:
                 t["tb"], t["end"] = truth.b[i], r["end"]
-        for label, t in sorted(totals.items()):
-            rows.append(dict(_base(det.name, ver, det.yes_means, label, t["expects"]), scope="all", periods=t["periods"],
+        for (label, present), t in sorted(totals.items(), key=lambda kv: (kv[0][0], -int(kv[0][1]))):
+            rows.append(dict(_base(det.name, ver, det.yes_means, label, t["expects"], present), scope="all",
+                             periods=t["periods"],
                              start=t["start"], end=t["end"], epochs=t["yes"] + t["no"],
                              truth_min=round(t["truth_s"] / 60, 1), **_minutes(t["yes"], t["no"], t["unread"]),
                              **judge(t["expects"], t["yes"], t["no"])))
     return rows
 
 
-def _base(name: str, ver: str, means: str, label: str, expects: str) -> dict:
-    return dict(detector=name, detector_version=ver, yes_means=means, label=label, truth_expects=expects,
-                validation_version=VERSION)
+def _base(name: str, ver: str, means: str, label: str, expects: str, present: str = "1") -> dict:
+    return dict(detector=name, detector_version=ver, yes_means=means, label=label, truth_present=present,
+                truth_expects=expects, validation_version=VERSION)
 
 
 def _minutes(yes: int, no: int, unread: int) -> dict:
@@ -472,6 +546,7 @@ def validate(local: Path, out: Path, detectors: list[Detector] | None = None, me
     tr = Truth.read(out / "truth.tsv")
     rows: list[dict] = []
     seen: dict[str, int] = {}
+    waiting: list[dict] = []  # measurers with no truth reading in their time: "no reference yet"
     for det in DETECTORS if detectors is None else detectors:
         try:
             outs = list(det.read(book))
@@ -487,10 +562,14 @@ def validate(local: Path, out: Path, detectors: list[Detector] | None = None, me
             book.problems.append(f"{m.name}: could not be read ({type(e).__name__}: {e})")
             continue
         seen[m.name] = sum(len(v.times) for v in vals)
-        rows += measured_rows(m, tr, vals)
+        got = measured_rows(m, tr, vals)
+        rows += got
+        if not got:
+            waiting.append(dict(name=m.name, label=m.label, unit=m.unit, values=seen[m.name],
+                                versions=sorted({v.version for v in vals})))
     covered = {r["label_id"] for r in rows if r.get("label_id")}
     info = dict(truth=len(tr.rows), uncovered=[r for r in tr.rows if r["label_id"] not in covered], seen=seen,
-                problems=book.problems)
+                problems=book.problems, no_reference=waiting)
     return rows, info
 
 
@@ -515,19 +594,24 @@ def summary(rows: list[dict], info: dict, built: str, book_json: dict | None) ->
         lines += ["No detector's output overlaps a truth label yet.", ""]
     for r in totals:
         lines.append("- " + _sentence(r))
+    for w in info.get("no_reference", []):
+        lines.append("- " + _no_reference(w))
     lines += ["", "## Totals", "",
               "| Detector | Version | Truth label | Expects | Periods | Compared (min) | Agreement | False yes (min) "
               "| False no (min) | Not read (min) |", "|---|---|---|---|---|---|---|---|---|---|"]
     for r in totals:
-        lines.append(f"| {r['detector']} | {r['detector_version']} | {r['label']} | {r['truth_expects']} | "
+        lines.append(f"| {r['detector']} | {r['detector_version']} | {_name(r)} | {r['truth_expects']} | "
                      f"{r['periods']} | {_f(_cmp_min(r))} | {_pct(r)} | {_f(r.get('false_pos_min'))} | "
                      f"{_f(r.get('false_neg_min'))} | {_f(r.get('not_read_min'))} |")
+    for w in info.get("no_reference", []):
+        lines.append(f"| {w['name']} | {' '.join(w['versions']) or '-'} | {w['label']} | value | 0 |  | no reference "
+                     f"yet ({w['values']} readings wait) |  |  |  |")
     lines += ["", "## Each truth label", "",
               "| Label | Truth | Detector | Compared (min) | Agreement | False yes (min) | False no (min) |",
               "|---|---|---|---|---|---|---|"]
     for r in sorted((r for r in rows if r["scope"] == "label"), key=lambda r: (r["start"], r["label_id"],
                                                                                r["detector"])):
-        lines.append(f"| {r['label_id']} | {r['label']} {_span(r['start'], r['end'])} | {r['detector']} | "
+        lines.append(f"| {r['label_id']} | {_name(r)} {_span(r['start'], r['end'])} | {r['detector']} | "
                      f"{_f(_cmp_min(r))} | {_pct(r)} | {_f(r.get('false_pos_min'))} | {_f(r.get('false_neg_min'))} |")
     lines += ["", "## Not compared", ""]
     if info["uncovered"]:
@@ -537,7 +621,8 @@ def summary(rows: list[dict], info: dict, built: str, book_json: dict | None) ->
             lines.append(f"- and {len(info['uncovered']) - 50} more")
     else:
         lines.append("Every active truth label was compared.")
-    quiet = [n for n in info["seen"] if not any(r["detector"] == n for r in rows)]
+    waiting = {w["name"] for w in info.get("no_reference", [])}
+    quiet = [n for n in info["seen"] if n not in waiting and not any(r["detector"] == n for r in rows)]
     if quiet:
         lines.append("")
         lines.append("Detectors with no truth label in their time yet: " + ", ".join(
@@ -549,6 +634,16 @@ def summary(rows: list[dict], info: dict, built: str, book_json: dict | None) ->
     for p in info["problems"]:
         lines.append(f"- PROBLEM: {p}")
     return "\n".join(lines) + "\n"
+
+
+def _name(r: dict) -> str:
+    """The truth label in words: `not walking` for a row that says it did not happen."""
+    return ("not " if r.get("truth_present") == "0" else "") + r["label"]
+
+
+def _no_reference(w: dict) -> str:
+    return (f"{w['name']}: no reference yet. It has {w['values']} readings, and no `{w['label']}` truth reading in "
+            f"{w['unit']} (a watch's, for example) lies in their time, so nothing can be said about how right it is.")
 
 
 def _cmp_min(r: dict) -> float | None:
@@ -577,11 +672,11 @@ def _sentence(r: dict) -> str:
                 f"average (detector minus truth {r['mean_error']}).")
     m = _f(_cmp_min(r))
     if r["truth_expects"] == "mostly":
-        return f"{name}: during {r['label']} ({m} min compared) it said {r['yes_means']} {_f(r['agreement_pct'])} %."
+        return f"{name}: during {_name(r)} ({m} min compared) it said {r['yes_means']} {_f(r['agreement_pct'])} %."
     if r["truth_expects"] == "yes":
-        return (f"{name}: during {r['label']} ({m} min compared) it missed {_f(r['false_neg_min'])} min "
+        return (f"{name}: during {_name(r)} ({m} min compared) it missed {_f(r['false_neg_min'])} min "
                 f"({_f(r['agreement_pct'])} % right).")
-    return (f"{name}: during {r['label']} ({m} min compared) it falsely said {r['yes_means']} for "
+    return (f"{name}: during {_name(r)} ({m} min compared) it falsely said {r['yes_means']} for "
             f"{_f(r['false_pos_min'])} min ({_f(r['agreement_pct'])} % right).")
 
 
@@ -619,6 +714,8 @@ def main(argv: list[str] | None = None, say: Callable[[str], object] = print) ->
         for r in rows:
             if r["scope"] == "all":
                 say("  " + _sentence(r))
+        for w in info.get("no_reference", []):
+            say("  " + _no_reference(w))
     say(f"validation {out}: {len(rows)} rows, {info['truth']} active truth labels, {len(info['uncovered'])} not "
         f"compared, {time.time() - t0:.1f} s")
     for p in info["problems"]:

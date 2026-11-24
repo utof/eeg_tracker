@@ -1,7 +1,6 @@
 // The night screen's layout, from a plain view model, so it can be rendered in tests without a phone.
 import 'package:flutter/material.dart';
 
-import '../recorder/contact.dart';
 import '../recorder/status.dart' show BoardLive;
 import 'alarm_view.dart';
 import 'archive_view.dart' show ArchiveEntry;
@@ -17,6 +16,7 @@ import 'records_parts.dart' show RecordsLinks;
 import 'share_sheet.dart';
 import 'sleep_report_view.dart' show durationParts, nightTitle;
 import 'sleep_so_far_view.dart' show SoFarSection;
+import 'device_status.dart';
 import 'theme.dart';
 import 'try_these_screen.dart' show TryTheseEntry;
 
@@ -175,6 +175,8 @@ class NightView extends StatelessWidget {
     this.onRetrySleep,
     this.onSleepSoFar,
     this.morning,
+    this.confirm,
+    this.onConfirmSettings,
     this.onLightsOff,
     this.onSettings,
     this.onStorage,
@@ -213,6 +215,11 @@ class NightView extends StatelessWidget {
 
   /// The Morning section (check-in and trends; morning_section.dart), shown between nights after Sleep.
   final Widget? morning;
+
+  /// The confirmation questions (DECISIONS 867): the card at the top of Night, which draws nothing when nothing is
+  /// asked, and the link to their settings on More.
+  final Widget? confirm;
+  final VoidCallback? onConfirmSettings;
 
   /// Lights off while a night records (DECISIONS 180).
   final VoidCallback? onLightsOff;
@@ -268,6 +275,7 @@ class NightView extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
         children: sectionsFor(tab, [
           _Status(m),
+          ?confirm,
           if (m.minutes != null) ...[const SizedBox(height: 28), _Readouts(m)],
           if (m.rows.isNotEmpty) ...[SectionHeading(m.stripTitle), NightStrip(rows: m.rows)],
           // While a night records, the night so far right under its strip: scored only when its page opens.
@@ -328,6 +336,10 @@ class NightView extends StatelessWidget {
           if (onStorage != null && (tab == null || tab == HomeTab.more)) ...[
             const SectionHeading('Storage'),
             _Storage(onStorage: onStorage),
+          ],
+          if (onConfirmSettings != null && (tab == null || tab == HomeTab.more)) ...[
+            const SectionHeading('Quick checks'),
+            _QuickChecks(onOpen: onConfirmSettings),
           ],
           if (tab == HomeTab.more) ...[const SectionHeading('Settings'), _More(onSettings: onSettings, onLicences: onLicences)],
           // the app's log, how it is used and what costs battery (lib/logs, DECISIONS 712-716)
@@ -520,51 +532,19 @@ class _Headband extends StatelessWidget {
     if (m.diyNames != null) return DiyIdleBlock(names: m.diyNames!);
     final text = Theme.of(context).textTheme;
     final muted = text.bodyMedium?.copyWith(color: Night.inkMuted);
-    final value = text.titleLarge?.copyWith(fontFeatures: tabular);
     final rssi = m.rssi;
-    final connected = m.battery != null || rssi != null;
+    // state, battery, each electrode and the signal panel: the one headband card (ui/device_status.dart)
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (!connected) Text(m.running ? 'Not connected yet.' : 'Not connected.', style: text.bodyLarge),
-        if (connected)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Battery', style: muted),
-                    const SizedBox(height: 4),
-                    Text(m.battery == null ? '–' : '${m.battery} %', style: value),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Signal at connect', style: muted),
-                    const SizedBox(height: 4),
-                    Text(
-                      rssi == null ? '–' : '${_signalWord(rssi)}, ${rssi < 0 ? '−${-rssi}' : '$rssi'} dBm',
-                      style: value,
-                    ),
-                  ],
-                ),
-              ),
-            ],
+        const SharedDeviceCard(heading: null),
+        if (rssi != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            'Bluetooth signal at connect: ${_signalWord(rssi)}, ${rssi < 0 ? '−${-rssi}' : '$rssi'} dBm',
+            style: muted?.copyWith(fontFeatures: tabular),
           ),
-        const SizedBox(height: 24),
-        Text(m.running ? 'Contact' : 'Contact at the start of the last night', style: muted),
-        const SizedBox(height: 10),
-        if (m.contactOhms.isEmpty)
-          Text('Checked once, when the night starts.', style: text.bodyLarge)
-        else
-          Row(
-            children: [for (final n in channelNames) Expanded(child: ContactCell(n, classifyOhms(m.contactOhms[n])))],
-          ),
+        ],
       ],
     );
   }
@@ -762,6 +742,28 @@ class _Storage extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         OutlinedButton.icon(onPressed: onStorage, icon: const Icon(Icons.storage_outlined), label: const Text('Storage')),
+      ],
+    );
+  }
+}
+
+/// More: the confirmation questions' settings.
+class _QuickChecks extends StatelessWidget {
+  const _QuickChecks({required this.onOpen});
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Soon after the app thinks you slept or walked, it asks you: Yes, No or Not sure. How many, and when not.',
+          style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(onPressed: onOpen, icon: const Icon(Icons.fact_check_outlined), label: const Text('Quick checks')),
       ],
     );
   }

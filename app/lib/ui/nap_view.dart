@@ -16,6 +16,7 @@ import '../sleep/live_stager.dart' show LiveMode;
 import 'dream_view.dart' show clock, faceGround, faceInk, faceMuted;
 import 'meditation_view.dart' show MarkShape, StateMark;
 import 'parts.dart';
+import 'device_status.dart';
 import 'theme.dart';
 
 class NapViewModel {
@@ -132,6 +133,7 @@ class NapView extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
         children: [
           _status(context),
+          const SharedDeviceCard(top: 24),
           for (final n in m.notes)
             Padding(
               padding: const EdgeInsets.only(top: 20),

@@ -13,6 +13,7 @@ import 'dart:typed_data';
 
 import '../detectors/detectors.dart';
 import '../recorder/header.dart' show readHeader;
+import '../walking/detector.dart' show WalkWindows, walkingEpochs;
 import '../wearer/check.dart' show NightWindow, NightWindowSampler;
 import 'drift.dart';
 import 'night_signal.dart';
@@ -39,7 +40,9 @@ const Map<BurstKind, String> _kindKey = {
 /// spans (first and last second), the drift-off detector from lights off (drift.dart; null with [driftError]
 /// when it failed), the back channels of the 10 minutes after a Lights off marker for "Was this you?"
 /// ([wearer], wearer/check.dart; null without a marker), and the side-to-side eye movements per epoch for the dream
-/// sleep check ([eye], rem_check.dart; null when this pass did not look).
+/// sleep check ([eye], rem_check.dart; null when this pass did not look), and whether each epoch is walking
+/// ([walking], walking/detector.dart over every channel the night's recordings share; null when this pass did not
+/// look): the scorer scores those epochs awake (DECISIONS 920).
 class NightSeen {
   const NightSeen({
     required this.quality,
@@ -49,6 +52,7 @@ class NightSeen {
     this.driftError,
     this.wearer,
     this.eye,
+    this.walking,
   });
   final List<EpochQuality> quality;
   final List<Burst> bursts;
@@ -57,14 +61,15 @@ class NightSeen {
   final String? driftError;
   final NightWindow? wearer;
   final EyeSeen? eye;
+  final List<bool>? walking;
 }
 
 typedef SeeFn = Future<NightSeen?> Function(List<File> recordings);
 
 /// The night's recordings (oldest first) joined on the clock as the sleep model reads them and fed through the
 /// detectors, the drift-off detector running from the night's lights off (drift.dart), and the eye-movement counter
-/// on the night's eye pair (rem_check.dart: T3-T4 on the BrainBit; read in the same pass); null when there are no
-/// samples.
+/// on the night's eye pair (rem_check.dart: T3-T4 on the BrainBit; read in the same pass), and the walking detector
+/// on every channel all the recordings hold (only as far as its veto needs: `quick`); null when there are no samples.
 NightSeen? seeNight(List<File> f32Files) {
   final (pair, why) = nightEyePair(f32Files);
   final names = [...channelNames];
@@ -83,12 +88,21 @@ NightSeen? seeNight(List<File> f32Files) {
     li = column(pair.leftName);
     ri = column(pair.rightName);
   }
+  if (f32Files.isNotEmpty) {
+    // the walking detector reads every channel, as the laptop's report: add those not yet read (by their column)
+    final h = readHeader(f32Files.first);
+    final have = {for (final n in names) h.indexOf(n)};
+    for (final name in sharedChannels(f32Files)) {
+      if (have.add(h.indexOf(name))) names.add(name);
+    }
+  }
   final layout = joinLayout(f32Files, names: names);
   if (layout.samples == 0) return null;
   final drift = NightDrift(f32Files, layout.startUnix);
   final det = Detectors(onSecond: drift.second);
   final wearer = NightWindowSampler(drift.markedLightsOffS);
   final eye = pair == null ? null : EyeMoveCounter(sampleRate: sampleRate);
+  final walk = WalkWindows(names.length, sampleRate, quick: true);
   final four = Float64List(4);
   final wide = names.length > 4;
   layout.forEachRow((row, missing) {
@@ -96,6 +110,7 @@ NightSeen? seeNight(List<File> f32Files) {
     det.push(r, missing: missing);
     wearer.push(r, missing);
     eye?.push(row[li], row[ri], missing: missing);
+    walk.push(row, missing: missing);
   });
   det.finish();
   return NightSeen(
@@ -106,7 +121,18 @@ NightSeen? seeNight(List<File> f32Files) {
     driftError: drift.error,
     wearer: wearer.window,
     eye: eye == null ? EyeSeen.not(why ?? noEyePair) : EyeSeen.measured(pair!.label, eye.finish()),
+    walking: walkingEpochs(walk.windows, det.epochs.length),
   );
+}
+
+/// The channel names every one of [f32Files] holds, in the first one's order.
+List<String> sharedChannels(List<File> f32Files) {
+  if (f32Files.isEmpty) return const [];
+  final heads = [for (final f in f32Files) readHeader(f)];
+  return [
+    for (final name in heads.first.names)
+      if (heads.every((h) => h.indexOf(name) != null)) name,
+  ];
 }
 
 /// The eye pair of a night (rem_check.dart [eyePairOf]) by its first recording's header, when every recording holds

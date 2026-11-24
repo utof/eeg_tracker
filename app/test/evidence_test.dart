@@ -28,6 +28,8 @@ void main() {
       'work-session',
       'memory-cues',
       'auto-start',
+      'signal-quality',
+      'confirm-questions',
       'share-on-wifi',
       'walking',
       'pulse',

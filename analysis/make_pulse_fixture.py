@@ -6,7 +6,8 @@
 Nothing of anyone's recordings: the signals are drawn here (the helpers below; analysis/tests/test_pulse.py uses them
 too): background EEG-like noise with an electrode offset and alpha, a pulse wave (its rate and three harmonics, the
 rate swinging a little with each breath) strongest on one or two electrodes, steps (short bumps on every channel, one
-foot a little different from the other), mains hum and a hole in the signal. Four cases: the BrainBit's four channels
+foot a little different from the other), mains hum and a hole in the signal. Five cases: a pulse under a walk on soft
+steps (the walking detector's veto); the BrainBit's four channels
 (a pulse, a hole, a movement, a weaker pulse, steps); eight channels in another layout with one dead and one railed
 electrode and loud hum; four channels at 500 samples a second; one channel at 256. Signals are stored as in
 detectors.json (gzip-compressed int32 differences, here in 1 µV steps), so both sides start from the very same numbers.
@@ -26,6 +27,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pulse as pl  # noqa: E402
+import walking as wk  # noqa: E402
 
 SCALE = 1  # steps per µV
 OUT = Path(__file__).resolve().parents[1] / "app" / "test" / "fixtures" / "pulse.json"
@@ -154,7 +156,18 @@ def one_channel() -> tuple[np.ndarray, float, np.ndarray, dict[str, Any]]:
     return x, fs, np.zeros(x.shape[1], dtype=bool), dict(names=["Fpz"], bpm=[50])
 
 
+def soft_walk() -> tuple[np.ndarray, float, np.ndarray, dict[str, Any]]:
+    """Four channels, 4 minutes: a pulse at 60 throughout, and from 1:02 to 2:50 a walk at 112 steps a minute on soft
+    steps (a shake of about 325 µV: walking-sized, under the movement rule): the walking detector's epochs are `w`."""
+    fs = 250.0
+    x = background(4, 240, fs, seed=81)
+    add_pulse(x, fs, 0, 240, 60, 14, [0.1, 0.1, 0.45, 1.0])
+    add_steps(x, fs, 62, 170, 112, 300, seed=82, gains=[1.0, 0.9, 0.6, 0.7])
+    return x, fs, np.zeros(x.shape[1], dtype=bool), dict(names=["O1", "O2", "T3", "T4"], bpm=[60])
+
+
 CASES = {"four channels: a pulse, a hole, a movement, a weaker pulse, steps": four_channels,
+         "four channels: a pulse and a walk on soft steps": soft_walk,
          "eight channels, one dead, one railed, loud hum": eight_channels,
          "four channels at 500 a second": fast_rate,
          "one channel at 256 a second": one_channel}
@@ -219,7 +232,7 @@ def case(name: str, make) -> dict[str, Any]:
         name=name, sample_rate=fs, channels=info["names"], n=int(x.shape[1]), signal=blob, missing=spans(miss),
         start_unix=START_UNIX, truth=info["bpm"],
         epochs=[[ep.code, num(ep.bpm), num(ep.conf), ep.channel, num(ep.best), ep.channels] for ep in eps],
-        stages=stages,
+        stages=stages, walking=wk.epoch_flags(wk.windows(xq, fs, miss, quick=True), len(eps)),
         asleep=dict(epochs=a.epochs, read=a.read, median=num(a.median), lowest=num(a.lowest)),
     )
 

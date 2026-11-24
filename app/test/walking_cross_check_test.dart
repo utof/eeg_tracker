@@ -67,13 +67,21 @@ void main() {
         }
       }
       final det = WalkWindows(names.length, rate);
+      final quick = WalkWindows(names.length, rate, quick: true);
       final row = Float64List(names.length);
       for (var i = 0; i < n; i++) {
         for (var k = 0; k < names.length; k++) {
           row[k] = x[k][i];
         }
         det.push(row, missing: missing[i]);
+        quick.push(row, missing: missing[i]);
       }
+      // walking per 30 s epoch, and the windows read without spectra (the sleep scorers' and the pulse's veto)
+      final pyEpochs = (c['epochs']! as List).cast<bool>();
+      expect(walkingEpochs(det.windows, pyEpochs.length), pyEpochs);
+      expect(walkingEpochs(quick.windows, pyEpochs.length), pyEpochs);
+      expect([for (final w in quick.windows) w.walks], (c['quick']! as List).cast<bool>());
+      expect([for (final w in quick.windows) w.walks], [for (final w in det.windows) w.walks]);
 
       final pyWindows = (c['windows']! as List).cast<List<Object?>>();
       expect(det.windows.length, pyWindows.length);

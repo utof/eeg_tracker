@@ -11,6 +11,7 @@ import 'diy_board_view.dart';
 import 'form_parts.dart' show Para, PinnedAction;
 import 'meditation_view.dart' show MarkShape, StateMark;
 import 'parts.dart';
+import 'lost_notice_setting.dart';
 import 'theme.dart';
 
 class OwnBleViewModel {
@@ -302,6 +303,8 @@ class _Idle extends StatelessWidget {
             style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.4),
           ),
         ],
+        const SectionHeading('If the headband is lost'),
+        const LostNoticeSetting(),
       ],
     );
   }

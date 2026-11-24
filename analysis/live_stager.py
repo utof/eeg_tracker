@@ -186,8 +186,11 @@ def replay(res: np.ndarray, gap: np.ndarray, n_in: int, sess, *, window: int = W
     return dict(lag=lag, edges=np.array(edges), call_s=np.array(secs), first=first)
 
 
-def stages_at(lag: np.ndarray, k: int, gap: np.ndarray, runs=None) -> list[str | None]:
-    """Stage per epoch as scored k epochs behind (mean of `runs`, default all); None where never scored."""
+def stages_at(lag: np.ndarray, k: int, gap: np.ndarray, runs=None, walking: list[bool] | None = None
+              ) -> list[str | None]:
+    """Stage per epoch as scored k epochs behind (mean of `runs`, default all); None where never scored. With
+    `walking` (walking.epoch_flags over the same stream: the phone's live scorer runs the walking detector beside the
+    model, live_stager.dart), an asleep epoch that is walking comes out awake (DECISIONS 920)."""
     p = lag[:, k] if runs is None else lag[list(runs), k]
     m = p.mean(0)
     out: list[str | None] = []
@@ -195,7 +198,8 @@ def stages_at(lag: np.ndarray, k: int, gap: np.ndarray, runs=None) -> list[str |
         if np.isnan(m[i]).any():
             out.append(None)
         else:
-            out.append("gap" if gap[i] else STAGES[int(m[i].argmax())])
+            st = "gap" if gap[i] else STAGES[int(m[i].argmax())]
+            out.append("W" if walking is not None and i < len(walking) and walking[i] and st not in ("gap", "W") else st)
     return out
 
 

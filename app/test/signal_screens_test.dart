@@ -12,6 +12,10 @@ import 'package:eeg_tracker/signal/live_signal.dart';
 import 'package:eeg_tracker/signal/signal_feed.dart';
 import 'package:eeg_tracker/ui/head_view.dart';
 import 'package:eeg_tracker/ui/night_view.dart' show Tone;
+import 'package:eeg_tracker/headband/battery_estimate.dart';
+import 'package:eeg_tracker/headband/device_status.dart';
+import 'package:eeg_tracker/signal/quality.dart';
+import 'package:eeg_tracker/ui/device_status.dart';
 import 'package:eeg_tracker/ui/signal_view.dart';
 import 'package:eeg_tracker/ui/theme.dart';
 import 'package:flutter/material.dart';
@@ -99,14 +103,31 @@ Future<void> _reveal(WidgetTester tester, Finder f) async {
   await tester.pump();
 }
 
-Widget _view(SignalViewModel m, LiveSignal? s, SignalPart part, {ValueNotifier<HeadPose>? pose}) => SignalView(
+DeviceCard _card(SignalViewModel m) => DeviceCard(
+  status: ValueNotifier(
+    DeviceStatus(
+      link: m.stage == SignalStage.live ? LinkState.live : LinkState.off,
+      quality: QualityVerdict(
+        electrodes: [
+          for (final e in m.ohms.entries) ElectrodeQuality(name: e.key, grade: classifyOhms(e.value), ohms: e.value),
+        ],
+        ohmsAt: m.ohms.isEmpty ? null : m.ohmsAt,
+      ),
+      battery: const BandBattery(gauge: 71, estimate: 71),
+    ),
+  ),
+  onMeasure: m.canMeasure ? () {} : null,
+);
+
+Widget _view(SignalViewModel m, LiveSignal? s, SignalPart part, {ValueNotifier<HeadPose>? pose, bool card = true}) => SignalView(
   model: m,
   signal: s,
   frames: ValueNotifier<int>(0),
   pose: pose ?? ValueNotifier(HeadPose.initial),
   initialPart: part,
   onAction: (_) {},
-  onMeasure: () {},
+  // the headband card every screen shares: its status as the app's one connection would give it for this page
+  device: card ? _card(m) : null,
   onPositions: () {},
   onInfo: () {},
 );
@@ -131,19 +152,6 @@ void main() {
       expect(describeSignal(at(SignalStage.waiting, age: 12)).sentence, 'No data for 12 s.');
       expect(describeSignal(at(SignalStage.waiting, age: 50)).tone, Tone.problem);
       expect(describeSignal(at(SignalStage.searching, diy: true)).sentence, contains('UDP port 9000'));
-    });
-
-    test('where the contact comes from: never "measure again" during a night or a session', () {
-      final m = brainBitMontage();
-      final at = DateTime(2026, 11, 19, 23, 12);
-      String src(ContactFrom f, FeedKind k, {bool measures = true}) => contactSource(
-        SignalViewModel(stage: SignalStage.live, kind: k, montage: m, ohmsFrom: f, ohmsAt: at, measuresContact: measures),
-      );
-      expect(src(ContactFrom.nightStart, FeedKind.night), contains('when the night started, 23:12'));
-      expect(src(ContactFrom.nightStart, FeedKind.night), contains('the last reading'));
-      expect(src(ContactFrom.session, FeedKind.session), contains('stays with the session'));
-      expect(src(ContactFrom.now, FeedKind.own), contains('Measure again'));
-      expect(src(ContactFrom.none, FeedKind.own, measures: false), 'This board does not measure contact.');
     });
 
     test('ohms in words', () {
@@ -191,7 +199,8 @@ void main() {
       expect(find.text('No headband'), findsOneWidget);
       expect(find.text('Try again'), findsOneWidget);
       expect(find.byType(HeadView), findsOneWidget);
-      await _reveal(tester, find.textContaining('measured when the headband connects'));
+      expect(find.text('Not connected'), findsOneWidget);
+      expect(find.text('about 71 %'), findsOneWidget, reason: 'the battery shows on the Signal tab too');
       expect(find.text('Measure contact again'), findsNothing);
     });
 
@@ -199,8 +208,7 @@ void main() {
       final m = brainBitMontage();
       await _shoot(tester, _view(_live(m, kind: FeedKind.night), _signal(m), SignalPart.head), 'signal_night', scale: scale);
       expect(find.textContaining('night recording'), findsOneWidget);
-      await _reveal(tester, find.textContaining('when the night started'));
-      expect(find.textContaining('when the night started'), findsOneWidget);
+      expect(find.text('about 71 %'), findsOneWidget);
       expect(find.text('Measure contact again'), findsNothing);
     });
 
@@ -221,7 +229,7 @@ void main() {
     tester.view.devicePixelRatio = 1080 / 393;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
-      MaterialApp(theme: nightTheme(), home: _view(_live(m), _signal(m), SignalPart.head, pose: pose)),
+      MaterialApp(theme: nightTheme(), home: _view(_live(m), _signal(m), SignalPart.head, pose: pose, card: false)), // the head and its rows alone
     );
     await tester.pump();
     final head = find.byType(HeadView);

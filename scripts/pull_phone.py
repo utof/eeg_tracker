@@ -51,6 +51,7 @@ phone did not answer, 2 the token is wrong or the answer is not the app's. Stand
 from __future__ import annotations
 
 import argparse, hashlib, hmac, json, os, shutil, sys, time, urllib.error, urllib.parse, urllib.request
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -94,6 +95,42 @@ class Paused(PhoneError):
 
 class AckRefused(Exception):
     """POST /ack was refused whole: no route (an older app), not paired, or a wrong key."""
+
+
+class Busy(Exception):
+    """Another pass (a pull, or the phone sending its files by itself) holds the folder; it was not free in time."""
+
+
+@contextmanager
+def pass_lock(dest: Path, wait: float | None = None):
+    """One pass at a time over [dest], whoever starts it (this script, phone_link.py's mirror, the receiver of the
+    phone's own sending in push_receiver.py; also across processes): an exclusive `flock` on the folder
+    `<dest>/phone/` itself, so no lock file is left among the data. [wait] None waits as long as it takes; a number
+    of seconds raises Busy when the folder is not free by then. Where the system has no `flock`, nothing is locked."""
+    try:
+        import fcntl
+    except ImportError:
+        yield
+        return
+    folder = dest / "phone"
+    folder.mkdir(parents=True, exist_ok=True)
+    fd = os.open(folder, os.O_RDONLY)
+    try:
+        if wait is None:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        else:
+            end = time.monotonic() + wait
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= end:
+                        raise Busy("another copy is running") from None
+                    time.sleep(0.05)
+        yield
+    finally:
+        os.close(fd)  # closing lets the lock go
 
 
 @dataclass(frozen=True)
@@ -232,31 +269,31 @@ class Phone:
                 m = json.loads(r.read().decode("utf-8"))
         except (OSError, ValueError) as e:
             raise PhoneError(f"the phone's list could not be read ({e})") from e
-        if not isinstance(m, dict) or m.get("format") != FORMAT or not isinstance(m.get("files"), list):
-            raise Refused(f"{self.base}/files is not the EEG Tracker app's list")
-        if m.get("version") != VERSION:
-            raise Refused(f"the phone's list is version {m.get('version')}; this script reads version {VERSION}")
-        out, bad, seen = [], [], set()
-        for f in m["files"]:
-            try:
-                p = ip.safe_path(f.get("path") if isinstance(f, dict) else None)
-            except ip.ManifestError:
-                bad.append(str(f.get("path") if isinstance(f, dict) else f)[:80])
-                continue
-            size, digest, mod = f.get("bytes"), f.get("sha256"), f.get("modified_ms")
-            ok_digest = digest is None or (isinstance(digest, str) and len(digest) == 64
-                                           and all(c in "0123456789abcdef" for c in digest))
-            try:
-                orig = ip.original_of(p, f.get("original"))
-            except (ValueError, ip.ManifestError):
-                orig = None
-                ok_digest = False
-            if not (isinstance(size, int) and size >= 0 and isinstance(mod, int) and ok_digest) or p in seen:
-                bad.append(str(p))
-                continue
-            seen.add(p)
-            out.append(Listed(p, size, digest, mod, orig, f.get("acked") is True))
-        return out, bad
+        return read_list(m, f"{self.base}/files")
+
+    def asks(self) -> list | None:
+        """GET /recheck: the phone's questions before it deletes raw recordings by itself; None when there are none
+        to read (an app without /recheck, no answer)."""
+        try:
+            with self._open("/recheck", timeout=FILE_TIMEOUT) as r:
+                m = json.loads(r.read(4_000_000).decode("utf-8"))
+        except (PhoneError, Refused, OSError, ValueError):
+            return None
+        asks = m.get("asks") if isinstance(m, dict) else None
+        return asks if isinstance(asks, list) else None
+
+    def prove(self, proofs: list[dict]) -> dict | None:
+        """POST /recheck: this laptop's proofs; the phone's word on them ({proven, failed}), None without one."""
+        body = json.dumps({"v": 1, "proofs": proofs}, separators=(",", ":")).encode()
+        try:
+            with self._open("/recheck", {"Content-Type": "application/json"}, FILE_TIMEOUT, body) as r:
+                m = json.loads(r.read().decode("utf-8"))
+        except (PhoneError, Refused, OSError, ValueError):
+            return None
+        return m if isinstance(m, dict) else None
+
+    how: str | None = None  # how pulls.jsonl names the way the files came, when not by an ordinary pull
+    acks_always = False  # True: acks are worked out even when an earlier POST /ack was refused (no_ack_at)
 
     def ack(self, files: list[dict[str, str]], key: str | None = None) -> tuple[list[str], list[dict]]:
         """POST /ack, signed with the pairing's key: (paths the phone took, [{path, why}] it did not). Raises
@@ -300,6 +337,36 @@ class Phone:
         except OSError as e:
             raise PhoneError(f"{path} stopped arriving ({e})") from e
         return n
+
+
+def read_list(m: object, name: str = "the list") -> tuple[list[Listed], list[str]]:
+    """The phone's list (format eeg-tracker-phone-files, version 1) as entries, and the paths in it that are not
+    usable; Refused when it is not that list."""
+    if not isinstance(m, dict) or m.get("format") != FORMAT or not isinstance(m.get("files"), list):
+        raise Refused(f"{name} is not the EEG Tracker app's list")
+    if m.get("version") != VERSION:
+        raise Refused(f"the phone's list is version {m.get('version')}; this script reads version {VERSION}")
+    out, bad, seen = [], [], set()
+    for f in m["files"]:
+        try:
+            p = ip.safe_path(f.get("path") if isinstance(f, dict) else None)
+        except ip.ManifestError:
+            bad.append(str(f.get("path") if isinstance(f, dict) else f)[:80])
+            continue
+        size, digest, mod = f.get("bytes"), f.get("sha256"), f.get("modified_ms")
+        ok_digest = digest is None or (isinstance(digest, str) and len(digest) == 64
+                                       and all(c in "0123456789abcdef" for c in digest))
+        try:
+            orig = ip.original_of(p, f.get("original"))
+        except (ValueError, ip.ManifestError):
+            orig = None
+            ok_digest = False
+        if not (isinstance(size, int) and size >= 0 and isinstance(mod, int) and ok_digest) or p in seen:
+            bad.append(str(p))
+            continue
+        seen.add(p)
+        out.append(Listed(p, size, digest, mod, orig, f.get("acked") is True))
+    return out, bad
 
 
 class State:
@@ -459,8 +526,14 @@ def _pull_packed(phone: Phone, e: Listed, dest: Path, index: ip.Index, state: St
 
 
 def pull(phone: Phone, dest: Path, *, raw_only: bool = False, now: datetime | None = None, key: str | None = None,
-         ack_budget: int = ACK_BUDGET) -> Pass:
-    """One pass: the phone's list, then everything the laptop lacks; with the pairing's [key], then the acks."""
+         ack_budget: int = ACK_BUDGET, lock_wait: float | None = None) -> Pass:
+    """One pass: the phone's list, then everything the laptop lacks; with the pairing's [key], then the acks. One
+    pass at a time over [dest] (`pass_lock`): it waits for another to end, or with [lock_wait] seconds raises Busy."""
+    with pass_lock(dest, lock_wait):
+        return _pass(phone, dest, raw_only=raw_only, now=now, key=key, ack_budget=ack_budget)
+
+
+def _pass(phone: Phone, dest: Path, *, raw_only: bool, now: datetime | None, key: str | None, ack_budget: int) -> Pass:
     pairing = key
     now = now or datetime.now().astimezone()
     here = phone.who() if phone.key else None
@@ -545,7 +618,7 @@ def pull(phone: Phone, dest: Path, *, raw_only: bool = False, now: datetime | No
         state.save()
         index.save()
         if rep.changed or rep.problems:
-            _record(rep, dest, "paired" if phone.key else "by code", now)
+            _record(rep, dest, getattr(phone, "how", None) or ("paired" if phone.key else "by code"), now)
     return rep
 
 
@@ -594,7 +667,7 @@ def acknowledge(phone: Phone, dest: Path, listed: list[Listed], key: str, rep: P
     pairing the phone forgot), nothing is hashed and it is asked again after 6 hours. A file the phone does not take
     is not sent again for the same bytes."""
     t = (now or datetime.now().astimezone()).timestamp()
-    if state.no_ack_at and t - state.no_ack_at < ACK_RETRY_S:
+    if state.no_ack_at and t - state.no_ack_at < ACK_RETRY_S and not getattr(phone, "acks_always", False):
         rep.ack_note = "the phone took no acks lately; asked again later"
         return
     due: list[tuple[Listed, Path, int, str]] = []
@@ -685,21 +758,11 @@ def _ranges(dst: Path, ranges: list[tuple[int, int]]):
         f.close()
 
 
-def answer_rechecks(phone: Phone, dest: Path, rep: Pass) -> None:
-    """The phone's questions before it deletes raw recordings by itself (DECISIONS 756): for each, an HMAC with the
-    phone's nonce over the asked byte ranges of THIS laptop's own copy (phone_auth.recheck_mac; a packed .f32.xz
-    unpacked), never over bytes fetched from the phone; "missing" when this laptop does not hold those bytes (no copy,
-    or one of another length). The phone deletes only on a fresh proof. An app without /recheck: nothing to answer."""
-    if not phone.key:
-        return
-    try:
-        with phone._open("/recheck", timeout=FILE_TIMEOUT) as r:
-            m = json.loads(r.read(4_000_000).decode("utf-8"))
-    except (PhoneError, Refused, OSError, ValueError):
-        return
-    asks = m.get("asks") if isinstance(m, dict) else None
-    if not isinstance(asks, list):
-        return
+def recheck_proofs(dest: Path, key: str, asks: list) -> list[dict]:
+    """The answers to the phone's questions before it deletes raw recordings by itself (DECISIONS 756): for each, an
+    HMAC with the phone's nonce over the asked byte ranges of THIS laptop's own copy (phone_auth.recheck_mac; a packed
+    .f32.xz unpacked), never over bytes fetched from the phone; "missing" when this laptop does not hold those bytes
+    (no copy, or one of another length). Nothing is sent here."""
     proofs: list[dict] = []
     for a in asks[:RECHECK_MAX]:
         if not isinstance(a, dict):
@@ -719,26 +782,35 @@ def answer_rechecks(phone: Phone, dest: Path, rep: Pass) -> None:
         dst = ip.target_for(dest, path)
         try:
             held = ip.on_laptop(dst) is not None and ip.size_of(dst) == size
-            mac = pa.recheck_mac(phone.key, str(path), nonce, size, rs, _ranges(dst, rs)) if held else None
+            mac = pa.recheck_mac(key, str(path), nonce, size, rs, _ranges(dst, rs)) if held else None
         except (OSError, EOFError, ValueError):
             mac = None
         proofs.append({"path": str(path), "nonce": nonce, "mac": mac} if mac else
                       {"path": str(path), "nonce": nonce, "missing": True})
+    return proofs
+
+
+def answer_rechecks(phone: Phone, dest: Path, rep: Pass) -> None:
+    """The phone's questions (`phone.asks()`: GET /recheck) answered from this laptop's own copies (`recheck_proofs`)
+    and sent (`phone.prove()`: POST /recheck). The phone deletes only on a fresh proof. An app without /recheck:
+    nothing to answer."""
+    if not phone.key:
+        return
+    asks = phone.asks()
+    if asks is None:
+        return
+    proofs = recheck_proofs(dest, phone.key, asks)
     if not proofs:
         return
-    body = json.dumps({"v": 1, "proofs": proofs}, separators=(",", ":")).encode()
-    try:
-        with phone._open("/recheck", {"Content-Type": "application/json"}, FILE_TIMEOUT, body) as r:
-            m = json.loads(r.read().decode("utf-8"))
-    except (PhoneError, Refused, OSError, ValueError):
-        return
+    m = phone.prove(proofs)
     if isinstance(m, dict):
         rep.proven += [p for p in m.get("proven") or [] if isinstance(p, str)]
         rep.unproven += [f"{f.get('path')} ({f.get('why')})" for f in m.get("failed") or [] if isinstance(f, dict)]
 
 
 def _record(rep: Pass, dest: Path, how: str, now: datetime) -> None:
-    """One line of pulls.jsonl: how the phone was reached (paired, or by code), never its address (DECISIONS 757)."""
+    """One line of pulls.jsonl: how the phone was reached (paired, by code, or pushed: it sent its files by itself),
+    never its address (DECISIONS 757)."""
     line = dict(pulled=now.isoformat(timespec="seconds"), phone=how, listed=rep.listed, bytes=rep.fetched,
                 new=len(rep.new), grown=len(rep.grown), checked=len(rep.checked), updated=len(rep.updated),
                 kept=len(rep.kept), damaged=len(rep.damaged), waiting=len(rep.waiting), refused=len(rep.refused),

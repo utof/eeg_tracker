@@ -20,10 +20,10 @@ import 'package:flutter/foundation.dart';
 import '../dream/band_link.dart' show BandLink;
 import '../recorder/chunk_writer.dart' show ChunkWriter, Sample, fileStem, unixSeconds;
 import '../recorder/contact.dart' show channelNames;
+import '../signal/quality.dart';
 import '../recorder/headband.dart';
 import '../session_keeper.dart';
 import '../sound/check_in_sound.dart';
-import 'live.dart';
 import 'measures.dart';
 import 'result.dart';
 import 'store.dart';
@@ -161,18 +161,11 @@ class MorningController extends ChangeNotifier {
   /// Seconds left in the running phase.
   int get secondsLeft => math.max(0, ((_phaseSamples - (_received - _phaseFrom)) / morningFs).ceil());
 
-  /// The live word per electrode from the last 4 s of its signal.
-  Map<String, ({Grade grade, String word, double spread})> get grades {
-    final n = (gradeWindowS * morningFs).round();
-    return {
-      for (final c in channelNames)
-        // a channel the contact check did not report is unknown, not held against it: its signal decides
-        c: gradeChannel(
-          contact.containsKey(c) ? contact[c] : 0,
-          _uv[c]!.isEmpty ? null : _uv[c]!.sublist(math.max(0, _uv[c]!.length - n)),
-        ),
-    };
-  }
+  /// Each electrode's word from the one judge (signal/quality.dart): the contact reading and the live signal.
+  QualityVerdict get quality => _judge.verdict;
+  late QualityJudge _judge = QualityJudge(names: channelNames, clock: _now);
+  SecondMaker _maker = SecondMaker(channels: channelNames.length, rate: morningFs);
+  final List<double> _row = List<double>.filled(channelNames.length, 0);
 
   /// Finds the headband, checks contact and starts the signal; then the contact step waits for [begin].
   Future<void> start() async {
@@ -205,6 +198,7 @@ class MorningController extends ChangeNotifier {
       if (run == _run) rechecking = false;
       if (!_live(run)) return; // Stop let the headband go
       contact = ohms;
+      _judge.ohms(ohms);
       var sound = _makeSound();
       String? note;
       try {
@@ -278,6 +272,7 @@ class MorningController extends ChangeNotifier {
       final ohms = await _checkContact(band);
       if (!_live(run)) return;
       contact = ohms;
+      _judge.ohms(ohms);
       await _sdk(band.startSignal(), 'start signal');
     } catch (e) {
       if (_live(run)) message = 'The contact check did not finish ($e).';
@@ -324,6 +319,8 @@ class MorningController extends ChangeNotifier {
     _restarted = false;
     _ended = false;
     _analysis = null;
+    _judge = QualityJudge(names: channelNames, clock: _now);
+    _maker = SecondMaker(channels: channelNames.length, rate: morningFs);
     contact = const {};
     rechecking = false;
     noSignal = false;
@@ -372,8 +369,10 @@ class MorningController extends ChangeNotifier {
         ..[2] = x.t3
         ..[3] = x.t4;
       for (var c = 0; c < 4; c++) {
-        _uv[channelNames[c]]!.add(_f32[c] * 1e6);
+        _uv[channelNames[c]]!.add(_row[c] = _f32[c] * 1e6);
       }
+      final second = _maker.push(_row);
+      if (second != null) _judge.second(second);
     }
     _received += batch.length;
     final end = _phaseFrom + _phaseSamples;

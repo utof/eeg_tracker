@@ -54,7 +54,8 @@ Clicking it opens the menu:
   752): "Phone: sharing on its home Wi-Fi · copied 14:05" (or "on a Wi-Fi allowed by hand", or "paired, reachable";
   "· copying its files" while the link copies), "Phone: on another Wi-Fi: sharing paused there", "Phone: no longer
   knows this laptop (Pair phone… again)", "Phone: paired the old way: Pair phone… once more (one scan)", or "Phone:
-  not reachable (app asleep, or Share on Wi-Fi off?)"; then the headband: "Headband: recording on the phone
+  not reachable (app asleep, or Share on Wi-Fi off?)"; then "Phone: sent its files by itself 14:05" (the last time
+  the phone sent them without being asked, with the day when it was not today; DECISIONS 847); then the headband: "Headband: recording on the phone
   (work session since 12:26, signal good, alert)", "Headband: connected, not on the head (…)", "Headband: no data
   for 2 min (…)", "Headband: recording a night on the phone, 6h10 so far", "Headband: not recording on the phone",
   or "Headband: —"; and a break line from the phone when there is one: "Break hint on the phone since 12:50
@@ -168,6 +169,10 @@ bigger, instead of starting a second copy. It is greyed out only without a termi
   (DECISIONS 751); the phone's answer must prove the same key. One look without an answer keeps the last one (a Wi-Fi blip); two in a row is "not reachable".
 - **At the start**, if a phone was paired before and does not answer now, one notification says so (only with
   notifications on; never during a meeting). Afterwards only the ring and the menu change.
+- **Headband notices from the phone**: when the phone made a new one (the headband sent no data for a while, data is
+  back, or its battery is nearly empty), the tray shows it once as a notification with the phone's own words (only with
+  notifications on; never during a meeting). A newer notice replaces the older one. One older than 30 minutes is
+  never shown, and a tray restart may show the newest again if it is still under 30 minutes old.
 - **Forget the phone…** → **Yes, forget it** deletes `link.json` and stops the kept link; the menu then offers
   Pair phone… first again.
 - When a work session starts or ends here, the tray tells the paired phone (Share on Wi-Fi's signed `POST /work`,

@@ -23,14 +23,14 @@ void main() {
   late List<Map<String, Object?>> sent;
   late List<bool> awake;
   late ShareControl c;
-  var now = DateTime(2026, 11, 22, 22, 5);
+  var now = DateTime(2099, 11, 22, 22, 5);
 
   setUp(() {
     files = Directory.systemTemp.createTempSync('share_control_test');
     saved = const ShareConfig();
     sent = [];
     awake = [];
-    now = DateTime(2026, 11, 22, 22, 5);
+    now = DateTime(2099, 11, 22, 22, 5);
     c = ShareControl(
       load: () async => saved,
       save: (x) async => saved = x,
@@ -45,6 +45,32 @@ void main() {
     await c.setOn(false);
     c.dispose();
     files.deleteSync(recursive: true);
+  });
+
+  test('Android\'s push job: armed while sharing is on and a laptop is paired, ended otherwise, told only on a change', () async {
+    final armed = <bool>[];
+    final p = ShareControl(
+      load: () async => saved,
+      save: (x) async => saved = x,
+      sendToRecorder: sent.add,
+      keepScreenOn: (on) async {},
+      clock: () => now,
+      pushSchedule: (on) async => armed.add(on),
+      host: (dir, onChange, wifiLock) =>
+          ShareHost(filesDir: dir, onLog: (_) {}, onChange: onChange, entry: fakeServer, wifiLock: wifiLock),
+    );
+    addTearDown(p.dispose);
+    await p.sync(night: false, filesDir: files.path);
+    expect(armed, [false], reason: 'off and not paired: no job');
+    await p.setOn(true);
+    expect(armed, [false], reason: 'on, but no laptop to send to');
+    saved = saved.withLaptop(const PairedLaptop(host: '192.168.1.10', port: 8771, key: '7d6f0c1b5a4e3d2c1b0a99887766554433221100ffeeddccbbaa998877665544', name: 'my-laptop'));
+    await p.sync(night: false, filesDir: files.path);
+    await p.sync(night: true, filesDir: files.path);
+    expect(armed, [false, true], reason: 'paired and on: armed once, also through a night');
+    await p.forgetLaptop();
+    expect(armed, [false, true, false]);
+    await p.setOn(false);
   });
 
   Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 150));
@@ -145,7 +171,7 @@ void main() {
     expect((sent.last['config']! as Map)['token'], saved.token);
 
     // Stop: 15 more minutes, served by the app again
-    now = DateTime(2026, 11, 23, 7, 30);
+    now = DateTime(2099, 11, 23, 7, 30);
     await c.afterStop();
     expect(saved.offAtMs, now.add(const Duration(minutes: 15)).millisecondsSinceEpoch);
     await c.sync(night: false, filesDir: files.path);

@@ -21,6 +21,9 @@ The truth table (`_local/data/truth.tsv`, written by scripts/data_book.py) is bu
   - every `<local>/truth/*.tsv` in the same schema (a watch's pulse readings converted to rows, any later importer);
   - the Archive's tags marked "This is what I was doing" on the phone (`<local>/phone/archive/*.tags.json`, `truth`
     true), their word matched to a label by its id or the vocabulary's `also` words.
+  - the phone's confirmation questions (`<local>/phone/confirm/`, DECISIONS 860-869): a Yes to "Did you walk
+    19:08-21:14?" is a row over the detector's stretch, a No the same row with `present` 0 (it did not happen: the
+    detector was wrong there), both naming the estimate in `estimate_id`; Not sure makes no row.
 Rows that break the schema are left out of the table and listed with the reason. Standard library only.
 """
 from __future__ import annotations
@@ -36,7 +39,9 @@ VOCABULARY = HERE / "truth_vocabulary.tsv"
 HAND_FILE = Path("analyses") / "truth-labels.tsv"  # from <local>
 IMPORT_FOLDER = Path("truth")  # from <local>: more truth files in the same schema
 COLUMNS = ["label_id", "start", "end", "recording", "kind", "label", "value", "unit", "source", "confidence", "created",
-           "supersedes", "owner_words", "context"]
+           "supersedes", "owner_words", "context",
+           "present", "estimate_id"]
+ADDED_LATER = {"present": "1", "estimate_id": ""}  # a file written before these columns reads with these values
 TABLE_COLUMNS = COLUMNS + ["origin", "active", "superseded_by"]  # truth.tsv: where each row came from, and its state
 FREE_TEXT = ("owner_words", "context")
 NUMBERED_KINDS = ("rating", "measurement")  # value and unit required
@@ -144,6 +149,12 @@ def row_errors(r: dict[str, str], vocab: Vocabulary) -> list[str]:
     if r["confidence"] not in vocab.confidences:
         errs.append(f"confidence {r['confidence']!r} is not one of {', '.join(vocab.confidences)}")
     errs += _value_errors(r, lab)
+    if r["present"] not in ("1", "0"):
+        errs.append(f"present {r['present']!r} is not 1 (it happened) or 0 (it did not)")
+    if r["estimate_id"] and not ID.fullmatch(r["estimate_id"]):
+        errs.append(f"estimate_id {r['estimate_id']!r} is not an id")
+    if r["present"] == "0" and lab is not None and lab.kind in NUMBERED_KINDS + ("correction",):
+        errs.append(f"present 0 has no meaning for a {lab.kind}")
     if r["supersedes"] == r["label_id"]:
         errs.append("a row cannot supersede itself")
     if lab is not None and lab.kind == "correction" and not r["supersedes"]:
@@ -203,8 +214,8 @@ def read_file(path: Path, origin: str, vocab: Vocabulary, out: Read) -> None:
     head = next(reader, None)
     if head is None:
         return
-    if sorted(head) != sorted(COLUMNS):
-        missing, extra = set(COLUMNS) - set(head), set(head) - set(COLUMNS)
+    missing, extra = set(COLUMNS) - set(head) - set(ADDED_LATER), set(head) - set(COLUMNS)
+    if missing or extra or len(set(head)) != len(head):
         out.rejected.append(Rejected(origin, 1, "", f"the header is not the truth schema (missing {sorted(missing)}, "
                                                     f"unknown {sorted(extra)})"))
         return
@@ -216,7 +227,8 @@ def read_file(path: Path, origin: str, vocab: Vocabulary, out: Read) -> None:
             out.rejected.append(Rejected(origin, line, cells[0] if cells else "",
                                          f"{len(cells)} cells, the header has {len(head)}"))
             continue
-        r = dict(zip(head, cells))
+        r = {**ADDED_LATER, **dict(zip(head, cells))}
+        r["present"] = r["present"] or "1"
         out.ids.add(r["label_id"])
         errs = row_errors(r, vocab)
         if errs:
@@ -250,12 +262,113 @@ def archive_rows(local: Path, vocab: Vocabulary, out: Read) -> None:
             r = dict(label_id=tid, start=_iso(t.get("start")), end=_iso(t.get("end")),
                      recording=str(j.get("id") or ""), kind=lab.kind, label=lab.id, value="", unit="",
                      source="owner_app_tag", confidence="certain", created=_iso(t.get("made")), supersedes="",
-                     owner_words=word, context=ARCHIVE_CONTEXT)
+                     owner_words=word, context=ARCHIVE_CONTEXT, present="1", estimate_id="")
             errs = row_errors(r, vocab)
             if errs:
                 out.rejected.append(Rejected(rel, 0, tid, "; ".join(errs)))
                 continue
             out.rows.append(dict(r, origin=rel))
+
+
+def _jsonl(path: Path) -> list[dict]:
+    """A phone file's lines that are JSON objects (a line cut short by a killed app is left out)."""
+    out = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return out
+    for line in text.splitlines():
+        try:
+            j = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(j, dict):
+            out.append(j)
+    return out
+
+
+CONFIRM_FOLDER = Path("phone") / "confirm"
+CONFIRM_ANSWERS = {"yes": "Yes", "no": "No", "skip": "Not sure"}  # the buttons' words (app/lib/confirm/store.dart)
+
+
+@dataclass
+class Confirmed:
+    """One estimate of the phone's confirmation questions and what the owner answered (DECISIONS 860-869)."""
+    estimate: dict
+    answer: str = ""  # yes, no, skip, or "" (not answered)
+    at: str = ""
+    via: str = ""
+    note: str = ""
+
+
+def clean_note(words: str) -> str:
+    """A note as the app keeps it: one line, single spaces, at most 200 characters."""
+    return re.sub(r"\s+", " ", words).strip()[:200].rstrip()
+
+
+def read_confirm(local: Path) -> list[Confirmed]:
+    """The phone's estimates (`estimates.jsonl`, the first line of an id counts) with their standing answers
+    (`answers.jsonl`: the first yes, no or skip stands, `undo` takes it back, a `note` adds the owner's words), in the
+    order registered. The same reading as app/lib/confirm/store.dart."""
+    got: dict[str, Confirmed] = {}
+    for j in _jsonl(local / CONFIRM_FOLDER / "estimates.jsonl"):
+        if isinstance(j.get("id"), str) and isinstance(j.get("label"), str):
+            got.setdefault(j["id"], Confirmed(j))
+    notes: dict[str, str] = {}
+    answers: dict[str, dict] = {}
+    for j in _jsonl(local / CONFIRM_FOLDER / "answers.jsonl"):
+        i = j.get("estimate_id")
+        if not isinstance(i, str):
+            continue
+        if isinstance(j.get("note"), str):
+            notes[i] = clean_note(j["note"])
+        elif j.get("answer") == "undo":
+            answers.pop(i, None)
+            notes.pop(i, None)
+        elif j.get("answer") in CONFIRM_ANSWERS and parse_time(j.get("at")) and i not in answers:
+            answers[i] = j
+    for i, a in answers.items():
+        if i in got:
+            c = got[i]
+            c.answer, c.at, c.note = a["answer"], a["at"], notes.get(i, "")
+            c.via = a["via"] if isinstance(a.get("via"), str) else "card"
+    return list(got.values())
+
+
+def confirm_row(c: Confirmed) -> dict[str, str] | None:
+    """An answered estimate as a truth row (the columns of COLUMNS); None for Not sure or no answer. A Yes says the
+    estimate's stretch was what the detector thought (`present` 1), a No that it was not (`present` 0). The same row
+    app/lib/confirm/labels.dart writes into the phone's own `confirm/labels.tsv`; one golden file checks both."""
+    if c.answer not in ("yes", "no"):
+        return None
+    e = c.estimate
+    yes = c.answer == "yes"
+    conf = e.get("confidence")
+    sure = f", confidence {conf:.2f}" if isinstance(conf, (int, float)) and not isinstance(conf, bool) else ""
+    word = CONFIRM_ANSWERS[c.answer]
+    return dict(label_id="confirm:" + e["id"][4:], start=_iso(e.get("start")), end=_iso(e.get("end")),
+                recording=e.get("recording") or "", kind=str(e.get("kind") or ""), label=e["label"], value="", unit="",
+                source="owner_stop_sheet" if c.via == "stop_sheet" else "owner_app_prompt",
+                confidence=(e.get("yes_means") if e.get("yes_means") in ("certain", "likely") else "certain") if yes
+                else "certain",
+                created=_iso(c.at), supersedes="", owner_words=f"{word}: {c.note}" if c.note else word,
+                context=f"the app asked; {e.get('detector')} ({e.get('version')}) said {e['label']}{sure}",
+                present="1" if yes else "0", estimate_id=e["id"])
+
+
+def confirm_rows(local: Path, vocab: Vocabulary, out: Read) -> None:
+    """The phone's answered confirmation questions as truth rows (`<local>/phone/confirm/`)."""
+    rel = (CONFIRM_FOLDER / "answers.jsonl").as_posix()
+    for c in read_confirm(local):
+        r = confirm_row(c)
+        if r is None:
+            continue
+        out.ids.add(r["label_id"])
+        errs = row_errors(r, vocab)
+        if errs:
+            out.rejected.append(Rejected(rel, 0, r["label_id"], "; ".join(errs)))
+            continue
+        out.rows.append(dict(r, origin=rel))
 
 
 def _iso(v: object) -> str:
@@ -328,8 +441,9 @@ def build(local: Path, vocab: Vocabulary | None = None) -> tuple[list[dict[str, 
     for p, rel in sources_of(local):
         read_file(p, rel, vocab, got)
     archive_rows(local, vocab, got)
+    confirm_rows(local, vocab, got)
     rows = check_rows(got)
-    counts = {"hand": 0, "files": 0, "archive": 0}
+    counts = {"hand": 0, "files": 0, "archive": 0, "confirm": 0}
     for r in rows:
         counts[origin_kind(r["origin"])] += 1
     return rows, got.rejected, counts
@@ -339,6 +453,8 @@ def origin_kind(origin: str) -> str:
     """`hand` (the hand file), `archive` (a phone tag) or `files` (<local>/truth/)."""
     if origin == HAND_FILE.as_posix():
         return "hand"
+    if origin.startswith("phone/confirm/"):
+        return "confirm"
     return "archive" if origin.startswith("phone/archive/") else "files"
 
 

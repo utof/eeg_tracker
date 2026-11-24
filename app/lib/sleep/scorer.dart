@@ -20,6 +20,7 @@ import 'dart:typed_data';
 import '../recorder/nights.dart';
 import '../recorder/packed.dart' show rawExists, rawLength;
 import '../recorder/remove.dart' show RawUse;
+import '../walking/detector.dart' show walkingVeto;
 import 'extras.dart';
 import 'model.dart';
 import 'prep.dart';
@@ -328,6 +329,9 @@ class SleepScorer {
       onError: (Object e) => (null, '$e'),
     );
     keep();
+    // nobody sleeps while walking: the epochs the walking detector calls walking are scored awake (DECISIONS 920)
+    final walking = found?.walking;
+    final (stages, changed) = walking == null ? (s.stages, 0) : walkingVeto(s.stages, walking);
     return buildReport(
       nightOf: night.name,
       built: _clock(),
@@ -336,7 +340,9 @@ class SleepScorer {
       lengthSeconds: facts.recordedSamples / 250,
       inputs: inputs,
       model: model,
-      stages: s.stages,
+      stages: stages,
+      walking: walking,
+      walkingChanged: changed,
       confidence: s.confidence,
       probabilities: probs,
       seen: found,

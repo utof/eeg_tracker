@@ -192,9 +192,16 @@ class BandLink {
 
   /// The headband's resistance for [LinkTiming.contactFor]: ohms per channel, null where it has none (infinite),
   /// channels it did not report left out.
-  Future<Map<String, double?>> contact() async {
+  /// On a handle to the one live connection (headband/connection.dart) the reading already in force is returned at
+  /// once, with no check and no pause in the stream, unless [fresh] asks for a new one (DECISIONS 855).
+  Future<Map<String, double?>> contact({bool fresh = false}) async {
     final band = _band;
     if (band == null) return const {};
+    final known = fresh || band is! KnownContact ? null : (band as KnownContact).knownContact;
+    if (known != null) {
+      LiveTap.contact(known.ohms, known.at);
+      return known.ohms;
+    }
     final readings = <Map<String, double>>[];
     final sub = band.resistance.listen(readings.add);
     try {
@@ -349,7 +356,7 @@ class BandLink {
     await sub?.cancel();
     try {
       await _sdk(band.stopSignal(), 'stop signal');
-      return await contact();
+      return await contact(fresh: true);
     } finally {
       if (!_closed && identical(_band, band)) await startSignal();
     }

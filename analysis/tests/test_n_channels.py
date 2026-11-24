@@ -72,7 +72,7 @@ def test_the_end_without_an_index_uses_the_files_rate(tmp_path: Path) -> None:
 def test_out_of_date_counts_minutes_by_each_files_record(tmp_path: Path) -> None:
     f = nch.write_set(tmp_path, T0, nch.volts(250 * 60 * 11, 8), nch.EIGHT)
     night = nf.Night("2026-11-19", nf.recordings(tmp_path))
-    rep = {"version": nf.VERSION, "drift_off": None, "rem_check": None,
+    rep = {"version": nf.VERSION, "drift_off": None, "rem_check": None, "walking": None,
            "inputs": [{"file": f.name, "bytes": 36 * 250 * 60 * 2}]}
     assert not nf.is_stale(night, rep)  # 9 min newer: 4 860 000 bytes, which 20-byte records would call 16 min
     rep["inputs"][0]["bytes"] = 36 * 250 * 60
