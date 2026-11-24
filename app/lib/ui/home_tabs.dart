@@ -102,5 +102,6 @@ Widget _badged(HomeTab t, Widget icon) => t != HomeTab.night
     ? icon
     : ValueListenableBuilder<int>(
         valueListenable: quickChecksWaiting,
-        builder: (_, n, _) => Badge(isLabelVisible: n > 0, label: Text('$n'), child: icon),
+        // the count is left out of the tab's spoken label, which stays "Night" (the emulator checks find the tab by it)
+        builder: (_, n, _) => Badge(isLabelVisible: n > 0, label: ExcludeSemantics(child: Text('$n')), child: icon),
       );
