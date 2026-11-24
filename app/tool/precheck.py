@@ -3,7 +3,7 @@
 "Pre-install check"; DECISIONS 733).
 
     python3 app/tool/precheck.py --old LAST_ON_PHONE.apk --new CANDIDATE.apk \\
-        [--replay REPLAY_BUILD.apk] [--nights DIR] [--reports DIR] [--out DIR] [--adb-port N] [--keep]
+        [--replay REPLAY_BUILD.apk] [--nights DIR] [--reports DIR] [--out DIR] [--adb-port N] [--adb-connect HOST:PORT] [--stage-only] [--keep]
 
 It makes a new AVD under /var/tmp with 2 cores (the phone's arm64 APK runs there through Android's ARM translation,
 which crashes ONNX Runtime with 4 cores), boots it headless, and checks what reached the owner's phone on 2026-11-19/20:
@@ -28,6 +28,13 @@ Prints a plain PASS / FAIL / SKIP list; exit status 1 when anything failed. Abou
 Only its own things: a private adb server on port 5041 (--adb-port; ADB_LIBUSB=0 ADB_USB=0) and the emulator's own serial on
 every adb call, never another device or the default adb server; the emulator and that server are stopped by PID
 and the AVD deleted at the end (--keep leaves the AVD and the seed copies). Run it in the heavy build slot.
+
+--adb-connect HOST:PORT: do not make or start an emulator here; use the one already reachable at that adb address (a
+tunnel to an emulator on another machine, started and stopped by whoever owns it: a fresh one, with 2 cores and the
+Europe/Moscow time zone as above). The private adb server connects to it and is stopped at the end; the emulator is not.
+
+The seed files go through a content-addressed cache on the device (SEED_CACHE, named by SHA-256) and are hard-linked into the app's
+folder; --stage-only fills the cache and stops, so an emulator snapshot saved after it already holds the nights (DECISIONS 873).
 """
 
 from __future__ import annotations
@@ -137,16 +144,31 @@ def free_port_pair() -> int:
     raise SystemExit("no free emulator port between 5556 and 5585")
 
 
+def sync_clock() -> None:
+    """An emulator restored from a saved snapshot keeps the clock of the moment it was saved: set the device's wall clock from
+    this machine's when they differ by more than 5 s (adbd runs as root here)."""
+    dev = sh("date +%s", check=False).strip()
+    now = time.time()
+    if dev.isdigit() and abs(int(dev) - now) <= 5:
+        return
+    sh(f"cmd alarm set-time {int(now * 1000)} || date -u -s @{int(now)}", check=False)
+    after = sh("date +%s", check=False).strip()
+    say(f"  device clock was {int(dev) - int(now) if dev.isdigit() else '?'} s off; now {int(after) - int(time.time()) if after.isdigit() else '?'} s")
+
+
 class Emulator:
-    def __init__(self, work: Path, keep: bool):
+    def __init__(self, work: Path, keep: bool, connect: str | None = None):
         self.work = work
         self.keep = keep
+        self.connect = connect  # HOST:PORT of an emulator somebody else runs (--adb-connect)
         self.avd_home = work / "avd"
         self.name = "eeg_precheck"
         self.proc: subprocess.Popen[bytes] | None = None
         self.server: subprocess.Popen[bytes] | None = None
 
     def create(self) -> None:
+        if self.connect:
+            return
         self.avd_home.mkdir(parents=True, exist_ok=True)
         env = {**ENV, "ANDROID_AVD_HOME": str(self.avd_home)}
         subprocess.run(
@@ -174,6 +196,9 @@ class Emulator:
             if time.time() - t0 > 30 or self.server.poll() is not None:
                 raise RuntimeError(f"our adb server did not start on port {ADB_PORT} (see adb-server.log)")
             time.sleep(1)
+        if self.connect:
+            self._attach()
+            return
         port = free_port_pair()
         SERIAL = f"emulator-{port}"
         env = {**ENV, "ANDROID_AVD_HOME": str(self.avd_home)}
@@ -213,7 +238,41 @@ class Emulator:
         sh("logcat -G 16M; logcat -c", check=False)
         say(f"booted in {time.time() - t0:.0f} s")
 
+    def _attach(self) -> None:
+        """The emulator at [connect]: connect our server to it, wait for the boot, root, the same settings as a local one."""
+        global SERIAL
+        SERIAL = str(self.connect)
+        t0 = time.time()
+        while run([ADB, *SERVER, "-s", SERIAL, "get-state"], timeout=20, check=False).stdout.strip() != "device":
+            run([ADB, *SERVER, "connect", SERIAL], timeout=30, check=False)
+            if time.time() - t0 > 120:
+                raise RuntimeError(f"adb could not connect to {SERIAL}")
+            time.sleep(2)
+        say(f"emulator {SERIAL} (somebody else's, over adb TCP)")
+        run([ADB, *SERVER, "-s", SERIAL, "wait-for-device"], timeout=600)
+        while sh("getprop sys.boot_completed", check=False).strip() != "1":
+            if time.time() - t0 > 600:
+                raise RuntimeError("the emulator did not boot")
+            time.sleep(3)
+        adb("root", check=False)  # adbd restarts as root: the TCP link goes with it
+        time.sleep(3)
+        for _ in range(30):
+            run([ADB, *SERVER, "connect", SERIAL], timeout=30, check=False)
+            if run([ADB, *SERVER, "-s", SERIAL, "shell", "echo up"], timeout=30, check=False).stdout.strip() == "up":
+                break
+            time.sleep(2)
+        while sh("getprop sys.boot_completed", check=False).strip() != "1":
+            time.sleep(2)
+        sync_clock()
+        for k in ("window_animation_scale", "transition_animation_scale", "animator_duration_scale"):
+            sh(f"settings put global {k} 0", check=False)
+        sh("svc power stayon true; input keyevent KEYCODE_WAKEUP; wm dismiss-keyguard", check=False)
+        sh("logcat -G 16M; logcat -c", check=False)
+        say(f"attached in {time.time() - t0:.0f} s")
+
     def stop(self) -> None:
+        if self.connect:
+            run([ADB, *SERVER, "disconnect", str(self.connect)], timeout=15, check=False)
         if self.proc is not None and self.proc.poll() is None:
             if SERIAL and self.server is not None and self.server.poll() is None:
                 run([ADB, *SERVER, "-s", SERIAL, "emu", "kill"], timeout=30, check=False)
@@ -231,7 +290,7 @@ class Emulator:
                 self.server.wait(timeout=15)
             except subprocess.TimeoutExpired:
                 self.server.kill()
-        if not self.keep:
+        if not self.keep and not self.connect:
             shutil.rmtree(self.avd_home, ignore_errors=True)
 
 
@@ -271,19 +330,49 @@ def device_time() -> str:
     return sh("date '+%m-%d %H:%M:%S.000'").strip()
 
 
+SEED_CACHE = "/data/local/tmp/seedcache"  # content-addressed: a file here is named by the SHA-256 of its bytes
+
+
+def file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def stage_files(pairs: list[tuple[Path, str]]) -> list[tuple[str, str]]:
+    """Puts the files into the device's cache SEED_CACHE unless a file with the same bytes is already there (a saved emulator
+    snapshot can hold them, which saves pushing 0.5 GB over a slow link); returns (sha256, path relative to files/)."""
+    sh(f"mkdir -p {SEED_CACHE} && rm -f {SEED_CACHE}/*.part")
+    have = set(sh(f"ls {SEED_CACHE}").split())
+    staged = []
+    for local, rel in pairs:
+        digest = file_sha256(local)
+        staged.append((digest, rel))
+        if digest in have:
+            continue
+        adb("push", str(local), f"{SEED_CACHE}/{digest}.part", timeout=600)
+        # only a complete file gets its final name
+        sh(f"[ $(stat -c %s {SEED_CACHE}/{digest}.part) = {local.stat().st_size} ] && mv {SEED_CACHE}/{digest}.part {SEED_CACHE}/{digest}")
+        have.add(digest)
+    return staged
+
+
 def seed(pairs: list[tuple[Path, str]], stage: Path) -> None:
     """Copies local files into the app's files/ (paths relative to it), owned by the app, with its SELinux label."""
     stop_app()
-    sh("rm -rf /data/local/tmp/seed && mkdir -p /data/local/tmp/seed")
     stage.mkdir(parents=True, exist_ok=True)
-    for local, rel in pairs:
-        sh(f"mkdir -p /data/local/tmp/seed/{Path(rel).parent}")
-        adb("push", str(local), f"/data/local/tmp/seed/{rel}", timeout=600)
+    staged = stage_files(pairs)
     sh(f"mkdir -p {FILES}")
     uid = sh(f"stat -c %u /data/data/{PKG}").strip()
     ctx = sh(f"ls -Zd /data/data/{PKG}").split()[0]
-    sh(f"cp -r /data/local/tmp/seed/. {FILES}/ && chown -R {uid}:{uid} {FILES} && chcon -R {ctx} {FILES}"
-       f" && rm -rf /data/local/tmp/seed")
+    dirs = sorted({str(Path(rel).parent) for _, rel in staged})
+    # a hard link, not a copy (a copy of 0.5 GB took over 2 minutes on a slow emulator disk); the app only reads these files, and
+    # a link that cannot be made falls back to a copy
+    steps = [f"mkdir -p {FILES}/{d}" for d in dirs] + [
+        f"(ln -f {SEED_CACHE}/{digest} {FILES}/{rel} || cp {SEED_CACHE}/{digest} {FILES}/{rel})" for digest, rel in staged]
+    sh(" && ".join(steps) + f" && chown -R {uid}:{uid} {FILES} && chcon -R {ctx} {FILES}", timeout=900)
 
 
 OUT: Path | None = None  # the run's log folder (screenshots of a screen a step could not use)
@@ -845,8 +934,8 @@ def collect(out: Path, started_ms: int) -> Result:
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--old", type=Path, required=True, help="the APK on the phone now (the last one installed there)")
-    p.add_argument("--new", type=Path, required=True, help="the candidate APK")
+    p.add_argument("--old", type=Path, help="the APK on the phone now (the last one installed there)")
+    p.add_argument("--new", type=Path, help="the candidate APK")
     p.add_argument("--replay", type=Path, help="the replay build of the candidate (--dart-define=EEG_REPLAY=true)")
     p.add_argument("--talking", action="store_true", help="kept for old commands: (c) runs whenever --replay is given")
     p.add_argument("--nights", type=Path, default=MAIN / "_local" / "recordings", help="recordings to seed (read-only)")
@@ -855,22 +944,30 @@ def main() -> int:
     p.add_argument("--only", default="abcd", help="which checks, e.g. 'bd'")
     p.add_argument("--keep", action="store_true", help="keep the AVD and the copies (the emulator still stops)")
     p.add_argument("--adb-port", type=int, default=ADB_PORT, help="our private adb server's port (default 5041)")
+    p.add_argument("--stage-only", action="store_true", help="only put the seed nights into the emulator's cache "
+                   f"({SEED_CACHE}), then stop: for saving an emulator snapshot that already holds them")
+    p.add_argument("--adb-connect", metavar="HOST:PORT", help="use the emulator already reachable at this adb address "
+                   "(a tunnel to another machine's) instead of making one here")
     a = p.parse_args()
     use_adb_port(a.adb_port)
+    if not a.stage_only and not (a.old and a.new):
+        p.error("--old and --new are required (except with --stage-only)")
     for apk in (a.old, a.new, *([a.replay] if a.replay else [])):
-        if not apk.is_file():
+        if apk is not None and not apk.is_file():
             p.error(f"{apk} is not there")
     stamp = time.strftime("%Y-%m-%d-%H%M%S")
     work = Path(f"/var/tmp/eeg-precheck-{stamp}")
     out = a.out or work / "out"
+    work.mkdir(parents=True, exist_ok=True)  # (with --out and --adb-connect nothing else makes it before the adb server's log)
     out.mkdir(parents=True, exist_ok=True)
     global OUT
     OUT = out
     stage = work / "stage"
+    stage.mkdir(parents=True, exist_ok=True)  # the .f32.xz nights are unpacked into it before (c) would make it
     t0 = time.time()
     started_ms = int(t0 * 1000)
     results: list[Result] = []
-    em = Emulator(work, a.keep)
+    em = Emulator(work, a.keep, a.adb_connect)
     talking_job = None
     if "c" in a.only and a.replay and not list((stage / "scenarios" / "talking-work").glob("*.f32")):
         stage.mkdir(parents=True, exist_ok=True)  # made while the emulator boots
@@ -879,6 +976,11 @@ def main() -> int:
     try:
         em.create()
         em.start()
+        if a.stage_only:
+            stage.mkdir(parents=True, exist_ok=True)
+            staged = stage_files(night_files(a.reports, a.nights, stage))
+            say(f"staged {len(staged)} files in {SEED_CACHE} on the emulator ({time.time() - t0:.0f} s)")
+            return 0
         if "a" in a.only:
             say("(a) update over yesterday")
             results.append(check_update(a.old, a.new, a.reports, a.nights, stage))
@@ -925,7 +1027,7 @@ def main() -> int:
         for r in results:
             f.write(f"{r.verdict} {r.name}: {r.words}\n" + "".join(f"    {d}\n" for d in r.details))
     print()
-    print(f"Pre-install check of {a.new.name} (over {a.old.name}), {(time.time() - t0) / 60:.1f} min")
+    print(f"Pre-install check of {a.new.name if a.new else '-'} (over {a.old.name if a.old else '-'}), {(time.time() - t0) / 60:.1f} min")
     for r in results:
         print(f"{r.verdict:4} {r.name}: {r.words}")
     print(f"Logs and details: {out}")
