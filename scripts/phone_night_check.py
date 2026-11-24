@@ -549,22 +549,37 @@ def _tries(evs: list[Event]) -> str:
     return f"{len(tries)} {'try' if len(tries) == 1 else 'tries'} ({direct} direct, {len(tries) - direct} scan)"
 
 
+def stopped_by_hand(run: Run) -> bool:
+    """The phone's run ended because Stop was pressed: its log has the night's closing packet line and no drop or stuck
+    line of its own. (A drop that ended with Stop while the app was still trying has its drop line in the same log.)
+    What a later start wrote into its own log, an empty run's "drop (run failed)" included, says nothing about why
+    this one ended: a stop is not a drop."""
+    return run.source == "phone" and run.has("packets_end") and not run.has("drop", "stuck")
+
+
 def explain(br: Break, evs: list[Event], empty_runs: int) -> None:
     """Sets the break's category and its reason in plain words, from the log lines around it."""
     if br.late:
         br.cat, br.text = "late", "the data arrived late in a burst (nothing lost)"
         return
-    kinds = {e.kind for e in evs}
     parts: list[str] = []
     cat = ""
+    if not br.inside and stopped_by_hand(br.a):
+        cat = "by_hand"
+        parts.append("stopped by hand, started again")
+        # only the stopped run's own lines may still name a cause; the starts after it are counted below
+        evs = [e for e in evs if e.stem == br.a.stem]
+    kinds = {e.kind for e in evs}
     stuck = [e for e in evs if e.kind in ("stuck", "laptop_stuck") or (e.kind == "try" and
                                                                       e.g["result"] == "no answer for")]
     if stuck:
-        cat = "stuck"
+        cat = cat or "stuck"
         what = next((e.g["what"] for e in stuck if "what" in e.g), "an SDK call")
         parts.append(f'Bluetooth stuck ("{what}" gave no answer)')
     drop = next((e for e in evs if e.kind == "drop"), None)
-    if drop:
+    if cat == "by_hand":
+        pass  # none of the lines below belongs to a run that Stop ended
+    elif drop:
         cat = cat or "drop"
         parts.append(f"drop ({drop.g['why']})")
     elif "laptop_drop" in kinds or "out_of_range" in kinds:

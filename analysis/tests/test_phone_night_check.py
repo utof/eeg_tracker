@@ -277,6 +277,51 @@ def test_a_loss_as_the_signal_stops_is_not_a_drop(tmp_path: Path) -> None:
     assert [x.cat for x in gap] == ["by_hand"]
 
 
+def test_a_stop_is_not_a_drop_even_when_the_next_start_failed_first(tmp_path: Path) -> None:
+    """2026-11-20: Stop at 23:58 ("stopped, battery 29%", the end-of-night lines, no reconnect try), a new start at
+    01:07 that was stopped during its contact check (the app wrote "drop (run failed)" into that empty run), and the
+    real start at 01:10. The 71.5 minutes are the owner's own pause, not a drop."""
+    a = PhoneRun(T, seconds=600, end="stop", night_end=True, band_battery=(30, 29))
+    write_run(tmp_path, a)
+    again = a.last + timedelta(minutes=69)
+    write_empty_run(tmp_path, again, [
+        (4.0, f"connected BB Black {ADDRESS} serial 0000 battery 100% signal -73 dBm"),
+        (9.7, "contact ohms O1=inf O2=inf T3=inf T4=inf"),
+        (9.8, "packets: 0 samples, missing 0 in 0 gaps, repeated 0, longest gap 0 samples"),
+        (9.8, "total samples 0, 0.0 min"),
+        (9.8, "drop (run failed); last data none; reconnecting"),
+        (9.8, "stopped, battery 100%"),
+        (9.9, "end of night, packets: 0 samples, missing 0 in 0 gaps, repeated 0, longest gap 0 samples"),
+    ])
+    b = PhoneRun(a.last + timedelta(minutes=71.5) - timedelta(seconds=8), seconds=600, night_end=True)
+    write_run(tmp_path, b)
+    s = pnc.check(tmp_path, NIGHT, signal=False)
+    assert s["unknown"] == []
+    gap = [x for x in s["breaks"] if x.cat != "late"]
+    assert [round(x.length / 60, 1) for x in gap] == [71.5]
+    assert [x.cat for x in gap] == ["by_hand"]
+    assert gap[0].text == "stopped by hand, started again; 1 start without data"
+    assert s["drops"] == [] and s["tries"] == dict(direct=0, scan=0, direct_ok=0, scan_ok=0)
+    text = pnc.render(s)
+    assert "0 drops" in text and "drop (run failed)" not in text
+    assert "getting the headband back" not in text
+
+
+def test_a_drop_that_ended_with_stop_hours_later_is_still_a_drop(tmp_path: Path) -> None:
+    """The other way round: the headband dropped, the tries failed, and Stop was pressed while the app was still
+    trying. The end-of-night lines land in the dropped run's log, and the break stays a drop."""
+    a = PhoneRun(T, seconds=600, end="drop", night_end=True,
+                 after=[(12, f"reconnect try 1 ({DIRECT}): not found after 12.0 s"),
+                        (90, f"reconnect try 2 ({DIRECT}): not found after 12.0 s")])
+    write_run(tmp_path, a)
+    b = PhoneRun(a.last + timedelta(minutes=30), seconds=600, night_end=True)
+    write_run(tmp_path, b)
+    s = pnc.check(tmp_path, NIGHT, signal=False)
+    gap = [x for x in s["breaks"] if x.cat != "late"]
+    assert [x.cat for x in gap] == ["drop"]
+    assert gap[0].text.startswith("drop (out of range); 2 tries (2 direct, 0 scan)")
+
+
 def test_a_recorder_that_died_and_never_came_back(tmp_path: Path) -> None:
     write_run(tmp_path, PhoneRun(T, seconds=300, end="killed"))
     s = pnc.check(tmp_path, NIGHT, signal=False)

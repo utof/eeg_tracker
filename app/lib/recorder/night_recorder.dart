@@ -722,7 +722,8 @@ class NightRecorder {
         _set(_status.copyWith(phase: Phase.recording, note: 'recording'));
         end = await _record(band, w, isLost);
       } else {
-        end = lost ? _End.lost : _End.failed;
+        // Stop pressed before the signal ran (during the contact check): a stop, not a drop
+        end = _stopping ? _End.stopped : (lost ? _End.lost : _End.failed);
       }
     } on SdkStuck catch (e) {
       await _cancel([sigSub, rangeSub, notesSub]);
