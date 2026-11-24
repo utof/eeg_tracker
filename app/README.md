@@ -256,6 +256,11 @@ Logs and details go to `/var/tmp/eeg-precheck-<time>/out/` (`--out`). About 12 m
 tunnel to an emulator on another machine, DECISIONS 870); the private adb server connects to it and is stopped at the end,
 the emulator is left to whoever started it. It must be a fresh 2-core API 36 x86_64 one in the Europe/Moscow time zone.
 
+The seed files go through a content-addressed cache on the device (`/data/local/tmp/seedcache`, named by SHA-256): a file whose bytes
+are already there is not pushed again, and the app's folder gets hard links to the cached files. `--stage-only` fills the cache
+and stops (no APKs needed): save an emulator snapshot after it and every later run starts from that snapshot with the nights
+already on it (DECISIONS 873). A device whose clock is off by more than 5 s (a restored snapshot's) is set from this machine's.
+
 ## Replay headband (test and replay builds only)
 
 `lib/headband/replay.dart` plays a recording in the app's own format (`.f32` plain or packed, `.idx`, the header) into
