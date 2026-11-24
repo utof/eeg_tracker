@@ -82,7 +82,7 @@ OwnFinder ownFinderFor(OwnBleSettings settings, OwnBleStore? store, Directory? r
   return OwnFinder(transport: UniversalTransport(), settings: s, remember: store?.remember);
 }
 
-class BrainBitFinder implements HeadbandFinder {
+class BrainBitFinder implements HeadbandFinder, WaitingFinder {
   /// [recorder]: the recorder's service asks (only it may record a replay whose layout is not the BrainBit's).
   /// In the screen's engine a finder made without [pick] is a door to the one connection (headband/connection.dart,
   /// DECISIONS 855): its headbands are handles to the connection every screen shares, and [dispose] leaves that
@@ -142,6 +142,14 @@ class BrainBitFinder implements HeadbandFinder {
 
   @override
   Future<Headband> connectDirect(BandId id) async => (await _pick()).connectDirect(id);
+
+  /// A waiting connect when the connection in use has one (our own connection); null with BrainBit's SDK, the DIY
+  /// board and a replay.
+  @override
+  Future<WaitingConnect?> waitFor(BandId id) async {
+    final f = await _pick();
+    return f is WaitingFinder ? (f as WaitingFinder).waitFor(id) : null;
+  }
 
   /// End of a session or a night. [anyLost]: a headband was left out of range (the SDK's scanner is then left
   /// alone; our own connection has nothing to free).

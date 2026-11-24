@@ -118,13 +118,22 @@ RULES = [(k, re.compile(p)) for k, p in [
     ("drop", r"drop \((?P<why>[^)]*)\); last data (?P<last>.+); reconnecting"),  # P
     ("stopped", r"stopped, battery (?P<bat>\S+)%"),  # P L
     ("stop_failed", r"stop failed: .*"),  # P L
-    ("try", r"reconnect try (?P<n>\d+) \((?P<how>direct to [^)]*|scan)\): (?P<result>connected after|not found after|"
-            r"failed after|no answer for) (?P<s>[\d.]+) s(?P<rest>.*)"),  # P
+    # P. From the reconnect ladder on (DECISIONS 940) a try that is not an ordinary one names its road after the
+    # way: `(direct to AA:.., safety try)`, `(scan, opened app)`
+    ("try", r"reconnect try (?P<n>\d+) \((?P<how>direct to [^),]*|scan)(?:, (?P<road>[^)]*))?\): "
+            r"(?P<result>connected after|not found after|failed after|no answer for) (?P<s>[\d.]+) s(?P<rest>.*)"),
     # P: the connection in use cannot reach the night's headband directly (the switch moved from our own connection
     # to the SDK during the night, DECISIONS 398): the same try scans at once; its own "reconnect try" line follows
-    ("try_rescan", r"reconnect try (?P<n>\d+) \((?P<how>direct to [^)]*)\): (?P<why>.*); scanning instead"),
-    ("reconnected", r"reconnected \((?P<how>direct|scan), try (?P<n>\d+)\) after a drop \((?P<why>[^)]*)\); "
-                    r"previous run (?P<prev>[^,]+), last data (?P<last>[^,]+)(?:, (?P<ago>[\d.]+) s ago)?"),  # P
+    ("try_rescan", r"reconnect try (?P<n>\d+) \((?P<how>direct to [^),]*)(?:, (?P<road>[^)]*))?\): (?P<why>.*); "
+                   r"scanning instead"),
+    # P. The ladder adds how long the headband was away and which road brought it back
+    ("reconnected", r"reconnected \((?P<how>direct|scan|waiting connect), try (?P<n>\d+)\) after a drop "
+                    r"\((?P<why>[^)]*)\); previous run (?P<prev>[^,;]+), last data (?P<last>[^,;]+)"
+                    r"(?:, (?P<ago>[\d.]+) s ago)?(?:; (?:waited (?P<waited>[^;]+); )?back by: (?P<by>.+))?"),
+    # P: the reconnect ladder's stage C (app/lib/headband/reconnect_ladder.dart): the waiting connect and its fallback
+    ("ladder", r"headband away .*: the 60 s tries stop; .*|the waiting connect failed \(.*\); .*|"
+               r"the waiting connect could not be opened \(.*\)|"
+               r"the headband showed up on the waiting connect \(step \d+\)"),
     ("reconnected_same", r"reconnected after (?P<s>[\d.]+) s away \((?:try (?P<n>\d+)|as the signal was stopped)\), "
                          r"battery (?P<bat>\S+)%; same files"),  # O
     # O: the link came back without a drop this object saw (it closed while no signal ran, e.g. the contact check)
@@ -142,7 +151,8 @@ RULES = [(k, re.compile(p)) for k, p in [
     ("own_failed", r"(?:own connection|driver) stopped unexpectedly: .*"),  # O
     ("own_info", r"driver own Bluetooth LE .*|layout .*|mode .* \(command \d+\)|status .*|"
                  r"own Bluetooth driver; headband address .*|(?:no known address: )?scanning up to .*|"
-                 r"the link carries .*|\S+ callback failed: .*|signal\+resistance \(command 5\) gave no signal .*"),
+                 r"the link carries .*|\S+ callback failed: .*|signal\+resistance \(command 5\) gave no signal .*|"
+                 r"link timing: interval [\d.]+ ms, latency \d+, timeout [\d.]+ s"),
     ("service_restart", r"service restarted by Android after the app process ended"),  # P
     ("prev_exit", r"previous process ended: (?P<when>\S+) (?P<reason>\S+) status (?P<status>-?\d+) "
                   r"importance (?P<imp>-?\d+)(?: \((?P<desc>.*)\))?"),  # P (Android's ApplicationExitInfo)
@@ -164,6 +174,8 @@ RULES = [(k, re.compile(p)) for k, p in [
              r"(?:, (?P<ghz>[\d.]+) GHz)?; default route (?P<route>[^;]+); screen (?P<screen>on|off|\?); "
              r"idle (?P<idle>yes|no|\?); lock (?P<lock>held|not held)"),
     ("wifi_unreadable", r"wifi unreadable: (?P<err>.*)"),  # P
+    # P: a headband-lost notice was shown (lost, back, battery nearly empty, a try by hand; DECISIONS 857, 943)
+    ("notice", r"notice: (?P<text>.*)"),
     # P: the night's live helpers and their markers (the drift-off detector and hands-free, rows 182 and 247; the
     # smart alarm, 230-236; the lucid cues, 300-309; their one sleep model, 330) and Share on Wi-Fi (220-229). Their
     # problems (a helper stopped, or could not start or ring) are listed under "helpers"; the rest is information.
@@ -171,7 +183,7 @@ RULES = [(k, re.compile(p)) for k, p in [
                r"lucid cues?|live sleep model|sharing on Wi-Fi)[ :,;(].*|lights off)"),
 ]]
 HELPER_PROBLEM = re.compile(r"\bstopped(?: by an error)?: |could not")
-PHONE_ONLY = {"phone_settings", "phone_battery", "battery_summary", "try", "reconnected", "service_restart",
+PHONE_ONLY = {"phone_settings", "phone_battery", "battery_summary", "try", "reconnected", "ladder", "notice", "service_restart",
               "prev_exit", "direct_off", "drop", "packets", "packets_end", "stuck", "out_of_range", "answered_out",
               "no_start", "error", "mending", "try_rescan", "lost_own_stopped", "wifi", "wifi_unreadable"}
 LAPTOP_ONLY = {"live_page", "info", "laptop_drop", "laptop_stuck", "contact_recheck", "reconnected_old",
@@ -526,7 +538,7 @@ def hour_of(t: float) -> float:
 # ---- why a break happened --------------------------------------------------------------------------------------------
 DROP_CATS = {"drop", "stuck", "android", "killed", "unknown"}
 # lines the app adds to a closed run's log
-NOTES = {"try", "try_rescan", "answered_out", "packets_end", "battery_summary"}
+NOTES = {"try", "try_rescan", "ladder", "notice", "answered_out", "packets_end", "battery_summary"}
 
 
 def _tries(evs: list[Event]) -> str:
@@ -595,7 +607,9 @@ def explain(br: Break, evs: list[Event], empty_runs: int) -> None:
         parts.append(f"{empty_runs} {'start' if empty_runs == 1 else 'starts'} without data")
     back = next((e for e in evs if e.kind == "reconnected"), None)
     if back:
-        parts.append(f"back by {back.g['how']}, try {back.g['n']}")
+        road = back.g.get("by", "")
+        ordinary = road in ("", "quick try", "minute try", back.g["how"])
+        parts.append(f"back by {back.g['how']}, try {back.g['n']}" + ("" if ordinary else f" ({road})"))
     if not cat:
         cat = "unknown"
         parts.append("no log line explains it")

@@ -236,6 +236,8 @@ class BrainBitBle {
     _closing = false;
     final session = _lost = Flag();
     _next = null;
+    _factsSaid = 0;
+    linkTiming = null;
     final attempt = transport.connect(address, timeout: timeout, onLost: () => _markLost('link dropped', session));
     final BleLink link;
     try {
@@ -245,18 +247,69 @@ class BrainBitBle {
       unawaited(attempt.then((l) => l.disconnect(), onError: (_) {}));
       rethrow;
     }
+    return _adopt(link, address);
+  }
+
+  /// The link is open: it becomes this driver's, and the headband is set up on it.
+  Future<BandInfo> _adopt(BleLink link, String address) async {
     if (_closing) {
       // close() was called while the connection was still opening: do not keep the late link.
       unawaited(link.disconnect().catchError((_) {}));
       throw HeadbandLost('closed while connecting');
     }
     _link = link;
+    if (link is LinkFacts) (link as LinkFacts).onFacts = _onLinkFacts;
     try {
       return await _setup(link, address);
     } on HeadbandError {
       await close(idle: false);
       rethrow;
     }
+  }
+
+  /// The link's real timing goes into the log once per connection, and again only when Android changes it (at most
+  /// [_factsMax] lines a connection): the numbers the research asked for, without a snoop log.
+  static const int _factsMax = 4;
+  int _factsSaid = 0;
+
+  /// The newest timing report of the current link (null: none yet).
+  String? linkTiming;
+
+  void _onLinkFacts(String line) {
+    linkTiming = line;
+    if (_factsSaid >= _factsMax) return;
+    _factsSaid++;
+    log(line);
+  }
+
+  /// Leaves a waiting connect to the known address open (DECISIONS 940): the phone's Bluetooth chip listens for the
+  /// headband and connects when it shows up; then the headband is set up as after [connect]. Null when there is no
+  /// known address or the transport has no waiting connect. `cancel` closes it (and a link that opened meanwhile).
+  ({Future<BandInfo> info, Future<void> Function() cancel})? waitForBand() {
+    final t = transport, address = this.address;
+    if (address == null || t is! WaitingTransport) return null;
+    _closing = false;
+    final session = _lost = Flag();
+    _next = null;
+    _factsSaid = 0;
+    linkTiming = null;
+    final waiting = (t as WaitingTransport).connectWaiting(address, onLost: () => _markLost('link dropped', session));
+    if (waiting == null) return null;
+    final info = waiting.link.then<BandInfo>(
+      (link) => _adopt(link, address),
+      onError: (Object e) => throw HeadbandLost('the waiting connect ended: $e'),
+    );
+    info.ignore();
+    return (
+      info: info,
+      cancel: () async {
+        _closing = true;
+        try {
+          await waiting.cancel().timeout(const Duration(seconds: 6));
+        } catch (_) {}
+        await close(idle: false);
+      },
+    );
   }
 
   Future<BandInfo> _setup(BleLink link, String address) async {

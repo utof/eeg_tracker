@@ -58,7 +58,7 @@ Uint8List encodeResist(int counter, Map<String, int> ohms) {
   return b.buffer.asUint8List();
 }
 
-class FakeHeadband implements BleTransport {
+class FakeHeadband implements BleTransport, WaitingTransport {
   FakeHeadband({
     this.address = fakeAddress,
     this.name = 'BB Black',
@@ -187,6 +187,22 @@ class FakeHeadband implements BleTransport {
   /// Bluetooth is switched off: a scan cannot even start.
   bool bluetoothOff = false;
 
+  /// What each new link reports as its timing (none by default).
+  List<String> linkFacts = const [];
+
+  /// Waiting connects: whether this fake has them, how many were opened, are open now and were closed by their owner.
+  bool hasWaiting = true;
+  int waitingOpened = 0, waitingOpen = 0, waitingClosed = 0;
+  Duration waitingPoll = const Duration(milliseconds: 10);
+
+  @override
+  BleWaiting? connectWaiting(String address, {required void Function() onLost}) {
+    if (!hasWaiting) return null;
+    waitingOpened++;
+    waitingOpen++;
+    return FakeWaiting(this, address, onLost);
+  }
+
   @override
   Future<BleFound?> scan(bool Function(String name) match, Duration timeout) async {
     scans++;
@@ -219,8 +235,63 @@ class FakeHeadband implements BleTransport {
   }
 }
 
-class FakeLink implements BleLink {
+/// The fake's waiting connect: it looks every [FakeHeadband.waitingPoll] whether the headband is back.
+class FakeWaiting implements BleWaiting {
+  FakeWaiting(this.hb, this._address, this._onLost) {
+    _done.future.ignore();
+    _timer = Timer.periodic(hb.waitingPoll, (_) => _look());
+    _look();
+  }
+  final FakeHeadband hb;
+  final String _address;
+  final void Function() _onLost;
+  final Completer<BleLink> _done = Completer<BleLink>();
+  Timer? _timer;
+
+  @override
+  Future<BleLink> get link => _done.future;
+
+  void _look() {
+    if (_done.isCompleted) return;
+    if (hb.bluetoothOff) return _end(error: BleError('Bluetooth not enabled'));
+    if (_address.toUpperCase() != hb.address.toUpperCase() || hb.away || hb.link != null) return;
+    hb.connects++;
+    hb.connectTimes.add(DateTime.now());
+    final l = hb.link = FakeLink(hb, _onLost);
+    l._start();
+    _end(link: l);
+  }
+
+  void _end({BleLink? link, BleError? error}) {
+    _timer?.cancel();
+    hb.waitingOpen--;
+    if (link != null) {
+      _done.complete(link);
+    } else {
+      _done.completeError(error!);
+    }
+  }
+
+  @override
+  Future<void> cancel() async {
+    if (_done.isCompleted) return;
+    hb.waitingClosed++;
+    _end(error: BleError('the waiting connect was closed'));
+  }
+}
+
+class FakeLink implements BleLink, LinkFacts {
   FakeLink(this.hb, this._onLost);
+
+  /// The link's timing as Android would report it: every line of [FakeHeadband.linkFacts], at once.
+  @override
+  set onFacts(void Function(String line)? to) {
+    if (to == null) return;
+    for (final line in hb.linkFacts) {
+      to(line);
+    }
+  }
+
   final FakeHeadband hb;
   final void Function() _onLost;
   final Map<String, void Function(Uint8List)> _subs = {};

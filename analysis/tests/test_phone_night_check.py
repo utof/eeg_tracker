@@ -456,6 +456,31 @@ PHONE_LINES = [
     f"reconnect try 2 ({DIRECT}): the night's headband was reached through our own connection; BrainBit's SDK needs a "
     "scan first; scanning instead",
     f"reconnect try 1 ({DIRECT}): unknown sensor family \"x\"; BrainBit's SDK needs a scan first; scanning instead",
+    # the reconnect ladder (DECISIONS 940-945): the road of a try that is not an ordinary one, the waiting connect,
+    # how long the headband was away and which road brought it back, the link's real timing, the notices
+    f"reconnect try 12 ({DIRECT}, safety try): not found after 17.0 s",
+    f"reconnect try 13 ({DIRECT}, opened app): connected after 2.1 s",
+    "reconnect try 14 (scan, timed try): not found after 15.0 s",
+    f"reconnect try 15 ({DIRECT}, Reconnect now): the night's headband was reached through our own connection; "
+    "BrainBit's SDK needs a scan first; scanning instead",
+    "headband away 10 min: the 60 s tries stop; a waiting connect is open (the phone listens for the headband), with a "
+    "safety try every 15 min",
+    "headband away 10 min: the 60 s tries stop; no waiting connect with this connection, so one try every 5 min "
+    "(2 min with the screen on)",
+    "the waiting connect failed (Bluetooth not enabled); one try every 5 min instead, then it is opened again",
+    "the waiting connect could not be opened (StateError: x)",
+    "the headband showed up on the waiting connect (step 14)",
+    "reconnected (waiting connect, try 14) after a drop (out of range); previous run 2026-11-19-230000, last data "
+    "2026-11-19T23:05:08.000, 11520.0 s ago; waited 3 h 12 min; back by: waiting connect",
+    "reconnected (direct, try 13) after a drop (no data); previous run 2026-11-19-230000, last data "
+    "2026-11-19T23:05:08.000, 1500.0 s ago; waited 25 min; back by: opened app",
+    "reconnected (direct, try 1) after a drop (app process restarted); previous run unknown, last data unknown; "
+    "waited 2 h 5 min; back by: app restart",
+    "link timing: interval 15 ms, latency 0, timeout 5.0 s",
+    "link timing: interval 48.75 ms, latency 2, timeout 0.7 s",
+    "notice: Headband lost. No data from the headband for 5 min. The recording waits for it. Is it on your head and "
+    "charged?",
+    "notice: tried again by hand, no answer yet",
 ] + [  # the night's live helpers, their markers and Share on Wi-Fi (app-line, DECISIONS 182-330)
     "drift-off detector on; lights off counts from the first sample until Lights off",
     "drift-off detector off after the restart; it starts again at Lights off",

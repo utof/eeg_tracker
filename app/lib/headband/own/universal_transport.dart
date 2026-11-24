@@ -16,9 +16,17 @@ import 'transport.dart';
 /// Keep equal to the version pinned in pubspec.yaml (a test compares it with pubspec.lock).
 const String blePackage = 'universal_ble 3.3.0';
 
-class UniversalTransport implements BleTransport {
+/// How long the plugin's own `connect()` call waits before it ends (the waiting connect itself stays open).
+const Duration waitingAskFor = Duration(seconds: 30);
+
+class UniversalTransport implements BleTransport, WaitingTransport {
   @override
   String get describe => blePackage;
+
+  /// `connect(autoConnect: true)`: Android's `connectGatt(autoConnect = true)`.
+  @override
+  BleWaiting? connectWaiting(String address, {required void Function() onLost}) =>
+      _UniversalWaiting(address, onLost).._start();
 
   @override
   Future<BleFound?> scan(bool Function(String name) match, Duration timeout) async {
@@ -77,10 +85,121 @@ class UniversalTransport implements BleTransport {
 
 String _text(Object e) => e is BleError ? e.message : e.toString().replaceAll('\n', ' ');
 
-class _UniversalLink implements BleLink {
+/// One open waiting connect. The plugin's `connect()` ends after its own time limit even with `autoConnect`; that
+/// only means "still waiting": the connection stream says when the headband is there.
+class _UniversalWaiting implements BleWaiting {
+  _UniversalWaiting(this.address, this._onLost);
+  final String address;
+  final void Function() _onLost;
+  final Completer<BleLink> _done = Completer<BleLink>();
+  StreamSubscription<bool>? _state;
+  bool _opening = false;
+
+  @override
+  Future<BleLink> get link => _done.future;
+
+  void _start() {
+    _done.future.ignore(); // an error nobody waits for any more is not an uncaught one
+    _state = UniversalBle.connectionStream(address).listen((connected) {
+      if (connected) unawaited(_arrived());
+    });
+    unawaited(_ask());
+  }
+
+  Future<void> _ask() async {
+    try {
+      await UniversalBle.connect(address, autoConnect: true, timeout: waitingAskFor);
+      await _arrived();
+    } on TimeoutException {
+      // still waiting: Android keeps listening
+    } catch (e) {
+      await _fail(BleError(_text(e)));
+    }
+  }
+
+  Future<void> _arrived() async {
+    if (_done.isCompleted || _opening) return;
+    _opening = true;
+    await _state?.cancel();
+    _state = null;
+    final link = _UniversalLink(address, _onLost);
+    try {
+      await link._open();
+    } catch (e) {
+      await link.disconnect();
+      if (!_done.isCompleted) _done.completeError(BleError(_text(e)));
+      return;
+    }
+    if (_done.isCompleted) {
+      await link.disconnect(); // closed meanwhile
+    } else {
+      _done.complete(link);
+    }
+  }
+
+  Future<void> _fail(BleError e) async {
+    if (_done.isCompleted) return;
+    _done.completeError(e);
+    await _letGo();
+  }
+
+  Future<void> _letGo() async {
+    await _state?.cancel();
+    _state = null;
+    try {
+      await UniversalBle.disconnect(address, timeout: const Duration(seconds: 5));
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> cancel() async {
+    if (_done.isCompleted) return; // the link is its owner's now, or the waiting connect is already closed
+    _done.completeError(BleError('the waiting connect was closed'));
+    await _letGo();
+  }
+}
+
+/// Every link's timing reports come through the plugin's one callback; each open link listens for its address.
+final Map<String, void Function(BleConnectionParametersChange)> _timingOf = {};
+bool _timingHooked = false;
+
+void _hookTiming() {
+  if (_timingHooked) return;
+  _timingHooked = true;
+  UniversalBle.onConnectionParametersChange = (c) => _timingOf[c.deviceId.toUpperCase()]?.call(c);
+}
+
+/// `link timing: interval 15 ms, latency 0, timeout 5.0 s`.
+String linkTimingLine({required double intervalMs, required int latency, required double timeoutMs}) {
+  final i = intervalMs == intervalMs.roundToDouble() ? intervalMs.toStringAsFixed(0) : intervalMs.toStringAsFixed(2);
+  return 'link timing: interval $i ms, latency $latency, timeout ${(timeoutMs / 1000).toStringAsFixed(1)} s';
+}
+
+class _UniversalLink implements BleLink, LinkFacts {
   _UniversalLink(this.address, this._onLost);
   final String address;
   final void Function() _onLost;
+  void Function(String line)? _facts;
+  String? _lastFacts;
+
+  @override
+  set onFacts(void Function(String line)? to) {
+    _facts = to;
+    final last = _lastFacts;
+    if (to != null && last != null) to(last);
+  }
+
+  void _onTiming(BleConnectionParametersChange c) {
+    if (!c.isSuccess) return;
+    final line = linkTimingLine(
+      intervalMs: c.intervalMs,
+      latency: c.latency,
+      timeoutMs: c.supervisionTimeoutMs,
+    );
+    if (line == _lastFacts) return;
+    _lastFacts = line;
+    _facts?.call(line);
+  }
   final List<StreamSubscription<Object?>> _subs = [];
   StreamSubscription<bool>? _state;
   List<BleService> _services = const [];
@@ -93,6 +212,8 @@ class _UniversalLink implements BleLink {
   int? get mtu => _mtu;
 
   Future<void> _open() async {
+    _hookTiming();
+    _timingOf[address.toUpperCase()] = _onTiming;
     _state = UniversalBle.connectionStream(address).listen((connected) {
       if (connected || !_connected) return;
       _connected = false;
@@ -160,6 +281,7 @@ class _UniversalLink implements BleLink {
   });
 
   Future<void> _stopListening() async {
+    if (_timingOf[address.toUpperCase()] == _onTiming) _timingOf.remove(address.toUpperCase());
     final state = _state, subs = _subs.toList();
     _state = null;
     _subs.clear();

@@ -69,3 +69,25 @@ abstract class BleLink {
   /// Closes this link only.
   Future<void> disconnect();
 }
+
+/// A waiting connect that is open (DECISIONS 940): Android's Bluetooth chip listens for the device and connects when
+/// it shows up. No scan, no time limit; it ends with [cancel], with Bluetooth switched off and with the app's process.
+abstract class BleWaiting {
+  /// The link once the device showed up; a [BleError] when the waiting connect broke or was closed.
+  Future<BleLink> get link;
+
+  /// Closes the waiting connect; nothing stays open on Android's side.
+  Future<void> cancel();
+}
+
+/// A transport that can leave a waiting connect open (the real one can; a test's may).
+abstract class WaitingTransport {
+  /// Null: none here. [onLost] as for [BleTransport.connect], once the link is up.
+  BleWaiting? connectWaiting(String address, {required void Function() onLost});
+}
+
+/// A link that reports its real timing (Android's connection interval, latency and supervision timeout).
+abstract class LinkFacts {
+  /// Gets one plain line per report, e.g. `link timing: interval 15 ms, latency 0, timeout 5.0 s`.
+  set onFacts(void Function(String line)? to);
+}
