@@ -37,6 +37,8 @@ import 'chunk_writer.dart';
 import 'contact.dart';
 import 'header.dart';
 import 'headband.dart';
+import '../spans/span.dart';
+import '../spans/span_log.dart';
 import 'live_drift.dart';
 import 'nights.dart';
 import 'packets.dart';
@@ -152,12 +154,25 @@ class NightRecorder {
     this.cues,
     this.liveLimits = const GuardLimits(),
     this.startNotes = const [],
+    this.spanLog,
+    this.sleep = true,
+    this.sleepSource = 'owner_button',
     DateTime Function()? clock,
   }) : _now = clock ?? DateTime.now,
        _steps = stepProbe == null ? null : StepLog(stepProbe, clock ?? DateTime.now);
 
   final HeadbandFinder finder;
   final Directory dir;
+
+  /// The spans files' writer (`files/spans/`); null: the spans are kept in the saved state only (tests of the rest).
+  final SpanLog? spanLog;
+
+  /// A new recording starts with Sleep: a sleep span from its start (it started the recording) and the sleep kit on.
+  /// False: Record alone, no span, no kit (Record first, DECISIONS 880-881).
+  final bool sleep;
+
+  /// Who started that first sleep span: `owner_button`, or `auto_start` for the headband watcher.
+  final String sleepSource;
   final NightStore store;
   final void Function(RecorderStatus status) onStatus;
 
@@ -302,7 +317,14 @@ class NightRecorder {
     try {
       await _begin(restartedBySystem);
       await _loop();
-      if (_stopping && _endNight) await _logNightEnd();
+      if (_stopping && _endNight) {
+        _closeSpans('recording_stopped', _now());
+        // no file set ever opened: the spans are still a true statement about the time, kept under the start's stamp
+        if (_night.recording == null && _spans.isNotEmpty) {
+          _bindRecording(fileStem(DateTime.fromMillisecondsSinceEpoch(_night.startMs)));
+        }
+        await _logNightEnd();
+      }
     } finally {
       await _steps?.stop();
       _set(_status.copyWith(phase: Phase.idle));
@@ -376,17 +398,21 @@ class NightRecorder {
       _night = NightState(
         active: true,
         startMs: _now().millisecondsSinceEpoch,
-        alarmEndMs: plan?.endMs,
-        alarmWindowMin: plan?.windowMin,
+        alarmEndMs: sleep ? plan?.endMs : null,
+        alarmWindowMin: sleep ? plan?.windowMin : null,
+        sleepKit: sleep,
       );
-      _startDrift();
+      if (sleep) {
+        openSpan('sleep', source: sleepSource, startedRecording: true, at: _now());
+        _startDrift();
+      }
       final t = _now();
       // the drift-off line first, then any line _startDrift kept (hands-free), then the smart alarm's
       _notes = [
         for (final n in startNotes) (t, n),
         if (_drift != null) (t, 'drift-off detector on; lights off counts from the first sample until Lights off'),
         ..._notes,
-        if (plan != null)
+        if (plan != null && sleep)
           (
             t,
             'smart alarm set: wake by ${_hm(plan.endMs)}, window from ${_hm(plan.startMs)}; the sleep model starts at '
@@ -396,7 +422,8 @@ class NightRecorder {
     }
     _packets = PacketAccount(_night.packets);
     _packetsLoggedMs = _now().millisecondsSinceEpoch;
-    _startCues();
+    _spans = [for (final l in _night.spans) ?Span.fromLine(l)];
+    if (_night.sleepKit) _startCues();
     await _save();
     _set(
       RecorderStatus(
@@ -436,7 +463,8 @@ class NightRecorder {
       }
       final ChunkWriter w;
       try {
-        w = ChunkWriter.open(dir, _now(), header: headerOf(band));
+        w = ChunkWriter.open(dir, _now(), header: headerOf(band), inRecording: true, recording: _night.recording);
+        if (_night.recording == null) _bindRecording(w.stem);
       } catch (e) {
         _set(_status.copyWith(note: 'cannot write files: ${_short(e)}'));
         await _quietly(band.disconnectAndDispose);
@@ -717,7 +745,7 @@ class NightRecorder {
     }
     if (_alarm == null && !_alarmMade) _startAlarm(t);
     _live.run((_) {
-      scorer?.add(t, sites, firstOfFile: firstOfFile); // an exception here reaches the guard: all of it off
+      if (_night.sleepKit) scorer?.add(t, sites, firstOfFile: firstOfFile); // an exception here reaches the guard: all of it off
       _scorerLines();
       _alarmCall((a) => a.add(t, sites, firstOfFile: firstOfFile), t);
       _cueCall((c) => c.add(t, sites, firstOfFile: firstOfFile), t);
@@ -881,6 +909,7 @@ class NightRecorder {
       _earlyLightsOff = t;
       return;
     }
+    if (!_night.sleepKit) return; // no sleep span: nothing counts from Lights off
     _night = _night.copyWith(lightsOffMs: t.millisecondsSinceEpoch);
     unawaited(_save().catchError((Object _) {})); // the next 10 s check saves it again
     _marker(lightsOffMarker, t);
@@ -1568,8 +1597,88 @@ class NightRecorder {
   Future<void> _pause(Duration d) => Future.any([Future<void>.delayed(d), _stopSignal.future]);
 
   void _set(RecorderStatus s) {
-    _status = s;
-    onStatus(s);
+    _status = s.copyWith(rec: RecordingLive(id: _night.recording, sleep: _night.sleepKit, spans: _spans));
+    onStatus(_status);
+  }
+
+  // ---- spans (Record first, DECISIONS 880-899) -----------------------------------------------------------------
+
+  /// The recording's spans in order, as last written.
+  List<Span> _spans = const [];
+
+  List<Span> get spans => _spans;
+
+  /// Opens a span of [kind] now (or [at]); the same kind already open is returned as it is. Its line is on storage
+  /// before this returns (once the recording has its id: until the first file set opens it waits in the saved state).
+  Span openSpan(String kind, {String source = 'owner_button', bool startedRecording = false, String? session, DateTime? at}) {
+    final open = _spans.where((s) => !s.closed && s.kind == kind).lastOrNull;
+    if (open != null) return open;
+    final t = at ?? _now();
+    final span = Span(
+      id: '${_night.recording ?? '?'}-${_spans.length + 1}',
+      kind: kind,
+      label: spanLabels[kind],
+      start: t,
+      source: source,
+      startedRecording: startedRecording,
+      session: session,
+    );
+    _putSpan(span);
+    _marker('span: $kind start', t);
+    return span;
+  }
+
+  /// Closes the open span [id] now (or [at]); null when there is none.
+  Span? closeSpan(String id, {String by = 'owner', DateTime? at}) {
+    final s = _spans.where((s) => s.id == id && !s.closed).firstOrNull;
+    if (s == null) return null;
+    final t = at ?? _now();
+    final closed = s.closedAt(t, by);
+    _putSpan(closed);
+    _marker('span: ${s.kind} end', t);
+    return closed;
+  }
+
+  void _closeSpans(String by, DateTime at) {
+    for (final s in [..._spans]) {
+      if (!s.closed) closeSpan(s.id, by: by, at: at);
+    }
+  }
+
+  void _putSpan(Span span) {
+    final i = _spans.indexWhere((s) => s.id == span.id);
+    _spans = [
+      for (var k = 0; k < _spans.length; k++) k == i ? span : _spans[k],
+      if (i < 0) span,
+    ];
+    _spansChanged();
+    if (_night.recording != null) _writeSpan(span);
+    if (_begun) _set(_status);
+  }
+
+  void _spansChanged() {
+    final made = _now();
+    _night = _night.copyWith(spans: [for (final s in _spans) s.toLine(made)]);
+    unawaited(_save().catchError((Object _) {}));
+  }
+
+  void _writeSpan(Span span) {
+    try {
+      spanLog?.write(span);
+    } catch (e) {
+      _logLine('could not write the span ${span.id}: ${_short(e)}; the recording goes on');
+    }
+  }
+
+  /// The recording got its id (its first file set's stem): the spans opened before that get their ids and their lines.
+  void _bindRecording(String id) {
+    _night = _night.copyWith(recording: id);
+    _spans = [for (var k = 0; k < _spans.length; k++) _spans[k].withId('$id-${k + 1}')];
+    _spansChanged();
+    for (final s in _spans) {
+      _writeSpan(s);
+    }
+    if (_begun) _set(_status);
   }
 }
 

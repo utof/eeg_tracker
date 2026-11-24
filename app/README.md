@@ -1,18 +1,21 @@
 # EEG Tracker: Android recorder and meditation
 
-Records a BrainBit headband all night on an Android phone. The main screen: Start night, Stop, the state,
+Records a BrainBit headband on an Android phone, all night or all day. The first tab, **Record**, has two buttons:
+**Record** records until you press Stop and is never counted as a night by itself; **Sleep** (it was Start night) is the
+same recording with a sleep stretch from its start, the smart alarm and the sound cues (Record first, DECISIONS 880-903;
+what you did in a recording is kept in `files/spans/`, docs/data-format.md). The main screen: Record, Sleep, Stop, the state,
 minutes recorded, seconds since the last data, a half-hour strip of what was saved, battery, signal,
 contact per channel, and phone settings that could stop the recording. Between nights, the **Morning** section
 opens the **morning check-in** and the **trends** page (below), and **Meditate** opens a guided eyes-closed
 session whose sound follows your alpha rhythm (below); from there, **Alpha-theta** training and the **replay
 check** (both below). Also between nights, the **Dream catcher** asks what is on your mind as you drift off and
 records your answers, and the **Nap coach** wakes you before deep sleep starts or at the length you pick (both
-below). The **Smart alarm**, set just above Start night, wakes you in a window you choose at a light moment of the
+below). The **Smart alarm**, set just above Sleep, wakes you in a window you choose at a light moment of the
 night, never in deep sleep, and always by the window's end (below). **Sound** (at the bottom, also during a night) plays calm sound
 for a state, with an optional beat, and with the headband shows what your brain does (below).
 
 **The bar at the bottom** (since 2026-11-20, DECISIONS 597): **Night** (the night screen: status, the strip, Sleep,
-Morning, Try these, Headband, Phone, with Start night pinned; the app opens here), **Sessions** (Meditation, Dream
+Morning, Try these, Headband, Phone, with Record and Sleep pinned; the app opens here), **Sessions** (Meditation, Dream
 catcher, Nap coach, Lucid dreams, Work, Sound), **Signal** (the head, live traces and raw data, below), **Trends** and
 **More** (Your data: Export data, Export a night, Share on Wi-Fi; Settings; Licences). Where a section below says
 "on the main screen", look in the tab that holds it; Back on another tab returns to Night.

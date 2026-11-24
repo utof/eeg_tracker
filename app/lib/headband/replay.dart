@@ -55,7 +55,7 @@ class NotForReplayBoard implements Exception {
 
   @override
   String toString() =>
-      "The replay plays $describe. Sessions read the BrainBit's O1 O2 T3 T4; only Start night records this layout.";
+      "The replay plays $describe. Sessions read the BrainBit's O1 O2 T3 T4; only Record and Sleep record this layout.";
 }
 
 /// One batch as it arrived: [at] seconds after the replay's first batch (long gaps shortened), its samples.

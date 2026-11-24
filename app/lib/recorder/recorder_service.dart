@@ -30,6 +30,8 @@ import '../sleep/live_log.dart' show LiveStageLog, liveStagesDirFor;
 import '../sleep/live_stager.dart';
 import '../sleep/night_scorer.dart';
 import '../sleep/onnx_runs.dart';
+import '../spans/span.dart' show spansDirFor;
+import '../spans/span_log.dart';
 import 'brainbit.dart';
 import 'chunk_writer.dart' show ChunkWriter;
 import 'headband.dart';
@@ -47,6 +49,19 @@ const String _alarmKey = 'alarmPlan';
 /// A night the headband watcher started (lib/auto, DECISIONS 604): its lines for the night's log. While set, the night
 /// runs no lucid cues (no sound starts without a tap); a start by hand removes it.
 const String _autoKey = 'autoStart';
+
+/// The recording starts with Sleep (`1`: a sleep span and the sleep kit from its start) or with Record alone (`0`).
+const String _sleepKey = 'startSleep';
+
+/// Opens or closes a span of the running recording (Record first, DECISIONS 884): the recorder writes it and answers
+/// with its status, which lists the spans.
+Map<String, Object?> openSpanCommand(String kind, {String? session}) => {
+  'kind': 'span',
+  'op': 'open',
+  'span_kind': kind,
+  'session': ?session,
+};
+Map<String, Object?> closeSpanCommand(String id, {String by = 'owner'}) => {'kind': 'span', 'op': 'close', 'id': id, 'by': by};
 
 /// Messages from the screen to the recorder.
 const String stopCommand = 'stop';
@@ -135,10 +150,12 @@ Future<ServiceRequestResult> startRecorderService(
   Function callback = recorderEntryPoint,
   List<String>? autoNotes,
   bool fromWatcher = false,
+  bool sleep = true,
 }) async {
   if (!fromWatcher) await AutoChannel.release();
   if (recordingsDir != null) await FlutterForegroundTask.saveData(key: _dirKey, value: recordingsDir);
   if (await FlutterForegroundTask.isRunningService) return const ServiceRequestSuccess();
+  await FlutterForegroundTask.saveData(key: _sleepKey, value: sleep ? '1' : '0');
   if (autoNotes == null) {
     await FlutterForegroundTask.removeData(key: _autoKey);
   } else {
@@ -254,6 +271,7 @@ class RecorderTaskHandler extends TaskHandler {
     final rec = await _recordingsDir();
     final plan = await _alarmPlan();
     final auto = await _autoNotes();
+    final sleep = await _startsWithSleep();
     // Stop (or the system's destroy) came while this was starting: it has been answered; no night starts after it.
     if (_stopping) return;
     final diy = _diy = this.finder == null ? diyNightFor(rec) : null;
@@ -291,6 +309,9 @@ class RecorderTaskHandler extends TaskHandler {
       // (DECISIONS 303, 507); neither in a night the headband watcher started (DECISIONS 604)
       cues: scorer == null || auto != null ? null : cues(rec, scorer),
       startNotes: [...?diy?.notes, if (starter != TaskStarter.system) ...?auto],
+      spanLog: SpanLog(spansDirFor(rec)),
+      sleep: sleep,
+      sleepSource: auto != null ? 'auto_start' : 'owner_button',
     );
     _recorder = recorder;
     // what this night runs, for the battery samples and the usage log (lib/logs/activity.dart, DECISIONS 715)
@@ -391,9 +412,23 @@ class RecorderTaskHandler extends TaskHandler {
       } else {
         _alarmOffEarly = true;
       }
+    } else if (data is Map && data['kind'] == 'span') {
+      _spanCommand(data);
     } else if (nightTapLeaseFrom(data) case final on?) {
       _signalTap(on: on);
     }
+  }
+
+  void _spanCommand(Map<Object?, Object?> data) {
+    final r = _recorder;
+    if (r == null || _stopping) return;
+    final kind = data['span_kind'], id = data['id'], by = data['by'], session = data['session'];
+    if (data['op'] == 'open' && kind is String && kind.isNotEmpty) {
+      r.openSpan(kind, session: session is String ? session : null);
+    } else if (data['op'] == 'close' && id is String) {
+      r.closeSpan(id, by: by is String ? by : 'owner');
+    }
+    _send(r.status);
   }
 
   /// The Signal view took or renewed its lease ([on]), or let it go.
@@ -464,6 +499,14 @@ class RecorderTaskHandler extends TaskHandler {
       return raw == null ? null : AlarmPlan.fromJson(jsonDecode(raw));
     } catch (_) {
       return null;
+    }
+  }
+
+  static Future<bool> _startsWithSleep() async {
+    try {
+      return await FlutterForegroundTask.getData<String>(key: _sleepKey) != '0';
+    } catch (_) {
+      return true;
     }
   }
 

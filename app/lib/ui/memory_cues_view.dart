@@ -228,7 +228,7 @@ class MemoryView extends StatelessWidget {
       ),
       MemoryDue.evening => (
         'Learn tonight',
-        'The evening task takes about 12 minutes. Do it before Start night; it counts for 3 hours.',
+        'The evening task takes about 12 minutes. Do it before Sleep; it counts for 3 hours.',
         MarkShape.ringedDot,
         Night.live,
       ),

@@ -21,6 +21,7 @@ import '../recorder/packed.dart' show packInBackground, packOldRecordings;
 import '../storage/clear.dart' show ClearMode, autoClear, planClear;
 import '../recorder/recorder_service.dart';
 import '../recorder/status.dart';
+import '../spans/span.dart' show spansLine;
 import '../session_keeper.dart' show PhoneSessionKeeper;
 import '../share/control.dart';
 import '../share/isolate.dart' show shareAddress;
@@ -748,7 +749,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
 
   Future<bool> _requestNearby() => requestNearby(_phone.sdkInt);
 
-  Future<void> _start() async {
+  Future<void> _start({bool sleep = true}) async {
     setState(() => _busy = true);
     _gate.begin();
     try {
@@ -777,9 +778,10 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       final dir = _dir ?? await _safe<String?>(Phone.recordingsDir, null);
       _scoring?.halt(); // the night comes first: scoring stops at its next model call and goes on after Stop
       _soFar?.reset(); // nothing of an earlier night's so far
-      final plan = await _setAlarmClock(dir);
+      // the smart alarm belongs to Sleep; Record alone sets none
+      final plan = sleep ? await _setAlarmClock(dir) : null;
       await _share.beforeNight(); // the recorder serves during the night: the app lets go of the port
-      final result = await startRecorderService(dir, alarm: plan);
+      final result = await startRecorderService(dir, alarm: plan, sleep: sleep);
       if (result is ServiceRequestFailure) _say('The recorder did not start: ${result.error}');
       _status = null;
       _statusAtMs = null;
@@ -807,7 +809,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('Stop the night?'),
+        title: Text(_status?.rec.sleep == false ? 'Stop recording?' : 'Stop the night?'),
         content: Text(
           'Recording ends. The files are kept.${at == null ? '' : ' The alarm still rings at '
               '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}.'}',
@@ -1057,6 +1059,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       sentence: d.sentence,
       tone: d.tone,
       running: _running,
+      sleeping: s?.rec.sleep ?? true,
+      spansLine: s == null ? null : spansLine(s.rec.spans, sinceMs: s.nightStartMs),
       busy: _busy,
       minutes: s != null ? s.minutesRecorded : (showLast ? last.samples / sampleRateHz / 60 : null),
       dataAgeSeconds: s?.lastDataMs == null ? null : ((now - s!.lastDataMs!) ~/ 1000).clamp(0, 1 << 30),
@@ -1141,6 +1145,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       tab: tab,
       model: model,
       onStart: _start,
+      onRecord: () => unawaited(_start(sleep: false)),
       onStop: _stop,
       onFix: _fix,
       onExport: _export,

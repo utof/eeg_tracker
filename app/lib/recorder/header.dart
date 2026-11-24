@@ -122,6 +122,7 @@ class RecordingHeader {
     this.counter = counterPacket,
     this.madeBy,
     this.session,
+    this.recording,
     this.source = HeaderSource.made,
   });
 
@@ -137,6 +138,10 @@ class RecordingHeader {
 
   /// What kind of session wrote the file set when it is not a night or a nap (`work`); null: sleep (DECISIONS 683).
   final String? session;
+
+  /// The recording this file set belongs to (its first set's stem; Record first, DECISIONS 882); null: a set from
+  /// before, grouped by time as it always was.
+  final String? recording;
   final HeaderSource source;
 
   /// The file set joins the nights: written by a night or a nap (no `session`, or `night` / `nap`).
@@ -153,6 +158,22 @@ class RecordingHeader {
     counter: counter,
     madeBy: madeBy,
     session: kind,
+    recording: recording,
+    source: source,
+  );
+
+  /// This header with [id] as its `recording`.
+  RecordingHeader inRecording(String? id) => RecordingHeader(
+    channels: channels,
+    sampleRate: sampleRate,
+    device: device,
+    layout: layout,
+    reference: reference,
+    ground: ground,
+    counter: counter,
+    madeBy: madeBy,
+    session: session,
+    recording: id,
     source: source,
   );
 
@@ -182,6 +203,7 @@ class RecordingHeader {
     'counter': counter,
     'made_by': madeBy,
     'session': ?session, // left out for sleep: a night's header is as it always was
+    'recording': ?recording,
   };
 
   /// The header's file text: one JSON object and a newline.
@@ -244,6 +266,10 @@ class RecordingHeader {
     if (session != null && (session.isEmpty || session.length > maxNameLength || session.trim() != session)) {
       bad('session must be a word of 1 to $maxNameLength characters, or absent');
     }
+    final recording = text('recording');
+    if (recording != null && (recording.isEmpty || recording.length > maxNameLength || recording.trim() != recording)) {
+      bad('recording must be an id of 1 to $maxNameLength characters, or absent');
+    }
     return RecordingHeader(
       channels: List.unmodifiable(channels),
       sampleRate: rate,
@@ -254,6 +280,7 @@ class RecordingHeader {
       counter: counter ?? counterPacket,
       madeBy: text('made_by'),
       session: session,
+      recording: recording,
       source: HeaderSource.file,
     );
   }
@@ -321,10 +348,11 @@ class RecordingHeader {
       other.ground == ground &&
       other.counter == counter &&
       other.madeBy == madeBy &&
-      other.session == session;
+      other.session == session &&
+      other.recording == recording;
 
   @override
-  int get hashCode => Object.hash(Object.hashAll(channels), sampleRate, device, layout, reference, ground, counter, session);
+  int get hashCode => Object.hash(Object.hashAll(channels), sampleRate, device, layout, reference, ground, counter, session, recording);
 }
 
 List<double>? _xyz(Object? v, void Function() bad) {

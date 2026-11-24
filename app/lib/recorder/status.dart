@@ -1,5 +1,6 @@
 // What the recorder isolate tells the screen, about once a second. Plain maps cross the isolate port.
 import '../detectors/drift_off.dart' show DriftState;
+import '../spans/span.dart' show Span;
 import 'contact.dart';
 
 enum Phase { idle, searching, connecting, checkingContact, recording, reconnecting, stopping }
@@ -27,7 +28,11 @@ class RecorderStatus {
     this.driftOnsetMs,
     this.alarm,
     this.board,
+    this.rec = const RecordingLive(),
   });
+
+  /// The recording's id, whether a sleep span runs, and its spans (Record first).
+  final RecordingLive rec;
 
   final Phase phase;
 
@@ -93,6 +98,7 @@ class RecorderStatus {
     String? note,
     Map<int, int>? slots,
     BoardLive? board,
+    RecordingLive? rec,
   }) => RecorderStatus(
     phase: phase ?? this.phase,
     nightStartMs: nightStartMs ?? this.nightStartMs,
@@ -110,6 +116,7 @@ class RecorderStatus {
     driftOnsetMs: driftOnsetMs,
     alarm: alarm,
     board: board ?? this.board,
+    rec: rec ?? this.rec,
   );
 
   /// The same status with the smart alarm replaced (null: none).
@@ -130,6 +137,7 @@ class RecorderStatus {
     driftOnsetMs: driftOnsetMs,
     alarm: alarm,
     board: board,
+    rec: rec,
   );
 
   /// The same status with the drift-off fields replaced (null clears them).
@@ -150,6 +158,7 @@ class RecorderStatus {
     driftOnsetMs: onsetMs,
     alarm: alarm,
     board: board,
+    rec: rec,
   );
 
   Map<String, Object?> toMap({required int nowMs}) => {
@@ -173,6 +182,7 @@ class RecorderStatus {
     'driftOnsetMs': driftOnsetMs,
     'alarm': alarm?.toMap(),
     'board': board?.toMap(),
+    'rec': rec.toMap(),
   };
 
   /// Parses a message from the recorder; returns null for anything else.
@@ -206,6 +216,7 @@ class RecorderStatus {
       driftOnsetMs: _int(data['driftOnsetMs']),
       alarm: AlarmStatus.fromMap(data['alarm']),
       board: BoardLive.fromMap(data['board']),
+      rec: RecordingLive.fromMap(data['rec']),
     );
   }
 }
@@ -334,3 +345,41 @@ class AlarmStatus {
 double? _finite(double? v) => v == null || v.isNaN || v.isInfinite ? null : v;
 int? _int(Object? v) => v is num ? v.toInt() : null;
 double? _double(Object? v) => v is num ? v.toDouble() : null;
+
+/// The running recording as the screen needs it (Record first, DECISIONS 880-899): its id (null until its first file
+/// set opens), whether the sleep kit is attached, and its spans in order.
+class RecordingLive {
+  const RecordingLive({this.id, this.sleep = true, this.spans = const []});
+
+  final String? id;
+
+  /// The sleep kit runs: a sleep span is open. A status from a recorder of before reads as true.
+  final bool sleep;
+  final List<Span> spans;
+
+  /// The open span of [kind], or of any kind.
+  Span? open([String? kind]) => spans.where((s) => !s.closed && (kind == null || s.kind == kind)).lastOrNull;
+
+  /// The open sleep span (kind `sleep` or `nap`).
+  Span? get openSleep => spans.where((s) => !s.closed && s.isSleep).lastOrNull;
+
+  Map<String, Object?> toMap() => {
+    'id': id,
+    'sleep': sleep,
+    'spans': [for (final s in spans) s.toLine(s.start)],
+  };
+
+  static RecordingLive fromMap(Object? m) {
+    if (m is! Map) return const RecordingLive();
+    final l = m['spans'];
+    return RecordingLive(
+      id: m['id'] is String ? m['id'] as String : null,
+      sleep: m['sleep'] != false,
+      spans: [
+        if (l is List)
+          for (final x in l)
+            if (x is Map) ?Span.fromLine(x),
+      ],
+    );
+  }
+}

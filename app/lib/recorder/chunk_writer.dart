@@ -92,14 +92,15 @@ class ChunkWriter {
   /// Opens a new file set in [dir] named after [start], its [header] (the BrainBit's unless said) written first. If
   /// that stem is taken (two runs in the same second), the next free second is used, so two runs never share one
   /// `.idx` numbering.
-  static ChunkWriter open(Directory dir, DateTime start, {RecordingHeader? header}) {
-    final h = header ?? brainBitHeader;
+  static ChunkWriter open(Directory dir, DateTime start, {RecordingHeader? header, bool inRecording = false, String? recording}) {
+    var h = header ?? brainBitHeader;
     dir.createSync(recursive: true);
     var t = start;
     while (File('${dir.path}/${fileStem(t)}.f32').existsSync()) {
       t = t.add(const Duration(seconds: 1));
     }
     final stem = fileStem(t);
+    if (inRecording) h = h.inRecording(recording ?? stem);
     writeHeader(File('${dir.path}/$stem.f32'), h);
     RandomAccessFile f(String ext) => File('${dir.path}/$stem.$ext').openSync(mode: FileMode.append);
     return ChunkWriter._(stem, h, f('f32'), f('idx'), f('log'));
