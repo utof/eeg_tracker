@@ -1,5 +1,5 @@
-label_id	start	end	recording	kind	label	value	unit	source	confidence	created	supersedes	owner_words	context	present	estimate_id
-archive:73b7503653828ecc	2026-11-21T11:02:00+03:00	2026-11-21T19:40:00+03:00	2026-11-21-110200	activity	other			owner_stop_sheet	within	2026-11-21T19:41:13+03:00		"Felt ""good""	then tired"	stop sheet	1	
-archive:a891d9fb7274db96	2026-11-21T11:02:00+03:00	2026-11-21T19:40:00+03:00	2026-11-21-110200	state	awake			owner_stop_sheet	certain	2026-11-21T19:41:10+03:00		"Felt ""good""	then tired"	stop sheet	1	
-archive:ae0d851eb77efead	2026-11-21T11:02:00+03:00	2026-11-21T19:40:00+03:00	2026-11-21-110200	activity	eating			owner_stop_sheet	within	2026-11-21T19:41:12+03:00		"Felt ""good""	then tired"	stop sheet	1	
-archive:8dc642cc0656329f	2026-11-21T17:00:00+03:00	2026-11-21T17:40:00+03:00	2026-11-21-110200	activity	walking			owner_stop_sheet	likely	2026-11-21T19:41:11+03:00		"Felt ""good""	then tired"	stop sheet	1	
+label_id	start	end	recording	kind	label	value	unit	source	confidence	created	supersedes	owner_words	context	present	estimate_id	times_confirmed
+archive:73b7503653828ecc	2026-11-21T11:02:00+03:00	2026-11-21T19:40:00+03:00	2026-11-21-110200	activity	other			owner_stop_sheet	within	2026-11-21T19:41:13+03:00		"Felt ""good""	then tired"	stop sheet	1		0
+archive:a891d9fb7274db96	2026-11-21T11:02:00+03:00	2026-11-21T19:40:00+03:00	2026-11-21-110200	state	awake			owner_stop_sheet	certain	2026-11-21T19:41:10+03:00		"Felt ""good""	then tired"	stop sheet	1		1
+archive:ae0d851eb77efead	2026-11-21T11:02:00+03:00	2026-11-21T19:40:00+03:00	2026-11-21-110200	activity	eating			owner_stop_sheet	within	2026-11-21T19:41:12+03:00		"Felt ""good""	then tired"	stop sheet	1		0
+archive:8dc642cc0656329f	2026-11-21T17:00:00+03:00	2026-11-21T17:40:00+03:00	2026-11-21-110200	activity	walking			owner_stop_sheet	likely	2026-11-21T19:41:11+03:00		"Felt ""good""	then tired"	stop sheet	1		1

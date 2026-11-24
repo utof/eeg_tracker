@@ -161,7 +161,7 @@ def test_a_report_with_span_is_stale_only_when_its_spans_change(phone: tuple[Pat
     make_set(rec, clock(21, 22), 10, rid)
     put_spans(sdir, rid, span_line(rid, 1, "sleep", clock(21, 23), clock(22, 3)))
     (n,) = nf.all_nights(rec)
-    report = {"version": nf.VERSION, "drift_off": None, "rem_check": None, "inputs": [],
+    report = {"version": nf.VERSION, "drift_off": None, "rem_check": None, "walking": None, "inputs": [],
               "span": {"recording": n.recording_ids, "spans": n.span_ids, "windows": [list(w) for w in n.windows or []]}}
     assert not nf.is_stale(n, report)
     put_spans(sdir, rid, span_line(rid, 1, "sleep", clock(21, 23), clock(22, 3)),

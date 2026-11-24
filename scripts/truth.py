@@ -286,6 +286,8 @@ def archive_rows(local: Path, vocab: Vocabulary, out: Read) -> None:
                          context=STOP_SHEET_CONTEXT if t["source"] == STOP_SHEET else ARCHIVE_CONTEXT)
                 if isinstance(t.get("confidence"), str):
                     r["confidence"] = t["confidence"]
+                    # "at some point in this recording": the row's times are the recording's, not the label's own
+                    r["times_confirmed"] = "0" if t["confidence"] == "within" else "1"
             errs = row_errors(r, vocab)
             if errs:
                 out.rejected.append(Rejected(rel, 0, tid, "; ".join(errs)))
