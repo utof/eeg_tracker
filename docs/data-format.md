@@ -781,6 +781,29 @@ pass that could not run keeps only `format`, `version`, `detector`, `recording`,
 A sleep report's night is read on its own clock: each reading goes to the report's 30 s epoch holding its middle. The
 Archive's list keeps a summary of every pulse file in `files/cache/pulse-index.json` (never exported).
 
+### The confirmation questions (`confirm/`)
+
+"Did you walk 19:08-21:14?" (DECISIONS 860-869): what the detectors thought happened, what you answered, and what the
+app did about asking. Until you answer, a detector's output is an **estimate**, not a label. Written by
+`packages/shared_labels` (the app's own package, shared with utof_tracker later) and, for the notification's buttons,
+by `ConfirmPrompts.kt`. Lines are only ever added; times are local with their UTC offset.
+
+| File | Holds |
+|---|---|
+| `estimates.jsonl` | one line per estimate: `{"id": "est:<16 hex>", "detector": "walking", "version": "walk-v2", "confidence": 0.9 or null, "start", "end", "recording": "2026-11-20-175012" or null, "kind": "activity", "label": "walking", "yes_means": "certain" or "likely", "made"}`. `label` and `kind` are the vocabulary's (`scripts/truth_vocabulary.tsv`). The id is the SHA-1 of detector, label, start, end and recording, so the same finding is never kept twice, whatever the detector's version |
+| `answers.jsonl` | one line per tap: `{"estimate_id", "answer": "yes" or "no" or "skip" or "undo", "at", "via": "card" or "notification" or "stop_sheet"}`, or your own words: `{"estimate_id", "note", "at"}`. The first yes, no or skip of an estimate stands; `undo` takes it (and its note) back, as if never answered |
+| `asks.jsonl` | one line per batch that went out as a notification: `{"at", "via": "notification", "estimates": [ids], "why": {id: "unsure" or "long" or "rare" or "few"}}`; and what the Android side did with it: `{"at", "event": "shown" or "held" or "late" or "skipped" or "dismissed", "batch", "reason"}` |
+| `armed.json` | the batch waiting for its moment (written whole) |
+| `settings.json` | `{"version": 1, "on", "per_batch" (3-5), "per_day" (1-6), "quiet_start_min", "quiet_end_min"}` |
+| `labels.tsv` | your Yes and No answers as truth rows in the truth schema below (the 16 columns), rebuilt whole by the app: a file pandas reads without the laptop |
+| `estimates.tsv` | every estimate with its answer, in the columns of the data book's `estimates.tsv` below, rebuilt whole by the app. With `labels.tsv` it is what another app (utof_tracker, once linked) takes as data, so it never asks the same thing again |
+
+A Yes is a truth row over the estimate's stretch (`present` 1); a No is the same row with `present` 0: it did not
+happen, the detector was wrong there. Not sure makes no row, and is never asked again. The laptop does not read
+`labels.tsv`: it builds the same rows from `estimates.jsonl` and `answers.jsonl` (answers given from the notification
+while the app was closed are in those two first), and one golden file
+(`packages/shared_labels/test/fixtures/confirm/`) checks the phone's and the laptop's rows against each other.
+
 ### Your tags on a recording (`archive/`)
 
 The Archive (DECISIONS 700-709): one file per recording you tagged, `archive/<id>.tags.json`, where `<id>` is the
@@ -1091,7 +1114,7 @@ Rules, for every table:
 Also in the folder: `README.md` (what is there, how to rebuild it), `book.json` (`format` `eeg-tracker-data-book`,
 `version` 1, `built`, `seconds`, `local`, `signal_version`, `measures_version`, the `models` the nights name, `rows`
 per table, `recordings` and `worked_out` this run, `labels_added`, `labels_removed`, `truth_from` (truth rows from
-the `hand` file, other `files` and the `archive`), `truth_rejected` (truth rows left out, each `origin:line id: why`),
+the `hand` file, other `files`, the `archive`, the phone's `confirm` answers and the pressed `spans`), `truth_rejected` (truth rows left out, each `origin:line id: why`),
 `epoch_columns`, `problems`),
 `.cache/` (the 30 s rows per recording, file hashes kept by size and modified time, the logs' numbers per night; safe
 to delete: the next run makes them again, slower) and `.lock` (one run at a time).
@@ -1237,10 +1260,34 @@ an electrode. utof_tracker's labels are not here (its opt-in feed comes later).
 | `replaces` | for `removed`: the label taken back |
 | `added` | when the data book first saw it |
 
+### `estimates.tsv` (DECISIONS 860-869)
+
+What the phone's detectors thought happened and what you answered when the app asked, rebuilt whole from
+`phone/confirm/estimates.jsonl` and `answers.jsonl`. An estimate is not a label until it has a yes or a no.
+
+| Column | Meaning |
+|---|---|
+| `estimate_id` | `est:` and 16 hex (stable: detector, label, times and recording) |
+| `start`, `end`, `recording` | the stretch, and the recording it was found in |
+| `kind`, `label` | the vocabulary's |
+| `detector`, `detector_version` | who thought so (`sleep-periods`, `walking`) and the version of its model or rules |
+| `confidence` | how sure the detector was, 0 to 1; empty when it does not say |
+| `yes_means` | the confidence a Yes gets as a truth row: `certain`, or `likely` when the detector itself found minutes that do not fit (a night with wake-ups) |
+| `made` | when the estimate was first kept |
+| `answer`, `answered`, `via` | `yes`, `no`, `skip` (Not sure) or empty (not answered yet); when; `card`, `notification` or `stop_sheet` |
+| `label_id` | the truth row a yes or a no made (`confirm:...` in `truth.tsv`) |
+| `owner_words` | the few words you added |
+
+```python
+import pandas as pd
+e = pd.read_csv("_local/data/estimates.tsv", sep="\t", parse_dates=["start", "end"])
+e[e.answer == "no"].groupby(["detector", "detector_version"]).size()   # where each detector was wrong
+```
+
 ### `truth.tsv` (truth labels, DECISIONS 820-829)
 
 What really happened, so the detectors can be scored against it: "awake from 17:50 to 22:07", "walking 19:08-21:14",
-a watch's pulse at 21:30. Rebuilt whole each run by `scripts/truth.py` (standard library) from three sources, which
+a watch's pulse at 21:30. Rebuilt whole each run by `scripts/truth.py` (standard library) from four sources, which
 keep the history; `truth.tsv` adds three columns and drops the rows that break the schema (listed in `book.json`'s
 `truth_rejected` and in `validation.md`):
 
@@ -1252,7 +1299,25 @@ keep the history; `truth.tsv` adds three columns and drops the rows that break t
   each with `source` `owner_app_tag`, `confidence` `certain`, the typed word in `owner_words`, its id the tag's
   `labels.tsv` id (`archive:` and 16 hex). The word is matched to a label by its id or one of the vocabulary's `also`
   words (`walk` is `walking`, `sleep` is `asleep`, `rest` is `resting`, `work` is `working`); another word is left out
-  with a reason (add it to `also`).
+  with a reason (add it to `also`). A tag may also carry `source`, `confidence` and `words` (the stop sheet's, Record
+  first): `source` `owner_stop_sheet` makes a row with that source, the tag's `confidence` (`certain`, `likely` or
+  `within`; `certain` when absent), the `words` unchanged in `owner_words` and `context` `stop sheet`; the tag's `label`
+  is then a vocabulary label id (`awake`, `night_sleep`, `nap`, `working`, `walking`, `eating`, `exercise`,
+  `meditating`, `meeting`, `other`). Words may hold a tab, a newline or a double quote: the table and truth files quote
+  such a cell (csv's minimal rule, `"` doubled, line ends kept as typed), so the words read back exactly.
+- **the phone's pressed spans** (`phone/spans/*.spans.jsonl`, above): every closed span with source `owner_button` or
+  `owner_confirmed` and a `label` is one row: `source` `owner_activity_button`, `confidence` `likely`, `recording` the
+  recording's id, `context` `activity button: <span kind>`, its id `span:<span id>`, `start` and `end` the span's. Open
+  spans and `auto_start` spans give no row.
+- **golden files** `tests/contract/labels/`: `stop-sheet.tags.json` (a stop sheet's tags: `awake` certain, `walking`
+  likely with times, `eating` within, a text-only `other` within, the same words with a tab and quotes on each) and
+  `stop-sheet.truth.tsv`, the rows `truth.py` makes from it (`stop-sheet.labels.tsv` is the same text: the shared
+  labels package's table has the truth columns). A test makes the rows from the tags and compares them.
+- **the phone's confirmation questions** (`phone/confirm/`, above; DECISIONS 860-869): a Yes or a No to "Did you walk
+  19:08-21:14?" is one row over the detector's stretch, `source` `owner_app_prompt` (`owner_stop_sheet` when the sheet
+  after Stop settled it), `confidence` `certain` (a Yes to a night the detector found wake-ups in: `likely`), `present`
+  1 for Yes and 0 for No, `estimate_id` the estimate, `owner_words` the button's word and the few words you added
+  (`No: I was on the sofa`), `context` what the detector said; its id `confirm:` and the estimate's 16 hex.
 
 Check a file before relying on it: `python3 scripts/truth.py check` (the hand file and `_local/truth/`, or the files
 named; exit 1 on any bad row), `python3 scripts/truth.py vocabulary` prints the words.
@@ -1265,17 +1330,20 @@ named; exit 1 on any bad row), `python3 scripts/truth.py vocabulary` prints the 
 | `kind` | the label's kind in the vocabulary: `state`, `activity`, `posture`, `event`, `device`, `rating`, `measurement`, `correction` |
 | `label` | a label id from `scripts/truth_vocabulary.tsv` (below) |
 | `value`, `unit` | a number and the label's own unit: required for `rating` (a whole number on its scale, `kss` `1-9`) and `measurement` (`pulse` `bpm`, `steps` `steps`); allowed for `drinking_coffee` (`cups`) and `drinking_alcohol` (`drinks`); empty for every other label |
-| `source` | who or what said it: `owner_chat`, `owner_note`, `owner_app_tag`, `owner_checkin`, `owner_mark_button`, `owner_tray`, `device_watch`, `device_phone`, `device_laptop`, `observer` |
-| `confidence` | `certain` (the label holds for the whole span, the times to about a minute) or `likely` (rough times, or not every minute fits) |
+| `source` | who or what said it: `owner_chat`, `owner_note`, `owner_app_tag`, `owner_checkin`, `owner_mark_button`, `owner_app_prompt`, `owner_tray`, `owner_stop_sheet`, `owner_activity_button`, `owner_utof`, `device_watch`, `device_phone`, `device_laptop`, `device_utof`, `observer` |
+| `confidence` | `certain` (the label holds for the whole span, the times to about a minute) or `likely` (rough times, or not every minute fits), or `within` (it happened somewhere inside the span, not all of it) |
 | `created` | when the row was made, ISO with offset |
 | `supersedes` | the `label_id` this row corrects (from any source): rows are never edited, a correction is a new row; `withdrawn` (kind `correction`) takes a row back with nothing in its place |
 | `owner_words` | free text: what the owner said or typed, verbatim (`I was sleeping for 1 or 2 hours`) |
 | `context` | free text: whoever recorded the row describes it (`walk outside with bench stops; phone in front right pocket`) |
+| `present` | 1: it happened (every row before 2026-11-21, and a file without this column); 0: it did **not** happen in this span: you answered No when the app asked about a detector's estimate (DECISIONS 866). Never 0 for a rating, a measurement or a correction |
+| `estimate_id` | the estimate this row answers (`est:...`, a row of `estimates.tsv`); empty for every other row |
 | `origin` | `truth.tsv` only: the source file from `_local/` |
 | `active` | `truth.tsv` only: 1 when no later row supersedes it (the one to use), else 0 |
 | `superseded_by` | `truth.tsv` only: the row that supersedes it (two corrections of one row: the first made) |
 
-The hand file and `_local/truth/*.tsv` have the first fourteen columns (any order). Free text is never required and
+The hand file and `_local/truth/*.tsv` have the first fourteen columns (any order), and may have `present` and
+`estimate_id` too. Free text is never required and
 never a key; programs filter on the typed columns. **Quoting:** a cell holding a tab, a newline or a double quote is
 wrapped in double quotes and its double quotes doubled (Python's `csv` minimal quoting, which `pandas.read_csv(path,
 sep="\t")` reads by default); a cell that starts with a double quote must be quoted the same way. A row with the wrong
@@ -1299,7 +1367,10 @@ renamed one: ids are stable).
 `scripts/validate_detectors.py` runs after each data book build and rebuilds both whole from `truth.tsv`,
 `epochs.tsv.gz`, the sleep reports (and the `sleep.json` beside a laptop report) and the phone's work sessions. Each
 detector answers per 30 s epoch yes, no or "not read"; for each truth label it expects yes, no, mostly yes (`mostly`:
-only the share is given) or nothing. An epoch counts for a truth row when its middle lies inside the row's span (a
+only the share is given) or nothing. A truth row with confidence `within` is not scored minute by minute: where the
+label expects yes or mostly it is one hit (the detector said yes at least once inside the span) or one miss
+(`truth_expects` `fired`, `agreement_pct` 100 or 0; in the `all` row the share of such spans that were hits); where it
+expects no, or the row says `present` 0, it is not compared. An epoch counts for a truth row when its middle lies inside the row's span (a
 moment: the epoch holding it). Only active truth rows count. Where two sources of one detector version cover the same
 minutes (a nap scored twice by hand), the first in the book's counting order is used.
 
@@ -1317,7 +1388,7 @@ its rows (`scope` `all`):
 | Column | Meaning |
 |---|---|
 | `detector`, `detector_version`, `yes_means` | the detector, the version that made the answers (the sleep model, the signal pass and the rule, the work session app), what its yes means |
-| `label`, `truth_expects` | the truth label and what the detector should say during it: `yes`, `no`, `mostly`, or `value` (a measurer) |
+| `label`, `truth_present`, `truth_expects` | the truth label, whether the row says it happened (1) or did not (0), and what the detector should say during it: `yes`, `no`, `mostly`, `fired` (a `within` row) or `value` (a measurer). During a row that says the label did not happen, a detector whose yes means that label should say `no`; other detectors are not compared |
 | `scope`, `label_id`, `periods` | `label` (one truth row, its id) or `all` (every row of that label; `periods` of them) |
 | `start`, `end`, `recording`, `truth_source`, `truth_confidence` | the truth row's (for `all`: the first start and the last end) |
 | `sources` | the detector's files the epochs came from |
@@ -1327,7 +1398,7 @@ its rows (`scope` `all`):
 | `agreement_pct` | the share of compared epochs where it said what the truth expects (`mostly`: the share of yes) |
 | `false_pos_min`, `false_neg_min` | minutes of yes where the truth says no, of no where it says yes (0 when the truth cannot make that error; empty for `mostly`) |
 | `values`, `mean_abs_error`, `mean_error`, `unit` | a measurer (a pulse against a watch's): the detector's values averaged, the error detector minus truth, in the label's unit |
-| `validation_version` | the rules above (`validate-v1`) |
+| `validation_version` | the rules above (`validate-v2`) |
 
 `validation.md` says the same in words: a sentence per detector and label, the totals, each truth row, and what could
 not be compared (truth rows no detector covers, detectors with no truth in their time, rows left out of `truth.tsv`).

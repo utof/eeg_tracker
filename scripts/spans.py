@@ -54,6 +54,7 @@ class Span:
     session: str | None = None
     paused: tuple[tuple[int | float, int | float | None], ...] = ()
     estimate: str | None = None
+    made_unix: int | float | None = None  # when the last line of the span was written (not in the golden files)
 
     @property
     def closed(self) -> bool:
@@ -130,7 +131,7 @@ def _span(d: dict) -> Span | None:
         if isinstance(p, list) and len(p) == 2 and (a := _time(p[0])) is not None and (p[1] is None or _time(p[1]) is not None):
             pauses.append((a, None if p[1] is None else _time(p[1])))
     return Span(span, kind, _text(d.get("label")), start, end_unix, source, d.get("started_recording") is True,
-                _text(d.get("ended_by")), _text(d.get("session")), tuple(pauses), _text(d.get("estimate")))
+                _text(d.get("ended_by")), _text(d.get("session")), tuple(pauses), _text(d.get("estimate")), _time(d.get("made")))
 
 
 def _strings(v: object) -> list[str]:

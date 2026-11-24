@@ -12,8 +12,11 @@ Every detector answers per 30 s epoch: yes, no, or not read (a gap, a noisy epoc
 label it expects yes (`yes`), no (`no`), yes for most of the span (`mostly`: only the share of yes is reported, no false
 minutes), or nothing (the label is not compared). An epoch belongs to a truth span when its middle lies inside it; a
 moment (start = end) takes the epoch that holds it. Only active truth rows count (a corrected row gives way to its
-correction). Where two sources of one detector version cover the same time (a nap scored twice by hand), the first in
-the data book's counting order is kept, so no minute counts twice.
+correction). A truth row with confidence `within` (it happened somewhere inside the span, not all of it) is never
+scored minute by minute: when the label expects yes or mostly, it is one hit (the detector said yes at least once
+inside the span) or one miss; a `within` row that expects no, or says `present` 0, is left out (it says nothing about
+the other minutes). Where two sources of one detector version cover the same time (a nap scored twice by hand), the
+first in the data book's counting order is kept, so no minute counts twice.
 
   detector     yes means                              from
   anysleep     asleep (N1 N2 N3 R; W is no)           every scored sleep report's stages (its own, or its sleep.json)
@@ -47,14 +50,15 @@ import data_book as db  # noqa: E402  (the reports in counting order, their stag
 import day_summary as ds  # noqa: E402
 import truth  # noqa: E402
 
-VERSION = "validate-v1"  # of the rules below: a change of any of them is a new version
+VERSION = "validate-v2"  # of the rules below: a change of any of them is a new version
 EPOCH_S = 30.0
 MIN_PER_EPOCH = EPOCH_S / 60
 TALKING_JAW = 2  # app/lib/archive/seen.dart ActivityRule.talkingJaw: jaw bursts in 30 s that read as talking or chewing
 MOVING_S = 3  # ActivityRule.movingS: seconds of movement in 30 s that read as moving
 YES, NO, UNREAD = 1, 0, -1
-COLUMNS = ["detector", "detector_version", "yes_means", "label", "truth_expects", "scope", "label_id", "periods",
-           "start", "end", "recording", "truth_source", "truth_confidence", "sources", "epochs", "truth_min", "yes_min",
+FIRED = "fired"  # truth_expects of a `within` row: scored only as "did the detector fire at all inside the span"
+COLUMNS = ["detector", "detector_version", "yes_means", "label", "truth_present", "truth_expects", "scope",
+           "label_id", "periods", "start", "end", "recording", "truth_source", "truth_confidence", "sources", "epochs", "truth_min", "yes_min",
            "no_min", "not_read_min", "agreement_pct", "false_pos_min", "false_neg_min", "values", "mean_abs_error",
            "mean_error", "unit", "validation_version"]
 
@@ -88,8 +92,14 @@ class Detector:
     mostly: frozenset[str]
     read: Callable[[Book], Iterable[Output]]
 
-    def expects(self, label: str) -> str | None:
-        return "yes" if label in self.yes else "no" if label in self.no else "mostly" if label in self.mostly else None
+    def expects(self, label: str, present: str = "1") -> str | None:
+        """What the detector should say during a truth row of `label`. A row with `present` 0 says the label did NOT
+        happen there (the owner's No to a confirmation question, DECISIONS 866): a detector that says yes during the
+        label should then say no; one that says no during it is told nothing."""
+        e = "yes" if label in self.yes else "no" if label in self.no else "mostly" if label in self.mostly else None
+        if present == "0":
+            return "no" if e in ("yes", "mostly") else None
+        return e
 
 
 @dataclass(frozen=True)
@@ -348,6 +358,11 @@ def counts(tl: Timeline, lo: np.ndarray, hi: np.ndarray) -> dict[str, np.ndarray
     return out
 
 
+def judge_within(yes: int, no: int) -> dict:
+    """One `within` span: a hit (100) when the detector said yes at least once inside it, else a miss (0)."""
+    return dict(agreement_pct=100.0 if yes else 0.0 if yes + no else None, false_pos_min=None, false_neg_min=None)
+
+
 def judge(expects: str, yes: int, no: int) -> dict:
     """Agreement and false minutes for one comparison: `yes` truth counts each no as a false no, `no` truth each yes as a
     false yes; `mostly` reports only the share of yes."""
@@ -377,9 +392,15 @@ class Truth:
         return Truth(df.to_dict("records"), _seconds(df["start"]), _seconds(df["end"]))
 
 
+def _scored(det: Detector, r: dict[str, str]) -> bool:
+    """Whether the detector is compared with this truth row at all (`within` rows only when yes is expected)."""
+    expects = det.expects(r["label"], r.get("present", "1"))
+    return bool(expects) and (r["confidence"] != "within" or (r.get("present", "1") == "1" and expects != "no"))
+
+
 def binary_rows(det: Detector, truth: Truth, outputs: list[Output]) -> list[dict]:
     rows: list[dict] = []
-    want = [i for i, r in enumerate(truth.rows) if det.expects(r["label"])]
+    want = [i for i, r in enumerate(truth.rows) if _scored(det, r)]
     if not want:
         return rows
     idx = np.array(want)
@@ -392,17 +413,23 @@ def binary_rows(det: Detector, truth: Truth, outputs: list[Output]) -> list[dict
             if yes + no + unread == 0:
                 continue
             r = truth.rows[i]
-            expects = det.expects(r["label"]) or ""
+            present = r.get("present", "1")
+            within = r["confidence"] == "within"
+            expects = FIRED if within else det.expects(r["label"], present) or ""
             used = tl.sources if len(tl.sources) == 1 else sorted({tl.sources[s] for s in tl.source[lo[j]:hi[j]]})
-            rows.append(dict(_base(det.name, ver, det.yes_means, r["label"], expects), scope="label",
+            rows.append(dict(_base(det.name, ver, det.yes_means, r["label"], expects, present), scope="label",
                              label_id=r["label_id"], periods=1, start=r["start"], end=r["end"],
                              recording=r["recording"], truth_source=r["source"], truth_confidence=r["confidence"],
                              sources=" ".join(used), epochs=yes + no,
                              truth_min=round((truth.b[i] - truth.a[i]) / 60, 1),
-                             **_minutes(yes, no, unread), **judge(expects, yes, no)))
-            t = totals.setdefault(r["label"], dict(expects=expects, periods=0, yes=0, no=0, unread=0, truth_s=0.0,
-                                                   start=r["start"], end=r["end"], ta=truth.a[i], tb=truth.b[i]))
+                             **_minutes(yes, no, unread),
+                             **(judge_within(yes, no) if within else judge(expects, yes, no))))
+            t = totals.setdefault((r["label"], present, within),
+                                  dict(expects=expects, periods=0, yes=0, no=0, unread=0, truth_s=0.0, hits=0, read=0,
+                                       start=r["start"], end=r["end"], ta=truth.a[i], tb=truth.b[i]))
             t["periods"] += 1
+            t["hits"] += 1 if yes else 0  # a `within` period is one hit or one miss
+            t["read"] += 1 if yes + no else 0
             t["yes"] += yes
             t["no"] += no
             t["unread"] += unread
@@ -411,17 +438,20 @@ def binary_rows(det: Detector, truth: Truth, outputs: list[Output]) -> list[dict
                 t["ta"], t["start"] = truth.a[i], r["start"]
             if truth.b[i] > t["tb"]:
                 t["tb"], t["end"] = truth.b[i], r["end"]
-        for label, t in sorted(totals.items()):
-            rows.append(dict(_base(det.name, ver, det.yes_means, label, t["expects"]), scope="all", periods=t["periods"],
+        for (label, present, within), t in sorted(totals.items(), key=lambda kv: (kv[0][0], -int(kv[0][1]), kv[0][2])):
+            scored = dict(agreement_pct=round(100 * t["hits"] / t["read"], 1) if t["read"] else None,
+                          false_pos_min=None, false_neg_min=None) if within else judge(t["expects"], t["yes"], t["no"])
+            rows.append(dict(_base(det.name, ver, det.yes_means, label, t["expects"], present), scope="all",
+                             periods=t["periods"],
                              start=t["start"], end=t["end"], epochs=t["yes"] + t["no"],
                              truth_min=round(t["truth_s"] / 60, 1), **_minutes(t["yes"], t["no"], t["unread"]),
-                             **judge(t["expects"], t["yes"], t["no"])))
+                             **scored))
     return rows
 
 
-def _base(name: str, ver: str, means: str, label: str, expects: str) -> dict:
-    return dict(detector=name, detector_version=ver, yes_means=means, label=label, truth_expects=expects,
-                validation_version=VERSION)
+def _base(name: str, ver: str, means: str, label: str, expects: str, present: str = "1") -> dict:
+    return dict(detector=name, detector_version=ver, yes_means=means, label=label, truth_present=present,
+                truth_expects=expects, validation_version=VERSION)
 
 
 def _minutes(yes: int, no: int, unread: int) -> dict:
@@ -519,7 +549,7 @@ def summary(rows: list[dict], info: dict, built: str, book_json: dict | None) ->
               "| Detector | Version | Truth label | Expects | Periods | Compared (min) | Agreement | False yes (min) "
               "| False no (min) | Not read (min) |", "|---|---|---|---|---|---|---|---|---|---|"]
     for r in totals:
-        lines.append(f"| {r['detector']} | {r['detector_version']} | {r['label']} | {r['truth_expects']} | "
+        lines.append(f"| {r['detector']} | {r['detector_version']} | {_name(r)} | {r['truth_expects']} | "
                      f"{r['periods']} | {_f(_cmp_min(r))} | {_pct(r)} | {_f(r.get('false_pos_min'))} | "
                      f"{_f(r.get('false_neg_min'))} | {_f(r.get('not_read_min'))} |")
     lines += ["", "## Each truth label", "",
@@ -527,7 +557,7 @@ def summary(rows: list[dict], info: dict, built: str, book_json: dict | None) ->
               "|---|---|---|---|---|---|---|"]
     for r in sorted((r for r in rows if r["scope"] == "label"), key=lambda r: (r["start"], r["label_id"],
                                                                                r["detector"])):
-        lines.append(f"| {r['label_id']} | {r['label']} {_span(r['start'], r['end'])} | {r['detector']} | "
+        lines.append(f"| {r['label_id']} | {_name(r)} {_span(r['start'], r['end'])} | {r['detector']} | "
                      f"{_f(_cmp_min(r))} | {_pct(r)} | {_f(r.get('false_pos_min'))} | {_f(r.get('false_neg_min'))} |")
     lines += ["", "## Not compared", ""]
     if info["uncovered"]:
@@ -551,6 +581,11 @@ def summary(rows: list[dict], info: dict, built: str, book_json: dict | None) ->
     return "\n".join(lines) + "\n"
 
 
+def _name(r: dict) -> str:
+    """The truth label in words: `not walking` for a row that says it did not happen."""
+    return ("not " if r.get("truth_present") == "0" else "") + r["label"]
+
+
 def _cmp_min(r: dict) -> float | None:
     return None if r.get("epochs") in (None, "") else r["epochs"] * MIN_PER_EPOCH
 
@@ -559,7 +594,7 @@ def _pct(r: dict) -> str:
     if r.get("mean_abs_error") is not None:
         return f"error {r['mean_abs_error']} {r['unit']}"
     return "" if r.get("agreement_pct") is None else f"{_f(r['agreement_pct'])} %" + (
-        " yes" if r["truth_expects"] == "mostly" else "")
+        " yes" if r["truth_expects"] == "mostly" else " fired at all" if r["truth_expects"] == FIRED else "")
 
 
 def _span(a: str, b: str) -> str:
@@ -576,12 +611,15 @@ def _sentence(r: dict) -> str:
         return (f"{name}: over {r['periods']} {r['label']} readings, off by {r['mean_abs_error']} {r['unit']} on "
                 f"average (detector minus truth {r['mean_error']}).")
     m = _f(_cmp_min(r))
+    if r["truth_expects"] == FIRED:
+        return (f"{name}: for {r['label']} said to be somewhere inside its {r['periods']} period(s) it said "
+                f"{r['yes_means']} at least once in {_f(r['agreement_pct'])} % of them.")
     if r["truth_expects"] == "mostly":
-        return f"{name}: during {r['label']} ({m} min compared) it said {r['yes_means']} {_f(r['agreement_pct'])} %."
+        return f"{name}: during {_name(r)} ({m} min compared) it said {r['yes_means']} {_f(r['agreement_pct'])} %."
     if r["truth_expects"] == "yes":
-        return (f"{name}: during {r['label']} ({m} min compared) it missed {_f(r['false_neg_min'])} min "
+        return (f"{name}: during {_name(r)} ({m} min compared) it missed {_f(r['false_neg_min'])} min "
                 f"({_f(r['agreement_pct'])} % right).")
-    return (f"{name}: during {r['label']} ({m} min compared) it falsely said {r['yes_means']} for "
+    return (f"{name}: during {_name(r)} ({m} min compared) it falsely said {r['yes_means']} for "
             f"{_f(r['false_pos_min'])} min ({_f(r['agreement_pct'])} % right).")
 
 

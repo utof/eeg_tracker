@@ -15,6 +15,8 @@ is in docs/data-format.md ("The data book"). It reads `_local/` and writes only 
                  and movement (analysis/epoch_signal.py)
   labels.tsv     append-only, one row per label from eeg_tracker's own stores (Archive tags, auto-start answers,
                  work-session hints and taps, markers, the tray's answers, check-in answers)
+  estimates.tsv  what the phone's detectors thought happened, and the owner's Yes / No / Not sure to each (DECISIONS
+                 860-869); a Yes or a No is also a row of truth.tsv
   truth.tsv      what really happened, typed (scripts/truth.py): the hand file, <local>/truth/*.tsv and the Archive
                  tags marked "This is what I was doing"; scripts/validate_detectors.py scores the detectors against it
   spans.tsv      one row per span of every recording: what you were doing in it (scripts/spans.py)
@@ -61,7 +63,8 @@ STAGE = {"W": "W", "1": "N1", "2": "N2", "3": "N3", "R": "R", "-": "gap"}
 PROB_KEYS = ("p_W", "p_N1", "p_N2", "p_N3", "p_R")
 QUALITY_WORD = {"g": "good", "d": "degraded", "m": "missing"}
 DEFAULT_LOCAL = ROOT / "_local"
-TABLES = ("nights.tsv", "sessions.tsv", "days.tsv", "epochs.tsv.gz", "labels.tsv", "truth.tsv", "spans.tsv")
+TABLES = ("nights.tsv", "sessions.tsv", "days.tsv", "epochs.tsv.gz", "labels.tsv", "truth.tsv", "spans.tsv",
+          "estimates.tsv")
 
 
 # ---- cells and files ------------------------------------------------------------------------------------------------
@@ -1067,7 +1070,44 @@ def labels_now(local: Path) -> tuple[list[dict], set[str]]:
             if isinstance(src.get(key), int) and not isinstance(src.get(key), bool):
                 out.append(_label("check-in", dict(file=m["_file"].name, key=key, value=src[key]), rel, start=at,
                                   end=at, kind=kind, value=src[key], unit=unit, how_asked="check-in", answered=at))
+    answers = local / truth.CONFIRM_FOLDER / "answers.jsonl"
+    if answers.is_file():  # the phone's confirmation questions (DECISIONS 860-869): every answer, Not sure too
+        rel = answers.relative_to(local).as_posix()
+        read.add(rel)
+        for c in truth.read_confirm(local):
+            e = c.estimate
+            if not c.answer or not ds.parse_time(e.get("start")):
+                continue
+            lab = e["label"]
+            out.append(_label("confirm", dict(estimate_id=e["id"], answer=c.answer, at=c.at), rel, start=iso(e["start"]),
+                              end=iso(e.get("end")), kind="activity",
+                              value={"yes": lab, "no": f"not {lab}"}.get(c.answer, "not sure"), unit="word",
+                              how_asked=f"question ({c.via})", app_guess=lab, answered=iso(c.at),
+                              detector_version=f"{e.get('detector')} {e.get('version')}"))
     return out, read
+
+
+ESTIMATE_COLUMNS = ["estimate_id", "start", "end", "recording", "kind", "label", "detector", "detector_version",
+                    "confidence", "yes_means", "made", "answer", "answered", "via", "label_id", "owner_words"]
+
+
+def estimate_rows(local: Path) -> list[dict]:
+    """estimates.tsv: what the phone's detectors thought happened and what the owner said to each (`answer` yes, no,
+    skip, or empty: not answered yet; an estimate is not a label until it has a yes or a no, whose truth row is
+    `label_id`). Rebuilt whole from `<local>/phone/confirm/` (truth.read_confirm)."""
+    rows = []
+    for c in truth.read_confirm(local):
+        e = c.estimate
+        row = truth.confirm_row(c)
+        conf = e.get("confidence")
+        rows.append(dict(estimate_id=e["id"], start=iso(e.get("start")), end=iso(e.get("end")),
+                         recording=e.get("recording"), kind=e.get("kind"), label=e["label"], detector=e.get("detector"),
+                         detector_version=e.get("version"),
+                         confidence=conf if isinstance(conf, (int, float)) and not isinstance(conf, bool) else None,
+                         yes_means=e.get("yes_means"), made=iso(e.get("made")), answer=c.answer,
+                         answered=iso(c.at) if c.at else None, via=c.via, label_id=row["label_id"] if row else None,
+                         owner_words=c.note))
+    return sorted(rows, key=lambda r: (r["start"] or "", r["estimate_id"]))
 
 
 def update_labels(path: Path, local: Path, now: datetime) -> tuple[int, int, int]:
@@ -1112,8 +1152,9 @@ Tidy tables of everything eeg_tracker measured on this laptop, made by `scripts/
 | `days.tsv` | day, 04:00 to 04:00 |
 | `epochs.tsv.gz` | 30 s of every recording (gzip; spreadsheets and pandas open it as it is or after `gunzip -k`) |
 | `labels.tsv` | label from the app's own stores (append-only: rows are only ever added) |
-| `truth.tsv` | truth label: what really happened, typed (`active` = 1: not corrected by a later row) |
+| `truth.tsv` | truth label: what really happened, typed (`active` = 1: not corrected by a later row; `present` = 0: it did not happen) |
 | `spans.tsv` | span: what you were doing in a recording (Record first): sleep, nap, work, meditate, ... |
+| `estimates.tsv` | what a detector thought happened and what you answered when the app asked (not a label until Yes or No) |
 | `validation.tsv`, `validation.md` | detector against truth label, and its summary (`scripts/validate_detectors.py`) |
 | `book.json` | how the last build went: versions, row counts, time, problems |
 
@@ -1166,6 +1207,8 @@ def build(local: Path, out: Path, now: datetime, full: bool = False, say: Callab
     _write(out / "spans.tsv", tsv(SPAN_COLUMNS, sprows).encode())
     trows, rejected, from_where = truth.build(local)
     truth.write_table(out / "truth.tsv", trows)
+    erows = estimate_rows(local)
+    _write(out / "estimates.tsv", tsv(ESTIMATE_COLUMNS, erows).encode())
     hashes.save()
     import epoch_signal as es
     book = dict(format=FORMAT, version=VERSION, built=iso(now), seconds=round(time.time() - t0, 1),
@@ -1173,7 +1216,7 @@ def build(local: Path, out: Path, now: datetime, full: bool = False, say: Callab
                 models=sorted({r["model"] for r in nrows if r.get("model")}),
                 rows={"nights.tsv": len(nrows), "sessions.tsv": len(srows), "days.tsv": len(drows),
                       "epochs.tsv.gz": n_epochs, "labels.tsv": n_labels, "truth.tsv": len(trows),
-                      "spans.tsv": len(sprows)},
+                      "spans.tsv": len(sprows), "estimates.tsv": len(erows)},
                 recordings=len(groups), worked_out=worked, labels_added=added, labels_removed=removed,
                 truth_from=from_where, truth_rejected=[r.text() for r in rejected],
                 epoch_columns=len(ep_columns), problems=problems)
