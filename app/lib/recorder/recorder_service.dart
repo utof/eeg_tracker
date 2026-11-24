@@ -17,6 +17,8 @@ import '../headband/battery_estimate.dart';
 import '../headband/connection.dart';
 import '../headband/lend.dart';
 import '../headband/lost_watch.dart';
+import '../headband/reconnect_hints.dart';
+import '../headband/reconnect_ladder.dart' show ReconnectHint;
 import '../headband/diy/night.dart';
 import '../logs/activity.dart' show Activity;
 import '../logs/engine.dart' show EngineRecords;
@@ -217,6 +219,16 @@ void recorderEntryPoint() {
   FlutterForegroundTask.setTaskHandler(RecorderTaskHandler());
 }
 
+/// How long after "Reconnect now" the notice says that the try found nothing (one direct try takes up to 17 s).
+const Duration triedTellAfter = Duration(seconds: 25);
+
+/// The lost notice's words after a try by hand that found nothing.
+String triedText(DateTime at) {
+  String two(int v) => v.toString().padLeft(2, '0');
+  return 'Tried again at ${two(at.hour)}:${two(at.minute)}: no answer yet. Is it switched on and charged? The '
+      'recording keeps waiting for it.';
+}
+
 class RecorderTaskHandler extends TaskHandler {
   RecorderTaskHandler({
     this.finder,
@@ -258,6 +270,9 @@ class RecorderTaskHandler extends TaskHandler {
 
   /// The DIY board's night (DECISIONS rows 360-369), or null for the BrainBit.
   DiyNight? _diy;
+
+  /// Android's reasons to try for a lost headband right now (headband/reconnect_hints.dart).
+  final ReconnectHints _hints = ReconnectHints();
 
   /// Why this engine holds the Wi-Fi lock (as `recorder`; one lock for the process, PhoneChannel.kt): the DIY board's
   /// datagrams, Share on Wi-Fi.
@@ -333,8 +348,11 @@ class RecorderTaskHandler extends TaskHandler {
         if (offer != null) 'started on the connection that was already live on the screen: no search, no new contact check',
       ],
       bandBattery: bandBattery,
+      screenOn: _hints.screenOn,
     );
     _recorder = recorder;
+    // the reconnect ladder's hints: the phone unlocked, Bluetooth on, the app in front, "Reconnect now" (DECISIONS 943)
+    unawaited(_hints.start(_onHint));
     // what this night runs, for the battery samples and the usage log (lib/logs/activity.dart, DECISIONS 715)
     Activity.begin('night');
     if (scorer != null) Activity.begin('live-model');
@@ -481,10 +499,27 @@ class RecorderTaskHandler extends TaskHandler {
   void _bandNotice(BandNotice n) {
     _alert = n.toMap();
     _recorder?.note('notice: ${n.title}. ${n.text}');
-    unawaited(Phone.bandNotice(n.title, n.text));
+    unawaited(Phone.bandNotice(n.title, n.text, reconnect: n.kind == BandNoticeKind.lost));
     final r = _recorder;
     if (r != null) _share?.setLive(_liveMap(r.status));
   }
+
+  /// A reason to try for the headband right now goes to the recorder's ladder. After "Reconnect now" on the lost
+  /// notice the owner is told how the try went: "back" comes by itself; "no answer yet" is said here.
+  void _onHint(ReconnectHint h) {
+    _recorder?.hint(h);
+    if (h != ReconnectHint.reconnectNow) return;
+    _triedTimer?.cancel();
+    final at = DateTime.now();
+    _triedTimer = Timer(triedTellAfter, () {
+      final r = _recorder, w = _lostWatch;
+      if (_stopping || r == null || w == null || !w.told || r.status.phase == Phase.recording) return;
+      r.note('notice: tried again by hand, no answer yet');
+      unawaited(Phone.bandNotice('Headband lost', triedText(at), reconnect: true));
+    });
+  }
+
+  Timer? _triedTimer;
 
   /// The status for Share on Wi-Fi's /state, with the newest headband notice (the laptop's tray shows it).
   Map<Object?, Object?> _liveMap(RecorderStatus s) => {
@@ -516,6 +551,8 @@ class RecorderTaskHandler extends TaskHandler {
     if (_stopping) return;
     _stopping = true;
     _lostTimer?.cancel();
+    _triedTimer?.cancel();
+    unawaited(_hints.stop());
     _endTap();
     _wifiWatch?.stop();
     final r = _recorder;

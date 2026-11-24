@@ -73,6 +73,9 @@ class LostWatch {
   bool _told = false;
   Duration? _after;
 
+  /// The "lost" notice was given and the headband is not back yet.
+  bool get told => _told;
+
   /// [expecting]: a night or session runs and was not stopped; [dataFresh]: a batch came in the last seconds.
   /// [batteryEmpty]: the battery estimate is at empty (for the lost notice's words).
   void update({required bool expecting, required bool dataFresh, bool batteryEmpty = false}) {

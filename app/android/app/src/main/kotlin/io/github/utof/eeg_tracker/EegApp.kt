@@ -15,12 +15,15 @@ class EegApp : Application() {
     override fun onCreate() {
         super.onCreate()
         AutoWatch.trackScreen(this) // when the screen went off, for the headband watcher's rules
+        ReconnectHints.trackActivities(this) // "the app came to the front", for the reconnect ladder (DECISIONS 943)
         FlutterForegroundTaskPlugin.addTaskLifecycleListener(object : FlutterForegroundTaskLifecycleListener {
             override fun onEngineCreate(flutterEngine: FlutterEngine?) {
                 flutterEngine?.let {
                     PhoneChannel.register(it.dartExecutor.binaryMessenger, this@EegApp)
                     // the smart alarm's live model brings the alarm forward from the recorder's engine
                     AlarmChannel.register(it.dartExecutor.binaryMessenger, this@EegApp)
+                    // the reconnect ladder's hints: unlock, Bluetooth on, the app in front, "Reconnect now"
+                    ReconnectHints.register(it.dartExecutor.binaryMessenger, this@EegApp)
                 }
             }
 
@@ -33,6 +36,7 @@ class EegApp : Application() {
             // the recorder's engine ends: its hold on Wi-Fi (Share on Wi-Fi, the DIY board) goes with it (DECISIONS 612)
             override fun onEngineWillDestroy() {
                 PhoneChannel.holdWifi(this@EegApp, "recorder", false)
+                ReconnectHints.forgetAll(this@EegApp)
             }
         })
     }

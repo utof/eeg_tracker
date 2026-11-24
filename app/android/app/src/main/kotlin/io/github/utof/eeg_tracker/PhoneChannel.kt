@@ -137,7 +137,11 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
                     result.success(null)
                 }
                 "bandNotice" -> result.success(
-                    bandNotice(call.argument<String>("title") ?: "Headband", call.argument<String>("text") ?: ""),
+                    bandNotice(
+                        call.argument<String>("title") ?: "Headband",
+                        call.argument<String>("text") ?: "",
+                        call.argument<Boolean>("reconnect") == true,
+                    ),
                 )
                 else -> result.notImplemented()
             }
@@ -148,9 +152,11 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
 
     /**
      * The headband-lost notices (lib/headband/lost_watch.dart, DECISIONS 857): one card, replaced by the next (lost, then
-     * back), on a channel of its own so it can be silenced apart from the recording's. A tap opens the app.
+     * back), on a channel of its own so it can be silenced apart from the recording's. A tap opens the app. With
+     * [reconnect] (the "lost" notice of a recording that is trying to get the headband back) it has a "Reconnect now"
+     * button: one try at once (ReconnectHints.kt, DECISIONS 943); the notice stays until the headband is back.
      */
-    private fun bandNotice(title: String, text: String): Boolean {
+    private fun bandNotice(title: String, text: String, reconnect: Boolean): Boolean {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return false
         if (nm.getNotificationChannel(BAND_CHANNEL) == null) {
             val ch = NotificationChannel(BAND_CHANNEL, "Headband lost or back", NotificationManager.IMPORTANCE_HIGH)
@@ -161,15 +167,19 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
         val tap = if (open == null) null else PendingIntent.getActivity(
             context, BAND_NOTICE_ID, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val n = Notification.Builder(context, BAND_CHANNEL)
+        val b = Notification.Builder(context, BAND_CHANNEL)
             .setSmallIcon(context.applicationInfo.icon)
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setAutoCancel(true)
             .setContentIntent(tap)
-            .build()
-        nm.notify(BAND_NOTICE_ID, n)
+        if (reconnect && ReconnectHints.watched()) {
+            b.addAction(
+                Notification.Action.Builder(null, "Reconnect now", ReconnectHints.reconnectNowIntent(context)).build(),
+            )
+        }
+        nm.notify(BAND_NOTICE_ID, b.build())
         return nm.areNotificationsEnabled()
     }
 
