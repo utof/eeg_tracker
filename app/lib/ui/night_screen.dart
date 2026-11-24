@@ -889,7 +889,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
         actions: [
           TextButton(onPressed: () => Navigator.pop(c), child: const Text('Not yet')),
           if (sleep.startedRecording) TextButton(onPressed: () => Navigator.pop(c, 'sleep'), child: const Text('Keep recording')),
-          FilledButton(
+          TextButton(
             onPressed: () => Navigator.pop(c, sleep.startedRecording ? 'all' : 'sleep'),
             child: Text(sleep.startedRecording ? 'Stop everything' : 'Stop sleep'),
           ),

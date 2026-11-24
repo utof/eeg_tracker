@@ -9,6 +9,7 @@ import 'package:eeg_tracker/confirm/questions.dart';
 import 'package:eeg_tracker/spans/span.dart';
 import 'package:eeg_tracker/spans/stop_sheet.dart';
 import 'package:eeg_tracker/ui/stop_sheet.dart';
+import 'package:eeg_tracker/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_labels/shared_labels.dart';
@@ -146,6 +147,7 @@ void main() {
     Future<void> open() async {
       await tester.pumpWidget(
         MaterialApp(
+          theme: nightTheme(), // the app's own: its filled buttons are as wide as they are allowed to be
           home: Builder(
             builder: (context) => Scaffold(
               body: TextButton(onPressed: () => showStopSheet(context, plan, filesDir: files), child: const Text('open')),
@@ -171,6 +173,8 @@ void main() {
     await tester.pump();
     expect(find.text('Walked: only part of it?'), findsOneWidget);
     await tester.enterText(find.byKey(const ValueKey('stop-words')), words);
+    // on a phone-sized screen Save is on the screen and can be tapped
+    expect(tester.getRect(find.text('Save')).right, lessThan(tester.view.physicalSize.width / tester.view.devicePixelRatio));
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     final tags = TagStore(files).tags(id);

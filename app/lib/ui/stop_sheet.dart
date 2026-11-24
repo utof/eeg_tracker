@@ -107,7 +107,7 @@ class _StopSheetState extends State<StopSheet> {
           content: const Text('The app scores that stretch as sleep and lists it with your nights.'),
           actions: [
             TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('No')),
-            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Yes')),
+            TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Yes')),
           ],
         ),
       );
@@ -129,8 +129,9 @@ class _StopSheetState extends State<StopSheet> {
     final marked = _p.marked;
     final last = _last;
     final times = last == null ? null : _times[last];
+    // above the keyboard and above the phone's own bar at the bottom edge
     return Padding(
-      padding: EdgeInsets.fromLTRB(24, 0, 24, 16 + MediaQuery.viewInsetsOf(context).bottom),
+      padding: EdgeInsets.fromLTRB(24, 0, 24, 16 + MediaQuery.viewInsetsOf(context).bottom + MediaQuery.viewPaddingOf(context).bottom),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -186,12 +187,14 @@ class _StopSheetState extends State<StopSheet> {
               ),
             ],
             const SizedBox(height: 16),
+            // each button takes half the row: the app's filled buttons are as wide as they are allowed to be
             Row(
-              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                TextButton(onPressed: () => Navigator.pop(context, _answers.isNotEmpty), child: const Text('Skip')),
+                Expanded(
+                  child: TextButton(onPressed: () => Navigator.pop(context, _answers.isNotEmpty), child: const Text('Skip')),
+                ),
                 const SizedBox(width: 12),
-                FilledButton(onPressed: _save, child: const Text('Save')),
+                Expanded(child: FilledButton(onPressed: _save, child: const Text('Save'))),
               ],
             ),
           ],

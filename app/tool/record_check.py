@@ -150,12 +150,16 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     sheet = wait(lambda: emu.match("What was this recording?", True), limit=60)
     details = pc.screen_words("4-sheet")
     chip = tap(emu.match("Walked", True)) if sheet else False
+    part = wait(lambda: emu.match("Walked: only part of it?", True), limit=15) if chip else None
+    details += pc.screen_words("4-chip")
     saved = tap(emu.match("Save", True)) if chip else False
     tags = wait(lambda: cat(f"{pc.FILES}/archive/{rec}.tags.json"), limit=30) if saved else ""
     try:
         tag = (json.loads(tags).get("tags") or [{}])[0]
     except ValueError:
         tag = {}
+    details.append(f"chip tapped {chip}, its times row shown {bool(part)}, Save tapped {saved}; archive: " + pc.sh(f"ls -la {pc.FILES}/archive {SPANS} 2>&1", check=False).replace("\n", " / "))
+    details += pc.screen_words("4-after-save")
     ok4 = bool(sheet) and tag.get("label") == "walking" and tag.get("source") == "owner_stop_sheet" and tag.get("confidence") == "within"
     results.append(pc.Result("4 Stop, then the sheet: a chip and Save write the tag", "PASS" if ok4 else "FAIL",
                              f"sheet shown: {bool(sheet)}; tag {json.dumps(tag)}", details))
