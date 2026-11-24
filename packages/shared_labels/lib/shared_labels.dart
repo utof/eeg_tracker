@@ -4,6 +4,7 @@ library;
 export 'src/estimate.dart';
 export 'src/labels.dart';
 export 'src/queue.dart';
+export 'src/stop_sheet.dart';
 export 'src/store.dart';
 export 'src/time.dart';
 export 'src/vocabulary.dart';

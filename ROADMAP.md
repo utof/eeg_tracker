@@ -157,7 +157,9 @@ Needs no owner decision, only time or data:
   "What was this recording?" chips and your own words become labels. Five steps: (1) Record button + stretches, (2)
   sleep on a running recording + reports from sleep stretches, (3) the stop sheet, (4) daytime activities on the
   recording's stream (after the one-connection lane), (5) labels shared with utof_tracker (its Alcohol button) and
-  nights with vs without alcohol.
+  nights with vs without alcohol. **Steps 1-3 are built** (2026-11-24, `feat/record-first`, DECISIONS 900-910): Record and
+  Sleep on the Record tab, Sleep and Stop sleep on a running recording, nights and naps from sleep stretches on the
+  phone and the laptop, "Not sleep" in the Archive, the sheet after Stop. Left: steps 4 and 5, and row 907's list.
 - **Whole-day recording, an archive, and what a day of recordings is for** (owner, 2026-11-20):
   - *Record the whole day* with the headband always on: one long recording (or a session per activity), started by hand or automatically, saved on the phone first and copied to the laptop (nothing lost when the link drops).
   - *Archive page*: every recording with its date, length, how it started (manual: Start night / Work session / a session; automatic: the watcher), its tags (sleep, work, meeting, walk, rest, manual tags); open any recording and see a timeline you can tap into, with activities tagged automatically and editable; delete recordings by hand.

@@ -892,6 +892,14 @@ not make the report stale.
 open span ends at the last data (`headband_off`); 6 hours without data: the recording stops itself; the phone
 restarted: at the next app start open spans end at the recording's last saved sample (`phone_restart`).
 
+**The sheet after Stop** ("What was this recording?", DECISIONS 890-891, 908-910) writes each chip as a tag of the
+recording in `archive/<id>.tags.json` with `truth: true`, `source: "owner_stop_sheet"`, `confidence` (`certain` for
+"Awake the whole time", `likely` for a chip with times, `within` for one without: it happened somewhere inside the
+span) and `words` (your own words, exactly as typed, in every tag of that sheet; words alone make one `other` tag).
+`scripts/truth.py` turns them into truth rows; the chips and the tag fields are the shared package's
+(`packages/shared_labels/lib/src/stop_sheet.dart`), checked against `tests/contract/labels/stop-sheet.tags.json`.
+`spans/stop-sheet.json` (`{"recording", "saved", "at"}`) only remembers which recording was last asked about.
+
 - **Writers**: the recorder while the recording runs, the screen once it has stopped (`app/lib/spans/span_log.dart`
   `SpanLog`, which refuses the screen while the recorder's saved state says the recording is active). Each span start
   and end is also one line in the open file set's `.log` and `.markers.jsonl` (`span: sleep start`).
