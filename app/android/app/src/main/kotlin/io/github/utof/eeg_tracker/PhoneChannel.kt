@@ -2,7 +2,10 @@ package io.github.utof.eeg_tracker
 
 import android.app.ActivityManager
 import android.app.ApplicationExitInfo
+import android.app.Notification
+import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.usage.UsageStatsManager
 import android.bluetooth.BluetoothManager
 import android.content.ComponentName
@@ -47,6 +50,10 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
 
         /** Notification channel of the recorder (recorder_service.dart). */
         const val RECORDING_CHANNEL = "night_recording"
+
+        /** The headband-lost notices' channel and their one card. */
+        const val BAND_CHANNEL = "headband_lost"
+        const val BAND_NOTICE_ID = 4721
 
         fun register(messenger: BinaryMessenger, context: Context) {
             MethodChannel(messenger, NAME).setMethodCallHandler(PhoneChannel(context.applicationContext))
@@ -137,11 +144,41 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
                     StepCounter.stop()
                     result.success(null)
                 }
+                "bandNotice" -> result.success(
+                    bandNotice(call.argument<String>("title") ?: "Headband", call.argument<String>("text") ?: ""),
+                )
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {
             result.error("phone", e.message, null)
         }
+    }
+
+    /**
+     * The headband-lost notices (lib/headband/lost_watch.dart, DECISIONS 857): one card, replaced by the next (lost, then
+     * back), on a channel of its own so it can be silenced apart from the recording's. A tap opens the app.
+     */
+    private fun bandNotice(title: String, text: String): Boolean {
+        val nm = context.getSystemService(NotificationManager::class.java) ?: return false
+        if (nm.getNotificationChannel(BAND_CHANNEL) == null) {
+            val ch = NotificationChannel(BAND_CHANNEL, "Headband lost or back", NotificationManager.IMPORTANCE_HIGH)
+            ch.description = "When a recording or session gets no data from the headband for a while, and when it is back"
+            nm.createNotificationChannel(ch)
+        }
+        val open = context.packageManager.getLaunchIntentForPackage(context.packageName)
+        val tap = if (open == null) null else PendingIntent.getActivity(
+            context, BAND_NOTICE_ID, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = Notification.Builder(context, BAND_CHANNEL)
+            .setSmallIcon(context.applicationInfo.icon)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setContentIntent(tap)
+            .build()
+        nm.notify(BAND_NOTICE_ID, n)
+        return nm.areNotificationsEnabled()
     }
 
     /** The storage the app's files live on: its size and what is free (the Storage page's context, DECISIONS 690-699). */

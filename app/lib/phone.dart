@@ -184,6 +184,16 @@ class Phone {
   }
 
   /// Schedules the foreground service to start again in [delayMs], then ends this process.
+  /// The headband-lost notice (lib/headband/lost_watch.dart): one card, replaced by the next. False when notifications
+  /// are off for the app (or there is no phone).
+  static Future<bool> bandNotice(String title, String text) async {
+    try {
+      return await _channel.invokeMethod<bool>('bandNotice', {'title': title, 'text': text}) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<void> restartProcess(int delayMs) =>
       _channel.invokeMethod<void>('restartProcess', {'delayMs': delayMs});
 

@@ -50,6 +50,7 @@ class ShareControl extends ChangeNotifier {
        _now = clock ?? DateTime.now,
        _session = session ?? sharedSession {
     _session.addListener(_sessionChanged);
+    sharedAlert.addListener(_alertChanged);
     _network = networkChanges?.listen((_) => unawaited(_host?.networkChanged()), onError: (Object _) {});
   }
 
@@ -79,8 +80,11 @@ class ShareControl extends ChangeNotifier {
 
   StreamSubscription<void>? _network;
 
-  /// The session's summary to the server (/state's `session`).
-  void _sessionChanged() => _host?.setSession(_session.value);
+  /// The session's summary to the server (/state's `session`), with the newest headband notice beside it (`alert`,
+  /// DECISIONS 857).
+  void _sessionChanged() => _host?.setSession(sessionWithAlert(_session.value, sharedAlert.value));
+
+  void _alertChanged() => _sessionChanged();
 
   final Future<ShareConfig> Function() load;
   final Future<void> Function(ShareConfig config) save;
@@ -284,7 +288,7 @@ class ShareControl extends ChangeNotifier {
     }, wifiLock);
     host.onProved = (n) => proofs.value += n;
     host.setLive(const {});
-    host.setSession(_session.value);
+    host.setSession(sessionWithAlert(_session.value, sharedAlert.value));
     await host.start(_config);
   }
 
@@ -356,6 +360,7 @@ class ShareControl extends ChangeNotifier {
   void dispose() {
     proofs.dispose();
     _session.removeListener(_sessionChanged);
+    sharedAlert.removeListener(_alertChanged);
     unawaited(_network?.cancel());
     unawaited(_stopHost());
     super.dispose();

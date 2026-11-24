@@ -12,10 +12,10 @@ const perSlot = sampleRateHz * 1800;
 void main() {
   group('contact', () {
     test('planning thresholds', () {
-      expect(classifyOhms(4e5), Contact.good);
-      expect(classifyOhms(1e6), Contact.good);
-      expect(classifyOhms(2e6), Contact.fair);
-      expect(classifyOhms(3e6), Contact.poor);
+      expect(classifyOhms(2e5), Contact.good);
+      expect(classifyOhms(4e5), Contact.ok);
+      expect(classifyOhms(1e6), Contact.ok);
+      expect(classifyOhms(2e6), Contact.poor);
       expect(classifyOhms(double.infinity), Contact.none);
       expect(classifyOhms(null), Contact.none);
     });
@@ -37,9 +37,9 @@ void main() {
       );
       final back = RecorderStatus.fromMap(s.toMap(nowMs: 3000))!;
       expect(back.phase, Phase.recording);
-      expect(back.contactOf('O1'), Contact.good);
+      expect(back.contactOf('O1'), Contact.ok);
       expect(back.contactOf('O2'), Contact.none);
-      expect(back.contactOf('T3'), Contact.fair);
+      expect(back.contactOf('T3'), Contact.poor);
       expect(back.slots, {994444: 250});
       expect(back.sentMs, 3000);
       expect(RecorderStatus.fromMap({'kind': 'stopped'}), isNull);

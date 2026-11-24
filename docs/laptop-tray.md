@@ -169,6 +169,10 @@ bigger, instead of starting a second copy. It is greyed out only without a termi
   (DECISIONS 751); the phone's answer must prove the same key. One look without an answer keeps the last one (a Wi-Fi blip); two in a row is "not reachable".
 - **At the start**, if a phone was paired before and does not answer now, one notification says so (only with
   notifications on; never during a meeting). Afterwards only the ring and the menu change.
+- **Headband notices from the phone**: when the phone made a new one (the headband sent no data for a while, data is
+  back, or its battery is nearly empty), the tray shows it once as a notification with the phone's own words (only with
+  notifications on; never during a meeting). A newer notice replaces the older one. One older than 30 minutes is
+  never shown, and a tray restart may show the newest again if it is still under 30 minutes old.
 - **Forget the phone…** → **Yes, forget it** deletes `link.json` and stops the kept link; the menu then offers
   Pair phone… first again.
 - When a work session starts or ends here, the tray tells the paired phone (Share on Wi-Fi's signed `POST /work`,

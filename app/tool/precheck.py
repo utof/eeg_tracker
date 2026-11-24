@@ -18,6 +18,8 @@ which crashes ONNX Runtime with 4 cores), boots it headless, and checks what rea
   (c) a replayed noisy work session (the made-up "talking" recording through the replay build's headband, at real
       speed for 6.5 minutes): no break may start by itself. Runs when --replay is given (DECISIONS 735; the
       work-day fix it waited for is in main since integration 17).
+  (e) only with `--only ...e` and --replay: the Signal tab reaches the replayed headband, then Start night must record
+      that live connection (no search, no contact check; DECISIONS 855-856).
   (d) logcat, ANRs and Android's exit reasons are collected; a crash or an ANR of the app fails, and the app's own
       files/app-starts.log must have recorded its starts with the exit reasons.
 
@@ -679,6 +681,103 @@ def check_talking(replay: Path, stage: Path, also: list[Result]) -> Result:
     return Result(name, "PASS", f"{TALK_MIN} minutes of replayed talking: no break started", details)
 
 
+# ---- (e) Signal, then Start night: one connection ------------------------------------------------------------------
+
+
+def make_quiet(stage: Path) -> Path:
+    """The made-up quiet-work recording (tool/replay_scenario.dart): `<stage>/scenarios/quiet-work/<stamp>.f32`."""
+    out = stage / "scenarios"
+    done = list((out / "quiet-work").glob("*.f32"))
+    if not done:
+        run(["dart", "run", "tool/replay_scenario.dart", "quiet-work", str(out)], timeout=900, cwd=str(APP))
+        done = list((out / "quiet-work").glob("*.f32"))
+    return done[0]
+
+
+def check_one_connection(replay: Path, stage: Path) -> Result:
+    """(e) The Signal tab reaches the (replayed) headband; Start night must then record that live connection: the
+    night's log says it started on the live connection and did not measure contact again, and names one connection
+    (DECISIONS 855-856)."""
+    name = "(e) Signal, then Start night: one connection"
+    f32 = make_quiet(stage)
+    stem = f32.name[: -len(".f32")]
+    install(replay)
+    stop_app()
+    plan = stage / "plan-quiet.json"
+    plan.write_text(json.dumps({"files": [f"quiet/{f32.name}"], "speed": 1, "loop": True}))
+    pairs = [(plan, "replay/plan.json")]
+    for ext in (".f32", ".idx", ".log", ".header.json"):
+        pairs.append((f32.with_name(stem + ext), f"replay/quiet/{stem}{ext}"))
+    seed(pairs, stage / "push-quiet")
+    sh("cmd bluetooth_manager enable", check=False)
+    sh(f"dumpsys deviceidle whitelist +{PKG}", check=False)  # Start night would open the battery settings page
+    before = set(sh(f"ls {FILES}/recordings/*.log 2>/dev/null", check=False).split())
+    time.sleep(3)
+    start_app()
+    if not wait_main():
+        return Result(name, "FAIL", "the app's main screen did not come up within 2 minutes", screen_words("e-start"))
+    details: list[str] = []
+    if not open_tab("Signal"):
+        return Result(name, "FAIL", "the Signal tab was not found", screen_words("e-tab"))
+    t0 = time.time()
+    live = False
+    while time.time() - t0 < 120 and not live:
+        time.sleep(4)
+        texts = [l for l, _, _ in emu.nodes()]
+        live = any(t.strip().startswith("Live") for t in texts) and any("Connected" in t for t in texts)
+    details.append(f"Signal live after {time.time() - t0:.0f} s: {live}")
+    words = screen_words("e-signal")
+    details.append("Signal tab: " + " | ".join(w for w in words if len(w) < 80)[:500])
+    if not live:
+        return Result(name, "FAIL", "the Signal tab did not get a live signal from the replay within 2 minutes", details)
+    battery = [w for w in words if "about" in w and "%" in w]
+    details.append(f"battery on the Signal tab: {battery[:1]}")
+    if not open_tab("Night"):
+        return Result(name, "FAIL", "the Night tab was not found", details)
+    t_start = time.time()
+    hit = find("Start night", exact=False, scrolls=2)
+    if hit is None:
+        return Result(name, "FAIL", "Start night was not found", details + screen_words("e-night"))
+    sh(f"input tap {hit[1]} {hit[2]}")
+    log = ""
+    newest = ""
+    recording_after = None
+    while time.time() - t_start < 90:
+        time.sleep(3)
+        new = [f for f in sh(f"ls {FILES}/recordings/*.log 2>/dev/null", check=False).split() if f not in before]
+        if not new:
+            continue
+        newest = sorted(new)[-1]
+        log = sh(f"cat {newest}", check=False)
+        if "recording started" in log:
+            recording_after = time.time() - t_start
+            break
+    details.append(f"night log {newest or '(none)'}; recording after {recording_after if recording_after is None else round(recording_after)} s")
+    details += ["    " + l for l in log.splitlines()[:14]]
+    time.sleep(10)
+    log = sh(f"cat {newest}", check=False) if newest else log
+    hit = emu.match("Stop", exact=True) or find("Stop", exact=True, scrolls=2)
+    if hit:
+        sh(f"input tap {hit[1]} {hit[2]}")
+        time.sleep(2)
+        confirm = emu.match("Stop", exact=True)
+        if confirm:
+            sh(f"input tap {confirm[1]} {confirm[2]}")
+        time.sleep(6)
+    if recording_after is None:
+        return Result(name, "FAIL", "the night did not start recording within 90 s of Start night", details)
+    lent = "started on the connection that was already live" in log
+    no_check = "not measured again" in log
+    samples = [int(m.group(1)) for m in re.finditer(r"samples (\d+) \(\+", log)]
+    connects = log.count(" connected ")
+    details.append(f"lent {lent}, contact not measured again {no_check}, connections in the log {connects}, samples {samples[-1:]}")
+    if not lent or not no_check:
+        return Result(name, "FAIL", "the night did not start on the Signal tab's live connection (it searched or checked contact again)", details)
+    if connects != 1 or "reconnect try" in log:
+        return Result(name, "FAIL", f"the night's log names {connects} connections or a reconnect try", details)
+    return Result(name, "PASS", f"recording {round(recording_after)} s after Start night, on the Signal tab's connection: no search, no contact check", details)
+
+
 # ---- (d) what the run left -----------------------------------------------------------------------------------------
 
 
@@ -799,6 +898,12 @@ def main() -> int:
                 also: list[Result] = []
                 results.append(check_talking(a.replay, stage, also))
                 results += also
+        if "e" in a.only:
+            if not a.replay:
+                results.append(Result("(e) Signal, then Start night: one connection", "SKIP", "needs --replay <replay build>"))
+            else:
+                say("(e) Signal, then Start night: one connection")
+                results.append(check_one_connection(a.replay, stage))
         if "d" in a.only:
             say("(d) crashes, ANRs, exit reasons")
             results.append(collect(out, started_ms))

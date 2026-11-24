@@ -7,6 +7,8 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import 'auto/task.dart' show runAutoWatch;
 import 'dream/speech_model.dart' show parakeetNotice;
+import 'headband/connection.dart';
+import 'headband/phone_connection.dart';
 import 'logs/engine.dart' show ScreenRecords;
 import 'logs/usage.dart' show Usage;
 import 'logs/usage_watch.dart' show UsageGestures, UsageNavigatorObserver;
@@ -16,6 +18,7 @@ import 'share/push/task.dart' show runPushTask;
 import 'sharp/prompts.dart';
 import 'start_log.dart';
 import 'ui/auto_hooks.dart';
+import 'ui/device_status.dart';
 import 'ui/night_screen.dart';
 import 'ui/sharp_rating_screen.dart';
 import 'ui/study_screen.dart' show StudyLogScreen;
@@ -28,6 +31,8 @@ void main() {
   ScreenRecords.start(recordingsDir: Phone.recordingsDir, power: Phone.powerMap, mainStarted: started, processAgeMs: Phone.processAge);
   FlutterForegroundTask.initCommunicationPort(); // status messages from the recorder isolate
   initRecorderService();
+  // the one headband connection every screen shares (lib/headband/connection.dart, DECISIONS 855)
+  HeadbandConnection.shared = startPhoneConnection();
   unawaited(logAppStart('screen')); // why the process before this one ended (files/app-starts.log, DECISIONS 734)
   // AnySleep's weights ship in the APK (assets/models); its MIT licence travels with them.
   LicenseRegistry.addLicense(() async* {
@@ -60,6 +65,7 @@ class EegTrackerApp extends StatefulWidget {
 class _EegTrackerAppState extends State<EegTrackerApp> {
   final GlobalKey<NavigatorState> _navigator = GlobalKey<NavigatorState>();
   late final SharpPhone _sharp = widget.sharp ?? ChannelSharpPhone();
+  late final DeviceCard? _deviceCard = DeviceCard.shared();
   late final AutoHooks _auto = AutoHooks(_navigator); // the headband watcher (lib/auto, DECISIONS 600)
   bool _asking = false;
 
@@ -112,7 +118,11 @@ class _EegTrackerAppState extends State<EegTrackerApp> {
     theme: nightTheme(),
     // the usage log (DECISIONS 713): the page on top, and taps, drags and scrolls of the app's own screens
     navigatorObservers: [_usage],
-    builder: (context, child) => UsageGestures(child: child ?? const SizedBox.shrink()),
+    // the one headband card for every screen (ui/device_status.dart, DECISIONS 854)
+    builder: (context, child) => DeviceCardScope(
+      card: _deviceCard,
+      child: UsageGestures(child: child ?? const SizedBox.shrink()),
+    ),
     home: const NightScreen(),
   );
 }
