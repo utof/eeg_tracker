@@ -27,7 +27,7 @@ import 'dart:io';
 
 import '../cache/file_summaries.dart';
 import '../export/store.dart' show ExportStore;
-import '../recorder/header.dart' show tryHeader;
+import '../recorder/header.dart' show headerFileOf, tryHeader;
 import '../recorder/nights.dart' show stemTime;
 import '../recorder/packed.dart' show isPackedPath, packedInfo, rawLength, rawOnDisk;
 import '../trends/days.dart' show dayKey;
@@ -53,7 +53,7 @@ const Duration joinGap = Duration(minutes: 15);
 const Duration maxRecording = Duration(hours: 24);
 
 /// Version of the kept summaries (a change drops them).
-const int _setsVersion = 3;
+const int _setsVersion = 4;
 const int _sessionsVersion = 2;
 
 enum ArchiveKind {
@@ -113,7 +113,7 @@ const Started _unknown = Started(StartedHow.unknown, 'Not known (the files do no
 
 /// The button a recording of [kind] is started with.
 Started byHand(ArchiveKind kind) => Started(StartedHow.hand, 'You: ${switch (kind) {
-  ArchiveKind.night => 'Start night',
+  ArchiveKind.night => 'Record or Sleep',
   ArchiveKind.work => 'Work session',
   ArchiveKind.meditation => 'Meditation',
   ArchiveKind.alphaTheta => 'Alpha-theta',
@@ -122,7 +122,7 @@ Started byHand(ArchiveKind kind) => Started(StartedHow.hand, 'You: ${switch (kin
   ArchiveKind.sound => 'Sound',
   ArchiveKind.checkIn => 'Morning check-in',
   ArchiveKind.handsFree => 'Calibrate (Settings)',
-  ArchiveKind.board => 'Start night (DIY board)',
+  ArchiveKind.board => 'Record or Sleep (DIY board)',
   ArchiveKind.recording => 'a start the files do not name',
 }}');
 
@@ -145,7 +145,11 @@ class RawSet {
     this.removed = false,
     this.removedOnLaptop = false,
     this.samplesBytes = 0,
+    this.recording,
   });
+
+  /// The recording the set's header names (Record first, DECISIONS 882); null: a set from before, joined by time.
+  final String? recording;
 
   /// Relative to `files/`, `recordings`.
   final String folder;
@@ -209,6 +213,7 @@ class RawSet {
     if (removed) 'removed': true,
     if (removedOnLaptop) 'removed_on_laptop': true,
     'samples': samplesBytes,
+    'recording': ?recording,
   };
 
   static RawSet? fromJson(Object? j) {
@@ -235,6 +240,7 @@ class RawSet {
       removed: j['removed'] == true,
       removedOnLaptop: j['removed_on_laptop'] == true,
       samplesBytes: j['samples'] is int ? j['samples'] as int : 0,
+      recording: j['recording'] is String ? j['recording'] as String : null,
     );
   }
 }
@@ -579,6 +585,8 @@ RawSet _readSet(Directory dir, String folder, String stem, List<File> files, Raw
     removed: gone != null,
     removedOnLaptop: gone?.onLaptop ?? false,
     samplesBytes: samples,
+    // the header stays on the phone when the samples leave it
+    recording: (h ?? (headerFileOf(f32).existsSync() ? tryHeader(f32) : null))?.recording,
   );
 }
 
@@ -688,6 +696,15 @@ List<List<RawSet>> chainSets(List<RawSet> sets) {
   bool family(RawSet s) => const {'night', 'preroll', 'board', 'other', 'work'}.contains(s.writer);
   for (final s in sets) {
     final last = out.isEmpty ? null : out.last;
+    // a set that names its recording belongs to that one and to no other; the rules by time are for sets without
+    if (last != null && (s.recording != null || last.last.recording != null)) {
+      if (s.recording == last.last.recording) {
+        last.add(s);
+      } else {
+        out.add([s]);
+      }
+      continue;
+    }
     if (last != null && family(s) && family(last.last) && s.writer != 'preroll') {
       final end = last.map((x) => x.last).reduce((a, b) => a.isAfter(b) ? a : b);
       final near = s.continues || s.start.difference(end) < joinGap;

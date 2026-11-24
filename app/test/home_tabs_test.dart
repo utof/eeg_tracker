@@ -131,11 +131,11 @@ void main() {
         expect(where[HomeTab.sessions]!.any((s) => s.startsWith('The headband is busy with the night')), isTrue);
         expect(where[HomeTab.more]!.any((s) => s.contains('Shared on Wi-Fi')), isTrue);
       } else {
-        expect(where[HomeTab.night], containsAll(['Start night', 'Sleep report', 'Morning check-in', 'Try these', 'Phone']));
+        expect(where[HomeTab.night], containsAll(['Sleep', 'Sleep report', 'Morning check-in', 'Try these', 'Phone']));
         expect(where[HomeTab.sessions], containsAll(['Meditate', 'Dream catcher', 'Nap coach', 'Lucid dreams', 'Work session', 'Sound']));
         expect(where[HomeTab.more], containsAll(['Export data', 'Export a night', 'Settings', 'Licences']));
         expect(where[HomeTab.night], isNot(contains('Meditate')));
-        expect(where[HomeTab.sessions], isNot(contains('Start night')));
+        expect(where[HomeTab.sessions], isNot(contains('Sleep')));
       }
       expect(where[HomeTab.signal], contains('the Signal page'));
       expect(where[HomeTab.trends], contains('the Trends page'));
@@ -146,7 +146,7 @@ void main() {
     final key = GlobalKey<HomeTabsState>();
     await _pump(tester, _tabs(_model(running: false), key: key), height: 873);
     expect(key.currentState!.tab, HomeTab.night);
-    expect(find.text('Start night'), findsOneWidget);
+    expect(find.ancestor(of: find.text('Sleep'), matching: find.bySubtype<FilledButton>()), findsOneWidget);
     expect(find.byType(NavigationDestination), findsNWidgets(5));
     for (final t in HomeTab.values) {
       expect(find.text(t.label), findsWidgets);
@@ -154,12 +154,12 @@ void main() {
     await tester.tap(find.text('Sessions'));
     await tester.pump(const Duration(milliseconds: 100));
     expect(key.currentState!.tab, HomeTab.sessions);
-    expect(find.text('Start night'), findsNothing); // pinned only on Night
+    expect(find.ancestor(of: find.text('Sleep'), matching: find.bySubtype<FilledButton>()), findsNothing); // pinned only on Night
     expect(find.byIcon(Icons.settings_outlined), findsNothing);
     await tester.binding.handlePopRoute();
     await tester.pump(const Duration(milliseconds: 100));
     expect(key.currentState!.tab, HomeTab.night);
-    expect(find.text('Start night'), findsOneWidget);
+    expect(find.ancestor(of: find.text('Sleep'), matching: find.bySubtype<FilledButton>()), findsOneWidget);
     expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
   });
 

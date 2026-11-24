@@ -10,6 +10,7 @@ widgets; nothing here knows a headband, a detector or either app's screens.
 | Store | `lib/src/store.dart` | the files: `estimates.jsonl`, `answers.jsonl`, `asks.jsonl`, `armed.json`, `settings.json`, `labels.tsv`, `estimates.tsv` |
 | Exports | `lib/src/labels.dart` | answers as truth rows (`labels.tsv`, the schema of `scripts/truth.py`) and every estimate with its answer (`estimates.tsv`), tab-separated: what the laptop, another app or pandas reads |
 | Queue | `lib/src/queue.dart` | which estimates to ask about and when |
+| Stop sheet | `lib/src/stop_sheet.dart` | "What was this recording?": the chips (`StopChips`), what a tap does, and the tags a filled sheet makes (`stopSheetTags`: source `owner_stop_sheet`, confidence `certain` / `likely` / `within`, your words verbatim); golden files `tests/contract/labels/stop-sheet.*` |
 | Widgets | `lib/src/widgets.dart` | `ConfirmBatch` (Yes / No / Not sure per question) and `ConfirmCard` |
 
 The golden files in `test/fixtures/confirm/` are checked by this package's tests, by the app's

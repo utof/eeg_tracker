@@ -34,6 +34,9 @@ import '../sleep/live_log.dart' show LiveStageLog, liveStagesDirFor;
 import '../sleep/live_stager.dart';
 import '../sleep/night_scorer.dart';
 import '../sleep/onnx_runs.dart';
+import '../spans/span.dart' show spansDirFor;
+import '../spans/after_restart.dart';
+import '../spans/span_log.dart';
 import 'brainbit.dart';
 import 'chunk_writer.dart' show ChunkWriter;
 import 'headband.dart';
@@ -52,6 +55,18 @@ const String _alarmKey = 'alarmPlan';
 /// runs no lucid cues (no sound starts without a tap); a start by hand removes it.
 const String _autoKey = 'autoStart';
 
+/// The recording starts with Sleep (`1`: a sleep span and the sleep kit from its start) or with Record alone (`0`).
+const String _sleepKey = 'startSleep';
+
+/// Opens or closes a span of the running recording (Record first, DECISIONS 884): the recorder writes it and answers
+/// with its status, which lists the spans.
+Map<String, Object?> openSpanCommand(String kind, {String? session}) => {
+  'kind': 'span',
+  'op': 'open',
+  'span_kind': kind,
+  'session': ?session,
+};
+Map<String, Object?> closeSpanCommand(String id, {String by = 'owner'}) => {'kind': 'span', 'op': 'close', 'id': id, 'by': by};
 /// A night started while the screen's engine holds a live connection: its offer to lend it (headband/lend.dart,
 /// DECISIONS 856). Read once by the recorder at its start, then removed.
 const String _lendKey = 'lend';
@@ -108,6 +123,19 @@ ShareStatus? shareStatusFrom(Object? data) {
   );
 }
 
+/// Sleep (or Nap) on the running recording, and Stop sleep (Record first, DECISIONS 904): the recorder opens or closes
+/// the sleep span and attaches or detaches the sleep kit; [alarm] is that sleep's smart alarm.
+Map<String, Object?> startSleepCommand({String kind = 'sleep', AlarmPlan? alarm}) => {
+  'kind': 'sleep',
+  'op': 'start',
+  'span_kind': kind,
+  'alarm': alarm?.toJson(),
+};
+const Map<String, Object?> stopSleepCommand = {'kind': 'sleep', 'op': 'stop'};
+
+/// Sent by the recorder when it stopped by itself after hours without the headband (DECISIONS 899).
+const Map<String, Object> gaveUpMessage = {'kind': 'gaveUp'};
+
 /// Sent by the recorder once its files are closed after [stopCommand].
 const Map<String, Object> stoppedMessage = {'kind': 'stopped'};
 
@@ -143,10 +171,12 @@ Future<ServiceRequestResult> startRecorderService(
   Function callback = recorderEntryPoint,
   List<String>? autoNotes,
   bool fromWatcher = false,
+  bool sleep = true,
 }) async {
   if (!fromWatcher) await AutoChannel.release();
   if (recordingsDir != null) await FlutterForegroundTask.saveData(key: _dirKey, value: recordingsDir);
   if (await FlutterForegroundTask.isRunningService) return const ServiceRequestSuccess();
+  await FlutterForegroundTask.saveData(key: _sleepKey, value: sleep ? '1' : '0');
   if (autoNotes == null) {
     await FlutterForegroundTask.removeData(key: _autoKey);
   } else {
@@ -215,6 +245,22 @@ const Duration shareRetryEvery = Duration(seconds: 60);
 bool shareEndedByItself(String note) => note.contains('could not') || note.contains('stopped');
 
 Future<NightState> loadNight() async => _PrefsNightStore().load();
+
+/// The saved night with a recording that ended without a Stop put right (spans/after_restart.dart): call only while
+/// the service does not run. True in the second place: a recording was just ended that way.
+Future<(NightState, bool)> loadEndedNight(String? recordingsDir) async {
+  final store = _PrefsNightStore();
+  final s = await store.load();
+  if (recordingsDir == null) return (s, false);
+  try {
+    final fixed = endedWithoutStop(s, Directory(recordingsDir));
+    if (fixed == null) return (s, false);
+    await store.save(fixed);
+    return (fixed, true);
+  } catch (_) {
+    return (s, false);
+  }
+}
 
 @pragma('vm:entry-point')
 void recorderEntryPoint() {
@@ -292,6 +338,7 @@ class RecorderTaskHandler extends TaskHandler {
     final rec = await _recordingsDir();
     final plan = await _alarmPlan();
     final auto = await _autoNotes();
+    final sleep = await _startsWithSleep();
     // Stop (or the system's destroy) came while this was starting: it has been answered; no night starts after it.
     if (_stopping) return;
     final diy = _diy = this.finder == null ? diyNightFor(rec) : null;
@@ -337,6 +384,17 @@ class RecorderTaskHandler extends TaskHandler {
       // the lucid dream cues or the memory cues, one kind a night: the shared model, the phone's media player
       // (DECISIONS 303, 507); neither in a night the headband watcher started (DECISIONS 604)
       cues: scorer == null || auto != null ? null : cues(rec, scorer),
+      spanLog: SpanLog(spansDirFor(rec)),
+      // a sleep started later gets a model of its own: a closed one is not started again
+      kit: diy != null
+          ? null
+          : () {
+              final s = nightScorer(rec);
+              return (scorer: s, alarm: alarm(rec, s), cues: cues(rec, s));
+            },
+      onGiveUp: () => unawaited(_giveUp()),
+      sleep: sleep,
+      sleepSource: auto != null ? 'auto_start' : 'owner_button',
       startNotes: [
         ...?diy?.notes,
         if (starter != TaskStarter.system) ...?auto,
@@ -452,11 +510,53 @@ class RecorderTaskHandler extends TaskHandler {
       } else {
         _alarmOffEarly = true;
       }
+    } else if (data is Map && data['kind'] == 'sleep') {
+      unawaited(_sleepCommand(data));
+    } else if (data is Map && data['kind'] == 'span') {
+      _spanCommand(data);
     } else if (nightTapLeaseFrom(data) case final on?) {
       _signalTap(on: on);
     } else if (data is Map && data['kind'] == lendKind) {
       _lend?.onMessage(data);
     }
+  }
+
+  Future<void> _sleepCommand(Map<Object?, Object?> data) async {
+    final r = _recorder;
+    if (r == null || _stopping) return;
+    if (data['op'] == 'start') {
+      AlarmPlan? plan;
+      try {
+        plan = data['alarm'] == null ? null : AlarmPlan.fromJson(data['alarm']);
+      } catch (_) {}
+      final kind = data['span_kind'];
+      r.startSleep(kind: kind is String && kind.isNotEmpty ? kind : 'sleep', plan: plan);
+      Activity.begin('live-model');
+    } else if (data['op'] == 'stop') {
+      await r.stopSleep();
+      Activity.set('live-model', on: false);
+      Activity.set('cues', on: false);
+    }
+    _send(r.status);
+  }
+
+  /// Hours without the headband: the recording is ended as by Stop, and the service goes.
+  Future<void> _giveUp() async {
+    await _stop(endNight: true);
+    FlutterForegroundTask.sendDataToMain(gaveUpMessage);
+    await FlutterForegroundTask.stopService();
+  }
+
+  void _spanCommand(Map<Object?, Object?> data) {
+    final r = _recorder;
+    if (r == null || _stopping) return;
+    final kind = data['span_kind'], id = data['id'], by = data['by'], session = data['session'];
+    if (data['op'] == 'open' && kind is String && kind.isNotEmpty) {
+      r.openSpan(kind, session: session is String ? session : null);
+    } else if (data['op'] == 'close' && id is String) {
+      r.closeSpan(id, by: by is String ? by : 'owner');
+    }
+    _send(r.status);
   }
 
   static Future<LendOffer?> _lendOffer() async {
@@ -584,6 +684,14 @@ class RecorderTaskHandler extends TaskHandler {
       return raw == null ? null : AlarmPlan.fromJson(jsonDecode(raw));
     } catch (_) {
       return null;
+    }
+  }
+
+  static Future<bool> _startsWithSleep() async {
+    try {
+      return await FlutterForegroundTask.getData<String>(key: _sleepKey) != '0';
+    } catch (_) {
+      return true;
     }
   }
 

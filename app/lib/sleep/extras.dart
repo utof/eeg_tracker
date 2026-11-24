@@ -70,7 +70,7 @@ typedef SeeFn = Future<NightSeen?> Function(List<File> recordings);
 /// detectors, the drift-off detector running from the night's lights off (drift.dart), and the eye-movement counter
 /// on the night's eye pair (rem_check.dart: T3-T4 on the BrainBit; read in the same pass), and the walking detector
 /// on every channel all the recordings hold (only as far as its veto needs: `quick`); null when there are no samples.
-NightSeen? seeNight(List<File> f32Files) {
+NightSeen? seeNight(List<File> f32Files, {List<(double, double)>? windows}) {
   final (pair, why) = nightEyePair(f32Files);
   final names = [...channelNames];
   var li = -1, ri = -1;
@@ -96,7 +96,7 @@ NightSeen? seeNight(List<File> f32Files) {
       if (have.add(h.indexOf(name))) names.add(name);
     }
   }
-  final layout = joinLayout(f32Files, names: names);
+  final layout = joinLayout(f32Files, names: names, windows: windows);
   if (layout.samples == 0) return null;
   final drift = NightDrift(f32Files, layout.startUnix);
   final det = Detectors(onSecond: drift.second);
@@ -152,6 +152,12 @@ List<String> sharedChannels(List<File> f32Files) {
 
 Future<NightSeen?> seeInBackground(List<File> recordings) =>
     Isolate.run(() => seeNight(recordings), debugName: 'night-extras');
+
+/// The same for a night of sleep spans: only the samples inside [windows] (unix seconds) are read.
+typedef SeeSpanFn = Future<NightSeen?> Function(List<File> recordings, List<(double, double)> windows);
+
+Future<NightSeen?> seeSpanInBackground(List<File> recordings, List<(double, double)> windows) =>
+    Isolate.run(() => seeNight(recordings, windows: windows), debugName: 'night-extras');
 
 /// Seconds from a night's first sample (local clock) to the next whole clock hour; 0 on the hour.
 int firstEdgeS(DateTime start) {

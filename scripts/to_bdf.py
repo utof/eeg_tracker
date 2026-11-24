@@ -15,7 +15,7 @@ time order. Missing time, inside a file or between files, is filled by holding t
 The start is moved back to a whole second (pyedflib 0.1.42 mishandles sub-second starts) and the end is padded
 to a whole second with the edge value ("BAD_padding"). Review: docs/research/bdf-plus-writing.md section 7.
 """
-import argparse, json, sys
+import argparse, json, math, sys
 from datetime import datetime
 from pathlib import Path
 from typing import Sequence
@@ -92,11 +92,29 @@ def night_header(paths: Sequence[Path]) -> recording.Header:
     return h0
 
 
-def join(paths: list[Path]) -> tuple[datetime, np.ndarray, list[tuple[float, float, str]]]:
+def clip_runs(rs: list[tuple[float, np.ndarray]], windows: Sequence[tuple[float, float]], fs: float
+              ) -> list[tuple[float, np.ndarray]]:
+    """The parts of the runs inside any of the windows (unix seconds): samples outside every window are dropped, so a
+    scorer that scales over its whole input never sees the awake hours around a sleep span."""
+    out = []
+    for t, x in rs:
+        for a, b in windows:
+            i0, i1 = max(0, math.ceil((a - t) * fs)), min(len(x), math.floor((b - t) * fs))
+            if i1 > i0:
+                out.append((t + i0 / fs, x[i0:i1]))
+    return out
+
+
+def join(paths: list[Path], windows: Sequence[tuple[float, float]] | None = None
+         ) -> tuple[datetime, np.ndarray, list[tuple[float, float, str]]]:
     """One array from all runs; returns (start, µV n x channels, annotations as (onset s, duration s, text)). The
-    files must hold the same channels at the same rate (night_header, which also names them)."""
+    files must hold the same channels at the same rate (night_header, which also names them). With `windows` (unix
+    seconds: the sleep spans of a night) only the samples inside them are read; the time between two windows is a
+    BAD_gap, as any other gap."""
     fs = night_header(paths).sample_rate
     rs = sorted((r for p in paths for r in runs(p)), key=lambda r: r[0])
+    if windows is not None:
+        rs = sorted(clip_runs(rs, windows, fs), key=lambda r: r[0])
     if not rs:
         raise SystemExit("empty recording")
     start = datetime.fromtimestamp(rs[0][0]).replace(microsecond=0)
@@ -115,6 +133,8 @@ def join(paths: list[Path]) -> tuple[datetime, np.ndarray, list[tuple[float, flo
         for line in (mf.read_text().splitlines() if mf.exists() else []):
             try: m = json.loads(line)
             except json.JSONDecodeError: continue
+            if windows is not None and not any(a <= m["t"] <= b for a, b in windows):
+                continue
             notes.append((max(0.0, round(m["t"] - start.timestamp(), 3)), -1, str(m.get("text", "marker"))))
     pad = (-n) % round(fs)
     if pad:

@@ -418,6 +418,8 @@ PHONE_LINES = [
     "stream restarted",
     "stream restart failed: Exception: x",
     "still no data; reconnecting",
+    "no data for 60 min: what was marked ends at the last data",
+    "no data for 6 h: the recording stops itself",
     "headband out of range; saving",
     "headband out of range; leaving it without SDK calls",
     "packets: 7200000 samples, missing 3 in 2 gaps, repeated 1, longest gap 2 samples",

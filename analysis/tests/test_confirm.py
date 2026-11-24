@@ -79,7 +79,7 @@ def test_the_truth_table_takes_the_answers_and_old_files_still_read(tmp_path: Pa
     old = [c for c in truth.COLUMNS if c not in truth.ADDED_LATER]  # the hand file as written before these columns
     write_hand(local, [row("tl-1", label="awake")], old)
     rows, rejected, counts = truth.build(local)
-    assert rejected == [] and counts == {"hand": 1, "files": 0, "archive": 0, "confirm": 5}
+    assert rejected == [] and counts == {"hand": 1, "files": 0, "archive": 0, "confirm": 5, "spans": 0}
     hand = next(r for r in rows if r["label_id"] == "tl-1")
     assert (hand["present"], hand["estimate_id"]) == ("1", "")
     no = [r for r in rows if r["present"] == "0"]

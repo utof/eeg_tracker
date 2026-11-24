@@ -30,8 +30,16 @@ Directory archiveDirFor(Directory filesDir) => Directory('${filesDir.path}/$arch
 
 /// A span you tagged by hand.
 class ManualTag {
-  ManualTag({required this.start, required this.end, required String label, DateTime? made, this.truth = false})
-    : label = cleanTag(label),
+  ManualTag({
+    required this.start,
+    required this.end,
+    required String label,
+    DateTime? made,
+    this.truth = false,
+    this.source,
+    this.confidence,
+    this.words,
+  }) : label = cleanTag(label),
       made = made ?? DateTime.now();
 
   final DateTime start, end;
@@ -41,6 +49,10 @@ class ManualTag {
   /// "This is what I was doing": the laptop counts the tag as a truth label (DECISIONS 824).
   final bool truth;
 
+  /// Set by the sheet after Stop (Record first, DECISIONS 890): who made it (`owner_stop_sheet`; null: you tagged it
+  /// in the Archive), how sure it is (`certain`, `likely`, `within`) and your own words, exactly as typed.
+  final String? source, confidence, words;
+
   Duration get length => end.difference(start);
 
   ManualTag copyWith({DateTime? start, DateTime? end, String? label, bool? truth}) => ManualTag(
@@ -49,6 +61,9 @@ class ManualTag {
     label: label ?? this.label,
     made: made,
     truth: truth ?? this.truth,
+    source: source,
+    confidence: confidence,
+    words: words,
   );
 
   Map<String, Object?> toJson() => {
@@ -57,6 +72,9 @@ class ManualTag {
     'label': label,
     'made': isoLocal(made),
     if (truth) 'truth': true,
+    'source': ?source,
+    'confidence': ?confidence,
+    'words': ?words,
   };
 
   /// Null for anything that is not a tag this version can read (no times, end before start, no word).
@@ -71,6 +89,9 @@ class ManualTag {
       label: l,
       made: made?.toLocal() ?? s.toLocal(),
       truth: j['truth'] == true,
+      source: j['source'] is String ? j['source'] as String : null,
+      confidence: j['confidence'] is String ? j['confidence'] as String : null,
+      words: j['words'] is String ? j['words'] as String : null,
     );
   }
 
@@ -81,10 +102,13 @@ class ManualTag {
       other.end == end &&
       other.label == label &&
       other.made == made &&
-      other.truth == truth;
+      other.truth == truth &&
+      other.source == source &&
+      other.confidence == confidence &&
+      other.words == words;
 
   @override
-  int get hashCode => Object.hash(start, end, label, made, truth);
+  int get hashCode => Object.hash(start, end, label, made, truth, source, confidence, words);
 }
 
 /// A tag's word as kept: trimmed, inner spaces single, lower case for the preset words, at most [maxTagLength].

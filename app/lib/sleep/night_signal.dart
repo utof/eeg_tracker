@@ -320,6 +320,20 @@ List<Run> runsOf(File f32, {List<String> names = channelNames, String who = 'The
   return out;
 }
 
+/// to_bdf.py `clip_runs`: the parts of [runs] inside any of [windows] (unix seconds, a night's sleep spans). Samples
+/// outside every window are never read: the scorer scales over its whole input, so the awake hours around a sleep
+/// span must not be in it (Record first, DECISIONS 886).
+List<Run> clipRuns(List<Run> runs, List<(double, double)> windows, int rate) {
+  final out = <Run>[];
+  for (final r in runs) {
+    for (final (a, b) in windows) {
+      final i0 = math.max(0, ((a - r.t0) * rate).ceil()), i1 = math.min(r.count, ((b - r.t0) * rate).floor());
+      if (i1 > i0) out.add(Run(r.file, r.first + i0, i1 - i0, r.t0 + i0 / rate, recordBytes: r.recordBytes, columns: r.columns));
+    }
+  }
+  return out;
+}
+
 /// to_bdf.py `join` for the night's `.f32` files (oldest first), without reading the samples. The layout reads the
 /// channels [names] (the sleep tools' O1 O2 T3 T4 unless said), picked by name in each file: a file without one is
 /// refused ([MissingSites], naming what [who] needs and what the file has).
@@ -328,8 +342,10 @@ NightLayout joinLayout(
   List<String> names = channelNames,
   String who = 'The sleep report',
   int rate = sampleRate,
+  List<(double, double)>? windows,
 }) {
-  final runs = [for (final f in f32Files) ...runsOf(f, names: names, who: who, rate: rate)];
+  var runs = [for (final f in f32Files) ...runsOf(f, names: names, who: who, rate: rate)];
+  if (windows != null) runs = clipRuns(runs, windows, rate);
   if (runs.isEmpty) return NightLayout(0, 0, const [], const [], names: names);
   _stableSortByT0(runs);
   final start = _wholeSecond(runs.first.t0);

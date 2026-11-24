@@ -235,7 +235,7 @@ class LucidView extends StatelessWidget {
       ),
       LucidDue.practise => (
         'On tonight',
-        'Practise in bed before you sleep, about 15 minutes. Then Start night as usual.',
+        'Practise in bed before you sleep, about 15 minutes. Then Sleep as usual.',
         MarkShape.ringedDot,
         Night.live,
       ),

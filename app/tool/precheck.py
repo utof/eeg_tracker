@@ -397,7 +397,8 @@ def wait_main(limit: float = 120) -> bool:
             labels = emu.nodes()
         except Exception:
             labels = []
-        if any(l.startswith("Night | Tab") for l, _, _ in labels):
+        # the first tab is Record since Record first (DECISIONS 902); Night in the builds before it
+        if any(l.startswith(("Record | Tab", "Night | Tab")) for l, _, _ in labels):
             return True
         for l, x, y in labels:
             if l.strip() == "Wait":
@@ -406,11 +407,21 @@ def wait_main(limit: float = 120) -> bool:
     return False
 
 
-def open_tab(name: str) -> bool:
-    """Taps the bottom bar's tab [name] (Night, Sessions, Signal, Trends, More)."""
+def bar_button(word: str) -> tuple[str, int, int] | None:
+    """The pinned bar's button [word] above the tabs (Record, Sleep, Stop): the lowest exact match that is not a tab.
+    A section heading of the same word higher up is not it."""
     _, h = emu.screen_size()
+    hits = [(l, x, y) for l, x, y in emu.nodes() if l.split(" | ")[0].strip() == word and h * 0.5 < y < h * 0.9]
+    return max(hits, key=lambda n: n[2]) if hits else None
+
+
+def open_tab(name: str) -> bool:
+    """Taps the bottom bar's tab [name] (Record, Sessions, Signal, Trends, More; "Night" is the first tab under either
+    of its names)."""
+    _, h = emu.screen_size()
+    names = ("Record", "Night") if name in ("Night", "Record") else (name,)
     for label, x, y in emu.nodes():
-        if y > h * 0.85 and label.split(" | ")[0].split("\n")[0].strip().startswith(name):
+        if y > h * 0.85 and label.split(" | ")[0].split("\n")[0].strip().startswith(names):
             sh(f"input tap {x} {y}")
             time.sleep(2)
             return True
@@ -752,7 +763,8 @@ def check_talking(replay: Path, stage: Path, also: list[Result]) -> Result:
     if hit:
         sh(f"input tap {hit[1]} {hit[2]}")
         time.sleep(2)
-        confirm = emu.match("Stop", exact=True)
+        # Sleep started this recording: "Stop everything" ends it (DECISIONS 904); "Stop" in the builds before
+        confirm = emu.match("Stop everything", exact=True) or emu.match("Stop", exact=True)
         if confirm:
             sh(f"input tap {confirm[1]} {confirm[2]}")
         time.sleep(5)
@@ -824,7 +836,7 @@ def check_one_connection(replay: Path, stage: Path) -> Result:
     if not open_tab("Night"):
         return Result(name, "FAIL", "the Night tab was not found", details)
     t_start = time.time()
-    hit = find("Start night", exact=False, scrolls=2)
+    hit = bar_button("Sleep") or find("Start night", exact=False, scrolls=2)
     if hit is None:
         return Result(name, "FAIL", "Start night was not found", details + screen_words("e-night"))
     sh(f"input tap {hit[1]} {hit[2]}")
@@ -849,7 +861,8 @@ def check_one_connection(replay: Path, stage: Path) -> Result:
     if hit:
         sh(f"input tap {hit[1]} {hit[2]}")
         time.sleep(2)
-        confirm = emu.match("Stop", exact=True)
+        # Sleep started this recording: "Stop everything" ends it (DECISIONS 904); "Stop" in the builds before
+        confirm = emu.match("Stop everything", exact=True) or emu.match("Stop", exact=True)
         if confirm:
             sh(f"input tap {confirm[1]} {confirm[2]}")
         time.sleep(6)

@@ -19,6 +19,7 @@ is in docs/data-format.md ("The data book"). It reads `_local/` and writes only 
                  860-869); a Yes or a No is also a row of truth.tsv
   truth.tsv      what really happened, typed (scripts/truth.py): the hand file, <local>/truth/*.tsv and the Archive
                  tags marked "This is what I was doing"; scripts/validate_detectors.py scores the detectors against it
+  spans.tsv      one row per span of every recording: what you were doing in it (scripts/spans.py)
   README.md, book.json   what is there, how it was built (versions, row counts, time)
 
 Built from the files alone, so it can always be built again (delete the folder and run this); nothing reads it back
@@ -52,6 +53,7 @@ import packed  # noqa: E402
 import phone_night_check as pnc  # noqa: E402  (the recorders' log lines, batteries, contact)
 import recording  # noqa: E402
 import rem_check as rc  # noqa: E402  (the dream sleep check; standard library part)
+import spans  # noqa: E402  (what you were doing in a recording, Record first)
 import truth  # noqa: E402  (the truth labels' schema and sources, DECISIONS 820-829)
 
 FORMAT, VERSION = "eeg-tracker-data-book", 1  # VERSION: of the tables' columns (docs/data-format.md)
@@ -61,7 +63,8 @@ STAGE = {"W": "W", "1": "N1", "2": "N2", "3": "N3", "R": "R", "-": "gap"}
 PROB_KEYS = ("p_W", "p_N1", "p_N2", "p_N3", "p_R")
 QUALITY_WORD = {"g": "good", "d": "degraded", "m": "missing"}
 DEFAULT_LOCAL = ROOT / "_local"
-TABLES = ("nights.tsv", "sessions.tsv", "days.tsv", "epochs.tsv.gz", "labels.tsv", "truth.tsv", "estimates.tsv")
+TABLES = ("nights.tsv", "sessions.tsv", "days.tsv", "epochs.tsv.gz", "labels.tsv", "truth.tsv", "spans.tsv",
+          "estimates.tsv")
 
 
 # ---- cells and files ------------------------------------------------------------------------------------------------
@@ -505,7 +508,7 @@ def write_epochs(out: Path, groups: list[Group], metas: dict[str, dict], store: 
 # ---- nights.tsv -----------------------------------------------------------------------------------------------------
 
 NIGHT_COLUMNS = [
-    "night", "kind", "source", "counts", "scored", "wearer", "start", "end", "sleep_start", "sleep_end",
+    "night", "kind", "source", "recording", "span_ids", "span_from", "counts", "scored", "wearer", "start", "end", "sleep_start", "sleep_end",
     "recorded_min", "missing_min", "in_bed_min", "asleep_min", "light_min", "deep_min", "dream_min",
     "awake_in_sleep_min", "wake_ups", "periods", "efficiency_pct", "fall_asleep_min", "lights_off_from",
     "drift_detector_min", "drift_agree",
@@ -644,6 +647,18 @@ def _morning(row: dict | None, local: Path, hashes: Hashes) -> tuple[dict, list[
     return out, pairs
 
 
+def _span_info(nrow: dict, rep: Report | None) -> dict:
+    """`recording`, `span_ids`, `span_from` of a night: from the spans that made it (the catalog's row), else from the
+    report's own `span` field (a phone report), else an old night: empty but `span_from` = migrated."""
+    if nrow.get("span_from") and nrow.get("recording"):
+        return dict(recording=nrow["recording"], span_ids=nrow["span_ids"], span_from=nrow["span_from"])
+    sp = rep.data.get("span") if rep is not None else None
+    if isinstance(sp, dict) and isinstance(sp.get("recording"), list) and isinstance(sp.get("spans"), list):
+        return dict(recording=" ".join(map(str, sp["recording"])), span_ids=" ".join(map(str, sp["spans"])),
+                    span_from=sp.get("from") if isinstance(sp.get("from"), str) else None)
+    return dict(recording=None, span_ids=None, span_from="migrated")
+
+
 def night_rows(local: Path, nights: list[dict], reports: dict[str, list[Report]], groups: list[Group],
                metas: dict[str, dict], hashes: Hashes, cache: Path) -> tuple[list[dict], list[str]]:
     by_id = {g.id: g for g in groups}
@@ -662,6 +677,7 @@ def night_rows(local: Path, nights: list[dict], reports: dict[str, list[Report]]
         wearer = wearer_of(reps)
         for i, rep in enumerate(reps or [None]):
             base: dict = dict(night=nrow["id"], counts=i == 0, wearer=wearer, raw_files=len(g.f32) if g else 0,
+                              **_span_info(nrow, rep),
                               **{k: v for k, v in logs.items() if k != "contact"}, **morning)
             base.update({f"contact_{k}_ohm": v for k, v in (logs.get("contact") or {}).items()})
             pairs = raw + mpairs
@@ -815,6 +831,24 @@ def session_rows(local: Path, hashes: Hashes) -> list[dict]:
                 continue
             rows.append(row)
     return sorted(rows, key=lambda r: (r["start"] or "", r["session"]))
+
+
+# ---- spans.tsv ------------------------------------------------------------------------------------------------------
+
+SPAN_COLUMNS = ["span_id", "recording", "kind", "label", "start", "end", "minutes", "source", "started_recording",
+                "ended_by", "session", "paused_minutes", "estimate"]
+
+
+def span_rows(local: Path) -> list[dict]:
+    """One row per span of every spans file in `<local>/phone/spans/`, oldest recording first, spans in file order."""
+    rows = []
+    for rec_id, f in spans.all(local).items():
+        for s in f.spans:
+            rows.append(dict(span_id=s.span, recording=rec_id, kind=s.kind, label=s.label, start=iso(s.start_unix),
+                             end=iso(s.end_unix), minutes=_r(s.minutes), source=s.source,
+                             started_recording=s.started_recording, ended_by=s.ended_by, session=s.session,
+                             paused_minutes=_r(s.paused_minutes) if s.paused else None, estimate=s.estimate))
+    return rows
 
 
 # ---- days.tsv -------------------------------------------------------------------------------------------------------
@@ -1119,6 +1153,7 @@ Tidy tables of everything eeg_tracker measured on this laptop, made by `scripts/
 | `epochs.tsv.gz` | 30 s of every recording (gzip; spreadsheets and pandas open it as it is or after `gunzip -k`) |
 | `labels.tsv` | label from the app's own stores (append-only: rows are only ever added) |
 | `truth.tsv` | truth label: what really happened, typed (`active` = 1: not corrected by a later row; `present` = 0: it did not happen) |
+| `spans.tsv` | span: what you were doing in a recording (Record first): sleep, nap, work, meditate, ... |
 | `estimates.tsv` | what a detector thought happened and what you answered when the app asked (not a label until Yes or No) |
 | `validation.tsv`, `validation.md` | detector against truth label, and its summary (`scripts/validate_detectors.py`) |
 | `book.json` | how the last build went: versions, row counts, time, problems |
@@ -1147,7 +1182,11 @@ def build(local: Path, out: Path, now: datetime, full: bool = False, say: Callab
     problems: list[str] = []
     nights = catalog.nights_on(local)
     reports = read_reports(local, hashes)
+    hidden = spans.hidden_nights(local)  # "Not sleep": a night no recording makes any more is left out, report and all
+    nights = [r for r in nights if r["raw"] or r["date"] not in hidden or r["source"] == "diy"]
     for nid, reps in reports.items():  # a report kept by hand whose night's raw files are gone: a row from it alone
+        if nid in hidden and not any(r["id"] == nid for r in nights):
+            continue
         if not any(r["id"] == nid for r in nights):
             nights.append(dict(catalog._row(nid, None, None), source=reps[0].source))  # noqa: SLF001
     nights.sort(key=lambda r: (r["date"], r["id"]))
@@ -1164,6 +1203,8 @@ def build(local: Path, out: Path, now: datetime, full: bool = False, say: Callab
     drows = day_rows(local, nrows, srows, hashes, now)
     _write(out / "days.tsv", tsv(DAY_COLUMNS, drows).encode())
     n_labels, added, removed = update_labels(out / "labels.tsv", local, now)
+    sprows = span_rows(local)
+    _write(out / "spans.tsv", tsv(SPAN_COLUMNS, sprows).encode())
     trows, rejected, from_where = truth.build(local)
     truth.write_table(out / "truth.tsv", trows)
     erows = estimate_rows(local)
@@ -1175,7 +1216,7 @@ def build(local: Path, out: Path, now: datetime, full: bool = False, say: Callab
                 models=sorted({r["model"] for r in nrows if r.get("model")}),
                 rows={"nights.tsv": len(nrows), "sessions.tsv": len(srows), "days.tsv": len(drows),
                       "epochs.tsv.gz": n_epochs, "labels.tsv": n_labels, "truth.tsv": len(trows),
-                      "estimates.tsv": len(erows)},
+                      "spans.tsv": len(sprows), "estimates.tsv": len(erows)},
                 recordings=len(groups), worked_out=worked, labels_added=added, labels_removed=removed,
                 truth_from=from_where, truth_rejected=[r.text() for r in rejected],
                 epoch_columns=len(ep_columns), problems=problems)

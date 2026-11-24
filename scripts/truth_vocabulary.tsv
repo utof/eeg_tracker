@@ -14,6 +14,10 @@ label	in_bed	state		bed	in bed to sleep, asleep or not (lights off to getting up
 label	eyes_closed	state		eyes-closed	eyes closed while awake
 label	headache	state			a headache
 label	ill	state		sick	ill (a cold, a fever)
+label	night_sleep	state			a night's sleep: mostly asleep, not every minute
+label	stressed	state			under stress
+label	at_home	state			at home (utof's places)
+label	away	state			out of the home (utof's places)
 label	walking	activity		walk	walking
 label	running	activity		run jogging	running or jogging
 label	stairs	activity			going up or down stairs
@@ -28,8 +32,11 @@ label	exercise	activity		workout gym	exercise other than walking, running or cyc
 label	meditating	activity		meditation	meditating
 label	sound_session	activity		sound	listening to one of eeg_tracker's sound sessions
 label	resting	activity		rest	resting without trying to sleep
+label	other	activity			something the list has no word for; `owner_words` says what
+label	neurofeedback	activity			a feedback training session (alpha-theta)
 label	drinking_coffee	event	cups	coffee	drinking coffee; value: cups
 label	drinking_alcohol	event	drinks	alcohol	drinking alcohol; value: drinks
+label	taking_medicine	event	doses		taking a medicine; `owner_words` names it
 label	sitting	posture		sit	sitting
 label	standing	posture		stand	standing
 label	lying	posture		lying-down	lying down
@@ -55,5 +62,9 @@ source	device_watch				a watch or a fitness band
 source	device_phone				the phone's own sensors (step counter, activity recognition)
 source	device_laptop				the laptop (ActivityWatch, the tray)
 source	observer				another person who saw it
+source	owner_activity_button				an activity you started and stopped in the app
+source	owner_utof				you logged it in utof_tracker
+source	device_utof				utof_tracker's phone collector (places, steps, screen)
 confidence	certain				the label holds for the whole span, the times to about a minute
 confidence	likely				the label holds, but the times are rough or not every minute fits
+confidence	within				it happened somewhere inside the span, not all of it

@@ -1,4 +1,4 @@
-// The main screen's bottom bar (DECISIONS 597): Night, Sessions, Signal, Trends, More, as Material 3's navigation bar.
+// The main screen's bottom bar (DECISIONS 597; the first tab is Record since Record first, DECISIONS 881): Record, Sessions, Signal, Trends, More, as Material 3's navigation bar.
 // The night screen's sections keep their order and their code (night_view.dart); a mark in its list says where the
 // next tab's sections begin ([TabStart]), so a section added later lands in the tab of its neighbours. Night is the
 // first tab and the app opens on it, with Start night pinned as before; system Back on another tab returns to Night.
@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import '../logs/usage.dart' show Usage;
 
 enum HomeTab {
-  night('Night', 'EEG Tracker', Icons.bedtime_outlined, Icons.bedtime),
+  night('Record', 'EEG Tracker', Icons.radio_button_checked, Icons.radio_button_checked),
   sessions('Sessions', 'Sessions', Icons.self_improvement, Icons.self_improvement),
   signal('Signal', 'Signal', Icons.ssid_chart, Icons.ssid_chart),
   trends('Trends', 'Trends', Icons.insights_outlined, Icons.insights),

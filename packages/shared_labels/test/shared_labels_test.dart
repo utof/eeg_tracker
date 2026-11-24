@@ -67,4 +67,25 @@ void main() {
     expect(got, [Answer.skip, Answer.yes]);
     expect(t.takeException(), isNull);
   });
+
+  test('the stop sheet: every chip is a vocabulary label; a tap, the confidences and the tags', () {
+    for (final c in stopChips) {
+      expect(Label.of(c.label), isNotNull, reason: c.word);
+    }
+    expect(tapStopChip({'night_sleep', 'walking'}, 'awake'), {'walking', 'awake'});
+    expect(tapStopChip({'awake'}, 'nap'), {'nap'});
+    final start = DateTime(2026, 11, 21, 11, 2), end = DateTime(2026, 11, 21, 19, 40);
+    final tags = stopSheetTags(
+      start: start,
+      end: end,
+      picks: [const StopPick('awake'), StopPick('walking', start: DateTime(2026, 11, 21, 17), end: DateTime(2026, 11, 21, 17, 40)), const StopPick('eating')],
+      words: 'a "b"\tc',
+      made: end,
+    );
+    expect([for (final t in tags) t['confidence']], ['certain', 'likely', 'within']);
+    expect(tags.every((t) => t['source'] == 'owner_stop_sheet' && t['truth'] == true && t['words'] == 'a "b"\tc'), isTrue);
+    expect(tags[1]['start'], isoLocal(DateTime(2026, 11, 21, 17)));
+    expect(tags[2]['end'], isoLocal(end));
+    expect(stopSheetTags(start: start, end: end, picks: const [], made: end), isEmpty);
+  });
 }

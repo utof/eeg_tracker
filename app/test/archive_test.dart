@@ -94,7 +94,7 @@ void main() {
       expect(n.kind, ArchiveKind.night);
       expect(n.kind.tag, 'sleep');
       expect(n.started.how, StartedHow.hand);
-      expect(n.started.words, 'You: Start night');
+      expect(n.started.words, 'You: Record or Sleep');
       expect(n.started.byYou, isTrue);
       expect(n.start, at(23, 0));
       expect(n.end.isAfter(at(23, 41)), isTrue);
@@ -210,7 +210,7 @@ void main() {
       final b = only(l, board);
       expect(b.kind, ArchiveKind.board);
       expect(b.sets.single.names, hasLength(8));
-      expect(b.started.words, 'You: Start night (DIY board)');
+      expect(b.started.words, 'You: Record or Sleep (DIY board)');
       expect(only(l, old).sets.single.names, ['O1', 'O2', 'T3', 'T4']);
       final p = only(l, packed).sets.single;
       expect(p.files, contains('$packed.f32.gz'));

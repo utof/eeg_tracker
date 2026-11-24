@@ -40,6 +40,8 @@ import 'chunk_writer.dart';
 import 'contact.dart';
 import 'header.dart';
 import 'headband.dart';
+import '../spans/span.dart';
+import '../spans/span_log.dart';
 import 'live_drift.dart';
 import 'nights.dart';
 import 'packets.dart';
@@ -51,6 +53,8 @@ class RecorderTiming {
   const RecorderTiming({
     this.tick = const Duration(seconds: 1),
     this.ticksPerCheck = 10,
+    this.spansAway = const Duration(minutes: 60),
+    this.stopAway = const Duration(hours: 6),
     this.scanFor = const Duration(seconds: 30),
     this.contactFor = const Duration(seconds: 6),
     this.settle = const Duration(seconds: 1),
@@ -82,6 +86,10 @@ class RecorderTiming {
 
   /// Every this many ticks (10 s): fsync, sample count in the log, range and stall check.
   final int ticksPerCheck;
+
+  /// The headband lost this long: open spans are closed at the last data, and later the recording stops itself
+  /// (planning values, DECISIONS 899).
+  final Duration spansAway, stopAway;
   final Duration scanFor;
   final Duration contactFor;
   final Duration settle;
@@ -124,6 +132,9 @@ class RecorderTiming {
 }
 
 /// An SDK call passed its deadline. Never swallowed by the ordinary error handling.
+/// The sleep kit of one sleep span: the live sleep model and what listens to it.
+typedef SleepKit = ({NightScorer? scorer, AlarmWatch Function(AlarmPlan plan)? alarm, CueFactory? cues});
+
 class SdkStuck implements Exception {
   SdkStuck(this.what, this.after);
   final String what;
@@ -155,6 +166,11 @@ class NightRecorder {
     this.cues,
     this.liveLimits = const GuardLimits(),
     this.startNotes = const [],
+    this.spanLog,
+    this.kit,
+    this.onGiveUp,
+    this.sleep = true,
+    this.sleepSource = 'owner_button',
     this.bandBattery,
     DateTime Function()? clock,
   }) : _now = clock ?? DateTime.now,
@@ -170,6 +186,16 @@ class NightRecorder {
 
   final HeadbandFinder finder;
   final Directory dir;
+
+  /// The spans files' writer (`files/spans/`); null: the spans are kept in the saved state only (tests of the rest).
+  final SpanLog? spanLog;
+
+  /// A new recording starts with Sleep: a sleep span from its start (it started the recording) and the sleep kit on.
+  /// False: Record alone, no span, no kit (Record first, DECISIONS 880-881).
+  final bool sleep;
+
+  /// Who started that first sleep span: `owner_button`, or `auto_start` for the headband watcher.
+  final String sleepSource;
   final NightStore store;
   final void Function(RecorderStatus status) onStatus;
 
@@ -189,18 +215,26 @@ class NightRecorder {
   final AlarmPlan? alarmPlan;
 
   /// Makes the smart alarm's live model for a plan, an hour before its window; null: none (the phone's alarm alone).
-  final AlarmWatch Function(AlarmPlan plan)? alarm;
+  AlarmWatch Function(AlarmPlan plan)? alarm;
 
   /// Lines for the night's log at its start (and again after a restart by Android): which headband, what is off.
   final List<String> startNotes;
 
   /// Makes tonight's sound cues for the night's start (the lucid or the memory cues, one kind a night; null from it:
   /// they are off); null: none.
-  final CueFactory? cues;
+  CueFactory? cues;
 
   /// The night's one live sleep model, which the smart alarm and the lucid cues made by [alarm] and [cues] listen to
   /// (DECISIONS 330); the recorder feeds it. Null: none (an alarm or cues with a model of their own feed it).
-  final NightScorer? scorer;
+  NightScorer? scorer;
+
+  /// Makes a fresh sleep kit (the live sleep model, the alarm and the cues that listen to it) for a sleep span
+  /// started on the running recording: a closed model is not started again. Null: the ones given at the start are
+  /// used again (tests).
+  final SleepKit Function()? kit;
+
+  /// The recording gave up after [RecorderTiming.stopAway] without any data: the service stops it.
+  final void Function()? onGiveUp;
 
   /// The one guard over the smart alarm, the lucid cues and [scorer]: an exception in the scorer, more than its share
   /// of this isolate's time (the model's own thread and the scaling isolate are not counted: they do not hold the
@@ -314,7 +348,14 @@ class NightRecorder {
     try {
       await _begin(restartedBySystem);
       await _loop();
-      if (_stopping && _endNight) await _logNightEnd();
+      if (_stopping && _endNight) {
+        _closeSpans('recording_stopped', _now());
+        // no file set ever opened: the spans are still a true statement about the time, kept under the start's stamp
+        if (_night.recording == null && _spans.isNotEmpty) {
+          _bindRecording(fileStem(DateTime.fromMillisecondsSinceEpoch(_night.startMs)));
+        }
+        await _logNightEnd();
+      }
     } finally {
       await _steps?.stop();
       _set(_status.copyWith(phase: Phase.idle));
@@ -388,17 +429,21 @@ class NightRecorder {
       _night = NightState(
         active: true,
         startMs: _now().millisecondsSinceEpoch,
-        alarmEndMs: plan?.endMs,
-        alarmWindowMin: plan?.windowMin,
+        alarmEndMs: sleep ? plan?.endMs : null,
+        alarmWindowMin: sleep ? plan?.windowMin : null,
+        sleepKit: sleep,
       );
-      _startDrift();
+      if (sleep) {
+        openSpan('sleep', source: sleepSource, startedRecording: true, at: _now());
+        _startDrift();
+      }
       final t = _now();
       // the drift-off line first, then any line _startDrift kept (hands-free), then the smart alarm's
       _notes = [
         for (final n in startNotes) (t, n),
         if (_drift != null) (t, 'drift-off detector on; lights off counts from the first sample until Lights off'),
         ..._notes,
-        if (plan != null)
+        if (plan != null && sleep)
           (
             t,
             'smart alarm set: wake by ${_hm(plan.endMs)}, window from ${_hm(plan.startMs)}; the sleep model starts at '
@@ -408,7 +453,8 @@ class NightRecorder {
     }
     _packets = PacketAccount(_night.packets);
     _packetsLoggedMs = _now().millisecondsSinceEpoch;
-    _startCues();
+    _spans = [for (final l in _night.spans) ?Span.fromLine(l)];
+    if (_night.sleepKit) _startCues();
     await _save();
     _set(
       RecorderStatus(
@@ -430,6 +476,8 @@ class NightRecorder {
 
   Future<void> _loop() async {
     while (!_stopping) {
+      _away();
+      if (_stopping) return;
       final Headband? band;
       try {
         band = _night.band == null ? await _search() : await _reconnectTry();
@@ -449,7 +497,8 @@ class NightRecorder {
       }
       final ChunkWriter w;
       try {
-        w = ChunkWriter.open(dir, _now(), header: headerOf(band));
+        w = ChunkWriter.open(dir, _now(), header: headerOf(band), inRecording: true, recording: _night.recording);
+        if (_night.recording == null) _bindRecording(w.stem);
       } catch (e) {
         _set(_status.copyWith(note: 'cannot write files: ${_short(e)}'));
         await _quietly(band.disconnectAndDispose);
@@ -662,6 +711,12 @@ class NightRecorder {
       sigSub = band.signal.listen((rows) => _onRows(w, rows));
       if (await _startSignal(band, w, isLost)) {
         w.log('recording started, 250 Hz');
+        if (_markOpenSpans) {
+          _markOpenSpans = false;
+          for (final s in _spans) {
+            if (!s.closed) _marker('span: ${s.kind} start', _now());
+          }
+        }
         _set(_status.copyWith(phase: Phase.recording, note: 'recording'));
         end = await _record(band, w, isLost);
       } else {
@@ -738,7 +793,7 @@ class NightRecorder {
     }
     if (_alarm == null && !_alarmMade) _startAlarm(t);
     _live.run((_) {
-      scorer?.add(t, sites, firstOfFile: firstOfFile); // an exception here reaches the guard: all of it off
+      if (_night.sleepKit) scorer?.add(t, sites, firstOfFile: firstOfFile); // an exception here reaches the guard: all of it off
       _scorerLines();
       _alarmCall((a) => a.add(t, sites, firstOfFile: firstOfFile), t);
       _cueCall((c) => c.add(t, sites, firstOfFile: firstOfFile), t);
@@ -854,7 +909,7 @@ class NightRecorder {
     final make = cues;
     if (make == null || _noDetectors) return;
     try {
-      final c = make(_night.startMs);
+      final c = make(_spans.where((s) => !s.closed && s.isSleep).lastOrNull?.start.millisecondsSinceEpoch ?? _night.startMs);
       if (c == null) return;
       _cueWatch = c;
       if (!c.finished) _liveStart(c.who); // off from the start (no loudness yet): let go at the next batch
@@ -922,6 +977,7 @@ class NightRecorder {
       _earlyLightsOff = t;
       return;
     }
+    if (!_night.sleepKit) return; // no sleep span: nothing counts from Lights off
     _night = _night.copyWith(lightsOffMs: t.millisecondsSinceEpoch);
     unawaited(_save().catchError((Object _) {})); // the next 10 s check saves it again
     _marker(lightsOffMarker, t);
@@ -1631,8 +1687,177 @@ class NightRecorder {
   Future<void> _pause(Duration d) => Future.any([Future<void>.delayed(d), _stopSignal.future]);
 
   void _set(RecorderStatus s) {
-    _status = s;
-    onStatus(s);
+    _status = s.copyWith(rec: RecordingLive(id: _night.recording, sleep: _night.sleepKit, spans: _spans));
+    onStatus(_status);
+  }
+
+  // ---- spans (Record first, DECISIONS 880-899) -----------------------------------------------------------------
+
+  /// Sleep (or Nap) on the running recording: a sleep span from now and the sleep kit attached, with [plan] as its
+  /// smart alarm. An open sleep span is returned as it is (Sleep and Nap never run together). Null before the
+  /// recording has begun or once it stops.
+  Span? startSleep({String kind = 'sleep', AlarmPlan? plan, String source = 'owner_button'}) {
+    if (!_begun || _stopping) return null;
+    final open = _spans.where((s) => !s.closed && s.isSleep).lastOrNull;
+    if (open != null) return open;
+    final t = _now();
+    final make = kit;
+    if (make != null && !_noDetectors) {
+      final k = make();
+      scorer = k.scorer;
+      alarm = k.alarm;
+      cues = k.cues;
+    }
+    _night = _night.withSleepKit(on: true, alarmEndMs: plan?.endMs, alarmWindowMin: plan?.windowMin);
+    _alarmMade = false;
+    _alarmLast = null;
+    _driftUsed = false;
+    final span = openSpan(kind, source: source, at: t);
+    _startDrift();
+    _startCues();
+    _logLine(
+      'sleep kit on for ${span.id}'
+      '${plan == null ? '' : '; smart alarm set: wake by ${_hm(plan.endMs)}, window from ${_hm(plan.startMs)}'}',
+    );
+    _set(_withAlarm(_withDrift(_status)));
+    return span;
+  }
+
+  /// Stop sleep: the open sleep span is closed and the sleep kit detached; the recording goes on. Null without one.
+  Future<Span?> stopSleep({String by = 'owner', DateTime? at}) async {
+    final open = _spans.where((s) => !s.closed && s.isSleep).lastOrNull;
+    if (open == null) return null;
+    final closed = closeSpan(open.id, by: by, at: at);
+    await _detachKit();
+    _logLine('sleep kit off after ${open.id}');
+    _set(_withAlarm(_withDrift(_status)));
+    return closed;
+  }
+
+  Future<void> _detachKit() async {
+    if (!_night.sleepKit) return;
+    _night = _night.withSleepKit(on: false);
+    final a = _alarm;
+    _alarm = null;
+    _alarmLast = null;
+    if (a != null) await _closeAlarm(a).timeout(const Duration(seconds: 5), onTimeout: () {});
+    final c = _cueWatch;
+    _cueWatch = null;
+    if (c != null) await _closeCues(c).timeout(const Duration(seconds: 5), onTimeout: () {});
+    _live.release();
+    await _closeScorer().timeout(const Duration(seconds: 5), onTimeout: () {});
+    if (_drift != null) {
+      _drift = null;
+      _driftWall.stop();
+    }
+    unawaited(_save().catchError((Object _) {}));
+  }
+
+  /// The headband has been lost for a long time (DECISIONS 899). After [RecorderTiming.spansAway] every open span is
+  /// closed at the last data ("you were doing this" is no longer known) and the sleep kit detached; after
+  /// [RecorderTiming.stopAway] the recording stops itself (through the service when it gave [onGiveUp]). A process
+  /// that has no data yet counts from its own start.
+  void _away() {
+    final last = _status.lastDataMs;
+    final gone = _now().millisecondsSinceEpoch - (last ?? (_awayFromMs ??= _now().millisecondsSinceEpoch));
+    if (last != null && gone >= timing.spansAway.inMilliseconds && _spans.any((s) => !s.closed)) {
+      final at = DateTime.fromMillisecondsSinceEpoch(last);
+      _note('no data for ${timing.spansAway.inMinutes} min: what was marked ends at the last data');
+      _closeSpans('headband_off', at);
+      unawaited(_detachKit());
+      _set(_withAlarm(_withDrift(_status)));
+    }
+    if (gone < timing.stopAway.inMilliseconds || _gaveUp) return;
+    _gaveUp = true;
+    _note('no data for ${timing.stopAway.inHours} h: the recording stops itself');
+    final giveUp = onGiveUp;
+    giveUp == null ? unawaited(stop()) : giveUp();
+  }
+
+  bool _gaveUp = false;
+
+  /// The spans opened before the first file set still need their line in its log and markers.
+  bool _markOpenSpans = false;
+  int? _awayFromMs;
+
+  /// The recording's spans in order, as last written.
+  List<Span> _spans = const [];
+
+  List<Span> get spans => _spans;
+
+  /// Opens a span of [kind] now (or [at]); the same kind already open is returned as it is. Its line is on storage
+  /// before this returns (once the recording has its id: until the first file set opens it waits in the saved state).
+  Span openSpan(String kind, {String source = 'owner_button', bool startedRecording = false, String? session, DateTime? at}) {
+    final open = _spans.where((s) => !s.closed && s.kind == kind).lastOrNull;
+    if (open != null) return open;
+    final t = at ?? _now();
+    final span = Span(
+      id: '${_night.recording ?? '?'}-${_spans.length + 1}',
+      kind: kind,
+      label: spanLabels[kind],
+      start: t,
+      source: source,
+      startedRecording: startedRecording,
+      session: session,
+    );
+    _putSpan(span);
+    // before the first file set there is no log to write into in time order: the line comes when the set opens
+    if (_night.recording != null) _marker('span: $kind start', t);
+    return span;
+  }
+
+  /// Closes the open span [id] now (or [at]); null when there is none.
+  Span? closeSpan(String id, {String by = 'owner', DateTime? at}) {
+    final s = _spans.where((s) => s.id == id && !s.closed).firstOrNull;
+    if (s == null) return null;
+    final t = at ?? _now();
+    final closed = s.closedAt(t, by);
+    _putSpan(closed);
+    _marker('span: ${s.kind} end', t);
+    return closed;
+  }
+
+  void _closeSpans(String by, DateTime at) {
+    for (final s in [..._spans]) {
+      if (!s.closed) closeSpan(s.id, by: by, at: at);
+    }
+  }
+
+  void _putSpan(Span span) {
+    final i = _spans.indexWhere((s) => s.id == span.id);
+    _spans = [
+      for (var k = 0; k < _spans.length; k++) k == i ? span : _spans[k],
+      if (i < 0) span,
+    ];
+    _spansChanged();
+    if (_night.recording != null) _writeSpan(span);
+    if (_begun) _set(_status);
+  }
+
+  void _spansChanged() {
+    final made = _now();
+    _night = _night.copyWith(spans: [for (final s in _spans) s.toLine(made)]);
+    unawaited(_save().catchError((Object _) {}));
+  }
+
+  void _writeSpan(Span span) {
+    try {
+      spanLog?.write(span);
+    } catch (e) {
+      _logLine('could not write the span ${span.id}: ${_short(e)}; the recording goes on');
+    }
+  }
+
+  /// The recording got its id (its first file set's stem): the spans opened before that get their ids and their lines.
+  void _bindRecording(String id) {
+    _night = _night.copyWith(recording: id);
+    _spans = [for (var k = 0; k < _spans.length; k++) _spans[k].withId('$id-${k + 1}')];
+    _spansChanged();
+    for (final s in _spans) {
+      _writeSpan(s);
+    }
+    _markOpenSpans = true;
+    if (_begun) _set(_status);
   }
 }
 

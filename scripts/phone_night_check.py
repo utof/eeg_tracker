@@ -109,6 +109,9 @@ RULES = [(k, re.compile(p)) for k, p in [
     ("stream_restarted", r"stream restarted(?:, battery \S+%)?"),  # P L
     ("stream_restart_failed", r"stream restart failed: .*"),  # P L
     ("still_no_data", r"still no data; (?P<what>reconnecting|exiting so record_night\.sh starts a fresh recorder)"),
+    # Record first (DECISIONS 899): the headband gone for long: what was marked ends, then the recording stops itself
+    ("away_spans", r"no data for (?P<min>\d+) min: what was marked ends at the last data"),  # P
+    ("away_stop", r"no data for (?P<h>\d+) h: the recording stops itself"),  # P
     ("mending", r"no data; the headband is mending the link itself \(check \d+\)"),  # P with our own connection
     ("out_of_range", r"headband out of range; (?:saving|leaving it without SDK calls)"),  # P
     ("laptop_drop", r"headband (?P<state>\S+); saving and exiting so record_night\.sh starts a fresh recorder"),  # L
@@ -309,7 +312,7 @@ def load_runs(folder: Path) -> list[Run]:
 
 # ---- nights ----------------------------------------------------------------------------------------------------------
 def nights_of(runs: list[Run], recs: dict[str, nf.Rec], source: str) -> list[nf.Night]:
-    return nf.nights([recs[r.stem] for r in runs if r.source == source and r.stem in recs])
+    return nf.nights([recs[r.stem] for r in runs if r.source == source and r.stem in recs], include_recorded=True)
 
 
 def night_runs(runs: list[Run], nights: list[nf.Night], night: nf.Night, source: str) -> list[Run]:

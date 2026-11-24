@@ -193,7 +193,7 @@ void main() {
       await _shoot(tester, ArchiveView(model: ArchiveViewModel(page: _page(toSee: [_work.id]), passing: true), now: _now), 'archive_list_$s', scale: scale, height: 1500);
       expect(find.text('Tags: sleep · rest'), findsOneWidget);
       expect(find.textContaining('Found: asleep 6 h 12'), findsOneWidget);
-      expect(find.text('Night · You: Start night'), findsNWidgets(1));
+      expect(find.text('Night · You: Record or Sleep'), findsNWidgets(1));
       expect(find.text('Work session · By itself: the headband watcher'), findsOneWidget);
       expect(find.textContaining('Finding activity in 1 more recording'), findsOneWidget);
     });
@@ -224,7 +224,7 @@ void main() {
       'archive_filtered',
     );
     expect(find.text('Work session · By itself: the headband watcher'), findsOneWidget);
-    expect(find.text('Night · You: Start night'), findsNothing);
+    expect(find.text('Night · You: Record or Sleep'), findsNothing);
     expect(find.textContaining('Showing work only'), findsOneWidget);
   });
 

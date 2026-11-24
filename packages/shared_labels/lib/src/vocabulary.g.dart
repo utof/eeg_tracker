@@ -12,6 +12,10 @@ abstract final class Labels {
   static const Label eyesClosed = Label("eyes_closed", "state", null, ["eyes-closed"], "eyes closed while awake");
   static const Label headache = Label("headache", "state", null, [], "a headache");
   static const Label ill = Label("ill", "state", null, ["sick"], "ill (a cold, a fever)");
+  static const Label nightSleep = Label("night_sleep", "state", null, [], "a night's sleep: mostly asleep, not every minute");
+  static const Label stressed = Label("stressed", "state", null, [], "under stress");
+  static const Label atHome = Label("at_home", "state", null, [], "at home (utof's places)");
+  static const Label away = Label("away", "state", null, [], "out of the home (utof's places)");
   static const Label walking = Label("walking", "activity", null, ["walk"], "walking");
   static const Label running = Label("running", "activity", null, ["run", "jogging"], "running or jogging");
   static const Label stairs = Label("stairs", "activity", null, [], "going up or down stairs");
@@ -26,8 +30,11 @@ abstract final class Labels {
   static const Label meditating = Label("meditating", "activity", null, ["meditation"], "meditating");
   static const Label soundSession = Label("sound_session", "activity", null, ["sound"], "listening to one of eeg_tracker's sound sessions");
   static const Label resting = Label("resting", "activity", null, ["rest"], "resting without trying to sleep");
+  static const Label other = Label("other", "activity", null, [], "something the list has no word for; `owner_words` says what");
+  static const Label neurofeedback = Label("neurofeedback", "activity", null, [], "a feedback training session (alpha-theta)");
   static const Label drinkingCoffee = Label("drinking_coffee", "event", "cups", ["coffee"], "drinking coffee; value: cups");
   static const Label drinkingAlcohol = Label("drinking_alcohol", "event", "drinks", ["alcohol"], "drinking alcohol; value: drinks");
+  static const Label takingMedicine = Label("taking_medicine", "event", "doses", [], "taking a medicine; `owner_words` names it");
   static const Label sitting = Label("sitting", "posture", null, ["sit"], "sitting");
   static const Label standing = Label("standing", "posture", null, ["stand"], "standing");
   static const Label lying = Label("lying", "posture", null, ["lying-down"], "lying down");
@@ -42,7 +49,7 @@ abstract final class Labels {
   static const Label steps = Label("steps", "measurement", "steps", [], "steps counted over the span");
   static const Label withdrawn = Label("withdrawn", "correction", null, [], "the row named in supersedes was wrong; nothing replaces it");
 
-  static const List<Label> all = [asleep, awake, nap, inBed, eyesClosed, headache, ill, walking, running, stairs, cycling, vehicle, eating, talking, meeting, focusedWork, working, exercise, meditating, soundSession, resting, drinkingCoffee, drinkingAlcohol, sitting, standing, lying, headbandOff, headbandAdjusted, kss, mood, tension, sleepQuality, sharp, pulse, steps, withdrawn];
+  static const List<Label> all = [asleep, awake, nap, inBed, eyesClosed, headache, ill, nightSleep, stressed, atHome, away, walking, running, stairs, cycling, vehicle, eating, talking, meeting, focusedWork, working, exercise, meditating, soundSession, resting, other, neurofeedback, drinkingCoffee, drinkingAlcohol, takingMedicine, sitting, standing, lying, headbandOff, headbandAdjusted, kss, mood, tension, sleepQuality, sharp, pulse, steps, withdrawn];
 }
 
 /// Every kind of the vocabulary and what it means.
@@ -71,10 +78,14 @@ const Map<String, String> labelSources = {
   "device_phone": "the phone's own sensors (step counter, activity recognition)",
   "device_laptop": "the laptop (ActivityWatch, the tray)",
   "observer": "another person who saw it",
+  "owner_activity_button": "an activity you started and stopped in the app",
+  "owner_utof": "you logged it in utof_tracker",
+  "device_utof": "utof_tracker's phone collector (places, steps, screen)",
 };
 
 /// Every confidence of the vocabulary and what it means.
 const Map<String, String> labelConfidences = {
   "certain": "the label holds for the whole span, the times to about a minute",
   "likely": "the label holds, but the times are rough or not every minute fits",
+  "within": "it happened somewhere inside the span, not all of it",
 };

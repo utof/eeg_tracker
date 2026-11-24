@@ -52,6 +52,9 @@ class NightViewModel {
     required this.sentence,
     required this.tone,
     required this.running,
+    this.sleeping = true,
+    this.spansLine,
+    this.stopSheetLine,
     this.busy = false,
     this.minutes,
     this.dataAgeSeconds,
@@ -84,8 +87,18 @@ class NightViewModel {
   final String sentence;
   final Tone tone;
 
-  /// A night is being recorded (the service runs).
+  /// A recording runs (the service runs).
   final bool running;
+
+  /// The running recording has an open sleep span (Lights off, the alarm and Sleep so far belong to it); false for a
+  /// recording started with Record (Record first, DECISIONS 880-881).
+  final bool sleeping;
+
+  /// What was marked in the running recording ("Sleep since 23:10"); null: nothing yet.
+  final String? spansLine;
+
+  /// The last recording's sheet "What was this recording?" still waits ("11:02-19:40 · 8 h 38 min"); null: no card.
+  final String? stopSheetLine;
 
   /// Start or Stop is in progress.
   final bool busy;
@@ -186,9 +199,20 @@ class NightView extends StatelessWidget {
     this.tab,
     this.onLicences,
     this.onArchive,
+    this.onRecord,
+    this.onSleepNow,
+    this.onStopSheet,
   });
 
+  /// Opens the last recording's sheet.
+  final VoidCallback? onStopSheet;
+
+  /// Sleep on the recording that runs.
+  final VoidCallback? onSleepNow;
   final NightViewModel model;
+
+  /// Record: the recording alone, no sleep span (null: no such button, the layout of before).
+  final VoidCallback? onRecord;
   final VoidCallback onStart;
   final VoidCallback onStop;
   final void Function(FixAction action) onFix;
@@ -373,7 +397,7 @@ class NightView extends StatelessWidget {
               top: false,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-                child: _Action(m, onStart: onStart, onStop: onStop, onLightsOff: onLightsOff, onAlarm: onAlarm),
+                child: _Action(m, onStart: onStart, onRecord: onRecord, onSleepNow: onSleepNow, onStopSheet: onStopSheet, onStop: onStop, onLightsOff: onLightsOff, onAlarm: onAlarm),
               ),
             ),
     );
@@ -960,8 +984,9 @@ class _Sound extends StatelessWidget {
 }
 
 class _Action extends StatelessWidget {
-  const _Action(this.m, {required this.onStart, required this.onStop, this.onLightsOff, this.onAlarm});
+  const _Action(this.m, {required this.onStart, required this.onStop, this.onRecord, this.onSleepNow, this.onStopSheet, this.onLightsOff, this.onAlarm});
   final NightViewModel m;
+  final VoidCallback? onRecord, onSleepNow, onStopSheet;
   final VoidCallback onStart;
   final VoidCallback onStop;
   final VoidCallback? onLightsOff;
@@ -969,6 +994,47 @@ class _Action extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (m.running && !m.sleeping) {
+      final text = Theme.of(context).textTheme;
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Divider(),
+          const SizedBox(height: 8),
+          Text(
+            m.spansLine ?? 'Recording. Nothing marked: this is not counted as sleep.',
+            style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.35),
+          ),
+          const SizedBox(height: 10),
+          if (m.alarmLine != null && onSleepNow != null) ...[
+            AlarmLine(line: m.alarmLine!, action: m.alarmAction ?? 'Set alarm', onAction: m.busy ? null : onAlarm),
+            const SizedBox(height: 4),
+          ],
+          Row(
+            children: [
+              if (onSleepNow != null) ...[
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: m.busy ? null : onSleepNow,
+                    icon: const Icon(Icons.bedtime_outlined),
+                    label: const Text('Sleep'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: m.busy ? null : onStop,
+                  icon: const Icon(Icons.stop_rounded),
+                  label: Text(m.busy ? 'Stopping…' : 'Stop'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
     if (m.running && onLightsOff != null) {
       return NightActions(
         line: m.lightsOffLine,
@@ -987,12 +1053,54 @@ class _Action extends StatelessWidget {
         label: Text(m.busy ? 'Stopping…' : 'Stop'),
       );
     }
-    final start = FilledButton.icon(
+    final sleep = FilledButton.icon(
       onPressed: m.busy ? null : onStart,
       icon: const Icon(Icons.bedtime_outlined),
-      label: Text(m.busy ? 'Starting…' : 'Start night'),
+      label: Text(m.busy ? 'Starting…' : 'Sleep'),
     );
+    // Record: the headband records until Stop and nothing is assumed to be a night; Sleep: the same recording with
+    // a sleep stretch from its start, the alarm and the sound cues (Record first, DECISIONS 880-881)
+    final start = onRecord == null
+        ? sleep
+        : Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: m.busy ? null : onRecord,
+                  icon: const Icon(Icons.radio_button_checked),
+                  label: const Text('Record'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: sleep),
+            ],
+          );
     final line = m.alarmLine;
+    final sheet = m.stopSheetLine;
+    if (sheet != null && onStopSheet != null) {
+      // the last recording's question waits here until it is answered or skipped (DECISIONS 890)
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Divider(),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'What was the last recording? $sheet',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.35),
+                ),
+              ),
+              TextButton(onPressed: m.busy ? null : onStopSheet, child: const Text('Answer')),
+            ],
+          ),
+          if (line != null) AlarmLine(line: line, action: m.alarmAction ?? 'Set alarm', onAction: m.busy ? null : onAlarm),
+          const SizedBox(height: 4),
+          start,
+        ],
+      );
+    }
     if (line == null) return start;
     // the alarm is set where the night is started, like the Lights off line above Lights off (DECISIONS 233)
     return Column(

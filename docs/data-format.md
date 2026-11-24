@@ -15,7 +15,7 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 | The phone over Wi-Fi | `GET /files`, `GET /files/<path>` on the phone; mirrored into `_local/recordings/` and `_local/phone/`, with `_local/phone/pull-state.json` and `pulls.jsonl` | the phone app's Share on Wi-Fi (`app/lib/share/`); read by `scripts/pull_phone.py` |
 | The laptop's work sessions | `_local/laptop/work/<stamp>.work.json`, `labels.jsonl` (below) | the laptop tray (`scripts/tray.py`, `scripts/laptop_work.py`) from ActivityWatch |
 | Catalog of nights | `_local/catalog/catalog.json`, `<date>.sha256`, `catalog.txt`, `history.log` | `scripts/catalog.py` (below) |
-| The data book | `_local/data/nights.tsv`, `sessions.tsv`, `days.tsv`, `epochs.tsv.gz`, `labels.tsv`, `truth.tsv`, `book.json`, `README.md` | `scripts/data_book.py`, after each copy from the phone through `scripts/after_pull.py` (below) |
+| The data book | `_local/data/nights.tsv`, `sessions.tsv`, `days.tsv`, `epochs.tsv.gz`, `labels.tsv`, `truth.tsv`, `spans.tsv`, `book.json`, `README.md` | `scripts/data_book.py`, after each copy from the phone through `scripts/after_pull.py` (below) |
 | Truth labels | `_local/analyses/truth-labels.tsv` (the hand file), `_local/truth/*.tsv`, the Archive's tags marked "This is what I was doing"; the vocabulary `scripts/truth_vocabulary.tsv` | the assistant from chat, the owner by hand or on the phone; checked by `scripts/truth.py` (below) |
 | Detectors against the truth | `_local/data/validation.tsv`, `validation.md` | `scripts/validate_detectors.py`, after each data book build (below) |
 | Raw recordings packed after a day | `<stamp>.f32.xz` on the laptop, `<stamp>.f32.gz` on the phone, in place of `<stamp>.f32`; `_local/packing.jsonl`, `files/packing.jsonl` | `scripts/pack_old.py` (daily), the phone app between nights (`app/lib/recorder/packed.dart`); below |
@@ -113,6 +113,7 @@ says what its `.f32` holds, so a record can carry any number of channels (DECISI
 | `reference`, `ground` | `{"name", "where", "site"}` (`where` in words, `site` a 10-10 name or `null`), or `null` when not known. BrainBit: `Ref`, `forehead`, `Fpz`; the DIY board: `Ref` on an earlobe (`A1`) and `Bias` on the other (`A2`), a plan |
 | `made_by` | the program that wrote it (optional) |
 | `session` | what kind of session wrote the file set when it is not sleep (optional): `work` for the phone's work session's raw EEG (DECISIONS 683), never part of a night; absent (every night, nap and file before it), `night` or `nap`: sleep |
+| `recording` | the id of the recording the file set belongs to (optional, phone, since Record first, DECISIONS 882): the stem of that recording's first file set (`2026-11-21-110200`). A set with it belongs to that recording and to no other: the Archive's 15-minute rule and the nights' 3-hour rule apply only to sets without it; what was sleep in it is said by its spans (`spans/`) |
 
 Required: `format`, `version`, `channels`, `sample_rate`, `unit`, `record`, `counter`; a missing `reference` or `ground`
 reads as `null`. A `site` is text of up to 16 characters (the writers fill it only for 10-10 names and A1 A2 M1 M2); an
@@ -198,6 +199,17 @@ that one's last data or has the same evening date, and never 24 hours or more af
 (`scripts/night_files.py`). `<date>` is the evening's date of the first recording (its start minus 12 hours, as
 `night_of`). While a night grows, its four files are replaced whole (never edited in place) once 10+ minutes of
 new samples exist; files of the same name made by hand are first renamed `<date>-manual.*`.
+
+A file set whose header has `recording` (Record first) is never chained like that. What was sleep in its recording
+is said by that recording's sleep spans (`spans/`, above): each closed span of kind `sleep` (source `owner_button`,
+`owner_confirmed` or `auto_start`) is a time window; windows are joined into one night by the same rule applied to
+spans (the next starts under 3 hours after the last one's end, or has the same evening date, within 24 hours of the
+first), named by the evening date of the first. Only the samples inside the windows are read. Spans of kind `nap` are
+naps and never join a night. A recording with no sleep span gives no night. Old file sets chain as before, except
+those a "Not sleep" line names. An old chain and a span night with the same evening date are one night. The report
+of such a night has `span`: `{recording: [ids], spans: [ids], kind, from, windows}` (`from`: `pressed`,
+`confirmed`, `auto`; `windows`: `[start, end]` in unix seconds); a report with `span` is out of date when its spans
+or windows change, not when its files grow.
 
 | Field | Meaning |
 |---|---|
@@ -818,6 +830,85 @@ Deleting by hand writes the same record as moving to the laptop: `<stamp>.remove
 samples and index; its `.log`, `.header.json` and `.markers.jsonl` stay. "Everything" (the Danger zone) removes every
 file of the recording, its record included, the session files, the report and the tags.
 
+### What you were doing in a recording (`spans/`)
+
+Record first (DECISIONS 880-899, spec `docs/specs/2026-11-21-record-first-design.md`): one **recording** is everything
+between Record (or Sleep) and Stop, one or more file sets whose headers carry its id (`recording`, the first set's
+stem). What you did in it is kept as **spans**: `spans/<recording id>.spans.jsonl`, one JSON object per line, add-only.
+A span is written when it opens and again whenever it changes: **the last line with a given `span` id is the span**;
+spans are listed in the order they first appear. A line is on storage before the tap that made it is answered. A line
+that is not a JSON object, has a `v` other than 1, or is neither a span nor a `reviewed` line is skipped (a kill in
+the middle of a write leaves a half last line: skipped too).
+
+| Field | Content |
+|---|---|
+| `v` | 1 |
+| `span` | `<recording id>-<n>`, n from 1 in the recording |
+| `kind` | `sleep`, `nap`, `work`, `meditate`, `alpha_theta`, `sound`, `dream_catcher`, `check_in`, `calibration`; a reader keeps a kind it does not know |
+| `label` | the shared vocabulary's label for it (`scripts/truth_vocabulary.tsv`): `sleep`, `nap` -> `in_bed`; `work` -> `working`; `meditate` -> `meditating`; `alpha_theta` -> `neurofeedback`; `sound` -> `sound_session`; `dream_catcher` -> `resting`; absent for the others |
+| `start`, `end` | local ISO time with the UTC offset; `end` is `null` while the span is open |
+| `source` | `owner_button` (you pressed it), `owner_confirmed` (the app found it, you said yes), `auto_start` (the headband watcher) |
+| `started_recording` | `true` when this span's button also started the recording |
+| `ended_by` | `owner`, `activity` (a timed session's end), `other_activity`, `recording_stopped`, `headband_off`, `phone_restart`; absent while open |
+| `session` | the activity's own file, relative to `files/`, or absent |
+| `paused` | `[start, end]` pairs: the span stayed open while its activity was paused (`end` `null` while paused) |
+| `estimate` | the confirm-questions estimate this span confirms (`owner_confirmed` only) |
+| `made` | when this line was written |
+
+A span needs `span`, `kind`, a `start` that parses and a `source`; `end` must be `null`, absent or a time.
+
+**Sleep spans** are those of kind `sleep` or `nap`: sleep reports come only from them (DECISIONS 886). A recording
+with `recording` in its headers and no sleep span is never a night.
+
+**Old recordings** (no `recording` in the header, no spans file) are never rewritten: they read as before, one night
+per chain of file sets. The Archive's **Not sleep** writes one line for such a recording:
+
+```json
+{"v": 1, "reviewed": "no_sleep", "sets": ["2026-11-20-221706"], "hides": ["2026-11-20"], "made": "2026-11-21T09:00:00+03:00"}
+```
+
+`sets`: the file sets (stems) that are no sleep, so they join no night; `hides`: the nights (evening dates) whose
+report is hidden when no other recording is left in them (the phone moves it to `nights/not-sleep/`, never deletes it;
+the laptop leaves that night out). A later line `{"v": 1, "reviewed": "sleep", ...}` takes it back. The last
+`reviewed` line counts.
+
+**Nights and naps from sleep spans** (the phone's `app/lib/recorder/nights.dart`, the laptop's
+`scripts/night_files.py`; DECISIONS 886-888, 904-907). A file set whose header names a recording is never chained by
+time. Its recording's closed spans of kind `sleep` are joined into nights by the chain rule applied to spans (the next
+starts under 3 hours after the last one's end, or has the same evening date, within 24 hours of the first); the night
+is named by the evening date of the first span's start and keeps its file, `nights/<evening date>.report.json`. A span
+of kind `nap` is a nap: scored by itself, never part of a night, its report in `nights/naps/<span start stamp>.report.json`
+(same format; its `night_of` is that stamp). Only the samples inside the spans are read. On the phone a span still
+open ends at the recording's last data. A report made from spans carries
+
+```json
+"span": {"recording": ["2026-11-21-110200"], "spans": ["2026-11-21-110200-3"], "kind": "night", "from": "pressed"}
+```
+
+(`kind` `night` or `nap`; `from` `pressed`, `confirmed` or `auto`, the first span's source); a report without it is
+an old night's. Its `inputs` list each file's bytes inside the spans, so a recording that goes on after the sleep does
+not make the report stale.
+
+**When the app ends a span by itself** (planning values, DECISIONS 899, 906): the headband lost for 60 minutes: every
+open span ends at the last data (`headband_off`); 6 hours without data: the recording stops itself; the phone
+restarted: at the next app start open spans end at the recording's last saved sample (`phone_restart`).
+
+**The sheet after Stop** ("What was this recording?", DECISIONS 890-891, 908-910) writes each chip as a tag of the
+recording in `archive/<id>.tags.json` with `truth: true`, `source: "owner_stop_sheet"`, `confidence` (`certain` for
+"Awake the whole time", `likely` for a chip with times, `within` for one without: it happened somewhere inside the
+span) and `words` (your own words, exactly as typed, in every tag of that sheet; words alone make one `other` tag).
+`scripts/truth.py` turns them into truth rows; the chips and the tag fields are the shared package's
+(`packages/shared_labels/lib/src/stop_sheet.dart`), checked against `tests/contract/labels/stop-sheet.tags.json`.
+`spans/stop-sheet.json` (`{"recording", "saved", "at"}`) only remembers which recording was last asked about.
+
+- **Writers**: the recorder while the recording runs, the screen once it has stopped (`app/lib/spans/span_log.dart`
+  `SpanLog`, which refuses the screen while the recorder's saved state says the recording is active). Each span start
+  and end is also one line in the open file set's `.log` and `.markers.jsonl` (`span: sleep start`).
+- **Readers**: `app/lib/spans/span.dart` (`readSpans`) and its twin `scripts/spans.py` (`read`), both checked against
+  the golden files `tests/contract/spans/*.spans.jsonl` and their `*.expected.json` (times as unix seconds).
+- **To the laptop**: `spans/` is a folder of `files/`, so Export data and Share on Wi-Fi take it as it is
+  (`_local/phone/spans/`).
+
 ### Walking (`walking/`, `steps/`)
 
 The walking pass (DECISIONS 800-809; the method: [detectors.md](detectors.md#walking-pace-and-estimated-steps-decisions-800-809))
@@ -1001,7 +1092,8 @@ line per ack (`acked`, `phone`, `files`) and the catalog's night rows `moved_fro
   (`laptop`, `phone`, `laptop+phone` or `diy`), `recordings` (runs with samples), `start` and `end` (first and last data), `hours_recorded`
   (samples at 250 Hz), `minutes_missing` (time between them without samples), `raw` (`false` for a phone report
   whose raw night is not on the laptop), `report` (`by` laptop or phone, `asleep_min`, `deep_min`, `dream_min`, or
-  `null`), `morning` (its check-in files), `files`, `bytes` and `file_list` (`path` from `_local/`, `bytes`,
+  `null`), for a night made from sleep spans `recording`, `span_ids` and `span_from` (as in nights.tsv; empty for an
+  old night, `span_from` `migrated`), `morning` (its check-in files), `files`, `bytes` and `file_list` (`path` from `_local/`, `bytes`,
   `mtime_ns`, `sha256`, `kind`: `raw` for `.f32 .f32.xz .idx .log .markers.jsonl .header.json`, else `derived`; a
   damaged `.header.json` is a PROBLEM ("damaged") on every run and its recording is counted in no night; for a packed
   `.f32.xz` also `original`: `path`, `bytes` and `sha256` of the `.f32` it holds). `missing`: raw files an earlier
@@ -1014,7 +1106,7 @@ line per ack (`acked`, `phone`, `files`) and the catalog's night rows `moved_fro
 
 ## The data book (`_local/data/`)
 
-`scripts/data_book.py` (DECISIONS 760-769) turns everything eeg_tracker measured on the laptop into six tidy tables, so
+`scripts/data_book.py` (DECISIONS 760-769) turns everything eeg_tracker measured on the laptop into seven tidy tables, so
 hundreds of days can be read in one place and every number traced to the files it came from. It reads `_local/` and
 writes only into `_local/data/` (or `--out`); nothing reads the book back as input, and it can always be built again
 from `_local/` (`uv run --project analysis python scripts/data_book.py`; `--full` works out everything again). The
@@ -1046,7 +1138,7 @@ Rules, for every table:
 Also in the folder: `README.md` (what is there, how to rebuild it), `book.json` (`format` `eeg-tracker-data-book`,
 `version` 1, `built`, `seconds`, `local`, `signal_version`, `measures_version`, the `models` the nights name, `rows`
 per table, `recordings` and `worked_out` this run, `labels_added`, `labels_removed`, `truth_from` (truth rows from
-the `hand` file, other `files` and the `archive`), `truth_rejected` (truth rows left out, each `origin:line id: why`),
+the `hand` file, other `files`, the `archive`, the phone's `confirm` answers and the pressed `spans`), `truth_rejected` (truth rows left out, each `origin:line id: why`),
 `epoch_columns`, `problems`),
 `.cache/` (the 30 s rows per recording, file hashes kept by size and modified time, the logs' numbers per night; safe
 to delete: the next run makes them again, slower) and `.lock` (one run at a time).
@@ -1061,6 +1153,7 @@ are cut by `night_files.py`'s chain rule and named by the evening date, as the c
 | Column | Meaning |
 |---|---|
 | `night` | the night's id: its evening date (`2026-11-19`), `<date>-diy` for the DIY board |
+| `recording`, `span_ids`, `span_from` | for a night made from sleep spans: the recording ids and the span ids (space-separated) and where the spans came from (`pressed`, `confirmed`, `auto`); for an old night (cut by the chain rule) the first two are empty and `span_from` is `migrated`. A night "Not sleep" hides, which no recording makes any more, is left out even when the phone's report is on the laptop |
 | `kind` | `nap` when under 3 hours asleep (or recorded, when unscored), else `night` (DECISIONS 761) |
 | `source` | whose report the row holds: `laptop` (`nights/<date>.report.json`, or a laptop report kept in `analyses/`), `phone` (`phone/nights/`), or for a night with no report the catalog's `laptop`, `phone`, `laptop+phone`, `diy` |
 | `counts` | 1 for the one row per night that counts (days.tsv adds it up): scored before unscored, then the laptop's in `nights/`, a laptop report in `analyses/`, the phone's |
@@ -1230,7 +1323,20 @@ keep the history; `truth.tsv` adds three columns and drops the rows that break t
   each with `source` `owner_app_tag`, `confidence` `certain`, the typed word in `owner_words`, its id the tag's
   `labels.tsv` id (`archive:` and 16 hex). The word is matched to a label by its id or one of the vocabulary's `also`
   words (`walk` is `walking`, `sleep` is `asleep`, `rest` is `resting`, `work` is `working`); another word is left out
-  with a reason (add it to `also`).
+  with a reason (add it to `also`). A tag may also carry `source`, `confidence` and `words` (the stop sheet's, Record
+  first): `source` `owner_stop_sheet` makes a row with that source, the tag's `confidence` (`certain`, `likely` or
+  `within`; `certain` when absent), the `words` unchanged in `owner_words` and `context` `stop sheet`; the tag's `label`
+  is then a vocabulary label id (`awake`, `night_sleep`, `nap`, `working`, `walking`, `eating`, `exercise`,
+  `meditating`, `meeting`, `other`). Words may hold a tab, a newline or a double quote: the table and truth files quote
+  such a cell (csv's minimal rule, `"` doubled, line ends kept as typed), so the words read back exactly.
+- **the phone's pressed spans** (`phone/spans/*.spans.jsonl`, above): every closed span with source `owner_button` or
+  `owner_confirmed` and a `label` is one row: `source` `owner_activity_button`, `confidence` `likely`, `recording` the
+  recording's id, `context` `activity button: <span kind>`, its id `span:<span id>`, `start` and `end` the span's. Open
+  spans and `auto_start` spans give no row.
+- **golden files** `tests/contract/labels/`: `stop-sheet.tags.json` (a stop sheet's tags: `awake` certain, `walking`
+  likely with times, `eating` within, a text-only `other` within, the same words with a tab and quotes on each) and
+  `stop-sheet.truth.tsv`, the rows `truth.py` makes from it (`stop-sheet.labels.tsv` is the same text: the shared
+  labels package's table has the truth columns). A test makes the rows from the tags and compares them.
 - **the phone's confirmation questions** (`phone/confirm/`, above; DECISIONS 860-869): a Yes or a No to "Did you walk
   19:08-21:14?" is one row over the detector's stretch, `source` `owner_app_prompt` (`owner_stop_sheet` when the sheet
   after Stop settled it), `confidence` `certain` (a Yes to a night the detector found wake-ups in: `likely`), `present`
@@ -1248,8 +1354,8 @@ named; exit 1 on any bad row), `python3 scripts/truth.py vocabulary` prints the 
 | `kind` | the label's kind in the vocabulary: `state`, `activity`, `posture`, `event`, `device`, `rating`, `measurement`, `correction` |
 | `label` | a label id from `scripts/truth_vocabulary.tsv` (below) |
 | `value`, `unit` | a number and the label's own unit: required for `rating` (a whole number on its scale, `kss` `1-9`) and `measurement` (`pulse` `bpm`, `steps` `steps`); allowed for `drinking_coffee` (`cups`) and `drinking_alcohol` (`drinks`); empty for every other label |
-| `source` | who or what said it: `owner_chat`, `owner_note`, `owner_app_tag`, `owner_checkin`, `owner_mark_button`, `owner_tray`, `device_watch`, `device_phone`, `device_laptop`, `observer` |
-| `confidence` | `certain` (the label holds for the whole span, the times to about a minute) or `likely` (rough times, or not every minute fits) |
+| `source` | who or what said it: `owner_chat`, `owner_note`, `owner_app_tag`, `owner_checkin`, `owner_mark_button`, `owner_app_prompt`, `owner_tray`, `owner_stop_sheet`, `owner_activity_button`, `owner_utof`, `device_watch`, `device_phone`, `device_laptop`, `device_utof`, `observer` |
+| `confidence` | `certain` (the label holds for the whole span, the times to about a minute) or `likely` (rough times, or not every minute fits), or `within` (it happened somewhere inside the span, not all of it) |
 | `created` | when the row was made, ISO with offset |
 | `supersedes` | the `label_id` this row corrects (from any source): rows are never edited, a correction is a new row; `withdrawn` (kind `correction`) takes a row back with nothing in its place |
 | `owner_words` | free text: what the owner said or typed, verbatim (`I was sleeping for 1 or 2 hours`) |
@@ -1285,7 +1391,10 @@ renamed one: ids are stable).
 `scripts/validate_detectors.py` runs after each data book build and rebuilds both whole from `truth.tsv`,
 `epochs.tsv.gz`, the sleep reports (and the `sleep.json` beside a laptop report) and the phone's work sessions. Each
 detector answers per 30 s epoch yes, no or "not read"; for each truth label it expects yes, no, mostly yes (`mostly`:
-only the share is given) or nothing. An epoch counts for a truth row when its middle lies inside the row's span (a
+only the share is given) or nothing. A truth row with confidence `within` is not scored minute by minute: where the
+label expects yes or mostly it is one hit (the detector said yes at least once inside the span) or one miss
+(`truth_expects` `fired`, `agreement_pct` 100 or 0; in the `all` row the share of such spans that were hits); where it
+expects no, or the row says `present` 0, it is not compared. An epoch counts for a truth row when its middle lies inside the row's span (a
 moment: the epoch holding it). Only active truth rows count. Where two sources of one detector version cover the same
 minutes (a nap scored twice by hand), the first in the book's counting order is used.
 
@@ -1304,7 +1413,7 @@ its rows (`scope` `all`):
 | Column | Meaning |
 |---|---|
 | `detector`, `detector_version`, `yes_means` | the detector, the version that made the answers (the sleep model, the signal pass and the rule, the work session app), what its yes means |
-| `label`, `truth_present`, `truth_expects` | the truth label, whether the row says it happened (1) or did not (0), and what the detector should say during it: `yes`, `no`, `mostly`, or `value` (a measurer). During a row that says the label did not happen, a detector whose yes means that label should say `no`; other detectors are not compared |
+| `label`, `truth_present`, `truth_expects` | the truth label, whether the row says it happened (1) or did not (0), and what the detector should say during it: `yes`, `no`, `mostly`, `fired` (a `within` row) or `value` (a measurer). During a row that says the label did not happen, a detector whose yes means that label should say `no`; other detectors are not compared |
 | `scope`, `label_id`, `periods` | `label` (one truth row, its id) or `all` (every row of that label; `periods` of them) |
 | `start`, `end`, `recording`, `truth_source`, `truth_confidence` | the truth row's (for `all`: the first start and the last end) |
 | `sources` | the detector's files the epochs came from |
@@ -1314,7 +1423,7 @@ its rows (`scope` `all`):
 | `agreement_pct` | the share of compared epochs where it said what the truth expects (`mostly`: the share of yes) |
 | `false_pos_min`, `false_neg_min` | minutes of yes where the truth says no, of no where it says yes (0 when the truth cannot make that error; empty for `mostly`) |
 | `values`, `mean_abs_error`, `mean_error`, `unit` | a measurer (a pulse against a watch's): the detector's values averaged, the error detector minus truth, in the label's unit |
-| `validation_version` | the rules above (`validate-v1`) |
+| `validation_version` | the rules above (`validate-v2`) |
 
 `validation.md` says the same in words: a sentence per detector and label, the totals, each truth row, and what could
 not be compared (truth rows no detector covers, detectors with no truth in their time, rows left out of `truth.tsv`).
@@ -1330,6 +1439,24 @@ The extension point (`DETECTORS`, `MEASURERS` in the script): a new detector giv
 detector that gives stretches, such as walking, through `from_spans`) and names the truth labels it expects yes and
 no for; a measurer (the pulse detector) gives `(time, value)` pairs and is scored against `measurement` rows of its
 label within `within_s` seconds.
+
+### `spans.tsv`
+
+One row per span of every recording (Record first, DECISIONS 880-899): what you were doing while the headband
+recorded, read by `scripts/spans.py` from the phone's `phone/spans/*.spans.jsonl` (format above, "What you were doing
+in a recording"). The last line of a span is the span; open spans have no `end`. A column that does not apply is empty.
+
+| Column | Meaning |
+|---|---|
+| `span_id`, `recording` | the span's id (`2026-11-21-110200-1`), and the recording it is in (the spans file's name) |
+| `kind`, `label` | `sleep`, `nap`, `work`, `meditate`, ... (a kind the reader does not know is kept); the shared vocabulary's label for it |
+| `start`, `end`, `minutes` | the span's times and length; empty `end` and `minutes` while it is open |
+| `source` | `owner_button`, `owner_confirmed`, `auto_start` |
+| `started_recording` | 1 when this span's button also started the recording |
+| `ended_by` | `owner`, `activity`, `other_activity`, `recording_stopped`, `headband_off`, `phone_restart` |
+| `session` | the activity's own file, relative to the phone's `files/` |
+| `paused_minutes` | minutes the activity was paused while the span stayed open (Work during a nap); empty when never paused |
+| `estimate` | the confirm-questions estimate a confirmed span answers |
 
 ### After each copy from the phone (`scripts/after_pull.py`)
 

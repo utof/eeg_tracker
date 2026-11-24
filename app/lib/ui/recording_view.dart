@@ -88,6 +88,8 @@ class RecordingView extends StatelessWidget {
     this.onAddTag,
     this.onTag,
     this.onRemove,
+    this.onNotSleep,
+    this.notSleep = false,
     this.onDanger,
     this.onSignal,
     this.onPulseInfo,
@@ -105,6 +107,11 @@ class RecordingView extends StatelessWidget {
 
   /// Remove from this phone: only offered with the laptop's checked copy.
   final VoidCallback? onRemove;
+
+  /// "Not sleep" for a recording from before Record first that the app took for a night (DECISIONS 889), or taking
+  /// it back when [notSleep]; null: not offered.
+  final VoidCallback? onNotSleep;
+  final bool notSleep;
   final VoidCallback? onDanger;
 
   /// The raw signal from the recording's start.
@@ -219,6 +226,23 @@ class RecordingView extends StatelessWidget {
           ),
           const SectionHeading('Files'),
           ..._files(i),
+          if (onNotSleep != null) ...[
+            const SectionHeading('Was this sleep?'),
+            Para(
+              notSleep
+                  ? 'You said this recording was not sleep. It is in no night and has no sleep report. Nothing was '
+                        'deleted.'
+                  : 'The app took this recording for a night. If you were awake, say so: it leaves the nights and '
+                        'Trends, and its sleep report is put away, not deleted.',
+              color: Night.inkMuted,
+              top: 0,
+            ),
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton(onPressed: onNotSleep, child: Text(notSleep ? 'It was sleep after all' : 'Not sleep')),
+            ),
+          ],
           if (onRemove != null) ...[
             const SectionHeading('On the laptop'),
             Para(
