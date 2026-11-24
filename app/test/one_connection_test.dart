@@ -110,8 +110,9 @@ class World {
   );
 
   /// Start sleep, as recorder_service.dart does it: the offer, then the recorder over the lend finder.
-  Future<LendOffer?> startNight({Duration takeWait = const Duration(milliseconds: 100)}) async {
+  Future<LendOffer?> startNight({Duration takeWait = const Duration(milliseconds: 100), void Function()? afterOffer}) async {
     final made = await owner.lendToNight();
+    afterOffer?.call();
     // the offer crosses as saved JSON
     final offer = made == null ? null : LendOffer.fromJson(made.toJson());
     nightOn = true;
@@ -279,6 +280,52 @@ void main() {
     expect(recordsIn(f32), greaterThanOrEqualTo(100));
     expect(w.band.count('disconnect'), 0, reason: 'Stop took the connection away from the screen');
     expect(w.owner.lending, isFalse);
+  });
+
+  test("the recorder's first answer (nothing started yet) reaches the screen before its start: the lend holds", () async {
+    // the emulator's Signal -> Sleep of 2026-11-25 01:21: the screen asked the new service for its status, the
+    // recorder answered with the status it is born with (idle), the owner took that for "the night is over" and
+    // withdrew the lend; the recorder's start then got "lost" and it had to connect by itself
+    final w = World();
+    addTearDown(w.close);
+    final feed = w.feed();
+    addTearDown(feed.dispose);
+    await feed.setActive(true);
+    await until(() => feed.stage == SignalStage.live && w.owner.live, what: 'Signal live');
+    final offer = await w.startNight(
+      afterOffer: () => w.owner.recorderData(const RecorderStatus().toMap(nowMs: DateTime.now().millisecondsSinceEpoch)),
+    );
+    expect(offer, isNotNull);
+    expect(w.owner.lending, isTrue, reason: 'an idle status before the start ended the lend');
+    await until(() => w.recording, what: 'the night recording');
+    expect(w.nightFinder.calls, isEmpty, reason: 'the recorder reached for a headband of its own');
+    expect(w.log(), isNot(contains('out of range')));
+    expect(w.band.count('startSignal'), 1);
+    // once it records, idle does mean the night is over
+    await w.recorder!.stop();
+    await until(() => !w.owner.lending, what: 'the lend ended by the stop');
+  });
+
+  test('a live connection with no contact reading: the night starts on it at once and says none was measured', () async {
+    // the owner's night of 2026-11-25 00:36: the recorder waited its whole contact time on the lent connection, which
+    // never sends resistance, and wrote "contact check: no resistance data arrived"
+    final w = World();
+    addTearDown(w.close);
+    final link = BandLink(finder: w.owner.finder, timing: _quick, onBatch: (_, _) {});
+    expect(await link.connect(), isTrue);
+    await link.startSignal(); // a screen that streams without a contact check
+    await until(() => w.owner.live);
+    expect(w.owner.knownContact, isNull);
+    final offer = await w.startNight();
+    expect(offer, isNotNull);
+    expect(offer!.ohms, isEmpty);
+    await until(() => w.recording, what: 'the night recording');
+    expect(w.log(), contains('no contact reading on the live connection; not measured now'));
+    expect(w.log(), isNot(contains('no resistance data arrived')));
+    expect(w.statuses.any((s) => s.phase == Phase.checkingContact), isFalse, reason: 'it waited for a check that cannot run');
+    expect(w.band.count('startResist'), 0);
+    expect(w.nightFinder.calls, isEmpty);
+    await link.close();
   });
 
   test('the lent headband drops: the recorder takes over on a connection of its own, the lost one is not touched', () async {

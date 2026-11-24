@@ -18,6 +18,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../dream/band_link.dart';
+import '../logs/app_log.dart';
 import '../recorder/chunk_writer.dart' show Sample;
 import '../recorder/headband.dart';
 import '../recorder/status.dart';
@@ -128,6 +129,12 @@ class HeadbandConnection {
   int _orphans = 0;
   DateTime? _triedAt;
   static const Duration _orphanFor = Duration(seconds: 75);
+
+  /// How long an offer waits for the recorder's `start` before an idle status withdraws it (the service's start on
+  /// the phone takes about a second; 7 s on the owner's night of 2026-11-25).
+  static const Duration lendStartWait = Duration(seconds: 20);
+  DateTime? _lendAt;
+  static final AppLog _log = AppLog('headband');
 
   bool get _reconnecting {
     final at = _triedAt;
@@ -291,6 +298,7 @@ class HeadbandConnection {
     _anyLost = true;
     _dropReal();
     if (_lending) {
+      _log.info('lend: the headband dropped; the recorder is told lost');
       sendToNight?.call(lendLost);
       _endLend();
     }
@@ -651,7 +659,19 @@ class HeadbandConnection {
     final was = nightRuns;
     _night = s;
     _nightAt = _now();
-    if (s.phase == Phase.idle && _lending) _endLend(keep: true);
+    // idle ends the lend: the night is over. But a recorder that has not said `start` yet is idle because it is
+    // newly born (the screen's status request can reach the new service before its first step): that answer is not
+    // an end, while the offer is young. An offer nobody starts on is withdrawn by the same line after [lendStartWait].
+    final offered = _lendAt;
+    final unborn = !_forwarding && offered != null && _now().difference(offered) < lendStartWait;
+    if (s.phase == Phase.idle && _lending) {
+      if (unborn) {
+        _log.info('lend: the recorder says idle before its start; the offer stands');
+      } else {
+        _log.info('lend: ended, the recorder is idle');
+        _endLend(keep: true);
+      }
+    }
     if (!was && nightRuns) {
       _startClock();
       if (_panelWatchers > 0) leaseNight?.call(true);
@@ -690,7 +710,9 @@ class HeadbandConnection {
     _lingerTimer = null;
     _lending = true;
     _forwarding = false;
+    _lendAt = _now();
     final known = knownContact;
+    _log.info('lend: the live connection is offered to the recorder', {'contact': known != null});
     _emit();
     return LendOffer(
       band: band.id,
@@ -703,19 +725,25 @@ class HeadbandConnection {
 
   /// The night did not start after all: the offer is withdrawn.
   void cancelLend() {
+    if (_lending) _log.info('lend: the service did not start; the offer is withdrawn');
     if (_lending) _endLend(keep: true);
   }
 
   void _onLendMessage(LendMessage m) {
     switch (m) {
       case LendMessage.start:
-        if (!_lending) return sendToNight?.call(lendLost);
+        if (!_lending) {
+          _log.info('lend: the recorder starts, but the offer is gone: it is told lost');
+          return sendToNight?.call(lendLost);
+        }
+        _log.info('lend: the recorder starts on the live connection');
         _forwarding = true;
         final band = _real;
         if (band != null) unawaited(_ensureStream(band).catchError((Object _) {}));
       case LendMessage.endKeep:
         if (_lending) _endLend(keep: true);
       case LendMessage.take:
+        _log.info('lend: the recorder reaches the headband itself; let go here');
         // the recorder reaches the headband itself now: nothing here may hold it
         _endLend();
         unawaited(_letGoReal().whenComplete(() => sendToNight?.call(lendReleased)));

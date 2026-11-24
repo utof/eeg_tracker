@@ -3,11 +3,15 @@
 host 10.0.2.2) with no notification; the spare port when 8765 is taken; the laptop's own copy pass beside it.
 
     _local/build_slot.sh heavy python3 app/tool/push_smoke.py APK [--natural-min 32] [--work /var/tmp/share_smoke]
-        [--replay REPLAY_BUILD.apk]
+        [--replay REPLAY_BUILD.apk] [--push-port N]
 
 With --replay (needs dart on PATH): first the replay build makes a short recording with a sleep stretch, a Stop and
 a chip on the sheet (tool/record_check.py's five steps), then APK is installed over it; the push must bring the
 recording's spans file and its tags to the laptop, where scripts/spans.py reads the sleep stretch (DECISIONS 836).
+With --push-port N the check's receiver listens on N and the emulator sends what the app addresses to the laptop's
+port 8772 there instead (a rule inside the emulator only): for a laptop whose own `phone_link.py --keep` holds 8772
+for the real phone. Without it the emulator's app would knock on the real receiver, which rightly refuses it (the
+run of 2026-11-25 01:07: every push "the laptop did not answer").
 
 Own adb server on port 5049, own temporary AVD under the work folder, both removed at the end. About 30-45 minutes:
 most of it is the wait for Android's own second run of the regular job.
@@ -35,6 +39,7 @@ import spans as laptop_spans  # noqa: E402
 WORK = Path("/var/tmp/share_smoke")
 DEST = WORK / "dest"
 LINK_PORT = 18771
+PUSH_PORT: int | None = None  # the check's own receiver port (--push-port); None: the app's 8772
 JOB = "877201"
 RESULTS: list[tuple[str, bool, str]] = []
 
@@ -151,7 +156,8 @@ def keep(*extra: str) -> subprocess.Popen:
     log = open(WORK / "keep.log", "ab")
     return subprocess.Popen(
         [sys.executable, "-I", str(WT / "scripts" / "phone_link.py"), "--keep", "--dest", str(DEST), "--address",
-         "10.0.2.2", "--port", str(LINK_PORT), "--no-pages", "--no-after-pull", "--push-loopback-home", *extra],
+         "10.0.2.2", "--port", str(LINK_PORT), "--no-pages", "--no-after-pull", "--push-loopback-home",
+         *(["--push-port", str(PUSH_PORT)] if PUSH_PORT else []), *extra],
         stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 
 
@@ -206,8 +212,9 @@ def spans_on_laptop(names: list[str]) -> None:
 
 
 def main() -> int:
-    global WORK, DEST
+    global WORK, DEST, PUSH_PORT
     apk = Path(sys.argv[1])
+    PUSH_PORT = int(sys.argv[sys.argv.index("--push-port") + 1]) if "--push-port" in sys.argv else None
     replay = Path(sys.argv[sys.argv.index("--replay") + 1]) if "--replay" in sys.argv else None
     natural = float(sys.argv[sys.argv.index("--natural-min") + 1]) if "--natural-min" in sys.argv else 32
     if "--work" in sys.argv:
@@ -226,6 +233,11 @@ def main() -> int:
         pc.sh("nohup toybox nc -L -p 8765 sleep 100000 >/dev/null 2>&1 &", check=False)
         time.sleep(2)
         pc.say("holder of 8765: " + pc.sh("ss -ltn 2>/dev/null | grep 8765 || netstat -ltn | grep 8765", check=False).strip())
+        if PUSH_PORT:
+            pc.sh(f"iptables -t nat -A OUTPUT -p tcp -d 10.0.2.2 --dport 8772 -j DNAT --to-destination 10.0.2.2:{PUSH_PORT}")
+            rule = pc.sh("iptables -t nat -S OUTPUT", check=False)
+            note(f"the emulator sends the app's pushes to this check's receiver (port {PUSH_PORT})", str(PUSH_PORT) in rule,
+                 rule.strip().splitlines()[-1] if rule.strip() else "no rule")
         span_files = record_with_sleep(replay) if replay else []
         pc.install(apk)
         pc.start_app()
@@ -248,6 +260,11 @@ def main() -> int:
         # the receiver alone (no copy pass of the laptop's own) from here to step 7
         kp = keep("--no-mirror")
         time.sleep(8)
+        taken = "is taken" in (WORK / "keep.log").read_text(errors="replace")
+        note("the check's receiver has its port (no other receiver on this laptop holds it)", not taken,
+             (WORK / "keep.log").read_text(errors="replace").strip().splitlines()[-1][:200] if taken else "")
+        if taken:
+            raise RuntimeError("the receiver's port is taken: run with --push-port N")
 
         # --- 2. the spare port: 8765 is held by nc, the app's server must be on 8766 and say why
         pc.adb("forward", "tcp:18765", "tcp:8765"); pc.adb("forward", "tcp:18766", "tcp:8766")

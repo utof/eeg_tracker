@@ -873,6 +873,12 @@ def check_one_connection(replay: Path, stage: Path) -> Result:
     samples = [int(m.group(1)) for m in re.finditer(r"samples (\d+) \(\+", log)]
     connects = log.count(" connected ")
     details.append(f"lent {lent}, contact not measured again {no_check}, connections in the log {connects}, samples {samples[-1:]}")
+    if not lent or not no_check or connects != 1 or "reconnect try" in log:
+        # what the recorder and the screen's connection owner said, whole: a handover that broke is told here
+        details += ["  night log: " + l for l in log.splitlines()[14:60]]
+    # the screen's side of the handover, in the app's own log (a pass and a fail read differently here)
+    said = sh(f"cat {FILES}/logs/app-*.jsonl 2>/dev/null | grep -F '\"msg\":\"lend:' | sort | tail -12", check=False)
+    details += ["  app log: " + l[:240] for l in said.splitlines()]
     if not lent or not no_check:
         return Result(name, "FAIL", "the night did not start on the Signal tab's live connection (it searched or checked contact again)", details)
     if connects != 1 or "reconnect try" in log:

@@ -80,9 +80,11 @@ def made_up(stage: Path, now: datetime) -> tuple[list[tuple[Path, str]], dict]:
         w0 = now - timedelta(minutes=80 + shift)
         if not blind(estimate_id("walking", "walking", w0, w1, rec)):
             break
-    v1 = now - timedelta(minutes=15)
-    v0 = next(now - timedelta(minutes=36 + k) for k in range(60)
-              if blind(estimate_id("walking", "walking", now - timedelta(minutes=36 + k), v1, rec)) and 36 + k < 44)
+    # the unsure walk must draw blind: its start, then its end too, move by whole minutes until it does (with the end
+    # fixed, 1 minute in 6 has no such start among the 8 that fit before the other walk: the run of 2026-11-25 01:05)
+    v0, v1 = next((now - timedelta(minutes=36 + k), now - timedelta(minutes=15 + d)) for d in range(10) for k in range(8)
+                  if blind(estimate_id("walking", "walking", now - timedelta(minutes=36 + k),
+                                       now - timedelta(minutes=15 + d), rec)))
     for shift in range(40):  # the sleep card must show its guess too: start it a minute earlier while it draws blind
         s0 = now - timedelta(minutes=200 + shift)
         nap = 9 <= s0.hour < 20

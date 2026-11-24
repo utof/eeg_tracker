@@ -1284,6 +1284,14 @@ class NightRecorder {
       await _save();
       return;
     }
+    if (band is LentBand) {
+      // a live connection the screen never measured contact on (or whose reading no longer holds): it cannot be
+      // measured from here (that would pause the screen's stream, and no resistance ever comes over the lend), so
+      // nothing is waited for. Not counted as tonight's check: a connection of the recorder's own still gets one.
+      // (The owner's night of 2026-11-25 00:36 waited 6 s here and wrote "no resistance data arrived".)
+      w.log('no contact reading on the live connection; not measured now');
+      return;
+    }
     _set(_status.copyWith(phase: Phase.checkingContact, note: 'checking contact'));
     final last = <String, double>{};
     final sub = band.resistance.listen(last.addAll);
