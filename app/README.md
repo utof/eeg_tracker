@@ -1856,6 +1856,21 @@ because Android blocks scans while the screen is off), after 2, 5, 10, 30 s and 
 third try is a short scan instead. Each try is written in the night's `.log` with its time (`drop`,
 `reconnect try`, `reconnected`), so gaps can be marked later. It never stops trying until you press Stop.
 
+After 10 minutes without the headband it stops asking every minute and waits cheaply instead (DECISIONS 940-945):
+
+- With our own connection the phone's Bluetooth chip listens for the headband by itself (a "waiting connect": about
+  2% of the radio's time, the app sleeps) and connects when it shows up; every 15 minutes the app also tries once
+  directly. With BrainBit's library, which has no waiting connect, the app tries once every 5 minutes, every 2 minutes
+  while the screen is on.
+- A try at once, whenever: you open the app, unlock the phone, switch Bluetooth on, or tap **Reconnect now** on the
+  "Headband lost" notice (the notice then says if that try found nothing).
+- The `.log` says which road brought it back and after how long: `reconnected (...); waited 3 h 12 min; back by:
+  waiting connect`. With our own connection it also has the link's real timing once per connection (`link timing:
+  interval 15 ms, latency 0, timeout 5.0 s`).
+
+The 10, 15, 5 and 2 minutes are planning values (one constant each in `lib/headband/reconnect_ladder.dart`); nobody
+has measured them on the phone yet.
+
 ## Archive (every recording, its timeline and tags)
 
 **More** → **Open the archive** lists everything the phone keeps, newest first, under each day (a day runs from 04:00

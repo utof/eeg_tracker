@@ -6,8 +6,9 @@
 //   C. Wait, after 10 min:  the 60 s tries stop. ONE waiting connect stays open (the phone's Bluetooth chip listens
 //                           for the headband and connects when it shows up; no scan, no time limit), with a safety
 //                           try every 15 min: the waiting connect is closed, one direct try is made, and it is
-//                           opened again. Where there is no waiting connect (BrainBit's SDK, the DIY board) or it
-//                           fails: one direct try every 5 min, every 2 min while the screen is on.
+//                           opened again. Where there is no waiting connect (BrainBit's SDK) or it fails: one
+//                           direct try every 5 min, every 2 min while the screen is on. (The DIY board's night
+//                           never gets here: listening on Wi-Fi costs no radio, [LadderTiming.neverWait].)
 //   Hints, at any stage:    the app opened or brought to the front, the phone unlocked, Bluetooth switched on,
 //                           "Reconnect now" on the headband-lost notice: one direct try at once.
 //
@@ -74,6 +75,10 @@ class LadderTiming {
   });
 
   final Duration mendFor, waitAfter, safetyEvery, fallbackEvery, fallbackEveryScreenOn;
+
+  /// For a board whose "connection" costs no radio time (the DIY board listens for datagrams on Wi-Fi): stage C
+  /// never begins, the owner's own short waits go on for as long as it takes.
+  static const LadderTiming neverWait = LadderTiming(waitAfter: Duration(days: 36500));
 
   /// How long closing a waiting connect may take before the try goes ahead anyway.
   final Duration cancelWait;
