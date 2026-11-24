@@ -7,8 +7,8 @@ Seeds a made-up sleep report, a made-up walk file with two walks (no recording o
 notification batch of today, starts the app and checks:
   1. the card names the stretch first and the guess second ("... The headband thinks you walked. Did you?"), and one
      card is a blind one ("What were you doing ...?": the walk whose id draws blind, worked out here by the app's rule);
-  2. a chip on the blind card stores `said` with the guess kept beside it (`card` blind);
-  3. "Yes, but the times are off" opens the strip; moving the end and saving stores a Yes with `times_confirmed` true;
+  2. "Yes, but the times are off" opens the strip; moving the end and saving stores a Yes with `times_confirmed` true;
+  3. a chip on the blind card stores `said` with the guess kept beside it (`card` blind);
   4. "Not sure" in the notification is stored as `not_sure`; back in the app the question is not asked again and
      the labels file has no row for it;
   5. the 2-batch limit: a new walk arrives after today's second batch: no notification comes, the next one is planned
@@ -181,25 +181,12 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     if not card:
         return results
 
-    chip = pc.find("Walking", exact=True)  # the blind card is the third: it may be below the screen's edge
-    ok = chip is not None
-    if chip:
-        pc.sh(f"input tap {chip[1]} {chip[2]}")
-        time.sleep(2)
-    got = wait(lambda: line_of(ids["blind"]), limit=30)
-    good = bool(got) and (got.get("answer"), got.get("card"), got.get("said"), got.get("guess")) == ("said", "blind", "walking", "walking")
-    results.append(pc.Result("2 a blind card stores what you said, with the guess kept beside it",
-                             "PASS" if ok and good else "FAIL", f"answers.jsonl: {json.dumps(got)}", pc.screen_words("blind-answered")))
-
-    for _ in range(4):
-        emu.scroll("up")
-    # each card that shows its guess has the link: take the one right under the walk's question
-    question = wait(lambda: emu.match(want["walk"], False), limit=20)
-    links = [n for n in emu.nodes() if n[0].strip() == "Yes, but the times are off" and question and n[2] > question[2]]
-    opened = bool(links)
-    if links:
-        link = min(links, key=lambda n: n[2])
-        pc.sh(f"input tap {link[1]} {link[2]}")
+    # the cards are in time order: sleep, the sure walk, the blind walk. Each card that shows its guess has the link;
+    # the walk's is the second from the top (the card's questions are one text node, so the place tells them apart)
+    links = sorted((n for n in emu.nodes() if n[0].strip() == "Yes, but the times are off"), key=lambda n: n[2])
+    opened = len(links) == 2
+    if opened:
+        pc.sh(f"input tap {links[1][1]} {links[1][2]}")
         time.sleep(2)
     strip = bool(wait(lambda: emu.match("set the times", False), limit=20))
     moved = tap("End 5 minutes earlier", limit=10)
@@ -207,10 +194,27 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     got = wait(lambda: line_of(ids["walk"]), limit=30)
     good = bool(got) and got.get("answer") == "yes" and got.get("times_confirmed") is True and bool(got.get("start")) and bool(got.get("end"))
     results.append(pc.Result(
-        "3 \"Yes, but the times are off\": the strip, an end moved, saved as confirmed times",
-        "PASS" if opened and strip and saved and good else "FAIL",
+        "2 \"Yes, but the times are off\": the strip, an end moved, saved as confirmed times",
+        "PASS" if opened and strip and moved and saved and good else "FAIL",
         f"link tapped {opened}, strip shown {strip}, end moved {moved}, saved {saved}; answers.jsonl: {json.dumps(got)}",
         pc.screen_words("times-saved")))
+
+    chip = None
+    for _ in range(8):  # the blind card is the third: its chips are below the screen's edge
+        chip = emu.match("Walking", True)
+        if chip:
+            break
+        pc.sh("input swipe 540 1500 540 900 400")
+        time.sleep(2)
+    ok = chip is not None
+    if chip:
+        pc.sh(f"input tap {chip[1]} {chip[2]}")
+        time.sleep(2)
+    got = wait(lambda: line_of(ids["blind"]), limit=30)
+    good = bool(got) and (got.get("answer"), got.get("card"), got.get("said"), got.get("guess")) == ("said", "blind", "walking", "walking")
+    results.append(pc.Result("3 a blind card stores what you said, with the guess kept beside it",
+                             "PASS" if ok and good else "FAIL", f"chip found {ok}; answers.jsonl: {json.dumps(got)}",
+                             pc.screen_words("blind-answered")))
 
     title = wait(cc.notification_title, limit=180)
     tapped = cc.tap_in_shade("Not sure")
