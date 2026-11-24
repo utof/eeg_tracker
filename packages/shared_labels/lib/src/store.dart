@@ -19,7 +19,9 @@
 //                                  or a few words you added: {"estimate_id", "note", "at"}. Written by the app and by
 //                                  the notification's buttons (ConfirmPrompts.kt), which work while the app is closed.
 //   files/confirm/asks.jsonl       one line per batch that went out as a notification ({"at", "estimates": [ids],
-//                                  "why": {id: word}}), and what the Android side did with it ({"at", "event", "batch"})
+//                                  "why": {id: word}, "blind": [ids made blind by rule]}), what the Android side did
+//                                  with it ({"at", "event", "batch"}), and every back-off step with its reason
+//                                  ({"at", "event": "backoff", "step", "reason", "until", "hour"})
 //   files/confirm/armed.json       the batch waiting for its moment (written whole)
 //   files/confirm/settings.json    the switch, how many questions, how many batches a day, the quiet hours
 //   files/confirm/labels.tsv       your Yes and No answers as truth labels (labels.dart), rebuilt whole
@@ -184,32 +186,46 @@ class Answered {
 }
 
 class ConfirmSettings {
-  const ConfirmSettings({this.on = true, this.perBatch = 4, this.perDay = 3, this.quietStartMin = 22 * 60, this.quietEndMin = 8 * 60});
+  const ConfirmSettings({
+    this.on = true,
+    this.perBatch = 4,
+    this.perDay = 2,
+    this.quietStartMin = 22 * 60,
+    this.quietEndMin = 8 * 60,
+    this.quietFromSleep = true,
+  });
 
   /// Off: no notification and no card; estimates are still kept.
   final bool on;
 
-  /// Questions in a batch (3 to 5) and notification batches a day (1 to 6).
+  /// Questions in a batch (2 to 4) and notification batches a day (1 or 2): planning values (asking.md).
   final int perBatch, perDay;
 
-  /// The quiet hours, minutes of the day; no notification between them (the card in the app is always there).
+  /// The fixed quiet hours, minutes of the day; no notification between them (the card in the app is always there).
+  /// Used when [quietFromSleep] is off, and while the app has too few of your nights to know when you sleep.
   final int quietStartMin, quietEndMin;
 
-  ConfirmSettings copyWith({bool? on, int? perBatch, int? perDay, int? quietStartMin, int? quietEndMin}) => ConfirmSettings(
+  /// The quiet hours follow your real sleep: from your usual bedtime until half an hour after you woke (queue.dart
+  /// `sleepHabit`).
+  final bool quietFromSleep;
+
+  ConfirmSettings copyWith({bool? on, int? perBatch, int? perDay, int? quietStartMin, int? quietEndMin, bool? quietFromSleep}) => ConfirmSettings(
     on: on ?? this.on,
     perBatch: perBatch ?? this.perBatch,
     perDay: perDay ?? this.perDay,
     quietStartMin: quietStartMin ?? this.quietStartMin,
     quietEndMin: quietEndMin ?? this.quietEndMin,
+    quietFromSleep: quietFromSleep ?? this.quietFromSleep,
   );
 
   Map<String, Object?> toJson() => {
-    'version': 1,
+    'version': 2,
     'on': on,
     'per_batch': perBatch,
     'per_day': perDay,
     'quiet_start_min': quietStartMin,
     'quiet_end_min': quietEndMin,
+    'quiet_from_sleep': quietFromSleep,
   };
 
   static ConfirmSettings fromJson(Object? j) {
@@ -218,20 +234,42 @@ class ConfirmSettings {
     const d = ConfirmSettings();
     return ConfirmSettings(
       on: j['on'] != false,
-      perBatch: within(j['per_batch'], 3, 5, d.perBatch),
-      perDay: within(j['per_day'], 1, 6, d.perDay),
+      perBatch: within(j['per_batch'], 2, 4, d.perBatch),
+      perDay: within(j['per_day'], 1, 2, d.perDay),
       quietStartMin: within(j['quiet_start_min'], 0, 1439, d.quietStartMin),
       quietEndMin: within(j['quiet_end_min'], 0, 1439, d.quietEndMin),
+      quietFromSleep: j['quiet_from_sleep'] != false,
     );
   }
 }
 
 /// The batch waiting for its notification.
 class Armed {
-  const Armed(this.at, this.ids, [this.why = const {}]);
+  const Armed(this.at, this.ids, [this.why = const {}, this.blind = const []]);
   final DateTime at;
   final List<String> ids;
   final Map<String, String> why;
+
+  /// The cards of this batch made blind by rule (backoff.dart: a run of fast Yes answers).
+  final List<String> blind;
+}
+
+/// A notification batch that went out.
+class Push {
+  const Push(this.at, this.ids, [this.blind = const []]);
+  final DateTime at;
+  final List<String> ids, blind;
+}
+
+/// A line of asks.jsonl that is not a batch: what the phone did with one (`shown`, `held`, `late`, `skipped`,
+/// `dismissed`; [batch] is the batch's moment), or a back-off step (`backoff`: [step], [until], [hour], [reason]).
+class AskEvent {
+  const AskEvent(this.at, this.event, {this.batch, this.step, this.until, this.hour, this.reason});
+  final DateTime at;
+  final String event;
+  final DateTime? batch, until;
+  final String? step, reason;
+  final int? hour;
 }
 
 /// Everything the files say, read once.
@@ -242,6 +280,9 @@ class ConfirmState {
     required this.notified,
     required this.batches,
     this.unanswered = const {},
+    this.pushes = const [],
+    this.events = const [],
+    this.forcedBlind = const {},
   });
 
   /// By id, in the order registered.
@@ -255,6 +296,14 @@ class ConfirmState {
 
   /// When each notification batch went out, oldest first.
   final List<DateTime> batches;
+
+  /// The notification batches that went out, oldest first ([batches] are their moments), and everything else the
+  /// asks file holds.
+  final List<Push> pushes;
+  final List<AskEvent> events;
+
+  /// Cards made blind by rule (in a batch that went out or the one waiting), beside the 1 in 5 drawn by id.
+  final Set<String> forcedBlind;
 
   /// The last "no answer came" of each estimate that has one. An estimate can be here and in [answers]: the answer
   /// counts.
@@ -353,16 +402,43 @@ class ConfirmStore {
       if (a != null && n.value.isNotEmpty) answers[n.key] = a.withNote(n.value);
     }
     final notified = <String>{};
-    final batches = <DateTime>[];
+    final pushes = <Push>[];
+    final events = <AskEvent>[];
+    final forced = <String>{...?armed()?.blind};
     for (final j in _lines(asksFile)) {
-      if (j is! Map || j['estimates'] is! List) continue;
+      if (j is! Map) continue;
       final at = DateTime.tryParse('${j['at']}')?.toLocal();
       if (at == null) continue;
-      batches.add(at);
-      notified.addAll((j['estimates'] as List).whereType<String>());
+      if (j['estimates'] is List) {
+        final blind = j['blind'] is List ? (j['blind'] as List).whereType<String>().toList() : const <String>[];
+        pushes.add(Push(at, (j['estimates'] as List).whereType<String>().toList(), blind));
+        notified.addAll(pushes.last.ids);
+        forced.addAll(blind);
+      } else if (j['event'] is String) {
+        events.add(
+          AskEvent(
+            at,
+            j['event'] as String,
+            batch: DateTime.tryParse('${j['batch']}')?.toLocal(),
+            step: j['step'] is String ? j['step'] as String : null,
+            until: DateTime.tryParse('${j['until']}')?.toLocal(),
+            hour: j['hour'] is int ? j['hour'] as int : null,
+            reason: j['reason'] is String ? j['reason'] as String : null,
+          ),
+        );
+      }
     }
-    batches.sort();
-    return ConfirmState(estimates: estimates, answers: answers, notified: notified, batches: batches, unanswered: unanswered);
+    pushes.sort((a, b) => a.at.compareTo(b.at));
+    return ConfirmState(
+      estimates: estimates,
+      answers: answers,
+      notified: notified,
+      batches: [for (final p in pushes) p.at],
+      unanswered: unanswered,
+      pushes: pushes,
+      events: events,
+      forcedBlind: forced,
+    );
   }
 
   /// A detector's one call: keeps [found] as estimates (those not kept before) and returns how many were new.
@@ -480,11 +556,16 @@ class ConfirmStore {
       final at = j is Map ? DateTime.tryParse('${j['at']}')?.toLocal() : null;
       if (j is! Map || at == null || j['estimates'] is! List) return null;
       final why = j['why'];
-      return Armed(at, (j['estimates'] as List).whereType<String>().toList(), {
-        if (why is Map)
-          for (final e in why.entries)
-            if (e.value is String) '${e.key}': e.value as String,
-      });
+      return Armed(
+        at,
+        (j['estimates'] as List).whereType<String>().toList(),
+        {
+          if (why is Map)
+            for (final e in why.entries)
+              if (e.value is String) '${e.key}': e.value as String,
+        },
+        j['blind'] is List ? (j['blind'] as List).whereType<String>().toList() : const [],
+      );
     } on FileSystemException {
       return null;
     } on FormatException {
@@ -497,7 +578,7 @@ class ConfirmStore {
       if (armedFile.existsSync()) armedFile.deleteSync();
       return;
     }
-    _whole(armedFile, jsonEncode({'at': isoLocal(a.at), 'estimates': a.ids, 'why': a.why}));
+    _whole(armedFile, jsonEncode({'at': isoLocal(a.at), 'estimates': a.ids, 'why': a.why, if (a.blind.isNotEmpty) 'blind': a.blind}));
   }
 
   /// The armed batch's moment has come: it went out (or the phone held it back), so its estimates never go into
@@ -505,10 +586,21 @@ class ConfirmStore {
   bool settleArmed(DateTime now) {
     final a = armed();
     if (a == null || a.at.isAfter(now)) return false;
-    _append(asksFile, {'at': isoLocal(a.at), 'via': 'notification', 'estimates': a.ids, 'why': a.why});
+    _append(asksFile, {'at': isoLocal(a.at), 'via': 'notification', 'estimates': a.ids, 'why': a.why, if (a.blind.isNotEmpty) 'blind': a.blind});
     saveArmed(null);
     return true;
   }
+
+  /// A back-off step and its reason, kept with the batches (backoff.dart): `pause`, `one_a_day`, `normal`,
+  /// `skip_hour`, `blind_batch`.
+  void logBackoff(String step, String reason, {required DateTime at, DateTime? until, int? hour}) => _append(asksFile, {
+    'at': isoLocal(at),
+    'event': 'backoff',
+    'step': step,
+    'reason': reason,
+    if (until != null) 'until': isoLocal(until),
+    'hour': ?hour,
+  });
 
   void writeLabels(String tsv) => _whole(labelsFile, tsv);
 

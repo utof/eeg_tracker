@@ -8,12 +8,19 @@ import 'theme.dart';
 
 String _clock(int minutes) => '${(minutes ~/ 60).toString().padLeft(2, '0')}:${(minutes % 60).toString().padLeft(2, '0')}';
 
+String _quietLine(ConfirmSettings s, ({int startMin, int endMin, int nights})? q) {
+  if (!s.quietFromSleep) return 'Off: the fixed hours below';
+  if (q == null || q.nights == 0) return 'Quiet from your usual bedtime until half an hour after you wake. Needs 3 recorded nights first.';
+  return 'Now quiet ${_clock(q.startMin)} to ${_clock(q.endMin)}, from your last ${q.nights} nights';
+}
+
 /// The settings page: the switch, how many, and the quiet hours.
 class ConfirmSettingsView extends StatelessWidget {
   const ConfirmSettingsView({
     super.key,
     required this.settings,
     required this.onChanged,
+    this.quietNow,
     this.notificationsOn = true,
     this.onNotificationSettings,
     this.onPickTime,
@@ -22,6 +29,9 @@ class ConfirmSettingsView extends StatelessWidget {
 
   final ConfirmSettings settings;
   final ValueChanged<ConfirmSettings> onChanged;
+
+  /// The quiet hours in force now, and from how many of your nights they come (0: the fixed hours).
+  final ({int startMin, int endMin, int nights})? quietNow;
 
   /// The phone allows the questions' notifications.
   final bool notificationsOn;
@@ -81,8 +91,8 @@ class ConfirmSettingsView extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(24, 4, 24, 32),
         children: [
           Text(
-            'Soon after the app thinks you slept or walked, it asks: "Did you walk 19:08-21:14?" Yes, No or Not sure, '
-            'one tap. Until you answer, it is only the app\'s guess.',
+            'Soon after the headband thinks you slept or walked, the app asks: "19:08-21:14. The headband thinks you '
+            'walked. Did you?" One tap. Now and then it asks without saying its guess. Until you answer, it is only a guess.',
             style: text.bodyLarge?.copyWith(height: 1.45),
           ),
           SwitchListTile(
@@ -100,13 +110,25 @@ class ConfirmSettingsView extends StatelessWidget {
               child: TextButton(onPressed: onNotificationSettings, child: const Text('Notification settings')),
             ),
           ],
-          choice('Questions at a time, at most', s.perBatch, const [3, 4, 5], (v) => s.copyWith(perBatch: v)),
-          choice('Notifications a day, at most', s.perDay, const [1, 2, 3, 4, 6], (v) => s.copyWith(perDay: v)),
+          choice('Questions at a time, at most', s.perBatch, const [2, 3, 4], (v) => s.copyWith(perBatch: v)),
+          choice('Notifications a day, at most', s.perDay, const [1, 2], (v) => s.copyWith(perDay: v)),
           const SizedBox(height: 20),
           Text('Quiet hours', style: text.bodyLarge?.copyWith(height: 1.4)),
           const SizedBox(height: 4),
-          Text('No notification between these times; it comes when they end. The card in the app is always there.', style: muted),
+          Text('No notification in the quiet hours; it comes when they end. The card in the app is always there.', style: muted),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Follow my sleep'),
+            subtitle: Text(_quietLine(s, quietNow), style: muted),
+            value: s.quietFromSleep,
+            onChanged: s.on ? (v) => onChanged(s.copyWith(quietFromSleep: v)) : null,
+          ),
+          if (!s.quietFromSleep || (quietNow?.nights ?? 0) == 0) ...[
+            const SizedBox(height: 4),
+            Text(s.quietFromSleep ? 'Until then, these hours:' : 'Always these hours:', style: muted),
+          ],
           const SizedBox(height: 10),
+          if (!s.quietFromSleep || (quietNow?.nights ?? 0) == 0)
           Row(
             children: [
               Expanded(child: OutlinedButton(onPressed: s.on ? () => _pick(true) : null, child: Text('From ${_clock(s.quietStartMin)}'))),
@@ -116,7 +138,8 @@ class ConfirmSettingsView extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           Text(
-            'Also never while a recording runs with the screen off: you may be asleep. It waits until you use the phone.',
+            'Also never while a recording runs with the screen off: you may be asleep. It waits until you use the phone. '
+            'If you often leave the notifications unanswered, the app sends fewer by itself.',
             style: muted,
           ),
         ],

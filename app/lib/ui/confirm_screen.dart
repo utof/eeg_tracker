@@ -71,7 +71,8 @@ class _ConfirmCardHostState extends State<ConfirmCardHost> with WidgetsBindingOb
   late final ConfirmQuestions _confirm = ConfirmQuestions(Directory(widget.filesPath), phone: widget.phone, clock: widget.clock);
   List<ConfirmQuestion> _questions = const [];
   final Map<String, Answer> _answers = {};
-  final Map<String, String> _notes = {};
+  final Map<String, String> _notes = {}, _saved = {};
+  List<Estimate> _around = const [];
 
   /// When the questions on the card came on screen (the answer keeps how long you took).
   DateTime _shown = DateTime.now();
@@ -127,18 +128,51 @@ class _ConfirmCardHostState extends State<ConfirmCardHost> with WidgetsBindingOb
     await (widget.gather ?? gatherInBackground)(widget.filesPath);
     await _confirm.plan();
     final pending = _confirm.pending();
+    final around = pending.any((q) => q.exactTimes) ? _confirm.around() : const <Estimate>[];
     if (!mounted) return;
     setState(() {
       _answers.clear();
       _notes.clear();
+      _saved.clear();
+      _around = around;
       _questions = pending;
       _shown = (widget.clock ?? DateTime.now)();
     });
   }
 
   void _answer(ConfirmQuestion q, Answer a) {
-    _confirm.answer(q.id, a, card: CardKind.normal, shown: _shown);
+    _confirm.answer(q.id, a, card: q.kind, shown: _shown);
     setState(() => _answers[q.id] = a);
+  }
+
+  /// "Yes, but the times are off", saved: a Yes with your own times.
+  void _times(ConfirmQuestion q, DateTime start, DateTime end) {
+    _confirm.answer(q.id, Answer.yes, card: q.kind, shown: _shown, start: start, end: end);
+    String clock(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+    setState(() {
+      _answers[q.id] = Answer.yes;
+      _saved[q.id] = '${q.yes}, ${clock(start)}-${clock(end)}';
+    });
+  }
+
+  /// A blind card's chip.
+  void _said(ConfirmQuestion q, Label label) {
+    _confirm.answer(q.id, Answer.said, card: CardKind.blind, shown: _shown, said: label);
+    setState(() {
+      _answers[q.id] = Answer.said;
+      _saved[q.id] = label.chip;
+    });
+  }
+
+  /// A blind card's "Something else": your own words.
+  Future<void> _words(ConfirmQuestion q) async {
+    final words = await askWords(context, q.text, null);
+    if (words == null || !mounted) return;
+    _confirm.answer(q.id, Answer.said, card: CardKind.blind, shown: _shown, words: words);
+    setState(() {
+      _answers[q.id] = Answer.said;
+      _saved[q.id] = cleanNote(words);
+    });
   }
 
   void _undo(ConfirmQuestion q) {
@@ -146,6 +180,7 @@ class _ConfirmCardHostState extends State<ConfirmCardHost> with WidgetsBindingOb
     setState(() {
       _answers.remove(q.id);
       _notes.remove(q.id);
+      _saved.remove(q.id);
     });
   }
 
@@ -161,9 +196,15 @@ class _ConfirmCardHostState extends State<ConfirmCardHost> with WidgetsBindingOb
     questions: _questions,
     answers: _answers,
     notes: _notes,
+    saved: _saved,
     onAnswer: _answer,
     onUndo: _undo,
     onNote: _note,
+    onTimes: _times,
+    onSaid: _said,
+    onWords: _words,
+    around: _around,
+    now: (widget.clock ?? DateTime.now)(),
     onInfo: () => showEvidence(context, 'confirm-questions'),
   );
 }
@@ -206,6 +247,13 @@ class _ConfirmSettingsScreenState extends State<ConfirmSettingsScreen> with Widg
   late ConfirmSettings _settings = _confirm.settings;
   bool _notifications = true;
 
+  /// The quiet hours in force now, and from how many of your nights (0: the fixed ones).
+  ({int startMin, int endMin, int nights}) _quietNow() {
+    final state = _confirm.store.read(), now = DateTime.now();
+    final q = quietHours(state, _settings, now);
+    return (startMin: q.startMin, endMin: q.endMin, nights: q.fromSleep ? (sleepHabit(state, now)?.nights ?? 0) : 0);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -247,6 +295,7 @@ class _ConfirmSettingsScreenState extends State<ConfirmSettingsScreen> with Widg
   @override
   Widget build(BuildContext context) => ConfirmSettingsView(
     settings: _settings,
+    quietNow: _quietNow(),
     onChanged: _changed,
     notificationsOn: _notifications,
     onNotificationSettings: () => unawaited(widget.phone?.openChannelSettings().catchError((Object _) {})),

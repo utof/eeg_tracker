@@ -7,6 +7,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart' show sha1;
 
+import 'store.dart' show CardKind;
 import 'time.dart';
 import 'vocabulary.dart';
 
@@ -107,29 +108,90 @@ const List<String> _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', '
 String _clock(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
 /// The day word before the times, in your local time at [now]: nothing for a stretch that ended today (a night that
-/// began yesterday too), ` yesterday`, else ` on Thu 19 Nov`.
+/// began yesterday too), `yesterday`, else `Thu 19 Nov`.
 String _dayWord(DateTime end, DateTime now) {
   final today = DateTime(now.year, now.month, now.day), endDay = DateTime(end.year, end.month, end.day);
   final ago = (today.difference(endDay).inHours / 24).round(); // whole days, safe across a clock change
   if (ago <= 0) return '';
-  if (ago == 1) return ' yesterday';
-  return ' on ${_weekdays[end.weekday - 1]} ${end.day} ${_months[end.month - 1]}';
+  if (ago == 1) return 'yesterday';
+  return '${_weekdays[end.weekday - 1]} ${end.day} ${_months[end.month - 1]}';
 }
 
-/// "Did you sleep 15:59-17:49?", "Did you walk yesterday 19:08-21:14?": short, the times in your local time.
-String questionOf(Estimate e, DateTime now) =>
-    '${e.label.ask}${_dayWord(e.end, now)} ${_clock(e.start)}-${_clock(e.end)}?';
+DateTime _halfHour(DateTime t) => DateTime(t.year, t.month, t.day, t.hour, t.minute).add(Duration(minutes: ((t.minute + 15) ~/ 30) * 30 - t.minute));
+
+/// The stretch in words, your local time at [now]: `15:59-17:49`, `yesterday 15:59-17:49`, `Thu 19 Nov 15:59-17:49`.
+/// Not [exact] (the times are no longer asked about, asking.md): to the half hour, `yesterday, about 16:00 to 18:00`.
+String spanWords(Estimate e, DateTime now, {bool exact = true}) {
+  final day = _dayWord(e.end, now);
+  if (exact) return '${day.isEmpty ? '' : '$day '}${_clock(e.start)}-${_clock(e.end)}';
+  final a = _clock(_halfHour(e.start)), b = _clock(_halfHour(e.end));
+  final about = a == b ? 'about $a' : 'about $a to $b';
+  return day.isEmpty ? about : '$day, $about';
+}
+
+String _capital(String s) => s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';
+
+/// The words of a card that shows the guess: the stretch first, the guess second, as [who]'s opinion, then the
+/// question: "15:59-17:49. The headband thinks you slept. Did you?" (asking.md: naming the stretch first and the guess
+/// as an opinion pulls less toward Yes than "Did you sleep 15:59-17:49?").
+String questionOf(Estimate e, DateTime now, {String who = 'The headband', bool exact = true}) =>
+    '${_capital(spanWords(e, now, exact: exact))}. $who thinks ${e.label.thinks}. ${e.label.asks}';
+
+/// The words of a blind card, which does not show the guess: "What were you doing 19:08-21:14?"
+String blindQuestionOf(Estimate e, DateTime now, {bool exact = true}) => 'What were you doing ${spanWords(e, now, exact: exact)}?';
+
+/// The labels a blind card offers, in the vocabulary's order, so the guess's place gives nothing away: a fixed short
+/// list, and the guess's own label when it is not on it. Sleep, a nap and night sleep are one chip.
+List<Label> blindChips(Estimate e) {
+  const base = {'asleep', 'walking', 'working', 'eating', 'resting', 'vehicle', 'exercise', 'talking'};
+  final guess = e.label;
+  return [
+    for (final l in Labels.all)
+      if (base.contains(l.id) || (l == guess && !base.any((b) => Label.of(b)!.sameAs(guess)))) l,
+  ];
+}
+
+/// Whether [id]'s card is a blind one: 1 card in [oneIn], picked by the estimate's id and [seed], so the same card is
+/// blind on the card, in the notification and in a test, and nothing is rolled at run time.
+bool blindByDraw(String id, {String seed = blindSeed, int oneIn = blindOneIn}) {
+  if (oneIn <= 0) return false;
+  final b = sha1.convert(utf8.encode('$seed|$id')).bytes;
+  return ((b[0] << 16) | (b[1] << 8) | b[2]) % oneIn == 0;
+}
+
+/// Planning values (asking.md): 1 card in 5 is blind; the seed of the draw.
+const int blindOneIn = 5;
+const String blindSeed = 'blind-1';
 
 /// One question as a screen shows it.
 class ConfirmQuestion {
-  const ConfirmQuestion(this.estimate, this.text, this.why);
+  const ConfirmQuestion(this.estimate, this.text, this.why, {this.kind = CardKind.normal, this.exactTimes = true, String? guessText})
+    : _guessText = guessText; // ignore: prefer_initializing_formals
   final Estimate estimate;
 
-  /// "Did you walk 19:08-21:14?"
+  /// What the card says: "15:59-17:49. The headband thinks you slept. Did you?", or a blind card's "What were you
+  /// doing 19:08-21:14?"
   final String text;
 
-  /// Why it was picked: `unsure`, `long`, `rare`, `few`.
+  /// Why it was picked: `newest`, `unsure`, `long`, `rare`, `few`.
   final String why;
 
+  /// A blind card does not show the guess; it offers [chips] and words of your own.
+  final CardKind kind;
+
+  /// The times are still asked about ("Yes, but the times are off"): only on the day of the stretch (asking.md).
+  final bool exactTimes;
+  final String? _guessText;
+
+  /// The words with the guess shown, for a screen that cannot draw a blind card.
+  String get guessText => _guessText ?? text;
+
   String get id => estimate.id;
+
+  /// The two buttons that name the thing ("I slept", "I was awake").
+  String get yes => estimate.label.yesWord;
+  String get no => estimate.label.noWord;
+
+  /// A blind card's choices.
+  List<Label> get chips => blindChips(estimate);
 }

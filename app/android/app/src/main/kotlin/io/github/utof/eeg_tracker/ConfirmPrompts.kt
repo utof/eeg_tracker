@@ -20,8 +20,8 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * The confirmation questions as a notification (DECISIONS 860-869): "Did you walk 19:08-21:14?" with Yes, No and
- * Not sure. The app's Dart side picks the batch, its words and its moment (lib/confirm/); this side rings it and takes
+ * The confirmation questions as a notification (DECISIONS 860-869, 960-979): "19:08-21:14" / "The headband thinks you
+ * walked. Did you?" with "I walked", "I did not walk" and "Not sure". The app's Dart side picks the batch, its words and its moment (lib/confirm/); this side rings it and takes
  * the answers while the app is closed. Each tap writes one line to files/confirm/answers.jsonl (the file the app's own
  * card writes) and shows the batch's next question, so several are answered without opening anything.
  *
@@ -46,6 +46,7 @@ object ConfirmPrompts {
     private const val KEY_BATCH = "batch" // waiting for its moment
     private const val KEY_SHOWN = "shown" // in the notification now
     private const val KEY_HANDLED = "handled"
+    private const val KEY_SHOWN_AT = "shownAt" // when the question now in the notification came up
     private const val LATE_MS = 6L * 60 * 60 * 1000
     private const val HOLD_MS = 15L * 60 * 1000
     private const val WINDOW_MS = 10L * 60 * 1000
@@ -60,8 +61,12 @@ object ConfirmPrompts {
     private const val REQ_SKIP = 67
     private val ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssxxx", Locale.ROOT)
 
-    /** One question of the kept batch: the estimate's id and the words to show. */
-    data class Question(val id: String, val text: String)
+    /**
+     * One question of the kept batch: the estimate's id, the words to show, and its card (a JSON object from the Dart
+     * side: `yes` and `no`, the two buttons' words, both empty for a blind card, which is answered in the app; `card`,
+     * `guess`, `confidence` and `end_ms`, kept with an answer given here).
+     */
+    data class Question(val id: String, val text: String, val card: String = "")
 
     data class Batch(val at: Long, val questions: List<Question>)
 
@@ -70,7 +75,10 @@ object ConfirmPrompts {
     private fun batch(context: Context, key: String = KEY_BATCH): Batch? = try {
         val j = JSONObject(prefs(context).getString(key, "") ?: "")
         val q = j.getJSONArray("questions")
-        Batch(j.getLong("at"), (0 until q.length()).map { Question(q.getJSONObject(it).getString("id"), q.getJSONObject(it).getString("text")) })
+        Batch(j.getLong("at"), (0 until q.length()).map {
+            val o = q.getJSONObject(it)
+            Question(o.getString("id"), o.getString("text"), o.optString("card", ""))
+        })
     } catch (_: Exception) {
         null
     }
@@ -81,7 +89,7 @@ object ConfirmPrompts {
             e.remove(key)
         } else {
             val q = JSONArray()
-            for (x in b.questions) q.put(JSONObject().put("id", x.id).put("text", x.text))
+            for (x in b.questions) q.put(JSONObject().put("id", x.id).put("text", x.text).put("card", x.card))
             e.putString(key, JSONObject().put("at", b.at).put("questions", q).toString())
         }
         e.apply()
@@ -91,8 +99,8 @@ object ConfirmPrompts {
      * Keeps the batch for [at] (epoch ms) and arms it; an empty batch cancels the alarm. A batch already in the
      * notification stays until answered or replaced by the next one shown.
      */
-    fun arm(context: Context, at: Long, ids: List<String>, texts: List<String>) {
-        val questions = ids.indices.map { Question(ids[it], texts.getOrElse(it) { "" }) }.filter { it.text.isNotEmpty() }
+    fun arm(context: Context, at: Long, ids: List<String>, texts: List<String>, cards: List<String> = emptyList()) {
+        val questions = ids.indices.map { Question(ids[it], texts.getOrElse(it) { "" }, cards.getOrElse(it) { "" }) }.filter { it.text.isNotEmpty() }
         keep(context, if (questions.isEmpty()) null else Batch(at, questions))
         rearm(context)
     }
@@ -166,15 +174,44 @@ object ConfirmPrompts {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
-    /** A button of the notification: write the answer, then the next question or nothing. */
-    fun answer(context: Context, id: String, answer: String) {
+    private fun card(q: Question?): JSONObject = try {
+        JSONObject(q?.card ?: "")
+    } catch (_: Exception) {
+        JSONObject()
+    }
+
+    private fun append(context: Context, line: JSONObject) {
         try {
             val dir = File(context.filesDir, "confirm").apply { mkdirs() }
-            val j = JSONObject().put("estimate_id", id).put("answer", answer).put("at", iso(System.currentTimeMillis())).put("via", "notification")
-            File(dir, "answers.jsonl").appendText("$j\n")
+            File(dir, "answers.jsonl").appendText("$line\n")
         } catch (_: Exception) {
             // a full disk: the question stays open on the app's card
         }
+    }
+
+    /**
+     * A button of the notification: write the answer, then the next question or nothing. The line keeps what the card
+     * was (the guess, how sure, when it came up, the seconds to the tap, how old the stretch was), as the app's own
+     * card does (packages/shared_labels store.dart). A Yes here says "it happened", never "the times are right".
+     */
+    fun answer(context: Context, id: String, answer: String) {
+        val now = System.currentTimeMillis()
+        val q = batch(context, KEY_SHOWN)?.questions?.firstOrNull { it.id == id }
+        val c = card(q)
+        val shown = prefs(context).getLong(KEY_SHOWN_AT, 0L)
+        val j = JSONObject().put("estimate_id", id).put("answer", answer).put("at", iso(now)).put("via", "notification")
+        if (q != null) {
+            j.put("card", c.optString("card", "normal"))
+            if (c.has("guess")) j.put("guess", c.get("guess"))
+            if (c.has("confidence")) j.put("confidence", c.get("confidence"))
+            if (shown in 1..now) {
+                j.put("shown", iso(shown))
+                j.put("seconds", Math.round((now - shown) / 100.0) / 10.0)
+                if (c.has("end_ms")) j.put("age_min", maxOf(0L, (shown - c.optLong("end_ms")) / 60000))
+            }
+        }
+        if (answer == "yes") j.put("times_confirmed", false)
+        append(context, j)
         answered(context, id)
     }
 
@@ -198,7 +235,15 @@ object ConfirmPrompts {
         if (nm.activeNotifications.any { it.id == NOTIFICATION_ID }) show(context, rest)
     }
 
+    /**
+     * The notification was swiped away: every question still in it is written down as not answered (never a Yes or a
+     * No). They stay on the app's card.
+     */
     fun dismissed(context: Context, at: Long) {
+        val now = iso(System.currentTimeMillis())
+        for (q in batch(context, KEY_SHOWN)?.questions ?: emptyList()) {
+            append(context, JSONObject().put("estimate_id", q.id).put("answer", "not_answered").put("why", "dismissed").put("at", now).put("via", "notification"))
+        }
         keep(context, null, KEY_SHOWN)
         log(context, at, "dismissed", null)
     }
@@ -225,7 +270,7 @@ object ConfirmPrompts {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         if (nm.getNotificationChannel(CHANNEL) != null) return
         val c = NotificationChannel(CHANNEL, "Quick checks", NotificationManager.IMPORTANCE_DEFAULT)
-        c.description = "A few times a day: did you sleep, did you walk? Yes, No or Not sure (More, Quick checks)"
+        c.description = "At most twice a day: did you sleep, did you walk? One tap (More, Quick checks)"
         c.setShowBadge(false)
         nm.createNotificationChannel(c)
     }
@@ -251,10 +296,25 @@ object ConfirmPrompts {
             ),
         ).build()
         val more = b.questions.size - 1
-        val n = Notification.Builder(context, CHANNEL)
+        val c = card(q)
+        val yes = c.optString("yes", "Yes")
+        val no = c.optString("no", "No")
+        // "15:59-17:49. The headband thinks you slept. Did you?": the stretch is the title, the rest the text
+        val cut = q.text.indexOf(". ")
+        val title = if (cut > 0) q.text.substring(0, cut) else q.text
+        val rest = if (cut > 0) q.text.substring(cut + 2) else ""
+        val blind = yes.isEmpty() || no.isEmpty()
+        val hint = when {
+            blind -> if (more > 0) "Tap to answer. Then $more more." else "Tap to answer."
+            more > 0 -> "One tap. Then $more more."
+            else -> "One tap."
+        }
+        val body = if (rest.isEmpty()) hint else "$rest\n$hint"
+        val builder = Notification.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_sharp)
-            .setContentTitle(q.text)
-            .setContentText(if (more > 0) "One tap. Then $more more." else "One tap.")
+            .setContentTitle(title)
+            .setContentText(if (rest.isEmpty()) hint else rest)
+            .setStyle(Notification.BigTextStyle().bigText(body))
             .setContentIntent(open)
             .setDeleteIntent(
                 PendingIntent.getBroadcast(
@@ -268,11 +328,14 @@ object ConfirmPrompts {
             .setTimeoutAfter(LATE_MS)
             .setCategory(Notification.CATEGORY_REMINDER)
             .setVisibility(Notification.VISIBILITY_PRIVATE)
-            .addAction(button("Yes", "yes", REQ_YES))
-            .addAction(button("No", "no", REQ_NO))
-            .addAction(button("Not sure", "skip", REQ_SKIP))
-            .build()
-        context.getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, n)
+        // the same order every time; a blind card (the guess is not shown) is answered in the app
+        if (!blind) {
+            builder.addAction(button(yes, "yes", REQ_YES))
+            builder.addAction(button(no, "no", REQ_NO))
+        }
+        builder.addAction(button("Not sure", "not_sure", REQ_SKIP))
+        prefs(context).edit().putLong(KEY_SHOWN_AT, System.currentTimeMillis()).apply()
+        context.getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, builder.build())
     }
 
     private fun iso(ms: Long): String = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).format(ISO)

@@ -29,9 +29,9 @@ void main() {
   test('every label can be asked about, in plain words', () {
     final at = DateTime(2026, 11, 20, 22);
     Estimate e(Label l) => Estimate(detector: 'd', version: 'v', label: l, start: DateTime(2026, 11, 20, 19, 8), end: DateTime(2026, 11, 20, 21, 14));
-    expect(questionOf(e(Labels.walking), at), 'Did you walk 19:08-21:14?');
-    expect(questionOf(e(Labels.headbandOff), at), 'Was the headband off 19:08-21:14?');
-    expect(questionOf(e(Labels.soundSession), at), 'Was this "sound session" 19:08-21:14?');
+    expect(questionOf(e(Labels.walking), at), '19:08-21:14. The headband thinks you walked. Did you?');
+    expect(questionOf(e(Labels.headbandOff), at), '19:08-21:14. The headband thinks the headband was off. Was it?');
+    expect(questionOf(e(Labels.soundSession), at), '19:08-21:14. The headband thinks this was "sound session". Was it?');
   });
 
   test('the labels file made from the fixture is the golden file', () {
@@ -148,21 +148,126 @@ void main() {
     });
   });
 
-  testWidgets('the batch works in any theme: three buttons a question, a tap answers', (t) async {
+  group('the card', () {
     final nap = Estimate(detector: 'd', version: 'v', label: Labels.nap, start: DateTime(2026, 11, 20, 15, 59), end: DateTime(2026, 11, 20, 17, 49));
-    final got = <Answer>[];
-    await t.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: ConfirmCard(questions: [ConfirmQuestion(nap, questionOf(nap, DateTime(2026, 11, 20, 18)), 'long')], onAnswer: (_, a) => got.add(a)),
-        ),
-      ),
-    );
-    expect(find.text('Quick check'), findsOneWidget);
-    expect(find.text('Did you nap 15:59-17:49?'), findsOneWidget);
-    await t.tap(find.text('Not sure'));
-    await t.tap(find.text('Yes'));
-    expect(got, [Answer.skip, Answer.yes]);
-    expect(t.takeException(), isNull);
+    final walk = Estimate(detector: 'd', version: 'v', label: Labels.walking, start: DateTime(2026, 11, 20, 19, 8), end: DateTime(2026, 11, 20, 21, 14));
+    final now = DateTime(2026, 11, 20, 21, 40);
+    ConfirmQuestion guess(Estimate e, {bool exact = true}) => ConfirmQuestion(e, questionOf(e, now, exact: exact), 'long', exactTimes: exact);
+    ConfirmQuestion blind(Estimate e) => ConfirmQuestion(e, blindQuestionOf(e, now), 'long', kind: CardKind.blind, guessText: questionOf(e, now));
+    Future<void> show(WidgetTester t, Widget child, {double width = 393}) async {
+      t.view.physicalSize = Size(width, 900);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      await t.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(padding: const EdgeInsets.all(24), child: child))));
+    }
+
+    testWidgets('names the stretch, then the guess; the buttons name the thing, in the same order every time', (t) async {
+      final got = <Answer>[];
+      await show(t, ConfirmCard(questions: [guess(nap), guess(walk)], onAnswer: (_, a) => got.add(a)));
+      expect(find.text('Quick check'), findsOneWidget);
+      expect(find.text('15:59-17:49. The headband thinks you napped. Did you?'), findsOneWidget);
+      for (final words in [['I napped', 'I was awake'], ['I walked', 'I did not walk']]) {
+        final x = [for (final w in words) t.getCenter(find.text(w)).dx];
+        final unsure = t.getCenter(find.text('Not sure').at(words.first == 'I napped' ? 0 : 1)).dx;
+        expect(x[0] < x[1] && x[1] < unsure, isTrue, reason: 'yes, no, not sure, left to right');
+      }
+      expect(find.text('Yes'), findsNothing);
+      expect(find.byType(Slider), findsNothing, reason: 'no confidence slider');
+      await t.tap(find.text('Not sure').first);
+      await t.tap(find.text('I napped'));
+      await t.tap(find.text('I did not walk'));
+      expect(got, [Answer.skip, Answer.yes, Answer.no]);
+      expect(t.getSize(find.widgetWithText(OutlinedButton, 'I walked')).height, greaterThanOrEqualTo(48));
+      expect(find.text('Yes, but the times are off'), findsNothing, reason: 'only a screen that can save times offers it');
+      expect(t.takeException(), isNull);
+    });
+
+    testWidgets('fits a narrow phone', (t) async {
+      final ride = Estimate(detector: 'd', version: 'v', label: Labels.vehicle, start: nap.start, end: nap.end);
+      await show(t, ConfirmCard(questions: [guess(walk), guess(ride), blind(nap)], onAnswer: (_, _) {}, onSaid: (_, _) {}, onWords: (_) {}, onTimes: (_, _, _) {}), width: 320);
+      expect(t.takeException(), isNull);
+      expect(find.text('I did not ride'), findsOneWidget);
+    });
+
+    testWidgets('"Yes, but the times are off" opens the stretch on a strip; both ends move; saving gives your times', (t) async {
+      final got = <(DateTime, DateTime)>[];
+      final other = Estimate(detector: 'd', version: 'v', label: Labels.nap, start: DateTime(2026, 11, 20, 18, 45), end: DateTime(2026, 11, 20, 19, 0));
+      await show(t, ConfirmBatch(questions: [guess(walk)], onAnswer: (_, _) {}, onTimes: (_, s, e) => got.add((s, e)), around: [other, walk], now: now));
+      await t.tap(find.text('Yes, but the times are off'));
+      await t.pumpAndSettle();
+      expect(find.text('Walking: set the times'), findsOneWidget);
+      expect(find.text('Start 19:08'), findsOneWidget);
+      expect(find.text('End 21:14'), findsOneWidget);
+      expect(find.text('Also found: napping 18:45-19:00'), findsOneWidget, reason: 'what came before is on the strip');
+      expect(find.text('18:36'), findsOneWidget, reason: 'the strip starts a quarter of the stretch earlier');
+      expect(find.text('21:40'), findsOneWidget, reason: 'and cannot go past now');
+      await t.tap(find.byKey(const ValueKey('times-start-later')));
+      await t.tap(find.byKey(const ValueKey('times-start-later')));
+      await t.tap(find.byKey(const ValueKey('times-end-earlier')));
+      await t.pump();
+      expect(find.text('Start 19:18'), findsOneWidget);
+      expect(find.text('End 21:09'), findsOneWidget);
+      // dragging the end's handle to the right moves it later, and it stops at now
+      await t.drag(find.byKey(const ValueKey('times-handle-end')), const Offset(400, 0));
+      await t.pump();
+      expect(find.text('End 21:40'), findsOneWidget);
+      await t.drag(find.byKey(const ValueKey('times-handle-start')), const Offset(-30, 0));
+      await t.pump();
+      final start = t.widget<Text>(find.byKey(const ValueKey('times-start'))).data!;
+      expect(start.compareTo('Start 19:18') < 0, isTrue, reason: 'dragged left: earlier ($start)');
+      // the start cannot pass the end
+      for (var i = 0; i < 40; i++) {
+        await t.tap(find.byKey(const ValueKey('times-start-later')));
+      }
+      await t.pump();
+      expect(find.text('Start 21:39'), findsOneWidget);
+      await t.tap(find.text('Save these times'));
+      await t.pumpAndSettle();
+      expect(got, [(DateTime(2026, 11, 20, 21, 39), DateTime(2026, 11, 20, 21, 40))]);
+      expect(find.text('Walking: set the times'), findsNothing);
+    });
+
+    testWidgets('times left as they are and saved count as seen; Cancel saves nothing; no link once the day is over', (t) async {
+      final got = <(DateTime, DateTime)>[];
+      await show(t, ConfirmBatch(questions: [guess(walk)], onAnswer: (_, _) {}, onTimes: (_, s, e) => got.add((s, e)), now: now));
+      await t.tap(find.text('Yes, but the times are off'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Cancel'));
+      await t.pumpAndSettle();
+      expect(got, isEmpty);
+      await t.tap(find.text('Yes, but the times are off'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Save these times'));
+      await t.pumpAndSettle();
+      expect(got, [(walk.start, walk.end)]);
+      await show(t, ConfirmBatch(questions: [guess(walk, exact: false)], onAnswer: (_, _) {}, onTimes: (_, _, _) {}));
+      expect(find.text('About 19:00 to 21:00. The headband thinks you walked. Did you?'), findsOneWidget);
+      expect(find.text('Yes, but the times are off'), findsNothing);
+    });
+
+    testWidgets('a blind card asks what you were doing and never shows the guess', (t) async {
+      final said = <Label>[];
+      final answers = <Answer>[];
+      var words = 0;
+      await show(t, ConfirmBatch(questions: [blind(walk)], onAnswer: (_, a) => answers.add(a), onSaid: (_, l) => said.add(l), onWords: (_) => words++, onTimes: (_, _, _) {}));
+      expect(find.text('What were you doing 19:08-21:14?'), findsOneWidget);
+      expect(find.textContaining('thinks'), findsNothing);
+      expect(find.text('I walked'), findsNothing);
+      expect(find.text('Yes, but the times are off'), findsNothing);
+      for (final chip in ['Sleeping', 'Walking', 'Working', 'Eating', 'Resting', 'Something else', 'Not sure']) {
+        expect(find.text(chip), findsOneWidget, reason: chip);
+      }
+      await t.tap(find.text('Working'));
+      await t.tap(find.text('Something else'));
+      await t.tap(find.text('Not sure'));
+      expect(said, [Labels.working]);
+      expect((words, answers.single), (1, Answer.skip));
+      // answered: what you said is shown, still not the guess
+      await show(t, ConfirmBatch(questions: [blind(walk)], onAnswer: (_, _) {}, onSaid: (_, _) {}, answers: {walk.id: Answer.said}, saved: {walk.id: 'Working'}));
+      expect(find.text('Saved: Working'), findsOneWidget);
+      // a screen that cannot take a blind answer shows the guess instead
+      await show(t, ConfirmBatch(questions: [blind(walk)], onAnswer: (_, _) {}));
+      expect(find.text('19:08-21:14. The headband thinks you walked. Did you?'), findsOneWidget);
+    });
   });
 }
