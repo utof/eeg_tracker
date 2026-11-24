@@ -4,7 +4,8 @@
 usage: python3 app/tool/confirm_check.py --apk <release or replay build> [--adb-port 5051] [--work DIR] [--out DIR] [--keep]
 
 Seeds a made-up sleep report and a made-up walk file (no recording of anyone), starts the app and checks:
-  1. the Record tab shows the "Quick check" card with the batch ("Did you ...?" lines);
+  1. the Record tab shows the "Quick check" card with the batch ("19:08-21:14. The headband thinks you walked. Did
+     you?" lines; the buttons name the thing since DECISIONS 964: "I walked" / "I did not walk" / "Not sure");
   2. a tap on the card's first Yes writes a `card` line to files/confirm/answers.jsonl;
   3. the notification is there with the next question; its No and Not sure buttons write `notification` lines while
      the questions go by one after the other, and the notification leaves after the last;
@@ -43,10 +44,19 @@ def made_up(stage: Path, now: datetime) -> tuple[list[tuple[Path, str]], list[st
     Returns the files to seed and the questions the app should ask."""
     stage.mkdir(parents=True, exist_ok=True)
     now = now.replace(second=0, microsecond=0)
+    import asking_check as ac  # the id and the blind draw, as the app works them out (it imports this file too)
     s0, s1 = now - timedelta(minutes=200), now - timedelta(minutes=90)
     w0, w1 = now - timedelta(minutes=80), now - timedelta(minutes=45)
     v0, v1 = now - timedelta(minutes=35), now - timedelta(minutes=15)
     rec = (now - timedelta(minutes=205)).strftime("%Y-%m-%d-%H%M%S")
+    # every card here shows its guess: a stretch whose id draws a blind card (1 in 5, DECISIONS 966) starts a minute
+    # earlier until it does not (the blind card has its own check, asking_check.py)
+    while ac.blind(ac.estimate_id("sleep-periods", "nap" if 9 <= s0.hour < 20 else "asleep", s0, s1, rec)):
+        s0 -= timedelta(minutes=1)
+    while ac.blind(ac.estimate_id("walking", "walking", w0, w1, rec)):
+        w0 -= timedelta(minutes=1)
+    while ac.blind(ac.estimate_id("walking", "walking", v0, v1, rec)):
+        v0 -= timedelta(minutes=1)
     night = (now - timedelta(hours=12)).strftime("%Y-%m-%d")
     report = {
         "version": 2, "night_of": night, "built": iso(now), "scoring_s": 1.0, "data_start": iso(s0 - timedelta(minutes=4)),
@@ -71,8 +81,8 @@ def made_up(stage: Path, now: datetime) -> tuple[list[tuple[Path, str]], list[st
              "walking_min": 55.0, "headband_steps": 6050, "pace": 110.0, "confidence": "likely",
              "walks": [walk(w0, w1, "sure"), walk(v0, v1, "unsure")], "minutes": []}
     quiet = ((now.hour + 12) % 24) * 60  # a minute of quiet hours half a day away: the batch may go out now
-    settings = {"version": 1, "on": True, "per_batch": 4, "per_day": 6, "quiet_start_min": quiet,
-                "quiet_end_min": quiet + 1}
+    settings = {"version": 2, "on": True, "per_batch": 4, "per_day": 2, "quiet_start_min": quiet,
+                "quiet_end_min": quiet + 1, "quiet_from_sleep": False}
     pairs = []
     for rel, obj in ((f"nights/{night}.report.json", report), (f"walking/{rec}.walk.json", walks),
                      ("confirm/settings.json", settings)):
@@ -80,9 +90,10 @@ def made_up(stage: Path, now: datetime) -> tuple[list[tuple[Path, str]], list[st
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(obj))
         pairs.append((p, rel))
-    sleep_word = "nap" if 9 <= s0.hour < 20 else "sleep"
-    return pairs, [f"Did you {sleep_word} {hm(s0)}-{hm(s1)}?", f"Did you walk {hm(w0)}-{hm(w1)}?",
-                   f"Did you walk {hm(v0)}-{hm(v1)}?"]
+    slept = "you napped" if 9 <= s0.hour < 20 else "you slept"
+    return pairs, [f"{hm(s0)}-{hm(s1)}. The headband thinks {slept}. Did you?",
+                   f"{hm(w0)}-{hm(w1)}. The headband thinks you walked. Did you?",
+                   f"{hm(v0)}-{hm(v1)}. The headband thinks you walked. Did you?"]
 
 
 def answers() -> list[dict]:
@@ -116,11 +127,15 @@ def wait(what, limit: float = 90, every: float = 3):  # noqa: ANN001, ANN201
         time.sleep(every)
 
 
-def tap_in_shade(word: str) -> bool:
+YES_WORDS = ("I slept", "I napped", "I walked")  # vocabulary.dart: what a Yes and a No are called on these cards
+NO_WORDS = ("I was awake", "I did not walk")
+
+
+def tap_in_shade(word: str, limit: float = 30) -> bool:
     """Opens the notification shade and taps the questions' button [word]."""
     pc.sh("cmd statusbar expand-notifications", check=False)
     time.sleep(2)
-    hit = wait(lambda: next(((l, x, y) for l, x, y in emu.nodes() if l.strip() == word), None), limit=30)
+    hit = wait(lambda: next(((l, x, y) for l, x, y in emu.nodes() if l.strip() == word), None), limit=limit)
     if not hit:
         return False
     pc.sh(f"input tap {hit[1]} {hit[2]}")
@@ -149,7 +164,8 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     if not card:
         return results
 
-    yes = next(((l, x, y) for l, x, y in emu.nodes() if l.strip() == "Yes"), None)
+    # the buttons name the thing (DECISIONS 964): the first card's Yes
+    yes = next(((l, x, y) for l, x, y in emu.nodes() if l.strip() in YES_WORDS), None)
     if yes:
         pc.sh(f"input tap {yes[1]} {yes[2]}")
     got = wait(lambda: [a for a in answers() if a.get("via") == "card"], limit=30)
@@ -159,14 +175,14 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     title = wait(notification_title, limit=180)
     first = title
     taps = []
-    for word, answer in (("No", "no"), ("Not sure", "skip")):
+    for word, answer in (("No", "no"), ("Not sure", "not_sure")):
         before = len(answers())
-        ok = tap_in_shade(word)
+        ok = any(tap_in_shade(w, limit=8) for w in NO_WORDS) if word == "No" else tap_in_shade(word)
         line = wait(lambda b=before: answers()[b:] or None, limit=30)
         taps.append((word, ok, line[0] if line else None, notification_title()))
     pc.sh("cmd statusbar collapse", check=False)
     good = bool(first) and all(ok and line and line.get("via") == "notification" and line.get("answer") == a
-                               for (w, ok, line, _), a in zip(taps, ("no", "skip")))
+                               for (w, ok, line, _), a in zip(taps, ("no", "not_sure")))
     gone = taps[-1][3] is None
     results.append(pc.Result(
         "3 the notification's buttons answer one question after the other", "PASS" if good and gone else "FAIL",
