@@ -13,6 +13,11 @@ import '../sleep/report.dart' show isoLocal;
 
 const String spansSuffix = '.spans.jsonl';
 
+/// `ended_by` of a span nobody ended: its session was gone (the app was closed, its page left) when something else
+/// closed it (Stop of the recording, the next activity, End on the Record tab's bar). Its end is not a time the owner
+/// stopped doing it (DECISIONS 1017).
+const String leftOpen = 'left_open';
+
 /// The kinds whose spans give sleep reports.
 const Set<String> sleepKinds = {'sleep', 'nap'};
 

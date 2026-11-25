@@ -130,7 +130,8 @@ void main() {
     await running;
 
     final back = readSpans(spansFileOf(spansDirFor(dir.path), id)).spans;
-    expect([for (final s in back) (s.kind, s.endedBy, s.label)], [('work', 'owner', 'working'), ('gardening', 'recording_stopped', null)]);
+    // an activity still marked at Stop was left open (its page had gone): the recorder says so
+    expect([for (final s in back) (s.kind, s.endedBy, s.label)], [('work', 'owner', 'working'), ('gardening', 'left_open', null)]);
     expect(back.first.session, 'work-sessions/x.work.json');
   });
 
@@ -545,6 +546,37 @@ void sleepOnARecording() {
     expect(statuses.last.rec.undoable, hasLength(1), reason: 'the rule\'s own Undo is still offered');
     await off.r.stop();
     await off.running;
+  });
+
+  test('Work left marked by a closed app is ended by Stop at the recording\'s last sample, and says it was left open', () async {
+    final band = FakeBand('a');
+    final r = NightRecorder(
+      finder: FakeFinder([band]),
+      dir: dir,
+      store: store,
+      onStatus: statuses.add,
+      onStuck: (_) async {},
+      timing: fast,
+      watch: null,
+      clock: clock,
+      spanLog: SpanLog(spansDirFor(dir.path), clock: clock),
+      sleep: false,
+    );
+    final running = r.run(restartedBySystem: false);
+    await wait(200);
+    r.startSleep(kind: 'nap');
+    r.openSpan('work'); // marked beside the nap, as its own page would
+    now = now.add(const Duration(minutes: 5));
+    await wait(100);
+    final lastData = now;
+    band.goOutOfRange();
+    await wait(100);
+    now = now.add(const Duration(minutes: 30)); // the headband has been away half an hour when Stop is pressed
+    final stopAt = now;
+    await r.stop();
+    await running;
+    final got = [for (final s in spans().spans) (s.kind, s.endedBy, s.end)];
+    expect(got, [('nap', 'recording_stopped', stopAt), ('work', 'left_open', lastData)]);
   });
 
   test('Sleep pressed while an activity is still marked ends that activity: one at a time', () async {

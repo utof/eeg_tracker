@@ -61,6 +61,7 @@ SCALE = re.compile(r"(\d+)-(\d+)")
 ARCHIVE_CONTEXT = 'Archive tag marked "This is what I was doing"'
 STOP_SHEET, STOP_SHEET_CONTEXT = "owner_stop_sheet", "stop sheet"
 BUTTON_SOURCE, BUTTON_SPANS = "owner_activity_button", ("owner_button", "owner_confirmed")
+OWNER_ENDS = ("owner", "activity")  # a span's `ended_by` when its end is a time the owner (or their timed session) made
 
 
 # ---- the vocabulary -------------------------------------------------------------------------------------------------
@@ -305,14 +306,21 @@ def span_rows(local: Path, vocab: Vocabulary, out: Read) -> None:
         for s in f.spans:
             if s.source not in BUTTON_SPANS or s.end_unix is None or not s.label or s.estimate:
                 continue
+            if s.end_unix <= s.start_unix:
+                continue  # no length: taken away with Undo, or ended by the 60-minute rule before any data
             tid = f"span:{s.span}"
             out.ids.add(tid)
             lab = vocab.labels.get(s.label)
+            # an end the owner did not make (the app was closed and Stop came hours later, the 60-minute rule, a phone
+            # restart, the next activity) is not a time: "at some point in this stretch". Stop of the recording under
+            # a sleep stretch is the owner's own press.
+            own_end = (s.ended_by in OWNER_ENDS or s.ended_by is None
+                       or (s.ended_by == "recording_stopped" and s.kind in ("sleep", "nap")))
             r = dict(label_id=tid, start=_unix_iso(s.start_unix), end=_unix_iso(s.end_unix), recording=rid,
                      kind=lab.kind if lab else "", label=s.label, value="", unit="", source=BUTTON_SOURCE,
-                     confidence="likely", created=_unix_iso(s.made_unix if s.made_unix is not None else s.end_unix),
+                     confidence="likely" if own_end else "within", created=_unix_iso(s.made_unix if s.made_unix is not None else s.end_unix),
                      supersedes="", owner_words="", context=f"activity button: {s.kind}", present="1",
-                     estimate_id="", times_confirmed="1")
+                     estimate_id="", times_confirmed="1" if own_end else "0")
             errs = row_errors(r, vocab)
             if errs:
                 out.rejected.append(Rejected(rel, 0, tid, "; ".join(errs)))

@@ -860,7 +860,7 @@ the middle of a write leaves a half last line: skipped too).
 | `start`, `end` | local ISO time with the UTC offset; `end` is `null` while the span is open |
 | `source` | `owner_button` (you pressed it), `owner_confirmed` (the app found it, you said yes), `auto_start` (the headband watcher), `auto_resume` (the 60-minute rule had ended Sleep and the headband came back: the app opened a new sleep stretch from the first new sample; its guess) |
 | `started_recording` | `true` when this span's button also started the recording |
-| `ended_by` | `owner`, `activity` (a timed session's end), `other_activity`, `recording_stopped`, `headband_off`, `phone_restart`, `undone` (you took away a stretch the app had opened by itself: it ends where it began); absent while open |
+| `ended_by` | `owner`, `activity` (a timed session's end), `other_activity`, `recording_stopped`, `left_open` (nobody ended it: its session was gone when Stop, the next activity or End on the bar closed it; at Stop it ends at the recording's last sample), `headband_off`, `phone_restart`, `undone` (you took away a stretch the app had opened by itself: it ends where it began); absent while open |
 | `session` | the activity's own file, relative to `files/`, or absent |
 | `paused` | `[start, end]` pairs: the span stayed open while its activity was paused (`end` `null` while paused) |
 | `estimate` | the confirm-questions estimate this span confirms (`owner_confirmed` only) |

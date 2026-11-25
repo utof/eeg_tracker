@@ -164,7 +164,7 @@ class Activities {
       }
       // a span whose session is gone (its screen was closed, the app restarted) ends when the next activity starts
       for (final other in rec?.spans ?? const <Span>[]) {
-        if (!other.closed && other.kind != kind) send(closeSpanCommand(other.id, by: 'other_activity'));
+        if (!other.closed && other.kind != kind) send(closeSpanCommand(other.id, by: leftOpen));
       }
       run = ActivityRun(kind, startedRecording: false);
       send(openSpanCommand(kind));
@@ -223,6 +223,15 @@ class Activities {
     if (span != null && stillRuns) send(closeSpanCommand(open.id, by: how));
     _log.info('activity ended', {'kind': run.kind, 'span': span?.id, 'by': how, 'recording_runs': stillRuns});
     if (stillRuns && run.startedRecording && how != 'other_activity') ask.value = run;
+  }
+
+  /// Stop of the recording was pressed (call it before the recorder is told): the activity that is alive ends here,
+  /// by the owner; whatever else is still marked then was left open, and the recorder says so.
+  void recordingStops() {
+    final run = current.value;
+    if (run == null || run.over) return;
+    final open = owner.recording?.open(run.kind);
+    if (open != null) send(closeSpanCommand(open.id, by: 'owner'));
   }
 
   /// The answer to [ask]: stop everything, or keep recording.

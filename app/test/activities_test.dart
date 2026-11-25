@@ -147,10 +147,11 @@ class Day {
     }
   }
 
+  /// Stop on the Record tab, as night_screen.dart does it: the activity that is alive is told first.
   Future<void> stop() async {
+    acts.recordingStops();
     stopped = true;
     await recorder?.stop();
-    owner.nightEnded();
   }
 
   bool get recording => statuses.isNotEmpty && statuses.last.phase == Phase.recording && statuses.last.nightSamples > 0;
@@ -310,7 +311,19 @@ void main() {
     expect(d.acts.ask.value, isNull);
     expect(d.acts.current.value, isNull);
     final span = d.log.read(d.recordingId).spans.single;
-    expect(span.endedBy, 'recording_stopped', reason: 'Stop of the recording closes every open span');
+    expect(span.endedBy, 'owner', reason: 'the session was alive when you pressed Stop: that end is yours');
+  });
+
+  test('the recording is stopped with a span left open by a closed app: it says left open, not that you ended it', () async {
+    final d = Day();
+    addTearDown(d.close);
+    await d.record();
+    await until(() => d.recording);
+    d.toRecorder(openSpanCommand('work')); // Work of an earlier run of the app: its screen is gone
+    await until(() => d.statuses.last.rec.open('work') != null);
+    await d.stop();
+    final span = d.log.read(d.recordingId).spans.single;
+    expect((span.kind, span.endedBy), ('work', 'left_open'));
   });
 
   test('the DIY board is chosen: an activity is refused in words before anything is started', () async {
@@ -359,7 +372,7 @@ void main() {
     final med = await d.session('meditate');
     await until(() => med.got.isNotEmpty);
     final spans = d.statuses.last.rec.spans;
-    expect([for (final s in spans) (s.kind, s.closed, s.endedBy)], [('work', true, 'other_activity'), ('meditate', false, null)]);
+    expect([for (final s in spans) (s.kind, s.closed, s.endedBy)], [('work', true, 'left_open'), ('meditate', false, null)]);
     await med.link.close();
   });
 

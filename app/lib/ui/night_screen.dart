@@ -23,7 +23,7 @@ import '../recorder/recorder_service.dart';
 import '../recorder/status.dart';
 import '../confirm/questions.dart';
 import '../spans/activities.dart';
-import '../spans/span.dart' show Span, spanWord, spansLine, undoLine;
+import '../spans/span.dart' show Span, leftOpen, spanWord, spansLine, undoLine;
 import '../spans/stop_sheet.dart';
 import 'stop_sheet.dart';
 import '../session_keeper.dart' show PhoneSessionKeeper;
@@ -932,7 +932,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     if (run != null && run.kind == open.kind) {
       unawaited(Activities.shared!.end(run));
     } else {
-      FlutterForegroundTask.sendDataToTask(closeSpanCommand(open.id));
+      // its session is gone: End now does not say when it ended
+      FlutterForegroundTask.sendDataToTask(closeSpanCommand(open.id, by: leftOpen));
     }
     FlutterForegroundTask.sendDataToTask(statusCommand);
   }
@@ -1006,6 +1007,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     try {
       _stopped = Completer<void>();
       _soFar?.nightEnded(); // a look stops at its next model call; the report comes next
+      Activities.shared?.recordingStops(); // an activity that is alive ends by this Stop; the rest was left open
       FlutterForegroundTask.sendDataToTask(stopCommand);
       // The recorder closes its files and the headband first; then the service goes.
       await _stopped!.future.timeout(const Duration(seconds: 25), onTimeout: () {});

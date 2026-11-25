@@ -373,7 +373,7 @@ class NightRecorder {
       await _begin(restartedBySystem);
       await _loop();
       if (_stopping && _endNight) {
-        _closeSpans('recording_stopped', _now());
+        _closeSpansAtStop();
         // no file set ever opened: the spans are still a true statement about the time, kept under the start's stamp
         if (_night.recording == null && _spans.isNotEmpty) {
           _bindRecording(fileStem(DateTime.fromMillisecondsSinceEpoch(_night.startMs)));
@@ -1946,9 +1946,17 @@ class NightRecorder {
     return closed;
   }
 
-  void _closeSpans(String by, DateTime at) {
+  /// Stop of the recording. A sleep stretch ends now, by the Stop you pressed (`recording_stopped`). An activity that
+  /// is still marked was left open (a session that is alive is ended by the screen before Stop, spans/activities.dart
+  /// `recordingStops`): it ends at the recording's last sample and says so (`left_open`), so nobody reads its end as
+  /// the time you stopped doing it (DECISIONS 1017).
+  void _closeSpansAtStop() {
+    final now = _now();
+    final last = _status.lastDataMs;
+    final lastData = last == null ? now : DateTime.fromMillisecondsSinceEpoch(last);
     for (final s in [..._spans]) {
-      if (!s.closed) closeSpan(s.id, by: by, at: at);
+      if (s.closed) continue;
+      s.isSleep ? closeSpan(s.id, by: 'recording_stopped', at: now) : closeSpan(s.id, by: leftOpen, at: lastData);
     }
   }
 

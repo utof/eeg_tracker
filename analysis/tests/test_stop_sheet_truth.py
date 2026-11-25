@@ -138,6 +138,35 @@ def test_a_span_made_by_a_yes_to_an_estimate_is_no_row_of_its_own(tmp_path: Path
     assert counts["spans"] == 1
 
 
+def test_an_end_the_owner_did_not_make_is_not_confirmed_times(tmp_path: Path) -> None:
+    """Review finding 9: Work marked at 14:00, the app closed at 15:00, Stop at 23:00. The span's end is the
+    recording's, not the owner's: its row says "at some point in this stretch" (`within`, `times_confirmed` 0), not
+    "working 14:00-23:00". The same for an end made by the 60-minute rule, a phone restart or the next activity. A
+    night's sleep ended by Stop is the owner's own press."""
+    def ended(n: int, kind: str, label: str, by: str | None) -> dict:
+        d = span(n, kind, label, "owner_button", f"2026-11-21T{10 + n}:00:00+03:00", f"2026-11-21T{10 + n}:30:00+03:00")
+        if by:
+            d["ended_by"] = by
+        return d
+
+    put_spans(tmp_path, RECORDING,
+              ended(1, "work", "working", "owner"), ended(2, "meditate", "meditating", "activity"),
+              ended(3, "work", "working", "left_open"), ended(4, "work", "working", "recording_stopped"),
+              ended(5, "work", "working", "headband_off"), ended(6, "work", "working", "phone_restart"),
+              ended(7, "work", "working", "other_activity"), ended(8, "sleep", "in_bed", "recording_stopped"),
+              ended(9, "sleep", "in_bed", "headband_off"), ended(10, "work", "working", None),
+              # taken away with Undo: no length, no row
+              {**span(11, "sleep", "in_bed", "auto_resume", "2026-11-21T22:00:00+03:00", "2026-11-21T22:00:00+03:00"),
+               "ended_by": "undone"},
+              {**span(12, "work", "working", "owner_button", "2026-11-21T22:10:00+03:00", "2026-11-21T22:10:00+03:00"),
+               "ended_by": "headband_off"})
+    rows, rejected, _ = truth.build(tmp_path)
+    assert rejected == []
+    assert [(r["label_id"].rsplit("-", 1)[1], r["confidence"], r["times_confirmed"]) for r in rows] == [
+        ("1", "likely", "1"), ("2", "likely", "1"), ("3", "within", "0"), ("4", "within", "0"), ("5", "within", "0"),
+        ("6", "within", "0"), ("7", "within", "0"), ("8", "likely", "1"), ("9", "within", "0"), ("10", "likely", "1")]
+
+
 def test_a_span_with_a_label_the_vocabulary_lacks_is_left_out_with_a_reason(tmp_path: Path) -> None:
     put_spans(tmp_path, RECORDING, span(1, "work", "dozing", "owner_button", "2026-11-21T11:05:00+03:00",
                                         "2026-11-21T12:40:00+03:00"))
