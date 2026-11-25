@@ -342,7 +342,7 @@ def _jsonl(path: Path) -> list[dict]:
 CONFIRM_FOLDER = Path("phone") / "confirm"
 # the words kept after "Saved:" (packages/shared_labels/lib/src/store.dart); `skip` is the older word for `not_sure`
 CONFIRM_ANSWERS = {"yes": "Yes", "no": "No", "not_sure": "Not sure", "said": "Said"}
-CONFIRM_WHY_NOT = ("dismissed", "expired", "never_seen", "short_and_old", "too_many")
+CONFIRM_WHY_NOT = ("dismissed", "expired", "never_seen", "short_and_old")
 CONFIRM_CLOSES = tuple(w for w in CONFIRM_WHY_NOT if w != "dismissed")  # the question is closed: asked no more
 ONE_QUESTION = {"asleep", "nap", "night_sleep"}  # vocabulary.dart `sameAs`: the clock tells these apart, not the owner
 

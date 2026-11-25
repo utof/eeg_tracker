@@ -11,8 +11,8 @@ The quick checks are built so that your answers stay careful for months. Five th
   right". A small "Yes, but the times are off" opens the stretch on a strip where you move both ends.
 - **Blind cards.** About 1 card in 5 does not show the guess: "What were you doing 19:08-21:14?" with a few choices
   and your own words.
-- **A small budget.** At most 2 notifications a day with at most 4 cards each, never while you usually sleep. Old or
-  short stretches are dropped instead of asked late.
+- **A small budget.** At most 2 notifications a day with at most 4 cards each, never while you usually sleep. Anything
+  more waits on the card in the app. Old or short stretches are dropped instead of asked late.
 - **Backing off.** If you often leave the notifications unanswered, the app sends fewer by itself.
 
 ## Evidence for this headband: some
@@ -65,8 +65,9 @@ monthly check on your own answers (below) shows whether they need changing.
   later. Which card is blind is fixed by the stretch itself, not rolled each time.
 - **Budget:** 2 notifications a day (it was 3), 4 cards each. The questions after Stop never count. Anything more
   waits on the card in the app, with a number on the Record tab.
-- **Dropped unasked:** stretches older than 48 hours; stretches under 15 minutes once they are 3 hours old; and when
-  more than 4 wait, all but the 2 newest and the ones the headband is least sure of.
+- **Dropped unasked:** stretches older than 48 hours, and stretches under 15 minutes once they are 3 hours old.
+- **More than 4 waiting:** a notification takes the 2 newest and the ones the headband is least sure of. The rest are
+  not pushed, but they stay on the card in the app until you answer them or they are 48 hours old.
 - **Quiet hours** follow your real sleep once the app has 3 of your nights: from your usual bedtime until 30 minutes
   after you woke. Before that, and whenever you switch "Follow my sleep" off, the fixed hours apply (22:00-08:00
   unless changed).

@@ -3,8 +3,9 @@
 // The queue is every estimate that is over, not answered (a Not sure counts as answered: never asked again), not about
 // a stretch already answered or already labelled by you (an Archive tag, a stop-sheet label), at most
 // [ConfirmRule.maxAge] old (after two days memory is no better than the detector) and, when short, only hours old.
-// When more wait than a batch holds, the newest and the ones the detector is least sure of are kept and the rest are
-// dropped unasked. [mayPush] is the one place that says when a batch may go out. All planning values (asking.md).
+// A notification holds one batch; when more wait than that, it takes the newest and the ones the detector is least sure
+// of, and the rest stay on the in-app card until they are answered or too old. [mayPush] is the one place that says
+// when a batch may go out. All planning values (asking.md).
 import 'backoff.dart';
 import 'estimate.dart';
 import 'store.dart';
@@ -39,8 +40,8 @@ abstract final class ConfirmRule {
   /// A stretch shorter than [shortStretch] is dropped unasked once it is older than [shortAskWithin].
   static const Duration shortStretch = Duration(minutes: 15), shortAskWithin = Duration(hours: 3);
 
-  /// With more waiting than a batch holds: this many of the newest are kept, then the ones the detector is least
-  /// sure of; the rest are dropped unasked.
+  /// With more waiting than a batch holds: this many of the newest go in the notification, then the ones the
+  /// detector is least sure of; the rest wait on the card.
   static const int keepNewest = 2;
 
   /// Quiet hours from your real sleep: nights (sleep of [nightAtLeast] or more) of the last [habitDays] days, at
@@ -140,17 +141,15 @@ List<Pick> pickBatch(List<Estimate> open, ConfirmState state, int max) {
   ]..sort((a, b) => a.estimate.start.compareTo(b.estimate.start));
 }
 
-/// The open questions a batch has no room for: dropped unasked (`too_many`), so a busy day does not pile up.
-List<Estimate> overflow(ConfirmState state, ConfirmSettings settings, DateTime now, {List<Labelled> labelled = const []}) {
+/// The in-app card: every open question, in time order. A batch's choice ([pickBatch]) is only what a notification
+/// takes; the others wait here until they are answered or too old. It never counts against the day's pushes: a batch
+/// the phone may not push is still here when you open the app.
+List<Pick> cardBatch(ConfirmState state, ConfirmSettings settings, DateTime now, {List<Labelled> labelled = const []}) {
+  if (!settings.on) return const [];
   final open = openEstimates(state, now, labelled: labelled);
-  final kept = {for (final p in pickBatch(open, state, settings.perBatch)) p.estimate.id};
-  return [for (final e in open) if (!kept.contains(e.id)) e];
+  final chosen = {for (final p in pickBatch(open, state, settings.perBatch)) p.estimate.id: p};
+  return [for (final e in open) chosen[e.id] ?? valueOf(e, state)]..sort((a, b) => a.estimate.start.compareTo(b.estimate.start));
 }
-
-/// The in-app card's batch: the open questions that are kept. It never counts against the day's pushes: a batch the
-/// phone may not push is still here when you open the app.
-List<Pick> cardBatch(ConfirmState state, ConfirmSettings settings, DateTime now, {List<Labelled> labelled = const []}) =>
-    settings.on ? pickBatch(openEstimates(state, now, labelled: labelled), state, settings.perBatch) : const [];
 
 /// The batch for one recording (the stop sheet's "What was this recording?"): every open question of it, whatever its
 /// age, the switch or the quiet hours, since you are looking at that recording now. It never counts against the
@@ -158,11 +157,13 @@ List<Pick> cardBatch(ConfirmState state, ConfirmSettings settings, DateTime now,
 List<Pick> recordingBatch(ConfirmState state, String recording, DateTime now, {List<Labelled> labelled = const [], int max = 5}) =>
     pickBatch(openEstimates(state, now, labelled: labelled, recording: recording), state, max);
 
-/// The next notification batch: the kept open questions that were in no notification yet.
-List<Pick> notificationBatch(ConfirmState state, ConfirmSettings settings, DateTime now, {List<Labelled> labelled = const []}) => [
-  for (final p in cardBatch(state, settings, now, labelled: labelled))
-    if (!state.notified.contains(p.estimate.id)) p,
-];
+/// The next notification batch: of the open questions, the ones [pickBatch] takes that were in no notification yet.
+List<Pick> notificationBatch(ConfirmState state, ConfirmSettings settings, DateTime now, {List<Labelled> labelled = const []}) => settings.on
+    ? [
+        for (final p in pickBatch(openEstimates(state, now, labelled: labelled), state, settings.perBatch))
+          if (!state.notified.contains(p.estimate.id)) p,
+      ]
+    : const [];
 
 /// When you usually go to bed and get up, minutes of the day, from [nights] of your own nights.
 typedef SleepHabit = ({int bedMin, int wakeMin, int nights});
