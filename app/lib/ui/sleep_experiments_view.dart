@@ -171,7 +171,16 @@ class SleepExperimentView extends StatelessWidget {
     this.onNew,
     this.onInfo,
     this.onOpen,
+    this.onRemind,
+    this.remindAt,
+    this.notificationsOff = false,
   });
+
+  /// Switches the evening reminder (DECISIONS 1085); null: no switch. [remindAt]: the time it rings at ("22:15").
+  /// [notificationsOff]: the phone does not let it through.
+  final ValueChanged<bool>? onRemind;
+  final String? remindAt;
+  final bool notificationsOff;
 
   /// The experiment shown; null: none yet.
   final SleepExperimentPage? page;
@@ -280,6 +289,27 @@ class SleepExperimentView extends StatelessWidget {
             value: null,
             onChanged: onAnswer == null ? null : (a) => onAnswer!(d, a),
           ),
+        if (onRemind != null) ...[
+          const SizedBox(height: 12),
+          SwitchListTile(
+            value: log.remind,
+            onChanged: onRemind,
+            title: Text('Remind me in the evening', style: text.bodyLarge?.copyWith(height: 1.3)),
+            contentPadding: EdgeInsets.zero,
+          ),
+          Para(
+            'One notification${remindAt == null ? '' : ' at about $remindAt'}, only while tonight is unanswered. It does '
+            'not come while a recording or a session runs: the question is then above the Sleep button on the Record tab.',
+            color: Night.inkMuted,
+            top: 0,
+          ),
+          if (log.remind && notificationsOff)
+            const Para(
+              'Notifications are off for EEG Tracker or for "Sleep experiment reminder", so it cannot come. Allow them '
+              'in the phone\'s settings: Apps, EEG Tracker, Notifications.',
+              color: Night.caution,
+            ),
+        ],
       ],
       const SectionHeading('What counts'),
       _Pair(label: k.withLabel, detail: k.withMeans),

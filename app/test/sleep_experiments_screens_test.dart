@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:eeg_tracker/sharp/schedule.dart' show PromptKind;
 import 'package:eeg_tracker/sleep_experiments/kinds.dart';
 import 'package:eeg_tracker/sleep_experiments/result.dart';
 import 'package:eeg_tracker/sleep_experiments/store.dart';
@@ -19,6 +20,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'screens_test.dart' show loadFonts;
+import 'sharp_prompts_test.dart' show FakeSharpPhone;
 import 'sleep_experiments_test.dart' show logOf, nn, twenty, wB, oB;
 
 Future<void> _shoot(WidgetTester tester, Widget w, String name, {double scale = 1, double height = 980}) async {
@@ -90,6 +92,8 @@ void main() {
           earlier: page == null ? [logOf(caffeine, const {}, ended: '2026-11-20')] : const [],
           onAnswer: (_, _) {},
           onOdd: (_, _, _) {},
+          onRemind: (_) {},
+          remindAt: '22:15',
           onPick: () {},
           onEnd: () {},
           onNew: () {},
@@ -249,6 +253,47 @@ void main() {
       expect(store.active(), isNull);
       expect(find.text('Result'), findsOneWidget);
       expect(find.text('Start an experiment'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the evening reminder: off at first; the switch keeps it and hands the phone tonight\'s; an answer takes tonight\'s away', (tester) async {
+      tester.view.physicalSize = const Size(1210, 9000);
+      tester.view.devicePixelRatio = 2.75;
+      addTearDown(tester.view.reset);
+      final now = DateTime(2026, 11, 2, 18);
+      final rec = '${tmp.path}/recordings';
+      final store = SleepExperimentStore(sleepExperimentsDirFor(rec));
+      final id = store.create(kind: caffeine, picked: false, now: now).plan.id;
+      final phone = FakeSharpPhone();
+      var allowed = false;
+      Widget page(Key key) => MaterialApp(
+        theme: nightTheme(),
+        home: SleepExperimentsScreen(key: key, recordingsDir: rec, now: () => now, readNights: (_) async => const {}, phone: phone, notificationsOn: () async => allowed),
+      );
+      await tester.pumpWidget(page(const ValueKey(1)));
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(find.widgetWithText(SwitchListTile, 'Remind me in the evening')).value, isFalse);
+      expect(find.textContaining('One notification at about 22:15, only while tonight is unanswered'), findsOneWidget);
+      expect(find.textContaining('Notifications are off'), findsNothing, reason: 'nothing to warn about while it is off');
+      expect(phone.armed, isEmpty);
+
+      await tester.tap(find.text('Remind me in the evening'));
+      await tester.pumpAndSettle();
+      expect(store.read(id)!.remind, isTrue);
+      expect(phone.armed.last.first.kind, PromptKind.sleepExperiment);
+      expect(phone.armed.last.first.at, DateTime(2026, 11, 2, 22, 15));
+      expect(find.textContaining('Notifications are off for EEG Tracker'), findsOneWidget);
+
+      allowed = true;
+      await tester.tap(find.text('In between').first);
+      await tester.pumpAndSettle();
+      expect(phone.armed.last.first.at, DateTime(2026, 11, 3, 22, 15));
+      expect(find.textContaining('Notifications are off'), findsNothing);
+
+      await tester.tap(find.text('Remind me in the evening'));
+      await tester.pumpAndSettle();
+      expect(store.read(id)!.remind, isFalse);
+      expect(phone.armed.last, isEmpty);
       expect(tester.takeException(), isNull);
     });
 

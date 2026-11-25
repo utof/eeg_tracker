@@ -32,6 +32,7 @@ import 'experiments_view.dart' show experimentLine;
 import 'sharp_hours_screen.dart';
 import '../sleep_experiments/result.dart' show nightNumbersFrom, sortNights;
 import '../sleep_experiments/store.dart';
+import 'sleep_experiment_ask.dart' show rearmOnPhone;
 import 'sleep_experiments_screen.dart';
 import 'sleep_experiments_view.dart';
 import 'trends_view.dart';
@@ -268,6 +269,8 @@ class _TrendsScreenState extends State<TrendsScreen> {
             } catch (err) {
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Not saved: $err')));
             }
+            // tonight's reminder is not needed any more (DECISIONS 1085)
+            unawaited(rearmOnPhone(dir).catchError((Object _) {}));
             unawaited(_load(walk: false));
           },
           onOpen: () async {

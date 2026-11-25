@@ -147,18 +147,21 @@ class SharpSettings {
 }
 
 /// What a planned moment asks. The phone's one alarm chain rings them all (SharpPrompts.kt): the sharp-hours
-/// question, and the two study reminders (lib/study/, DECISIONS rows 400-401).
+/// question, the two study reminders (lib/study/, DECISIONS rows 400-401) and a sleep experiment's evening reminder.
 enum PromptKind {
   sharp('sharp'),
   studyEvening('study_evening'),
-  studyMorning('study_morning');
+  studyMorning('study_morning'),
+
+  /// The evening reminder of a running sleep experiment (lib/sleep_experiments/reminder.dart, DECISIONS 1085).
+  sleepExperiment('sleep_experiment');
 
   const PromptKind(this.wire);
 
   /// The name the Android side knows it by.
   final String wire;
 
-  bool get isStudy => this != sharp;
+  bool get isStudy => this == studyEvening || this == studyMorning;
 }
 
 /// One planned moment: when, what it asks, and (sharp-hours questions) whether it suggests the reaction test.

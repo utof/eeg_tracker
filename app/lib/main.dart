@@ -16,6 +16,7 @@ import 'phone.dart' show Phone;
 import 'recorder/recorder_service.dart';
 import 'share/push/task.dart' show runPushTask;
 import 'sharp/prompts.dart';
+import 'sharp/schedule.dart' show PromptKind;
 import 'spans/activities.dart';
 import 'start_log.dart';
 import 'ui/activity_stop.dart';
@@ -23,6 +24,7 @@ import 'ui/auto_hooks.dart';
 import 'ui/device_status.dart';
 import 'ui/night_screen.dart';
 import 'ui/sharp_rating_screen.dart';
+import 'ui/sleep_experiments_screen.dart';
 import 'ui/study_screen.dart' show StudyLogScreen;
 import 'ui/theme.dart';
 
@@ -107,7 +109,12 @@ class _EegTrackerAppState extends State<EegTrackerApp> {
       if (launch != null && nav != null) {
         await nav.push(
           MaterialPageRoute<void>(
-            builder: (_) => launch.kind.isStudy ? StudyLogScreen(kind: launch.kind, launch: launch) : SharpRatingScreen(launch: launch),
+            builder: (_) => switch (launch.kind) {
+              PromptKind.studyEvening || PromptKind.studyMorning => StudyLogScreen(kind: launch.kind, launch: launch),
+              // a sleep experiment's evening reminder opens its page: today's question is on top (DECISIONS 1085)
+              PromptKind.sleepExperiment => const SleepExperimentsScreen(),
+              PromptKind.sharp => SharpRatingScreen(launch: launch),
+            },
           ),
         );
       }
