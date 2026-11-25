@@ -198,7 +198,7 @@ class StudyView extends StatelessWidget {
           const SizedBox(height: 12),
           Text(
             'Seen together, not tested: the days you study in the evening may differ in other ways too. To test it on '
-            'yourself, start the self-experiment "Study in the evening or the morning" (Trends, Experiments); it '
+            'yourself, start the self-experiment "Study in the evening or the morning" (Trends, Self-experiments); it '
             'reads your recall as its number.',
             style: muted,
           ),

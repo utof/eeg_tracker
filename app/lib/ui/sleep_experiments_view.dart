@@ -519,7 +519,7 @@ class SleepExperimentSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SectionHeading('Sleep experiments'),
+        const SectionHeading('Sleep experiments: one tap each evening'),
         if (e == null)
           const Para(
             'What does late caffeine, a late workout or a few drinks do to your own sleep? Tap each evening; the app '

@@ -1006,7 +1006,7 @@ to, before the app shows the answer).
 Nothing of this has run on the phone yet. A good first one is caffeine: research found late caffeine costs about 45
 minutes of sleep on average.
 
-1. Open **Trends**, scroll to **Self-experiments**, tap **Experiments**, then **New experiment**.
+1. Open **Trends**, find **Self-experiments** under today's numbers, tap **Self-experiments**, then **New experiment**.
 2. Choose "No caffeine in the last 8 hours before bed", leave **Asleep** as the number and 4 weeks, tap
    **Start tomorrow**.
 3. From tomorrow: look at the task once a day, wear the headband at night, do the morning check-in, tap Kept or
