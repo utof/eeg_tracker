@@ -411,6 +411,7 @@ PHONE_LINES = [
     "contact ohms O1=120000 O2=inf T3=none T4=31000",
     "contact check: no resistance data arrived",
     "contact check failed: PlatformException(x)",
+    "no contact reading on the live connection; not measured now",
     "recording started, 250 Hz",
     "samples 2500 (+2500) battery 90%",
     "samples 2500 (+0) battery null%",

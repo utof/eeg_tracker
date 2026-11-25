@@ -154,11 +154,18 @@ def signed_who(port: int, key: str) -> str:
 
 def keep(*extra: str) -> subprocess.Popen:
     log = open(WORK / "keep.log", "ab")
-    return subprocess.Popen(
-        [sys.executable, "-I", str(WT / "scripts" / "phone_link.py"), "--keep", "--dest", str(DEST), "--address",
-         "10.0.2.2", "--port", str(LINK_PORT), "--no-pages", "--no-after-pull", "--push-loopback-home",
-         *(["--push-port", str(PUSH_PORT)] if PUSH_PORT else []), *extra],
-        stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    args = ["--keep", "--dest", str(DEST), "--address", "10.0.2.2", "--port", str(LINK_PORT), "--no-pages",
+            "--no-after-pull", "--push-loopback-home", *extra]
+    if PUSH_PORT is None:
+        cmd = [sys.executable, "-I", str(WT / "scripts" / "phone_link.py"), *args]
+    else:
+        # the app still names the laptop's port 8772 in `Host`; this check's receiver listens on PUSH_PORT, so here
+        # (and only here) it also answers to that name: the real receiver's Host rule is untouched
+        start = ("import sys; sys.path.insert(0, sys.argv.pop(1)); import local_http as lh; own = lh.own_hosts; "
+                 "lh.own_hosts = lambda h, extra=(): own(h, extra) | {'10.0.2.2:8772'}; "
+                 "import phone_link; sys.exit(phone_link.main(sys.argv[1:]))")
+        cmd = [sys.executable, "-I", "-u", "-c", start, str(WT / "scripts"), *args, "--push-port", str(PUSH_PORT)]
+    return subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 
 
 def close_app() -> bool:

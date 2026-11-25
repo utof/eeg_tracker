@@ -816,7 +816,12 @@ def check_one_connection(replay: Path, stage: Path) -> Result:
     time.sleep(3)
     start_app()
     if not wait_main():
-        return Result(name, "FAIL", "the app's main screen did not come up within 2 minutes", screen_words("e-start"))
+        try:  # why: a crash at start, or an emulator too slow to draw it
+            (OUT / "e-no-main-logcat.txt").write_text(logcat())
+        except Exception:
+            pass
+        return Result(name, "FAIL", "the app's main screen did not come up within 2 minutes",
+                      screen_words("e-start") + ["app process: " + (app_pid() or "none")])
     details: list[str] = []
     if not open_tab("Signal"):
         return Result(name, "FAIL", "the Signal tab was not found", screen_words("e-tab"))

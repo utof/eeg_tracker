@@ -100,6 +100,8 @@ RULES = [(k, re.compile(p)) for k, p in [
     ("contact", r"contact ohms (?P<ohms>.*)"),  # P L O
     ("contact_none", r"contact check: no resistance data(?: arrived)?|contact re-check: no resistance data arrived"),
     ("contact_failed", r"contact check failed: (?P<err>.*)"),  # P L
+    # a night on the screen's live connection that had no reading in force: not a failed check (2026-11-25)
+    ("contact_not_measured", r"no contact reading on the live connection; not measured now"),  # P
     ("contact_recheck", r"contact re-check asked(?P<rest>.*)"),  # L
     ("live_page", r"live check page on port \d+"),  # L
     ("info", r"(?:sdk library|features|commands|parameters)(?: unavailable:)? .*"),  # L
