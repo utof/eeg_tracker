@@ -271,7 +271,8 @@ already on it (DECISIONS 873). A device whose clock is off by more than 5 s (a r
 
 `python3 tool/push_smoke.py <release APK> [--work <folder on a disk with room>]` (heavy build slot, about 25
 minutes, adb port 5049) pairs a temporary emulator with a receiver on this laptop and checks the phone's own
-sending (DECISIONS 849): the spare port, the scheduled job run by Android itself with the app closed, forced
+sending (DECISIONS 849). The receiver listens on a free port the OS picks (`--push-port N` chooses one), never on
+8772, which the laptop's own `phone_link.py --keep` holds for the real phone: the spare port, the scheduled job run by Android itself with the app closed, forced
 runs, the laptop's own copy beside it, and that no notification is shown. It waits for Android's own run before
 it forces any: every run of a periodic job moves Android's next window 15 minutes on.
 With `--replay <replay build>` it first makes a short recording with a sleep stretch on the replay build (the five
