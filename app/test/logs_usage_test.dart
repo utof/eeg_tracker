@@ -328,6 +328,31 @@ void main() {
       expect(screenLabel('dialog'), 'Dialog');
     });
 
+    test('an old log calls the first tab Night (before Record first): it is read as the Record tab', () {
+      final old = <Map<String, Object?>>[
+        {'t': at(0), 'ev': 'app', 'state': 'front'},
+        {'t': at(0), 'ev': 'view', 'screen': 'tab:Night'},
+        {'t': at(2), 'ev': 'tap', 'screen': 'tab:Night', 'control': 'FilledButton', 'label': 'Start night'},
+        {'t': at(3), 'ev': 'scroll', 'screen': 'tab:Night', 'axis': 'v', 'dir': 'down', 'px': 400, 'ms': 200, 'reach': 0.5},
+        {'t': at(5), 'ev': 'view', 'screen': 'tab:Signal'},
+        {'t': at(10), 'ev': 'view', 'screen': 'tab:Record'}, // the new name, after the update
+        {'t': at(12), 'ev': 'tap', 'screen': 'tab:Record', 'control': 'FilledButton', 'label': 'Start night'},
+        {'t': at(20), 'ev': 'app', 'state': 'back'},
+      ];
+      final oldMetrics = <Map<String, Object?>>[
+        {'t': at(1), 'kind': 'frames', 'screen': 'tab:Night', 'n': 300, 'slow': 30, 'janky': 20, 'worst_ms': 90},
+      ];
+      final r = usageSummary(old, oldMetrics, since: DateTime(2026, 11, 20), now: day.add(const Duration(days: 1)));
+      expect([for (final x in r.screens) x.screen], unorderedEquals(['tab:Record', 'tab:Signal']));
+      expect(r.screens.firstWhere((x) => x.screen == 'tab:Record').time, const Duration(minutes: 5 + 10));
+      expect(r.taps.single, (screen: 'tab:Record', control: 'Start night', taps: 2));
+      expect(r.scrolls.single.screen, 'tab:Record');
+      expect(r.smooth.single.screen, 'tab:Record');
+      expect(r.notOpened, isNot(contains('tab:Record')), reason: 'the tab was opened under its old name');
+      expect(r.notOpened, isNot(contains('tab:Night')));
+      expect(screenLabel('tab:Night'), 'Record tab');
+    });
+
     test('every screen the "not opened" list knows is a page of the app (its widget is in lib/ui)', () {
       final source = [
         for (final f in Directory('lib/ui').listSync())
