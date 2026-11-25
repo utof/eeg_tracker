@@ -31,7 +31,7 @@ import '../detectors/gestures.dart';
 import '../feedback/features.dart' show fs;
 import '../handsfree/live.dart';
 import '../meditation/controller.dart' show gapPauseS, gapSamples;
-import '../spans/activities.dart' show activityRef;
+import '../spans/activities.dart' show ActivityRef, activityRef;
 import '../recorder/chunk_writer.dart';
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
@@ -176,6 +176,10 @@ class DreamController extends ChangeNotifier {
 
   /// The span this session runs on as an activity of the day's recording (then it writes no EEG file of its own).
   String? _span;
+
+  /// The recording this session rides on, read again when the session is saved: until the headband is found the
+  /// recording has no id yet and the span is numbered `?-1` (spans/activities.dart [ActivityRef]).
+  ActivityRef? _rides;
   Detectors? _seen;
   DriftOff? _drift;
   RoundPlan? _plan;
@@ -282,6 +286,7 @@ class DreamController extends ChangeNotifier {
     _writer = null;
     _recording = null;
     _span = null;
+    _rides = null;
     _seen = null;
     _drift = null;
     _hands = null;
@@ -324,6 +329,7 @@ class DreamController extends ChangeNotifier {
     final ref = (_link?.ridesRecorder ?? false) ? activityRef() : null;
     if (ref != null) {
       // an activity of the day's recording: its signal is that recording's samples inside the span
+      _rides = ref;
       _recording = ref.recording;
       _span = ref.span;
       return;
@@ -667,8 +673,8 @@ class DreamController extends ChangeNotifier {
       plannedRounds: rounds,
       ending: ending,
       prompts: _prompts,
-      recording: _recording,
-      span: _span,
+      recording: _rides?.recording ?? _recording,
+      span: _rides?.span ?? _span,
       firstTimerS: plan.firstTimerS,
       baselineS: d?.baselineDone,
       rounds: List.of(_rounds),

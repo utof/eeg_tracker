@@ -35,7 +35,7 @@ import '../sleep/live_log.dart' show LiveStageLog, liveStagesDirFor;
 import '../sleep/live_stager.dart';
 import '../sleep/night_scorer.dart';
 import '../sleep/onnx_runs.dart';
-import '../spans/span.dart' show recordingStoppedNotice, spansDirFor, spansEndedNotice;
+import '../spans/span.dart' show recordingStoppedNotice, sleepResumedNotice, spansDirFor, spansEndedNotice;
 import '../spans/after_restart.dart';
 import '../spans/span_log.dart';
 import 'brainbit.dart';
@@ -132,6 +132,11 @@ const Map<String, Object?> stopSleepCommand = {'kind': 'sleep', 'op': 'stop'};
 /// Sent by the recorder when it stopped by itself after hours without the headband (DECISIONS 899).
 const Map<String, Object> gaveUpMessage = {'kind': 'gaveUp'};
 
+/// How long the screen waits for [stoppedMessage] before it stops the service: the recorder's own worst case (three
+/// closes of at most 5 s each, then [RecorderTiming.stopTimeout], 20 s) and a little more. A service stopped before
+/// the recorder has finished leaves the recording marked active with its spans open.
+const Duration stopAnswerWait = Duration(seconds: 40);
+
 /// Sent by the recorder once its files are closed after [stopCommand].
 const Map<String, Object> stoppedMessage = {'kind': 'stopped'};
 
@@ -145,7 +150,7 @@ void initRecorderService() {
     ),
     iosNotificationOptions: const IOSNotificationOptions(showNotification: false),
     foregroundTaskOptions: ForegroundTaskOptions(
-      // The recorder keeps its own 1 s clock; no repeat events needed.
+      // The recorder keeps its own 1 s clock and the service its own heartbeat (StatusBeat); no repeat events needed.
       eventAction: ForegroundTaskEventAction.nothing(),
       autoRunOnBoot: false, // a reboot ends the night; never resume silently
       autoRunOnMyPackageReplaced: false,
@@ -255,7 +260,7 @@ Future<(NightState, bool)> loadEndedNight(String? recordingsDir) async {
   final s = await store.load();
   if (recordingsDir == null) return (s, false);
   try {
-    final fixed = endedWithoutStop(s, Directory(recordingsDir));
+    final fixed = endedWithoutStop(s, Directory(recordingsDir), processStart: appProcessStart);
     if (fixed == null) return (s, false);
     await store.save(fixed);
     return (fixed, true);
@@ -300,6 +305,10 @@ class RecorderTaskHandler extends TaskHandler {
   LostWatch? _lostWatch;
   Map<String, Object?>? _alert;
   Timer? _lostTimer;
+
+  /// The heartbeat: the recorder's status every [recorderBeat] while it searches, reconnects or records, so the screen
+  /// knows a recorder exists also when no sample arrives.
+  late final StatusBeat _beat = StatusBeat(read: () => _recorder?.status, send: _send);
   BandBatteryStore? _bandBattery;
   Phase? _shownPhase;
   int _shownAtMs = 0;
@@ -401,6 +410,11 @@ class RecorderTaskHandler extends TaskHandler {
         final n = spansEndedNotice(ended, awayMinutes: const RecorderTiming().spansAway.inMinutes);
         unawaited(Phone.bandNotice(n.title, n.text));
       },
+      // the headband came back after that rule had ended Sleep: the app marked it again by itself, and says so
+      onSleepResumed: (span) {
+        final n = sleepResumedNotice(span);
+        unawaited(Phone.bandNotice(n.title, n.text));
+      },
       sleep: sleep,
       firstSpan: firstSpan,
       sleepSource: auto != null ? 'auto_start' : 'owner_button',
@@ -412,6 +426,7 @@ class RecorderTaskHandler extends TaskHandler {
       bandBattery: bandBattery,
     );
     _recorder = recorder;
+    _beat.start();
     // what this night runs, for the battery samples and the usage log (lib/logs/activity.dart, DECISIONS 715)
     Activity.begin('night');
     if (scorer != null) Activity.begin('live-model');
@@ -437,7 +452,14 @@ class RecorderTaskHandler extends TaskHandler {
       _wifiDiy = true;
       unawaited(_wifi());
     }
-    unawaited(recorder.run(restartedBySystem: starter == TaskStarter.system));
+    unawaited(
+      recorder.run(restartedBySystem: starter == TaskStarter.system).then((_) {
+        // Android started the service by itself and there is no recording to continue: none begins, the service goes
+        if (!recorder.nothingToContinue || _stopping) return;
+        debugPrint('eeg_tracker recorder: started by Android with no recording to continue; stopping the service');
+        unawaited(FlutterForegroundTask.stopService());
+      }),
+    );
     unawaited(_sharing(() async => _applyShare(await loadShareConfig())));
   }
 
@@ -664,6 +686,7 @@ class RecorderTaskHandler extends TaskHandler {
       _wifiDiy = false;
       await _wifi();
     }
+    _beat.stop();
     FlutterForegroundTask.sendDataToMain(stoppedMessage);
     Metrics.band = null;
     for (final f in const ['headband', 'cues', 'live-model', 'night']) {

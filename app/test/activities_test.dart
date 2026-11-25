@@ -147,10 +147,11 @@ class Day {
     }
   }
 
+  /// Stop on the Record tab, as night_screen.dart does it: the activity that is alive is told first.
   Future<void> stop() async {
+    acts.recordingStops();
     stopped = true;
     await recorder?.stop();
-    owner.nightEnded();
   }
 
   bool get recording => statuses.isNotEmpty && statuses.last.phase == Phase.recording && statuses.last.nightSamples > 0;
@@ -288,12 +289,18 @@ void main() {
     await link.startSignal();
     expect(d.statuses.last.rec.open('work'), isNotNull);
     expect(d.statuses.last.phase, isNot(Phase.recording));
+    final early = activityRef(); // a session takes it when it starts (work, nap, meditation ...) and reads it when it saves
+    expect((early?.recording, early?.span), (null, '?-1'));
     await Future<void>.delayed(const Duration(milliseconds: 50));
     expect(got, isEmpty);
     d.nightFinder.bands.add(d.band);
     await until(() => got.length > 3, what: 'the stream after the headband was found');
     // the span opened before the recording had its id: it is the recording's first all the same
     expect(d.spans.single.id, '${d.recordingId}-1');
+    // and what the session writes into its own file names that recording and that span, not the "?-1" of its start
+    final ref = activityRef();
+    expect((ref?.recording, ref?.span), (d.recordingId, '${d.recordingId}-1'), reason: 'the session file could not be joined to its signal');
+    expect((early?.recording, early?.span), (d.recordingId, '${d.recordingId}-1'), reason: 'a reference taken at the start must follow the span');
     await link.close();
     await until(() => d.spans.single.closed, what: 'the span closed under its final id');
     expect(d.screenFinder.calls, isEmpty);
@@ -310,7 +317,19 @@ void main() {
     expect(d.acts.ask.value, isNull);
     expect(d.acts.current.value, isNull);
     final span = d.log.read(d.recordingId).spans.single;
-    expect(span.endedBy, 'recording_stopped', reason: 'Stop of the recording closes every open span');
+    expect(span.endedBy, 'owner', reason: 'the session was alive when you pressed Stop: that end is yours');
+  });
+
+  test('the recording is stopped with a span left open by a closed app: it says left open, not that you ended it', () async {
+    final d = Day();
+    addTearDown(d.close);
+    await d.record();
+    await until(() => d.recording);
+    d.toRecorder(openSpanCommand('work')); // Work of an earlier run of the app: its screen is gone
+    await until(() => d.statuses.last.rec.open('work') != null);
+    await d.stop();
+    final span = d.log.read(d.recordingId).spans.single;
+    expect((span.kind, span.endedBy), ('work', 'left_open'));
   });
 
   test('the DIY board is chosen: an activity is refused in words before anything is started', () async {
@@ -359,7 +378,7 @@ void main() {
     final med = await d.session('meditate');
     await until(() => med.got.isNotEmpty);
     final spans = d.statuses.last.rec.spans;
-    expect([for (final s in spans) (s.kind, s.closed, s.endedBy)], [('work', true, 'other_activity'), ('meditate', false, null)]);
+    expect([for (final s in spans) (s.kind, s.closed, s.endedBy)], [('work', true, 'left_open'), ('meditate', false, null)]);
     await med.link.close();
   });
 

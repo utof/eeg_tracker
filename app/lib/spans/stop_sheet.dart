@@ -169,20 +169,55 @@ bool saveStopSheet(
 }
 
 /// A Yes on a sleep estimate (the confirm questions, wherever it was answered): a sleep span of its recording, source
-/// `owner_confirmed` with the estimate's id, so that stretch gets its report (DECISIONS 889). Nothing for another
-/// label, an estimate without a recording or one confirmed before; false when it could not be written (the
-/// recording still runs: [active] is its id).
-bool confirmedSleep(Directory filesDir, Estimate e, {String? Function()? active}) {
+/// `owner_confirmed` with the estimate's id, so that stretch gets its report (DECISIONS 889, 1016). Its times are the
+/// ones you set when [answer] has them ("Yes, but the times are off"), else the detector's; a span this estimate
+/// already has is corrected to them (a new line of the same span). Nothing for another label or an estimate without
+/// a recording; false when it could not be written (the recording still runs: [active] is its id; the next
+/// [sweepConfirmedSleep] writes it). The span says only that the stretch gets a report: whether its times are yours
+/// is the answer's to say (the laptop's truth table reads the answer, never this span).
+bool confirmedSleep(Directory filesDir, Estimate e, {Answered? answer, String? Function()? active}) {
   final recording = e.recording;
   if (recording == null || recording.isEmpty || !e.label.sameAs(Labels.asleep)) return true;
+  final yours = answer != null && answer.timesConfirmed;
+  final start = yours ? answer.start! : e.start, end = yours ? answer.end! : e.end;
   final log = SpanLog.screen(Directory('${filesDir.path}/spans'), active: active ?? () => null);
-  if (log.read(recording).spans.any((s) => s.estimate == e.id)) return true;
   try {
-    log.add(recording, kind: e.label.id == 'nap' ? 'nap' : 'sleep', start: e.start, end: e.end, source: 'owner_confirmed', estimate: e.id);
+    final has = log.read(recording).spans.where((s) => s.estimate == e.id).lastOrNull;
+    if (has != null) {
+      if (has.start != start || has.end != end) log.write(has.withTimes(start, end));
+      return true;
+    }
+    log.add(recording, kind: e.label.id == 'nap' ? 'nap' : 'sleep', start: start, end: end, source: 'owner_confirmed', estimate: e.id);
     return true;
   } on SpansBusy {
     return false;
   } on FileSystemException {
     return false;
   }
+}
+
+/// Every Yes on a sleep estimate that has no span yet gets it now ([confirmedSleep], safe to repeat): a Yes tapped in
+/// the notification is written by Android without the app's hook, and a Yes given while that recording still ran
+/// could not be written into the recorder's file. Run at the app's start, when it comes to the front and after Stop.
+/// [written]: spans made or corrected now; [waiting]: Yeses whose recording still runs.
+({int written, int waiting}) sweepConfirmedSleep(Directory filesDir, {String? Function()? active}) {
+  final ConfirmState state;
+  try {
+    state = ConfirmStore(filesDir).read();
+  } catch (_) {
+    return (written: 0, waiting: 0);
+  }
+  final spansDir = Directory('${filesDir.path}/spans');
+  var written = 0, waiting = 0;
+  for (final a in state.answers.entries) {
+    final e = state.estimates[a.key];
+    final recording = e?.recording;
+    if (e == null || a.value.answer != Answer.yes || recording == null || recording.isEmpty || !e.label.sameAs(Labels.asleep)) continue;
+    final yours = a.value.timesConfirmed;
+    final start = yours ? a.value.start! : e.start, end = yours ? a.value.end! : e.end;
+    final has = readSpans(spansFileOf(spansDir, recording)).spans.where((s) => s.estimate == e.id).lastOrNull;
+    if (has != null && has.start == start && has.end == end) continue;
+    confirmedSleep(filesDir, e, answer: a.value, active: active) ? written++ : waiting++;
+  }
+  return (written: written, waiting: waiting);
 }

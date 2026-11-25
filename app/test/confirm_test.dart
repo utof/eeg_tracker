@@ -377,16 +377,17 @@ void main() {
       expect((s.answers[b.id]!.start, s.answers[b.id]!.end), (at(19, 20), at(21)));
     });
 
-    test('a Yes calls the hook with the estimate (record-first makes a sleep stretch of it)', () {
-      final got = <Estimate>[];
-      ConfirmQuestions.onYes = got.add;
+    test('a Yes calls the hook with the estimate and the answer as kept (record-first makes a sleep stretch of it)', () {
+      final got = <(Estimate, Answered)>[];
+      ConfirmQuestions.onYes = (e, a) => got.add((e, a));
       addTearDown(() => ConfirmQuestions.onYes = null);
       final q = make();
-      final a = est(Labels.nap, at(15, 59), 110), b = est(Labels.walking, at(19, 8), 126);
-      q.register([a, b]);
+      final a = est(Labels.nap, at(15, 59), 110), b = est(Labels.walking, at(19, 8), 126), c = est(Labels.asleep, at(2), 60);
+      q.register([a, b, c]);
       q.answer(a.id, Answer.yes);
       q.answer(b.id, Answer.no);
-      expect([for (final e in got) e.id], [a.id]);
+      q.answer(c.id, Answer.yes, start: at(2, 10), end: at(2, 50));
+      expect([for (final x in got) (x.$1.id, x.$2.timesConfirmed, x.$2.start)], [(a.id, false, null), (c.id, true, at(2, 10))]);
     });
   });
 

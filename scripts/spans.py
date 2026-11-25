@@ -54,7 +54,7 @@ class Span:
     label: str | None
     start_unix: int | float
     end_unix: int | float | None  # None while the span is open
-    source: str  # owner_button, owner_confirmed, auto_start, ...
+    source: str  # owner_button, owner_confirmed, auto_start, auto_resume, ...
     started_recording: bool = False
     ended_by: str | None = None
     session: str | None = None

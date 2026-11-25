@@ -202,7 +202,7 @@ new samples exist; files of the same name made by hand are first renamed `<date>
 
 A file set whose header has `recording` (Record first) is never chained like that. What was sleep in its recording
 is said by that recording's sleep spans (`spans/`, above): each closed span of kind `sleep` (source `owner_button`,
-`owner_confirmed` or `auto_start`) is a time window; windows are joined into one night by the same rule applied to
+`owner_confirmed`, `auto_start` or `auto_resume`) is a time window; windows are joined into one night by the same rule applied to
 spans (the next starts under 3 hours after the last one's end, or has the same evening date, within 24 hours of the
 first), named by the evening date of the first. Only the samples inside the windows are read. Spans of kind `nap` are
 naps and never join a night. A recording with no sleep span gives no night. Old file sets chain as before, except
@@ -858,9 +858,9 @@ the middle of a write leaves a half last line: skipped too).
 | `kind` | `sleep`, `nap`, `work`, `meditate`, `alpha_theta`, `sound`, `dream_catcher`, `check_in`, `calibration`; a reader keeps a kind it does not know |
 | `label` | the shared vocabulary's label for it (`scripts/truth_vocabulary.tsv`): `sleep`, `nap` -> `in_bed`; `work` -> `working`; `meditate` -> `meditating`; `alpha_theta` -> `neurofeedback`; `sound` -> `sound_session`; `dream_catcher` -> `resting`; absent for the others |
 | `start`, `end` | local ISO time with the UTC offset; `end` is `null` while the span is open |
-| `source` | `owner_button` (you pressed it), `owner_confirmed` (the app found it, you said yes), `auto_start` (the headband watcher) |
+| `source` | `owner_button` (you pressed it), `owner_confirmed` (the app found it, you said yes), `auto_start` (the headband watcher), `auto_resume` (the 60-minute rule had ended Sleep and the headband came back: the app opened a new sleep stretch from the first new sample; its guess) |
 | `started_recording` | `true` when this span's button also started the recording |
-| `ended_by` | `owner`, `activity` (a timed session's end), `other_activity`, `recording_stopped`, `headband_off`, `phone_restart`; absent while open |
+| `ended_by` | `owner`, `activity` (a timed session's end), `other_activity`, `recording_stopped`, `left_open` (nobody ended it: its session was gone when Stop, the next activity or End on the bar closed it; at Stop it ends at the recording's last sample), `headband_off`, `phone_restart`, `undone` (you took away a stretch the app had opened by itself: it ends where it began); absent while open |
 | `session` | the activity's own file, relative to `files/`, or absent |
 | `paused` | `[start, end]` pairs: the span stayed open while its activity was paused (`end` `null` while paused) |
 | `estimate` | the confirm-questions estimate this span confirms (`owner_confirmed` only) |

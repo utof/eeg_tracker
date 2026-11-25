@@ -23,7 +23,7 @@ import '../recorder/recorder_service.dart';
 import '../recorder/status.dart';
 import '../confirm/questions.dart';
 import '../spans/activities.dart';
-import '../spans/span.dart' show Span, spanWord, spansLine, undoLine;
+import '../spans/span.dart' show Span, leftOpen, spanWord, spansLine, undoLine;
 import '../spans/stop_sheet.dart';
 import 'stop_sheet.dart';
 import '../session_keeper.dart' show PhoneSessionKeeper;
@@ -348,9 +348,12 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       ?..startRecording = ((kind) => _start(sleep: false, span: kind, quiet: true))
       ..stopRecording = _stopNow;
     // a Yes to "Did you sleep 15:59-17:49?", wherever it is answered, makes that stretch a sleep span with a report
-    ConfirmQuestions.onYes = (e) {
+    // (with the times you set, when you set them); one that cannot be written yet waits for [_sweepYeses]
+    ConfirmQuestions.onYes = (e, a) {
       final files = _filesDir;
-      if (files != null) confirmedSleep(Directory(files), e, active: () => _running ? _status?.rec.id : null);
+      if (files == null) return;
+      final ok = confirmedSleep(Directory(files), e, answer: a, active: _activeRecording);
+      if (!ok && mounted) _say('Noted. The sleep report for that stretch comes after you stop the recording.');
     };
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
@@ -428,6 +431,20 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       _status = s;
       _statusAtMs = DateTime.now().millisecondsSinceEpoch;
     });
+  }
+
+  /// The id of the recording that runs now (its spans file is the recorder's to write), or null.
+  String? _activeRecording() => _running ? _status?.rec.id : null;
+
+  /// A Yes to "Did you sleep?" that could not become a sleep stretch when it was given (tapped in the notification,
+  /// or while that recording still ran) becomes one now (spans/stop_sheet.dart [sweepConfirmedSleep]).
+  void _sweepYeses(String? recordingsDir, {required bool running}) {
+    if (recordingsDir == null) return;
+    try {
+      // while the service runs but its status has not come yet, the running recording is not known: wait
+      if (running && _status?.rec.id == null) return;
+      sweepConfirmedSleep(Directory(recordingsDir).parent, active: () => running ? _status?.rec.id : null);
+    } catch (_) {}
   }
 
   /// Why the night's sleep scoring must not run now, or null.
@@ -577,6 +594,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
         ? null
         : await _safe(() async => _waitingSheet(Directory(dir).parent, last), null);
     if (endedAlone && mounted) _say('The recording stopped when the phone restarted. What was marked ends at its last data.');
+    _sweepYeses(dir, running: running);
     // the nights' chaining opens every recording's index (and a packed one's header): off the screen's thread
     final nights = dir == null || running ? const <NightFiles>[] : await _listNights(dir);
     final now = DateTime.now();
@@ -914,7 +932,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     if (run != null && run.kind == open.kind) {
       unawaited(Activities.shared!.end(run));
     } else {
-      FlutterForegroundTask.sendDataToTask(closeSpanCommand(open.id));
+      // its session is gone: End now does not say when it ended
+      FlutterForegroundTask.sendDataToTask(closeSpanCommand(open.id, by: leftOpen));
     }
     FlutterForegroundTask.sendDataToTask(statusCommand);
   }
@@ -983,14 +1002,20 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   /// Ends the recording now, with no question: Stop once it was confirmed, and "Stop everything" after an activity
   /// that started the recording (spans/activities.dart).
   Future<void> _stopNow() async {
-    if (!mounted || _busy) return;
+    // the tab is in the middle of another tap (Sleep, a start): the Stop waits for it instead of doing nothing
+    for (var i = 0; i < 100 && mounted && _busy; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    if (!mounted) return;
+    if (_busy) return _say('The recording is still running: the app was busy. Tap Stop on the Record tab.');
     setState(() => _busy = true);
     try {
       _stopped = Completer<void>();
       _soFar?.nightEnded(); // a look stops at its next model call; the report comes next
+      Activities.shared?.recordingStops(); // an activity that is alive ends by this Stop; the rest was left open
       FlutterForegroundTask.sendDataToTask(stopCommand);
       // The recorder closes its files and the headband first; then the service goes.
-      await _stopped!.future.timeout(const Duration(seconds: 25), onTimeout: () {});
+      await _stopped!.future.timeout(stopAnswerWait, onTimeout: () {});
       await FlutterForegroundTask.stopService();
       await _share.afterStop(); // 15 more minutes, so the laptop gets the end of the night
       if (mounted) unawaited(_stopSheet(afterStop: true)); // the files are closed: what was this recording?
@@ -1242,7 +1267,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       spansLine: s == null ? null : spansLine(s.rec.spans, sinceMs: s.nightStartMs),
       activityLine: _openActivity == null ? null : '${spanWord(_openActivity!.kind)} since ${_hm(_openActivity!.start)}',
       activityWord: _openActivity == null ? null : spanWord(_openActivity!.kind),
-      undoLine: !_running || s == null ? null : undoLine(s.rec.undoable),
+      undoLine: !_running || s == null ? null : undoLine(s.rec.undoable, resumed: s.rec.resumed),
       stopSheetLine: _running || _sheetPlan == null
           ? null
           : '${_hm(_sheetPlan!.start)}-${_hm(_sheetPlan!.end)}',

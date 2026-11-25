@@ -73,13 +73,18 @@ class ActivityRun {
 /// What the session that rides on the recording now names in its own file; null when none does.
 ActivityRef? activityRef() => Activities.shared?.ref;
 
-/// Where an activity's signal is: what its own session file names instead of a raw file of its own.
+/// Where an activity's signal is: what its own session file names instead of a raw file of its own. It follows the
+/// activity's span as the recorder tells it ([Activities] keeps the run's span current), so a session that took it
+/// at its start and reads it when it saves gets the recording's id and the span's final number, not the `?-1` of a
+/// start before the headband was found.
 class ActivityRef {
-  const ActivityRef({required this.recording, required this.span});
+  const ActivityRef._(this._run, this._first);
+  final ActivityRun _run;
+  final Span _first;
 
   /// The recording's id (null: the recording had not found the headband when the session was saved).
-  final String? recording;
-  final String span;
+  String? get recording => _run.recording;
+  String get span => (_run.span ?? _first).id;
 
   /// The two fields every activity's own file gets (spec section 5.3).
   Map<String, Object?> toJson() => {'recording': recording, 'span': span};
@@ -93,7 +98,9 @@ class Activities {
     this.askStatus,
     this.answerWait = const Duration(seconds: 20),
     this.askEvery = const Duration(milliseconds: 400),
-  });
+  }) {
+    owner.status.addListener(_follow);
+  }
 
   /// The screen's engine's activities (set in main.dart); null in the other engines and in tests that make their own.
   static Activities? shared;
@@ -132,11 +139,23 @@ class Activities {
   /// The running recording as the recorder last told it.
   RecordingLive? get recording => owner.recording;
 
-  /// What the running activity's own file names as its signal; null when no activity rides on a recording.
+  /// What the running activity's own file names as its signal; null when no activity rides on a recording. Read
+  /// from the recorder's status now, not from the activity's start: a span opened before the headband was found is
+  /// `?-1` with no recording until the first file set opens, and is numbered again then.
   ActivityRef? get ref {
     final run = current.value;
-    final span = run?.span;
-    return run == null || span == null || run.over ? null : ActivityRef(recording: run.recording, span: span.id);
+    if (run == null || run.over) return null;
+    _follow();
+    final span = run.span;
+    return span == null ? null : ActivityRef._(run, span);
+  }
+
+  /// The running activity's span as the recorder has it now (its id changes once: when the recording gets its own).
+  void _follow() {
+    final run = current.value;
+    if (run == null || run.over) return;
+    final now = owner.recording?.open(run.kind);
+    if (now != null) run.span = now;
   }
 
   /// Starts [kind] as an activity: its span is open on the running recording when this returns (the recorder is
@@ -164,7 +183,7 @@ class Activities {
       }
       // a span whose session is gone (its screen was closed, the app restarted) ends when the next activity starts
       for (final other in rec?.spans ?? const <Span>[]) {
-        if (!other.closed && other.kind != kind) send(closeSpanCommand(other.id, by: 'other_activity'));
+        if (!other.closed && other.kind != kind) send(closeSpanCommand(other.id, by: leftOpen));
       }
       run = ActivityRun(kind, startedRecording: false);
       send(openSpanCommand(kind));
@@ -219,10 +238,20 @@ class Activities {
     final rec = owner.recording;
     // the id may have changed since the start (a span opened before the headband was found is numbered again)
     final open = rec?.open(run.kind);
+    if (open != null) run.span = open;
     final stillRuns = rec != null && open != null;
     if (span != null && stillRuns) send(closeSpanCommand(open.id, by: how));
     _log.info('activity ended', {'kind': run.kind, 'span': span?.id, 'by': how, 'recording_runs': stillRuns});
     if (stillRuns && run.startedRecording && how != 'other_activity') ask.value = run;
+  }
+
+  /// Stop of the recording was pressed (call it before the recorder is told): the activity that is alive ends here,
+  /// by the owner; whatever else is still marked then was left open, and the recorder says so.
+  void recordingStops() {
+    final run = current.value;
+    if (run == null || run.over) return;
+    final open = owner.recording?.open(run.kind);
+    if (open != null) send(closeSpanCommand(open.id, by: 'owner'));
   }
 
   /// The answer to [ask]: stop everything, or keep recording.

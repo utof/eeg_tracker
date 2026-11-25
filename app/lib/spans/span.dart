@@ -13,6 +13,11 @@ import '../sleep/report.dart' show isoLocal;
 
 const String spansSuffix = '.spans.jsonl';
 
+/// `ended_by` of a span nobody ended: its session was gone (the app was closed, its page left) when something else
+/// closed it (Stop of the recording, the next activity, End on the Record tab's bar). Its end is not a time the owner
+/// stopped doing it (DECISIONS 1017).
+const String leftOpen = 'left_open';
+
 /// The kinds whose spans give sleep reports.
 const Set<String> sleepKinds = {'sleep', 'nap'};
 
@@ -65,7 +70,8 @@ class Span {
   /// Null while the span is open.
   final DateTime? end;
 
-  /// `owner_button`, `owner_confirmed`, `auto_start`.
+  /// `owner_button`, `owner_confirmed`, `auto_start`, `auto_resume` (the app opened it when the headband came back
+  /// after the 60-minute rule had ended Sleep, DECISIONS 1015).
   final String source;
   final bool startedRecording;
   final String? endedBy;
@@ -101,6 +107,21 @@ class Span {
     start: start,
     source: source,
     startedRecording: startedRecording,
+    session: session,
+    paused: paused,
+    estimate: estimate,
+  );
+
+  /// The same span with other times (a confirmed stretch whose times the owner set afterwards).
+  Span withTimes(DateTime start, DateTime? end) => Span(
+    id: id,
+    kind: kind,
+    label: label,
+    start: start,
+    end: end,
+    source: source,
+    startedRecording: startedRecording,
+    endedBy: endedBy,
     session: session,
     paused: paused,
     estimate: estimate,
@@ -311,9 +332,21 @@ String _wordsOf(List<Span> spans) {
 );
 
 /// The Record tab's line for the same ([undoable]: `RecordingLive.undoable`); null when there is nothing to undo.
-String? undoLine(List<Span> undoable) => undoable.isEmpty
+/// [resumed] (`RecordingLive.resumed`): the app has opened a sleep stretch by itself since; the line says so, and
+/// Undo takes that stretch away.
+String? undoLine(List<Span> undoable, {Span? resumed}) => resumed != null
+    ? 'The headband came back at ${_hmOf(resumed.start)}, so the app marked Sleep again from then (its guess). Not sleeping?'
+    : undoable.isEmpty
     ? null
     : '${_wordsOf(undoable)} ended at ${_hmOf(undoable.first.end!)}: the headband was off for an hour. Still going?';
+
+/// The phone notification when the app opened a sleep stretch by itself after the headband came back ([resumed]).
+({String title, String text}) sleepResumedNotice(Span resumed) => (
+  title: 'Sleep goes on',
+  text:
+      'The headband is back, so Sleep is marked again from ${_hmOf(resumed.start)} (the app\'s guess). Not sleeping? '
+      'Open the app and tap Undo.',
+);
 
 /// The phone notification when the recording stopped itself after [awayHours] without the headband.
 ({String title, String text}) recordingStoppedNotice({required int awayHours}) => (
@@ -330,7 +363,10 @@ String spansLine(List<Span> spans, {int sinceMs = 0}) {
   final parts = [
     if (sinceMs > 0) 'Recording since ${hm(DateTime.fromMillisecondsSinceEpoch(sinceMs))}',
     for (final s in spans)
-      s.end == null ? '${spanWord(s.kind)} since ${hm(s.start)}' : '${spanWord(s.kind)} ${hm(s.start)}-${hm(s.end!)}',
+      if (s.end == null)
+        '${spanWord(s.kind)} since ${hm(s.start)}${s.source == 'auto_resume' ? ' (marked by the app)' : ''}'
+      else if (s.end!.isAfter(s.start))
+        '${spanWord(s.kind)} ${hm(s.start)}-${hm(s.end!)}',
     if (spans.isEmpty) 'nothing marked, so it is not counted as sleep',
   ];
   return parts.join(' · ');
