@@ -5,7 +5,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
-import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/nights.dart';
 import 'package:eeg_tracker/sleep/so_far.dart';
 import 'package:eeg_tracker/spans/span.dart';
