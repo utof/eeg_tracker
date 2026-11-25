@@ -123,6 +123,21 @@ def test_closed_pressed_spans_with_a_label_become_rows_and_the_rest_do_not(tmp_p
     assert book["truth_from"]["spans"] == 2 and book["rows"]["truth.tsv"] == 2
 
 
+def test_a_span_made_by_a_yes_to_an_estimate_is_no_row_of_its_own(tmp_path: Path) -> None:
+    """Review finding 4: a plain Yes to "Did you sleep 15:59-17:49?" says it happened, not that the times are right. Its
+    span (`owner_confirmed` with the estimate's id) is there for the report; as truth it is the `confirm:` row, which
+    knows whether the times were set. A span row beside it would say `times_confirmed` 1 for the detector's times."""
+    yes = span(1, "sleep", "in_bed", "owner_confirmed", "2026-11-21T15:59:00+03:00", "2026-11-21T17:49:00+03:00")
+    yes["estimate"] = "est:0123456789abcdef"
+    put_spans(tmp_path, RECORDING, yes,
+              span(2, "sleep", "in_bed", "owner_confirmed", "2026-11-21T23:00:00+03:00", "2026-11-22T07:00:00+03:00"))
+    rows, rejected, counts = truth.build(tmp_path)
+    assert rejected == []
+    # the stop sheet's "Slept 23:00-07:00" (owner_confirmed, no estimate) are the owner's own times: still a row
+    assert [(r["label_id"], r["times_confirmed"]) for r in rows] == [(f"span:{RECORDING}-2", "1")]
+    assert counts["spans"] == 1
+
+
 def test_a_span_with_a_label_the_vocabulary_lacks_is_left_out_with_a_reason(tmp_path: Path) -> None:
     put_spans(tmp_path, RECORDING, span(1, "work", "dozing", "owner_button", "2026-11-21T11:05:00+03:00",
                                         "2026-11-21T12:40:00+03:00"))

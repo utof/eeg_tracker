@@ -33,8 +33,9 @@ class ConfirmQuestions {
   final ConfirmPhone? phone;
   final DateTime Function() _clock;
 
-  /// Called for each Yes with the estimate (record-first's sleep stretches hook in here).
-  static void Function(Estimate estimate)? onYes;
+  /// Called for each Yes with the estimate and the answer as it was kept: after "Yes, but the times are off" the
+  /// answer holds the times you set (record-first's sleep stretches hook in here).
+  static void Function(Estimate estimate, Answered answer)? onYes;
 
   /// The stretches you labelled yourself: every Archive tag (the stop sheet's chips are tags too).
   List<Labelled> labelled() {
@@ -127,9 +128,10 @@ class ConfirmQuestions {
     final p = phone;
     if (p != null) unawaited(p.answered(estimateId).catchError((Object _) {}).then((_) => plan()));
     if (e == null) return;
-    if (a == Answer.yes) onYes?.call(e);
     final kept = store.read().answers[estimateId];
-    if (kept != null) onAnswered?.call(e, kept);
+    if (kept == null) return;
+    if (a == Answer.yes) onYes?.call(e, kept);
+    onAnswered?.call(e, kept);
   }
 
   /// Takes an answer back; the question is open again.

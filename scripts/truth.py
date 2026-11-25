@@ -297,11 +297,13 @@ def archive_rows(local: Path, vocab: Vocabulary, out: Read) -> None:
 
 def span_rows(local: Path, vocab: Vocabulary, out: Read) -> None:
     """The phone's spans as truth: one row per closed span the owner pressed or confirmed that has a label (its id
-    `span:<span id>`, the `recording` column the recording's id). Open spans and `auto_start` spans give no row."""
+    `span:<span id>`, the `recording` column the recording's id). Open spans and `auto_start` / `auto_resume` spans
+    give no row. Neither does a span made by a Yes to an estimate (`owner_confirmed` with `estimate`): that Yes is the
+    `confirm:` row, which says whether the times were set; the span's times after a plain Yes are the detector's."""
     for rid, f in spans_mod.all(local).items():
         rel = (spans_mod.folder(local) / f"{rid}{spans_mod.SUFFIX}").relative_to(local).as_posix()
         for s in f.spans:
-            if s.source not in BUTTON_SPANS or s.end_unix is None or not s.label:
+            if s.source not in BUTTON_SPANS or s.end_unix is None or not s.label or s.estimate:
                 continue
             tid = f"span:{s.span}"
             out.ids.add(tid)

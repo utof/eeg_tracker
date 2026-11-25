@@ -143,6 +143,74 @@ void main() {
     expect(confirmedSleep(files, other, active: () => 'running'), isFalse); // the recorder's file while it runs
   });
 
+  // ---- a Yes to "Did you sleep?" (review finding 4, DECISIONS 1016) ----
+
+  Estimate sleepEstimate({String? recording}) => Estimate(
+    label: Labels.asleep,
+    start: start.add(const Duration(hours: 2)),
+    end: start.add(const Duration(hours: 4)),
+    recording: recording ?? id,
+    detector: 'test',
+    version: '1',
+    confidence: 0.7,
+    made: end,
+  );
+  List<Span> spansOf(String recording) => readSpans(spansFileOf(Directory('${files.path}/spans'), recording)).spans;
+
+  test('"Yes, but the times are off": the sleep span is built from the times you set, not the detector\'s', () {
+    final confirm = ConfirmQuestions(files, clock: () => end.add(const Duration(minutes: 5)));
+    final e = sleepEstimate();
+    confirm.register([e]);
+    final from = e.start.add(const Duration(minutes: 25)), to = e.end.subtract(const Duration(minutes: 10));
+    final said = <(Estimate, Answered)>[];
+    ConfirmQuestions.onYes = (e, a) {
+      said.add((e, a));
+      confirmedSleep(files, e, answer: a);
+    };
+    addTearDown(() => ConfirmQuestions.onYes = null);
+    confirm.answer(e.id, Answer.yes, start: from, end: to);
+    expect(said.single.$2.timesConfirmed, isTrue);
+    expect([for (final s in spansOf(id)) (s.source, s.estimate, s.start, s.end)], [('owner_confirmed', e.id, from, to)]);
+  });
+
+  test('a plain Yes keeps the detector\'s times; times set later (after taking the answer back) correct the same span', () {
+    final confirm = ConfirmQuestions(files, clock: () => end.add(const Duration(minutes: 5)));
+    final e = sleepEstimate();
+    confirm.register([e]);
+    ConfirmQuestions.onYes = (e, a) => confirmedSleep(files, e, answer: a);
+    addTearDown(() => ConfirmQuestions.onYes = null);
+    confirm.answer(e.id, Answer.yes);
+    expect([for (final s in spansOf(id)) (s.estimate, s.start, s.end)], [(e.id, e.start, e.end)]);
+    confirm.undo(e.id);
+    final from = e.start.add(const Duration(minutes: 30));
+    confirm.answer(e.id, Answer.yes, start: from, end: e.end);
+    final after = spansOf(id);
+    expect([for (final s in after) (s.estimate, s.start, s.end)], [(e.id, from, e.end)], reason: 'one span, with your times');
+  });
+
+  test('a Yes given where no span could be written (the notification, or while that recording still runs) becomes '
+      'the span at the next sweep once the recording has stopped', () {
+    final confirm = ConfirmQuestions(files, clock: () => end.add(const Duration(minutes: 5)));
+    final e = sleepEstimate(), walk = Estimate(label: Label.of('walking')!, start: e.start, end: e.end, recording: id, detector: 'test', version: '1', confidence: 0.6, made: end);
+    final no = sleepEstimate(recording: 'other');
+    confirm.register([e, walk, no]);
+    ConfirmQuestions.onYes = null; // the notification's Yes is written by Android: no hook runs
+    final from = e.start.add(const Duration(minutes: 5));
+    confirm.answer(e.id, Answer.yes, via: AnswerVia.notification, start: from, end: e.end);
+    confirm.answer(walk.id, Answer.yes);
+    confirm.answer(no.id, Answer.no);
+    expect(spansOf(id), isEmpty);
+    // the recording still runs: nothing may be written into the recorder's file, and nothing is lost
+    expect(sweepConfirmedSleep(files, active: () => id), (written: 0, waiting: 1));
+    expect(spansOf(id), isEmpty);
+    // it has stopped
+    expect(sweepConfirmedSleep(files, active: () => null), (written: 1, waiting: 0));
+    expect([for (final s in spansOf(id)) (s.kind, s.source, s.estimate, s.start, s.end)], [('sleep', 'owner_confirmed', e.id, from, e.end)]);
+    expect(sweepConfirmedSleep(files, active: () => null), (written: 0, waiting: 0), reason: 'safe to repeat');
+    expect(spansOf(id), hasLength(1));
+    expect(spansOf('other'), isEmpty, reason: 'a No makes no span');
+  });
+
   testWidgets('the sheet: chips, words, Save writes the tags; Skip writes nothing; either way it is not asked again', (tester) async {
     Future<void> open() async {
       await tester.pumpWidget(

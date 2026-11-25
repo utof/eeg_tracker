@@ -107,6 +107,21 @@ class Span {
     estimate: estimate,
   );
 
+  /// The same span with other times (a confirmed stretch whose times the owner set afterwards).
+  Span withTimes(DateTime start, DateTime? end) => Span(
+    id: id,
+    kind: kind,
+    label: label,
+    start: start,
+    end: end,
+    source: source,
+    startedRecording: startedRecording,
+    endedBy: endedBy,
+    session: session,
+    paused: paused,
+    estimate: estimate,
+  );
+
   Span withId(String id) => Span(
     id: id,
     kind: kind,

@@ -348,9 +348,12 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       ?..startRecording = ((kind) => _start(sleep: false, span: kind, quiet: true))
       ..stopRecording = _stopNow;
     // a Yes to "Did you sleep 15:59-17:49?", wherever it is answered, makes that stretch a sleep span with a report
-    ConfirmQuestions.onYes = (e) {
+    // (with the times you set, when you set them); one that cannot be written yet waits for [_sweepYeses]
+    ConfirmQuestions.onYes = (e, a) {
       final files = _filesDir;
-      if (files != null) confirmedSleep(Directory(files), e, active: () => _running ? _status?.rec.id : null);
+      if (files == null) return;
+      final ok = confirmedSleep(Directory(files), e, answer: a, active: _activeRecording);
+      if (!ok && mounted) _say('Noted. The sleep report for that stretch comes after you stop the recording.');
     };
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
@@ -428,6 +431,20 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       _status = s;
       _statusAtMs = DateTime.now().millisecondsSinceEpoch;
     });
+  }
+
+  /// The id of the recording that runs now (its spans file is the recorder's to write), or null.
+  String? _activeRecording() => _running ? _status?.rec.id : null;
+
+  /// A Yes to "Did you sleep?" that could not become a sleep stretch when it was given (tapped in the notification,
+  /// or while that recording still ran) becomes one now (spans/stop_sheet.dart [sweepConfirmedSleep]).
+  void _sweepYeses(String? recordingsDir, {required bool running}) {
+    if (recordingsDir == null) return;
+    try {
+      // while the service runs but its status has not come yet, the running recording is not known: wait
+      if (running && _status?.rec.id == null) return;
+      sweepConfirmedSleep(Directory(recordingsDir).parent, active: () => running ? _status?.rec.id : null);
+    } catch (_) {}
   }
 
   /// Why the night's sleep scoring must not run now, or null.
@@ -577,6 +594,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
         ? null
         : await _safe(() async => _waitingSheet(Directory(dir).parent, last), null);
     if (endedAlone && mounted) _say('The recording stopped when the phone restarted. What was marked ends at its last data.');
+    _sweepYeses(dir, running: running);
     // the nights' chaining opens every recording's index (and a packed one's header): off the screen's thread
     final nights = dir == null || running ? const <NightFiles>[] : await _listNights(dir);
     final now = DateTime.now();
