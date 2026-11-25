@@ -68,6 +68,7 @@ class TrendsView extends StatelessWidget {
     this.onExperiments,
     this.experimentLine,
     this.unusual,
+    this.sleepExperiments,
     this.onSharp,
     this.sharpLine,
   });
@@ -76,6 +77,9 @@ class TrendsView extends StatelessWidget {
 
   /// The "Unusual for you" section (unusual_view.dart), right after the summary line; null: none.
   final Widget? unusual;
+
+  /// The "Sleep experiments" section (sleep_experiments_view.dart), before Self-experiments; null: none.
+  final Widget? sleepExperiments;
 
   /// Opens the sharp-hours page (the assistant's proposal, DECISIONS rows 280-289); the section shows only with it.
   final VoidCallback? onSharp;
@@ -153,6 +157,7 @@ class TrendsView extends StatelessWidget {
               _DayEntry(day: d, rows: m.rows, today: m.today),
             ],
           ],
+          ?sleepExperiments,
           if (onExperiments != null) ...[
             const SectionHeading('Self-experiments'),
             if (experimentLine != null)
