@@ -10,6 +10,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueNotifier;
+
 import '../experiments/experiment.dart' show experimentId;
 import '../training/check.dart' show allocate, Arm, newSalt;
 import '../trends/days.dart';
@@ -94,6 +96,10 @@ class SleepExperimentStore {
   SleepExperimentStore(this.dir);
   final Directory dir;
 
+  /// Counts every line this app wrote to an experiment's log (a tap, a start, an end), on any page: the Record tab's
+  /// line listens, so an answer given on Trends takes the question away there too.
+  static final ValueNotifier<int> written = ValueNotifier<int>(0);
+
   File _f(String id, String name) => File('${dir.path}/$id/$name');
 
   void _line(String id, DateTime at, String day, String event, [Map<String, Object?> more = const {}]) {
@@ -102,6 +108,7 @@ class SleepExperimentStore {
       mode: FileMode.append,
       flush: true,
     );
+    written.value++;
   }
 
   /// One experiment; null when its plan cannot be read. A damaged log line is skipped.
