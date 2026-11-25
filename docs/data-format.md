@@ -537,10 +537,12 @@ One folder per experiment (DECISIONS rows 1050-1063), named by when it was start
 | File | Content |
 |---|---|
 | `plan.json` | written once: `version` 1, `id`, `kind` (`caffeine_late`, `workout_late`, `alcohol`), `created`, `start` (the first evening that counts, `YYYY-MM-DD`; a day runs 04:00 to 04:00), `picked` (the app picks the test nights) and then `salt` (the secret the picks are drawn from) and `draw`, `with` and `without` (what each means, in words), `watched` (the numbers compared: `efficiency`, `deep`, `awake`, `pulse`, `sleep_start`, `dream`), `day` (which night an answer is judged by) |
-| `log.jsonl` | one line per tap, added at the end: `at`, `day`, `event`. `started`; `answer` with `answer` (`with`, `without`, `neither`, or null when taken back); `odd` with `flag` (`ill`, `away`) and `on`; `pick` with `index` (from 0) and `with`; `ended`. The last line about a day wins |
+| `log.jsonl` | one line per tap, added at the end: `at`, `day`, `event`. `started`; `answer` with `answer` (`with`, `without`, `neither`, or null when taken back); `odd` with `flag` (`ill`, `away`) and `on`; `pick` with `index` (from 0) and `with`; `reminder` with `on` (the evening reminder's switch; off until a line says on); `ended`. The last line about a day wins |
 
 An evening's answer is judged by the sleep report of the next day; the app works the result out again from the
-reports each time, so no result is stored.
+reports each time, so no result is stored. `sleep-experiments/prompts.jsonl` (beside the folders) is the phone's log
+of the evening reminder, in the lines of the sharp-hours `prompts.jsonl`: `planned`, `at`, `event` (`shown`,
+`skipped` with `reason`, `late`, `snoozed`, `dismissed`).
 
 ### Hands-free controls (`hands-free/`)
 

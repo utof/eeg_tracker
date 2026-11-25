@@ -967,12 +967,17 @@ Nothing of this has run on the phone yet, and it has seen only one of your check
 
 ## Sleep experiments (late caffeine, a late workout, a few drinks)
 
-Not yet run on a phone. **Trends**, scroll to **Sleep experiments**, **Start an experiment**: choose Late caffeine,
-Late hard workout or Alcohol. Each evening tap one of three answers (on Trends or on the page). The page shows how
+**Trends**, right under today's numbers, **Sleep experiments: one tap each evening**, **Start an experiment**: choose
+Late caffeine, Late hard workout or Alcohol. Each evening tap one of three answers: on the **Record** tab right above
+the Sleep button (from 17:00, until answered), on Trends, or on the page. **Remind me in the evening** on the page
+(off at first) adds one notification before your usual bedtime while tonight is unanswered; it does not come while a
+recording or a session runs. The section under it on Trends, **Self-experiments: a task on days the app picks**, is
+the older kind (below). The page shows how
 many nights are in, the two averages from 5 nights of each kind, and a verdict only from the nights it needs (never
 under 10 of each). For caffeine and the workout you may switch on **Let the app pick**: on a free evening tap
 **Pick for tonight** and it says with or without by chance; only then can a result say "Tested". Code
-`lib/sleep_experiments/`, `lib/ui/sleep_experiments_*.dart`; DECISIONS rows 1050-1063; the **i** button shows
+`lib/sleep_experiments/`, `lib/ui/sleep_experiments_*.dart`, `lib/ui/sleep_experiment_ask.dart`; DECISIONS rows
+1050-1063, 1082-1085; the **i** button shows
 `docs/evidence/sleep-experiments.md`.
 
 ## Self-experiments (does this habit change that number, for you?)
