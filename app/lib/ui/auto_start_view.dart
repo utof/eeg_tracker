@@ -27,26 +27,29 @@ List<(String, Color)> watchLines(WatchStatus s, {DateTime? now}) {
     out.add(('Android refused a check in the background at ${hm(refused)}.', Night.caution));
   }
   if (s.sdkInt > 0 && !s.companionSupported) {
-    out.add(('This phone has no companion pairing.', Night.caution));
+    out.add(('This phone cannot let Android watch for the headband.', Night.caution));
   } else if (s.paired && s.observing) {
     out.add((
-      'Paired${s.pairedName == null ? '' : ' with ${s.pairedName}'}: Android watches for the headband for the app, keeps '
-          'the app ready while it is near, and lets it start a recording from the background.',
+      'Android watches for the headband${s.pairedName == null ? '' : ' (${s.pairedName})'} and tells the app when it is near: '
+          'the app stays ready, and Android lets it start a recording from the background.',
       Night.live,
     ));
   } else if (s.paired) {
-    out.add(('Paired, but Android does not report when the headband is near on this phone (Android ${s.sdkInt}).', Night.caution));
+    out.add(('Android is set to watch for the headband, but this phone does not report when it is near (Android ${s.sdkInt}).', Night.caution));
   } else if (s.sdkInt > 0 && !s.presenceSupported) {
     out.add(('This Android (${s.sdkInt}) cannot tell the app when the headband is near.', Night.caution));
   } else if (s.sdkInt > 0) {
-    out.add(('Not paired yet. Pair the headband once: Android then tells the app when it is near.', Night.inkMuted));
+    out.add((
+      'Android is not watching for the headband yet. Let Android watch for it once: then it tells the app when the headband is near.',
+      Night.inkMuted,
+    ));
   }
   if (s.batteryExempt) {
-    out.add(('The app may run in the background (battery: no restrictions), so bedtime checks can start without pairing too.', Night.ink));
+    out.add(('The app may run in the background (battery: no restrictions), so bedtime checks can start even when Android is not watching.', Night.ink));
   } else if (!(s.paired && s.observing) && s.sdkInt > 0) {
     out.add((
-      'Without the pairing or the battery exemption Android may refuse checks in the background: then the app checks '
-          'only when you open it.',
+      'Without Android watching for the headband or the battery exemption, Android may refuse checks in the background: '
+          'then the app checks only when you open it.',
       Night.caution,
     ));
   }
@@ -54,7 +57,7 @@ List<(String, Color)> watchLines(WatchStatus s, {DateTime? now}) {
   if (x != null) {
     out.add((
       'Xiaomi ($x): also switch on Autostart and set Battery saver to No restrictions (main screen, Phone). Whether '
-          'HyperOS keeps the pairing\'s "headband near" working is not known yet.',
+          'HyperOS keeps Android\'s "headband near" message working is not known yet.',
       Night.inkMuted,
     ));
   }
@@ -220,9 +223,9 @@ class AutoStartView extends StatelessWidget {
             runSpacing: 8,
             children: [
               if (m.status?.paired == true)
-                TextButton(onPressed: onForget, child: const Text('Forget the pairing'))
+                TextButton(onPressed: onForget, child: const Text('Stop watching'))
               else
-                FilledButton.icon(onPressed: onPair, icon: const Icon(Icons.link), label: const Text('Pair the headband')),
+                FilledButton.icon(onPressed: onPair, icon: const Icon(Icons.visibility_outlined), label: const Text('Let Android watch for the headband')),
               OutlinedButton.icon(onPressed: onCheckNow, icon: const Icon(Icons.sensors), label: const Text('Check now')),
             ],
           ),

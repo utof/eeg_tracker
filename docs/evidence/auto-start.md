@@ -28,15 +28,16 @@ so the app asks instead.
 - A 2026 paper built for exactly these four electrode sites reports 94.69 % for "focus", "relaxation", "engagement"
   and "flow", but its labels are lab tasks (imagined movement, eyes closed, real movement, eyes open) from lab
   recordings cut down to four channels; the authors write that it is not a measure of real-life states.
-- Android lets an app start its recording in the background when the device is paired through Android's own
-  companion pairing, or when the app may ignore battery optimisation; a tap on a notification is always allowed.
+- Android lets an app start its recording in the background when you have let Android watch for the device (its own
+  "companion device" feature, not the laptop's pairing), or when the app may ignore battery optimisation; a tap on a
+  notification is always allowed.
 - People answer short one-tap questions well: in experience-sampling studies about 79 % of about 6 prompts a day were
   answered, and the number of prompts did not lower that.
 
 ## Where the data does not support it
 
-- None of this has run on a phone yet. Whether the phone's system (Xiaomi's HyperOS) keeps the companion pairing's
-  "headband near" working with the screen off is not documented anywhere.
+- None of this has run on a phone yet. Whether the phone's system (Xiaomi's HyperOS) keeps Android's
+  "headband near" message working with the screen off is not documented anywhere.
 - The contact limit for "on the head" (10 MΩ, at least half the electrodes) is a planning value until readings on and
   off the head are seen on the phone.
 - The kind rules are guesses about one person's habits: working in bed late, an afternoon nap or a headband put on to
@@ -52,7 +53,7 @@ so the app asks instead.
   and anything else ("anything else" can only ask or do nothing for now).
 - Checks happen only at sensible moments: when you open the app, every 10 minutes in your bedtime window (from 2 hours
   before your usual bedtime to your usual wake-up, from your last 14 days of recorded nights; 23:00 to 07:00 until 3
-  nights are recorded; you can set it by hand), when Android says the paired headband came near (at most every 30
+  nights are recorded; you can set it by hand), when Android says the headband came near (at most every 30
   minutes), and when the laptop tray says a work session started (it tells the paired phone through Share on Wi-Fi
   between nights). Never during a recording or a session, nor while the Signal tab holds the headband.
 - A check connects for about 10 seconds: contact on every electrode, by name (any headband or helmet), and the

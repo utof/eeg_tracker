@@ -71,7 +71,7 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
 
 **When the headband is on anyway**
 
-- [When I put the headband on](#when-i-put-the-headband-on-automatic-recording-asks-first-unless-you-change-it): pair it once, then a bedtime with "Ask me" (5 minutes, then a few evenings)
+- [When I put the headband on](#when-i-put-the-headband-on-automatic-recording-asks-first-unless-you-change-it): let Android watch for it once, then a bedtime with "Ask me" (5 minutes, then a few evenings)
 
 **When the headband and the board are ready**
 
@@ -507,7 +507,7 @@ APKs under the ARM translation, x86_64 API 36 image):
 12. **When I put the headband on** (DECISIONS rows 600-609; a **debug** build: only it has the fake "headband came
    near"): `flutter build apk --debug --target-platform android-x64`, install with `-g`, and allow background starts the
    way the owner's fallback does (`adb shell dumpsys deviceidle whitelist +io.github.utof.eeg_tracker`; the emulator
-   has no companion pairing). Open Settings, **When I put the headband on**. Put "now" inside the bedtime window
+   cannot let Android watch for the headband). Open Settings, **When I put the headband on**. Put "now" inside the bedtime window
    (`run-as io.github.utof.eeg_tracker` and write `files/auto-start/settings.json` with `bed_min` an hour ahead), press
    Home, then `adb shell am broadcast -n io.github.utof.eeg_tracker/.AutoDebugReceiver -a
    io.github.utof.eeg_tracker.auto.DEBUG_PRESENCE --es fake worn` (`--es fake off` for a headband off the head,
@@ -1646,13 +1646,14 @@ shows `docs/evidence/auto-start.md`).
 
 - Settings (the gear on the Night tab, or More, **Settings**), **When I put the headband on**. For **At night**, **Working** and **Anything
   else**: **Automatic**, **Ask me** (the default) or **Do nothing**. "Anything else" can only ask for now.
-- **Pair the headband** once: Android's own dialog offers the headband ("BB Black"). Then Android tells the app when
-  the headband comes near and lets it start a recording with the app closed. Without it the battery exemption the app
+- **Let Android watch for the headband** once: Android's own dialog offers the headband ("BB Black"). Then Android
+  tells the app when the headband comes near and lets it start a recording with the app closed. (This is neither the
+  laptop's pairing nor the Bluetooth connection; **Stop watching** takes it back.) Without it the battery exemption the app
   already asks for does the same job, less reliably; with neither, the app checks only when you open it. The page says
   which of these your phone allows.
 - When it checks: when you open the app, every 10 minutes in your **bedtime window** (from 2 hours before your usual
   bedtime to your usual wake-up, from your last 14 days of nights; 23:00 to 07:00 until 3 nights; **Change** sets it
-  by hand), when the paired headband comes near, and when the laptop tray says a work session started (it tells the
+  by hand), when Android says the headband came near, and when the laptop tray says a work session started (it tells the
   phone paired by its QR code, through Share on Wi-Fi between nights). **Check now** runs one. Never during a
   recording or a session, nor while the Signal tab holds the headband, and not in the 30 minutes after a recording's
   last data.
@@ -1683,13 +1684,13 @@ Files, app-private, exported by Export data and listed by Share on Wi-Fi: `files
 `state.json`, `log.jsonl` (every check, guess, question, answer and outcome) and `laptop.json`; format in
 `docs/data-format.md`. A debug build has a fake "headband came near" for the emulator (Emulator smoke test).
 
-### Owner step: pair it, then a bedtime with "Ask me" (5 minutes, then a few evenings)
+### Owner step: let Android watch for the headband, then a bedtime with "Ask me" (5 minutes, then a few evenings)
 
-Nothing of this has run on a phone yet. Only the phone can tell: whether HyperOS shows the pairing dialog and keeps
+Nothing of this has run on a phone yet. Only the phone can tell: whether HyperOS shows Android's dialog and keeps
 "headband near" working with the screen off, the contact numbers on and off the head, and how much the checks take
 from the headband's battery.
 
-1. Settings, **When I put the headband on**, **Pair the headband** with the headband nearby and not in use. Choose
+1. Settings, **When I put the headband on**, **Let Android watch for the headband** with the headband nearby and not in use. Choose
    it in the dialog. Note what the "Watching for the headband" lines say.
 2. On a Xiaomi: Settings, Apps, EEG Tracker: **Autostart** on and **Battery saver: No restrictions**.
 3. Headband on, **Check now**: within about 20 seconds a quiet notification should ask. Tap **Not now**. Then take
@@ -1697,7 +1698,7 @@ from the headband's battery.
 4. At bedtime, leave everything on **Ask me**, put the headband on, put the phone on the charger and lock it. Within 10
    minutes "Headband on. Start the night?" should come. Tap **Start the night**. Stop in the morning as usual.
 5. Tell the assistant (and Export data: `auto-start/log.jsonl` has the contact numbers and battery of every check):
-   - Did the pairing dialog show the headband; did the question come, how late, with the screen off?
+   - Did Android's dialog show the headband; did the question come, how late, with the screen off?
    - Did the night's report start when you put the headband on, not when you tapped?
    - Did a question ever come at a wrong moment (off the head, in a session, right after Stop)?
    - The headband's battery in the evening and in the morning, on a day with checks.
