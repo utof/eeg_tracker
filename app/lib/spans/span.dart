@@ -5,7 +5,8 @@
 // The reader's choices where the format doc leaves room are the twin's: a blank line is skipped without being
 // counted; a `reviewed` word other than `no_sleep` or `sleep` makes the line skipped; a time without an offset is
 // local time; a `paused` pair that does not parse is dropped (the span is kept); `started_recording` that is not
-// `true` reads as false; text fields that are not text read as null.
+// `true` reads as false; text fields that are not text read as null; `removed` that is not `true` reads as false, and
+// `moved_to` is read only beside it.
 import 'dart:convert';
 import 'dart:io';
 
@@ -59,6 +60,8 @@ class Span {
     this.session,
     this.paused = const [],
     this.estimate,
+    this.removed = false,
+    this.movedTo,
   });
 
   /// `<recording id>-<n>`.
@@ -79,6 +82,12 @@ class Span {
   final List<(DateTime, DateTime?)> paused;
   final String? estimate;
 
+  /// The owner took this stretch away in the Archive ("Not sleep", "Remove this mark"), or it was filed again under
+  /// the recording that holds its hours ([movedTo]: the id it has there). A removed span is in no list that counts
+  /// ([SpansFile.spans]); its times are kept, so it can be put back with a line without `removed` (DECISIONS 1025).
+  final bool removed;
+  final String? movedTo;
+
   bool get closed => end != null;
   bool get isSleep => sleepKinds.contains(kind);
 
@@ -97,6 +106,8 @@ class Span {
     session: session,
     paused: [for (final p in paused) (p.$1, p.$2 ?? at)],
     estimate: estimate,
+    removed: removed,
+    movedTo: movedTo,
   );
 
   /// The same span open again (Undo of an end the app made by itself).
@@ -110,6 +121,8 @@ class Span {
     session: session,
     paused: paused,
     estimate: estimate,
+    removed: removed,
+    movedTo: movedTo,
   );
 
   /// The same span with other times (a confirmed stretch whose times the owner set afterwards).
@@ -125,6 +138,25 @@ class Span {
     session: session,
     paused: paused,
     estimate: estimate,
+    removed: removed,
+    movedTo: movedTo,
+  );
+
+  /// The same span taken away ([removed] true; [movedTo]: it was filed again under that id), or put back.
+  Span asRemoved(bool removed, {String? movedTo}) => Span(
+    id: id,
+    kind: kind,
+    label: label,
+    start: start,
+    end: end,
+    source: source,
+    startedRecording: startedRecording,
+    endedBy: endedBy,
+    session: session,
+    paused: paused,
+    estimate: estimate,
+    removed: removed,
+    movedTo: removed ? movedTo : null,
   );
 
   Span withId(String id) => Span(
@@ -139,6 +171,8 @@ class Span {
     session: session,
     paused: paused,
     estimate: estimate,
+    removed: removed,
+    movedTo: movedTo,
   );
 
   /// One line of the spans file ([made]: when it is written).
@@ -158,6 +192,8 @@ class Span {
         for (final p in paused) [isoLocal(p.$1), p.$2 == null ? null : isoLocal(p.$2!)],
       ],
     'estimate': ?estimate,
+    if (removed) 'removed': true,
+    if (removed) 'moved_to': ?movedTo,
     'made': isoLocal(made),
   };
 
@@ -205,16 +241,29 @@ class Span {
       session: _text(d['session']),
       paused: pauses,
       estimate: _text(d['estimate']),
+      removed: d['removed'] == true,
+      movedTo: d['removed'] == true ? _text(d['moved_to']) : null,
     );
   }
 }
 
 /// A spans file as read.
 class SpansFile {
-  SpansFile({this.spans = const [], this.reviewed, this.sets = const [], this.hides = const [], this.skipped = 0});
+  SpansFile({
+    this.spans = const [],
+    this.removed = const [],
+    this.reviewed,
+    this.sets = const [],
+    this.hides = const [],
+    this.skipped = 0,
+  });
 
-  /// In the order each span first appeared.
+  /// In the order each span first appeared; without the ones taken away.
   final List<Span> spans;
+
+  /// The spans the owner took away, and the ones filed again under another recording ([Span.movedTo]), in the same
+  /// order: nothing counts them.
+  final List<Span> removed;
 
   /// `no_sleep` or `sleep` from the last `reviewed` line; null without one.
   final String? reviewed;
@@ -230,6 +279,7 @@ class SpansFile {
 
   Map<String, Object?> toExpected() => {
     'spans': [for (final s in spans) s.toExpected()],
+    'removed': [for (final s in removed) {...s.toExpected(), 'moved_to': s.movedTo}],
     'reviewed': reviewed,
     'sets': sets,
     'hides': hides,
@@ -273,7 +323,14 @@ SpansFile parseSpans(String text) {
       byId[s.id] = s;
     }
   }
-  return SpansFile(spans: byId.values.toList(), reviewed: reviewed, sets: sets, hides: hides, skipped: skipped);
+  return SpansFile(
+    spans: [for (final s in byId.values) if (!s.removed) s],
+    removed: [for (final s in byId.values) if (s.removed) s],
+    reviewed: reviewed,
+    sets: sets,
+    hides: hides,
+    skipped: skipped,
+  );
 }
 
 /// The spans file [f]; a missing or unreadable one is an empty one.

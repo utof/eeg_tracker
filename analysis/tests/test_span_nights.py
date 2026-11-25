@@ -235,3 +235,60 @@ def test_nights_tsv_names_the_spans_and_leaves_out_a_hidden_night(tmp_path: Path
             ("", "", "migrated")
     r = by["2026-11-21"]
     assert (r["recording"], r["span_ids"], r["span_from"]) == ("2026-11-21-230000", "2026-11-21-230000-1", "pressed")
+
+
+# ---- a stretch taken away, and a short stray one (DECISIONS 1025, 1026): the owner's 2026-11-25 ----------------------
+
+def _removed(line: str, **more: object) -> str:
+    return json.dumps({**json.loads(line), "removed": True, **more})
+
+
+def _the_test_and_tonight(rec: Path) -> tuple[str, str]:
+    """Sleep pressed for a 4-minute test at 14:17 (two file sets), and the night that evening in its own recording."""
+    test_id, night_id = "2026-11-25-141752", "2026-11-25-233000"
+    make_set(rec, datetime(2026, 11, 25, 14, 17, 52), 39 / 3600, test_id)
+    make_set(rec, datetime(2026, 11, 25, 14, 19, 30), 119 / 3600, test_id)
+    make_set(rec, clock(25, 23, 30), 8, night_id)
+    return test_id, night_id
+
+
+def test_a_short_stray_stretch_hours_before_the_night_is_left_out_of_it(phone: tuple[Path, Path]) -> None:
+    rec, sdir = phone
+    test_id, night_id = _the_test_and_tonight(rec)
+    stray = span_line(test_id, 1, "sleep", datetime(2026, 11, 25, 14, 17, 52), datetime(2026, 11, 25, 14, 21, 29))
+    put_spans(sdir, test_id, stray)
+    n, = nf.all_nights(rec)  # before tonight: alone on its evening date it is that night, as before
+    assert (n.name, n.span_ids) == ("2026-11-25", [f"{test_id}-1"])
+    put_spans(sdir, night_id, span_line(night_id, 1, "sleep", clock(25, 23, 30), clock(26, 7, 30)))
+    n, = nf.all_nights(rec)
+    assert (n.name, n.span_ids, n.recording_ids) == ("2026-11-25", [f"{night_id}-1"], [night_id])
+    assert n.windows == [(clock(25, 23, 30).timestamp(), clock(26, 7, 30).timestamp())]
+    assert n.start == clock(25, 23, 30).timestamp() and [r.stem for r in n.recs] == [night_id]
+
+
+def test_a_short_stretch_hours_after_a_sleep_is_left_out_and_two_long_ones_still_join(phone: tuple[Path, Path]) -> None:
+    rec, sdir = phone
+    rid = "2026-11-25-120000"
+    make_set(rec, clock(25, 12), 20, rid)
+    put_spans(sdir, rid, span_line(rid, 1, "sleep", clock(25, 13), clock(25, 13, 40)),
+              span_line(rid, 2, "sleep", clock(25, 20), clock(25, 20, 5)),
+              span_line(rid, 3, "sleep", clock(25, 23, 30), clock(26, 7)))
+    n, = nf.all_nights(rec)
+    assert n.span_ids == [f"{rid}-1", f"{rid}-3"]
+
+
+def test_a_removed_stretch_is_in_no_night_no_nap_no_truth_row_and_no_spans_row(phone: tuple[Path, Path]) -> None:
+    rec, sdir = phone
+    test_id, night_id = _the_test_and_tonight(rec)
+    stray = span_line(test_id, 1, "sleep", datetime(2026, 11, 25, 14, 17, 52), datetime(2026, 11, 25, 14, 21, 29))
+    nap = span_line(test_id, 2, "nap", datetime(2026, 11, 25, 14, 19, 40), datetime(2026, 11, 25, 14, 21))
+    put_spans(sdir, test_id, stray, _removed(stray), nap, _removed(nap))
+    assert nf.all_nights(rec) == [] and nf.naps(rec) == []
+    f = spans.read(sdir / f"{test_id}.spans.jsonl")
+    assert f.spans == [] and [s.span for s in f.removed] == [f"{test_id}-1", f"{test_id}-2"]
+    local = rec.parent.parent
+    assert db.span_rows(local) == []
+    # taken back: one more line without `removed`
+    put_spans(sdir, test_id, stray, _removed(stray), stray)
+    assert [n.span_ids for n in nf.all_nights(rec)] == [[f"{test_id}-1"]]
+    assert [r["span_id"] for r in db.span_rows(local)] == [f"{test_id}-1"]

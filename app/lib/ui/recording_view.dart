@@ -11,6 +11,7 @@ import '../archive/tags.dart';
 import '../logs/own_text.dart';
 import '../pulse/pass.dart' show PulseResult;
 import '../recorder/nights.dart' show nightLabel;
+import '../spans/span.dart';
 import 'archive_timeline.dart';
 import 'archive_view.dart' show sizeWords, lengthText, spanText;
 import 'evidence_sheet.dart' show showEvidence;
@@ -90,6 +91,8 @@ class RecordingView extends StatelessWidget {
     this.onRemove,
     this.onNotSleep,
     this.notSleep = false,
+    this.marks = const [],
+    this.onMark,
     this.onDanger,
     this.onSignal,
     this.onPulseInfo,
@@ -112,6 +115,11 @@ class RecordingView extends StatelessWidget {
   /// it back when [notSleep]; null: not offered.
   final VoidCallback? onNotSleep;
   final bool notSleep;
+
+  /// The marked stretches of a recording with an id (Record first), the ones taken away among them
+  /// ([Span.removed]); [onMark] takes one away or puts it back (DECISIONS 1025).
+  final List<Span> marks;
+  final ValueChanged<Span>? onMark;
   final VoidCallback? onDanger;
 
   /// The raw signal from the recording's start.
@@ -226,6 +234,16 @@ class RecordingView extends StatelessWidget {
           ),
           const SectionHeading('Files'),
           ..._files(i),
+          if (marks.isNotEmpty) ...[
+            const SectionHeading('Marked in this recording'),
+            const Para(
+              'What was marked while it recorded. If a mark is wrong, remove it: it then counts nowhere (no night, no '
+              'nap, not in Trends), and its sleep report is put away, not deleted. You can put it back.',
+              color: Night.inkMuted,
+              top: 0,
+            ),
+            for (final s in marks) _MarkRow(span: s, until: i.end, onTap: onMark == null ? null : () => onMark!(s)),
+          ],
           if (onNotSleep != null) ...[
             const SectionHeading('Was this sleep?'),
             Para(
@@ -313,6 +331,51 @@ class RecordingView extends StatelessWidget {
         _Row(s.kind.word, s.companions.isEmpty ? sizeWords(s.bytes) : '${1 + s.companions.length} files, ${sizeWords(s.bytes)}'),
       if (i.tags != null) _Row('Your tags', i.manualTags.length == 1 ? '1 tag' : '${i.manualTags.length} tags'),
     ];
+  }
+}
+
+/// Who made a mark, in the owner's words.
+String markedBy(Span s) => switch (s.source) {
+  'owner_button' => 'you pressed it',
+  'owner_confirmed' => 'you said yes afterwards',
+  _ => 'marked by the app',
+};
+
+/// The button that takes a mark away or puts it back.
+String markAction(Span s) => s.removed
+    ? (s.isSleep ? 'It was sleep after all' : 'Put this mark back')
+    : (s.isSleep ? 'Not sleep' : 'Remove this mark');
+
+class _MarkRow extends StatelessWidget {
+  const _MarkRow({required this.span, required this.until, this.onTap});
+  final Span span;
+
+  /// Where an open mark ends: the recording's end.
+  final DateTime until;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final s = span;
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${spanWord(s.kind)} ${spanText(s.start, s.end ?? until)}',
+            style: text.bodyLarge?.copyWith(fontFeatures: tabular, color: s.removed ? Night.inkMuted : null),
+          ),
+          Text(
+            s.removed ? 'Removed: it counts nowhere. Nothing was deleted.' : markedBy(s),
+            style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.35),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(onPressed: onTap, child: Text(markAction(s))),
+        ],
+      ),
+    );
   }
 }
 

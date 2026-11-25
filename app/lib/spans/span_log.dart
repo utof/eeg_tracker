@@ -49,7 +49,9 @@ class SpanLog {
     bool startedRecording = false,
   }) {
     var n = 0;
-    for (final s in read(recording).spans) {
+    final file = read(recording);
+    // a span taken away keeps its number: the next one never reuses it
+    for (final s in [...file.spans, ...file.removed]) {
       final k = int.tryParse(s.id.substring(s.id.lastIndexOf('-') + 1)) ?? 0;
       if (k > n) n = k;
     }

@@ -15,6 +15,7 @@ import 'package:eeg_tracker/archive/page.dart';
 import 'package:eeg_tracker/archive/raw_remover.dart' show OnLaptop;
 import 'package:eeg_tracker/archive/seen.dart';
 import 'package:eeg_tracker/archive/tags.dart';
+import 'package:eeg_tracker/spans/span_log.dart';
 import 'package:eeg_tracker/ui/archive_screen.dart';
 import 'package:eeg_tracker/ui/archive_view.dart';
 import 'package:eeg_tracker/ui/home_tabs.dart';
@@ -326,6 +327,78 @@ void main() {
       await tester.tap(find.text('Delete'));
       await tester.pumpAndSettle();
       expect(deleted, [(DeleteMode.rawOnly, _night.id)]);
+    });
+
+    testWidgets('a mark of a new recording: Not sleep takes it away, It was sleep after all brings it back', (tester) async {
+      tester.view.physicalSize = const Size(1210, 2695);
+      tester.view.devicePixelRatio = 2.75;
+      addTearDown(tester.view.reset);
+      // the owner's 2026-11-25: Sleep pressed for a 4-minute test
+      const id = '2026-11-25-141700';
+      final from = DateTime(2026, 11, 25, 14, 17), to = DateTime(2026, 11, 25, 14, 21);
+      final set = _set(from, to, mb: 1);
+      final item = ArchiveItem(
+        id: id,
+        kind: ArchiveKind.night,
+        start: from,
+        end: to,
+        started: byHand(ArchiveKind.night),
+        sets: [
+          RawSet(folder: set.folder, stem: set.stem, start: from, end: to, bytes: 1, rawBytes: 1, writer: 'night', files: const [], recording: id),
+        ],
+      );
+      expect(set.stem, id);
+      final log = SpanLog(Directory('${files.path}/spans'));
+      final sleep = log.add(id, kind: 'sleep', start: from, end: to, source: 'owner_button', endedBy: 'recording_stopped');
+      log.add(id, kind: 'work', start: from, end: to, source: 'owner_button');
+      String? active = id;
+      await tester.pumpWidget(
+        _app(
+          RecordingScreen(
+            item: item,
+            filesPath: files.path,
+            all: [item],
+            detail: (f, i, s) async => RecordingDetail(input: _input(), rawPaths: const [], passKept: true),
+            busy: () async => const ArchiveBusy(),
+            activeRecording: () async => active,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      // the button brought to the middle of the page (clear of a message at the bottom), then tapped
+      Future<void> press(String label) async {
+        await tester.scrollUntilVisible(find.text(label), 200);
+        await Scrollable.ensureVisible(tester.element(find.text(label)), alignment: 0.5);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(label));
+        await tester.pumpAndSettle();
+      }
+
+      await tester.scrollUntilVisible(find.text('Not sleep'), 300);
+      expect(find.text('Sleep 14:17 – 14:21'), findsOneWidget);
+      expect(find.text('Was this sleep?'), findsNothing); // that is the question for a recording from before
+
+      // while it still records, its marks are the recorder's
+      await press('Not sleep');
+      expect(find.textContaining('still recording'), findsOneWidget);
+      expect(log.read(id).removed, isEmpty);
+      ScaffoldMessenger.of(tester.element(find.byType(RecordingView))).clearSnackBars();
+      await tester.pumpAndSettle();
+
+      active = null;
+      await press('Not sleep');
+      expect([for (final s in log.read(id).removed) s.id], [sleep.id]);
+      expect([for (final s in log.read(id).spans) s.kind], ['work']);
+      expect(find.text('Not sleep'), findsNothing);
+      expect(find.textContaining('Removed'), findsWidgets);
+      expect(tester.takeException(), isNull);
+
+      await press('It was sleep after all');
+      expect(log.read(id).removed, isEmpty);
+      expect([for (final s in log.read(id).spans) s.id], ['$id-1', '$id-2']);
+      expect(find.text('Not sleep'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('Remove this mark'), 100); // the Work mark
+      expect(find.text('Work 14:17 – 14:21'), findsOneWidget);
     });
 
     testWidgets('with the laptop\'s checked copy: Remove from this phone, one confirmation', (tester) async {

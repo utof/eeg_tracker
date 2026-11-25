@@ -1,0 +1,51 @@
+{
+ "spans": [
+  {
+   "span": "2026-11-25-141752-2",
+   "kind": "work",
+   "label": "working",
+   "start_unix": 1795605720,
+   "end_unix": 1795605780,
+   "source": "owner_button",
+   "started_recording": false,
+   "ended_by": "owner",
+   "session": "work-sessions/2026-11-25-142200.work.json",
+   "paused": [],
+   "estimate": null
+  }
+ ],
+ "removed": [
+  {
+   "span": "2026-11-25-141752-1",
+   "kind": "sleep",
+   "label": "in_bed",
+   "start_unix": 1795605472,
+   "end_unix": 1795605689,
+   "source": "owner_button",
+   "started_recording": true,
+   "ended_by": "recording_stopped",
+   "session": null,
+   "paused": [],
+   "estimate": null,
+   "moved_to": null
+  },
+  {
+   "span": "2026-11-25-141752-3",
+   "kind": "sleep",
+   "label": "in_bed",
+   "start_unix": 1795559452,
+   "end_unix": 1795584682,
+   "source": "owner_confirmed",
+   "started_recording": false,
+   "ended_by": "owner",
+   "session": null,
+   "paused": [],
+   "estimate": "est:192b8daeafb5e51a",
+   "moved_to": "2026-11-25-003600-1"
+  }
+ ],
+ "reviewed": null,
+ "sets": [],
+ "hides": [],
+ "skipped": 0
+}

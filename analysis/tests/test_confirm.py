@@ -5,6 +5,7 @@ phone and the laptop must make the same rows from the same two files.
 """
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import sys
@@ -211,3 +212,30 @@ def test_the_shared_package_holds_the_vocabulary_as_it_is_now() -> None:
     asked = (ROOT / "packages" / "shared_labels" / "lib" / "src" / "vocabulary.dart").read_text(encoding="utf-8")
     for word in re.findall(r"^  '(\w+)': '", asked, flags=re.M):  # every label with question words is a label
         assert word in VOCAB.labels or word == "night_sleep", word
+
+
+def test_a_yes_whose_sleep_stretch_was_taken_away_is_no_truth_row_until_it_is_put_back(tmp_path: Path) -> None:
+    """DECISIONS 1025: the owner said Yes to a sleep estimate, the app made its stretch, and later he took the stretch
+    away in the Archive ("Not sleep"). The Yes is then no truth; putting the stretch back brings the row back. A
+    stretch that was only filed again under another recording (`moved_to`) changes nothing."""
+    phone(tmp_path)
+    got = truth.Read()
+    truth.confirm_rows(tmp_path, VOCAB, got)
+    yes = next(r for r in got.rows if r["label"] == "asleep" and r["present"] == "1")
+    est = yes["estimate_id"]
+    line = {"v": 1, "span": "r-1", "kind": "sleep", "label": "in_bed", "start": yes["start"], "end": yes["end"],
+            "source": "owner_confirmed", "estimate": est, "made": yes["end"]}
+    f = tmp_path / "phone" / "spans" / "r.spans.jsonl"
+    f.parent.mkdir(parents=True)
+
+    def ids(*lines: dict) -> set[str]:
+        f.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+        out = truth.Read()
+        truth.confirm_rows(tmp_path, VOCAB, out)
+        return {r["label_id"] for r in out.rows}
+
+    everything = {r["label_id"] for r in got.rows}
+    assert ids(line) == everything
+    assert ids(line, {**line, "removed": True}) == everything - {yes["label_id"]}
+    assert ids(line, {**line, "removed": True}, line) == everything
+    assert ids(line, {**line, "removed": True, "moved_to": "q-1"}) == everything

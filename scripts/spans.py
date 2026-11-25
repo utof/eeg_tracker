@@ -7,7 +7,7 @@ The phone keeps `files/spans/<recording id>.spans.jsonl` (docs/data-format.md, "
 Export data and Share on Wi-Fi copy the folder to `<local>/phone/spans/`. This is the twin of the phone's reader
 (`app/lib/spans/span.dart`, `readSpans`): both are checked against the golden files in `tests/contract/spans/`.
 
-  read(path)                      -> SpansFile  (spans, reviewed, sets, hides, skipped)
+  read(path)                      -> SpansFile  (spans, removed, reviewed, sets, hides, skipped)
   folder(local)                   -> <local>/phone/spans
   for_recording(local, id)        -> SpansFile  (empty when the recording has no file)
   all(local)                      -> {recording id: SpansFile}  (the id is the file name minus `.spans.jsonl`)
@@ -26,6 +26,9 @@ they first appear; a line that is not a JSON object, has a `v` other than 1, or 
 line is skipped and counted (a half last line from a kill, too); a kind this reader does not know is kept. A span
 needs `span`, `kind`, `source` (non-empty text), a `start` that parses and an `end` that is null, absent or a time.
 `reviewed` lines: the last one counts; `sets` and `hides` come from that last line and are empty when it says `sleep`.
+A span whose last line says `"removed": true` was taken away by the owner ("Not sleep", "Remove this mark") or filed
+again under another recording (`moved_to`): it is not in `spans`, so nothing counts it (nights, naps, truth rows,
+spans.tsv); it is listed in `removed`, in the order of first appearance. A later line without `removed` puts it back.
 
 Choices the format doc leaves open (both readers must do the same): a blank line is skipped without being counted; a
 `reviewed` word other than `no_sleep` or `sleep` makes the line skipped; a time without an offset is read as this
@@ -61,6 +64,8 @@ class Span:
     paused: tuple[tuple[int | float, int | float | None], ...] = ()
     estimate: str | None = None
     made_unix: int | float | None = None  # when the last line of the span was written (not in the golden files)
+    removed: bool = False  # the owner took it away, or it was filed again under another recording (`moved_to`)
+    moved_to: str | None = None  # the id of the span that took its place in another recording's file
 
     @property
     def closed(self) -> bool:
@@ -91,17 +96,23 @@ class Span:
                     ended_by=self.ended_by, session=self.session, paused=[list(p) for p in self.paused],
                     estimate=self.estimate)
 
+    def to_json_removed(self) -> dict:
+        """The golden files' shape of a span in `removed`."""
+        return dict(self.to_json(), moved_to=self.moved_to)
+
 
 @dataclass
 class SpansFile:
-    spans: list[Span] = field(default_factory=list)  # in the order each span first appeared
+    spans: list[Span] = field(default_factory=list)  # in the order each span first appeared; without the removed
+    removed: list[Span] = field(default_factory=list)  # the spans taken away or moved, in the same order
     reviewed: str | None = None  # `no_sleep` or `sleep` from the last reviewed line; None without one
     sets: list[str] = field(default_factory=list)
     hides: list[str] = field(default_factory=list)
     skipped: int = 0  # lines skipped
 
     def to_json(self) -> dict:
-        return dict(spans=[s.to_json() for s in self.spans], reviewed=self.reviewed, sets=list(self.sets),
+        return dict(spans=[s.to_json() for s in self.spans], removed=[s.to_json_removed() for s in self.removed],
+                    reviewed=self.reviewed, sets=list(self.sets),
                     hides=list(self.hides), skipped=self.skipped)
 
 
@@ -137,7 +148,8 @@ def _span(d: dict) -> Span | None:
         if isinstance(p, list) and len(p) == 2 and (a := _time(p[0])) is not None and (p[1] is None or _time(p[1]) is not None):
             pauses.append((a, None if p[1] is None else _time(p[1])))
     return Span(span, kind, _text(d.get("label")), start, end_unix, source, d.get("started_recording") is True,
-                _text(d.get("ended_by")), _text(d.get("session")), tuple(pauses), _text(d.get("estimate")), _time(d.get("made")))
+                _text(d.get("ended_by")), _text(d.get("session")), tuple(pauses), _text(d.get("estimate")),
+                _time(d.get("made")), d.get("removed") is True, _text(d.get("moved_to")) if d.get("removed") is True else None)
 
 
 def _strings(v: object) -> list[str]:
@@ -172,7 +184,8 @@ def parse(text: str) -> SpansFile:
             out.skipped += 1
         else:
             by_id[s.span] = s
-    out.spans = list(by_id.values())
+    out.spans = [s for s in by_id.values() if not s.removed]
+    out.removed = [s for s in by_id.values() if s.removed]
     return out
 
 
@@ -279,6 +292,7 @@ def line(s: Span) -> str:
 def describe(rec_id: str, f: SpansFile) -> list[str]:
     out = [f"recording {rec_id}: {len(f.spans)} span(s)" + (f", {f.skipped} line(s) skipped" if f.skipped else "")]
     out += [f"  {line(s)}" for s in f.spans]
+    out += [f"  taken away: {line(s)}" + (f", now {s.moved_to}" if s.moved_to else "") for s in f.removed]
     if f.reviewed == "no_sleep":
         out.append(f"  not sleep: sets {' '.join(f.sets) or '-'}; hides nights {' '.join(f.hides) or '-'}")
     return out

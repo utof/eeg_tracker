@@ -16,7 +16,10 @@ import '../archive/items.dart';
 import '../archive/raw_remover.dart' show OnLaptop;
 import '../archive/seen.dart';
 import '../archive/tags.dart';
+import '../recorder/recorder_service.dart' show loadNight;
 import '../spans/not_sleep.dart';
+import '../spans/span.dart';
+import '../spans/span_log.dart' show SpansBusy;
 import '../walking/pass.dart' show Walked, walkInBackground;
 import '../pulse/pass.dart' show PulseResult, Pulsed, pulseInBackground;
 import 'archive_screen.dart' show deleteInBackground, phoneArchiveBusy;
@@ -40,6 +43,7 @@ class RecordingScreen extends StatefulWidget {
     this.pulse,
     this.busy,
     this.delete,
+    this.activeRecording,
   });
 
   final ArchiveItem item;
@@ -56,6 +60,10 @@ class RecordingScreen extends StatefulWidget {
   /// Tests: the pulse pass without an isolate.
   final Future<Pulsed> Function(String filesPath, String id, List<String> paths)? pulse;
   final Future<ArchiveBusy> Function()? busy;
+
+  /// The id of the recording that runs now (its marks are the recorder's to write), or null. Tests: without the
+  /// recorder's saved state.
+  final Future<String?> Function()? activeRecording;
   final Future<DeleteOutcome> Function(String filesPath, ArchiveItem item, DeleteMode mode, List<ArchiveItem> all, ArchiveBusy busy)? delete;
 
   @override
@@ -90,11 +98,58 @@ class _RecordingScreenState extends State<RecordingScreen> {
     _say(now ? 'Counted as sleep again. Its report comes back, or is made again.' : 'Not sleep: it is in no night now.');
   }
 
+  /// The id of a recording made since Record first (its sets' headers name it), or null for one from before.
+  String? get _recordingId => _item.sets.where((s) => s.recording != null).firstOrNull?.recording;
+
+  /// Its marked stretches, the ones taken away after the others; one that was only filed again under another
+  /// recording is not shown.
+  List<Span> _marks = const [];
+
+  void _readMarks() {
+    final id = _recordingId;
+    if (id == null) return;
+    final f = readSpans(spansFileOf(Directory('${widget.filesPath}/spans'), id));
+    _marks = [...f.spans, for (final s in f.removed) if (s.movedTo == null) s]..sort((a, b) => a.start.compareTo(b.start));
+  }
+
+  static Future<String?> _phoneActiveRecording() async {
+    try {
+      final n = await loadNight();
+      return n.active ? n.recording : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// "Not sleep" / "Remove this mark" for one marked stretch, or putting it back (spans/not_sleep.dart).
+  Future<void> _toggleMark(Span s) async {
+    final active = await (widget.activeRecording ?? _phoneActiveRecording)();
+    if (!mounted) return;
+    try {
+      setSpanRemoved(_files, s, removed: !s.removed, active: () => active);
+    } on SpansBusy {
+      _say('This recording is still recording. Its marks can be changed after Stop.');
+      return;
+    } on FileSystemException {
+      _say('That could not be saved: the phone is full.');
+      return;
+    }
+    _changed = true;
+    setState(_readMarks);
+    _say(switch ((s.removed, s.isSleep)) {
+      (false, true) => 'Not sleep: it is in no night now. Its report is put away, not deleted.',
+      (true, true) => 'Counted as sleep again. Its report comes back, or is made again.',
+      (false, false) => 'Mark removed. It counts nowhere now.',
+      (true, false) => 'Mark put back.',
+    });
+  }
+
   Directory get _files => Directory(widget.filesPath);
 
   @override
   void initState() {
     super.initState();
+    _readMarks();
     unawaited(_load());
   }
 
@@ -326,9 +381,11 @@ class _RecordingScreenState extends State<RecordingScreen> {
         onAddTag: () => _editTag(),
         onTag: (t) => _editTag(tag: t),
         onRemove: i.hasRaw && i.laptop == OnLaptop.yes ? _remove : null,
-        // only a recording from before Record first can be a night by mistake: a new one has its spans
+        // a recording from before Record first is a night as a whole; a new one has its marks, each removable
         onNotSleep: _oldNight(i) ? _toggleNotSleep : null,
         notSleep: _oldNight(i) && isNotSleep(Directory(widget.filesPath), i.id),
+        marks: _marks,
+        onMark: (s) => unawaited(_toggleMark(s)),
         onDanger: _danger,
         onSignal: () => _signal(i.start),
       ),
