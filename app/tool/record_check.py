@@ -198,9 +198,17 @@ def work_starts_recording(before: set[str]) -> list[pc.Result]:
 def rec_sets(rec: str) -> dict[str, int]:
     """Every raw file of the recording [rec] (its header names it) with its size."""
     out: dict[str, int] = {}
-    for h in pc.sh(f"grep -l '\"recording\": *\"{rec}\"' {REC}/*.header.json 2>/dev/null", check=False).split():
-        f = h[: -len(".header.json")] + ".f32"
-        out[f] = size(f)
+    for h in pc.sh(f"ls {REC}/*.header.json 2>/dev/null", check=False).split():
+        stem = h.rsplit("/", 1)[1][: -len(".header.json")]
+        if stem < rec:
+            continue
+        try:
+            named = json.loads(cat(h)).get("recording")
+        except ValueError:
+            named = None
+        if named == rec or stem == rec:
+            f = f"{REC}/{stem}.f32"
+            out[f] = size(f)
     if not out:
         out[f"{REC}/{rec}.f32"] = size(f"{REC}/{rec}.f32")
     return out
