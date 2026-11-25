@@ -268,6 +268,64 @@ void main() {
     expect(confirm.pending().map((q) => q.estimate.id), containsAll([guess.id, other.id]));
   });
 
+  test('a Yes whose sleep stretch was taken away is no label in the phone\'s own tables; put back, it is one again', () {
+    final t = theTest();
+    final now = DateTime(2026, 11, 25, 15);
+    final confirm = ConfirmQuestions(files, clock: () => now);
+    Estimate nap(DateTime start, DateTime end, String recording) =>
+        Estimate(detector: 'sleep-periods', version: 'test', label: Labels.nap, start: start, end: end, recording: recording, confidence: 0.9, made: end);
+    final yes = nap(DateTime(2026, 11, 25, 12), DateTime(2026, 11, 25, 12, 40), t.recording);
+    final no = nap(DateTime(2026, 11, 25, 9), DateTime(2026, 11, 25, 9, 30), t.recording);
+    final other = nap(DateTime(2026, 11, 25, 6), DateTime(2026, 11, 25, 6, 30), 'another');
+    confirm.register([yes, no, other]);
+    confirm.answer(yes.id, Answer.yes);
+    confirm.answer(no.id, Answer.no);
+    confirm.answer(other.id, Answer.yes);
+    // the stretch the Yes made (spans/stop_sheet.dart writes it with the estimate's id)
+    final made = log.add(t.recording, kind: 'sleep', start: yes.start, end: yes.end, source: 'owner_confirmed', estimate: yes.id);
+
+    Map<String, List<String>> table(File f) {
+      final rows = [for (final l in f.readAsLinesSync().skip(1)) l.split('\t')];
+      final head = f.readAsLinesSync().first.split('\t');
+      final id = head.indexOf('estimate_id');
+      return {for (final r in rows) r[id]: r};
+    }
+
+    Set<String> labels() => table(confirm.store.labelsFile).keys.toSet();
+    (String, String) estimate(String id) {
+      final r = table(File('${files.path}/confirm/estimates.tsv'))[id]!;
+      return (r[estimateColumns.indexOf('answer')], r[estimateColumns.indexOf('label_id')]);
+    }
+
+    confirm.writeTables();
+    expect(labels(), {yes.id, no.id, other.id});
+    expect(estimate(yes.id), ('yes', 'confirm:${yes.id.substring(4)}'));
+    final header = confirm.store.labelsFile.readAsLinesSync().first;
+
+    setSpanRemoved(files, made, removed: true);
+    confirm.writeTables();
+    expect(labels(), {no.id, other.id});
+    // the Yes stays as what was said; it only names no label (as the laptop's table, DECISIONS 1044)
+    expect(estimate(yes.id), ('yes', ''));
+    expect(estimate(no.id), ('no', 'confirm:${no.id.substring(4)}'));
+    expect(estimate(other.id), ('yes', 'confirm:${other.id.substring(4)}'));
+    expect(confirm.store.labelsFile.readAsLinesSync().first, header);
+    expect(confirm.store.read().answers[yes.id]!.answer, Answer.yes);
+    // the app's next start gathers and writes the same
+    confirm.gather(collect: (_) => const []);
+    expect(labels(), {no.id, other.id});
+
+    setSpanRemoved(files, log.read(t.recording).removed.single, removed: false);
+    confirm.gather(collect: (_) => const []);
+    expect(labels(), {yes.id, no.id, other.id});
+    expect(estimate(yes.id), ('yes', 'confirm:${yes.id.substring(4)}'));
+
+    // only filed again under another recording (`moved_to`): not taken away, the label stays
+    log.write(log.read(t.recording).spans.firstWhere((s) => s.id == made.id).asRemoved(true, movedTo: 'elsewhere-1'));
+    confirm.writeTables();
+    expect(labels(), {yes.id, no.id, other.id});
+  });
+
   test('the recording that runs now is the recorder\'s: its marks cannot be removed from the Archive', () {
     final t = theTest();
     expect(() => setSpanRemoved(files, t, removed: true, active: () => t.recording), throwsA(isA<SpansBusy>()));

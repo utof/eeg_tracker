@@ -817,7 +817,7 @@ by `ConfirmPrompts.kt`. Lines are only ever added; times are local with their UT
 | `asks.jsonl` | one line per batch that went out as a notification: `{"at", "via": "notification", "estimates": [ids], "why": {id: "newest" or "unsure" or "long" or "rare" or "few"}, "blind": [ids made blind by rule]}`; what the Android side did with it: `{"at", "event": "shown" or "held" or "late" or "skipped" or "dismissed", "batch", "reason"}`; and every back-off step with its reason: `{"at", "event": "backoff", "step": "pause" or "one_a_day" or "normal" or "skip_hour" or "blind_batch", "reason", "until", "hour"}` (DECISIONS 972) |
 | `armed.json` | the batch waiting for its moment (written whole) |
 | `settings.json` | `{"version": 1, "on", "per_batch" (3-5), "per_day" (1-6), "quiet_start_min", "quiet_end_min"}` |
-| `labels.tsv` | your answers as truth rows in the truth schema below (the 17 columns), rebuilt whole by the app: a file pandas reads without the laptop |
+| `labels.tsv` | your answers as truth rows in the truth schema below (the 17 columns), rebuilt whole by the app: a file pandas reads without the laptop. A Yes whose sleep stretch you took away afterwards in the Archive has no row while that lasts (and an empty `label_id` in `estimates.tsv`); put the stretch back and the row is back |
 | `estimates.tsv` | every estimate with its answer, in the columns of the data book's `estimates.tsv` below, rebuilt whole by the app. With `labels.tsv` it is what another app (utof_tracker, once linked) takes as data, so it never asks the same thing again |
 
 A Yes is a truth row that it happened (`present` 1, `likely`, `times_confirmed` 0: the times are still the
@@ -1266,7 +1266,9 @@ are cut by `night_files.py`'s chain rule and named by the evening date, as the c
 
 One row per session file: the phone's work sessions (`phone/work-sessions/`), the laptop's (`laptop/work/`),
 meditation and alpha-theta (`phone/meditations/`, `phone/alpha-theta/`), the nap coach (`phone/naps/`) and sound for
-states (`phone/sound-states/`). A column that does not apply to a kind is empty.
+states (`phone/sound-states/`). A column that does not apply to a kind is empty. A session whose mark on its
+recording was removed in the Archive ("Remove this mark") has no row, and its minutes are in no day of `days.tsv`
+(the day's `excluded` says "mark removed"); put the mark back and both are back. The session's file is never deleted.
 
 | Column | Meaning |
 |---|---|
