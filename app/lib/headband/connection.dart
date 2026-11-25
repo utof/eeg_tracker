@@ -11,7 +11,10 @@
 //   one live signal for the foldable panel ([panel]);
 // - a night started while it is live gets the same stream (lend.dart): the recorder records what this connection
 //   receives until the first drop, then takes the headband over on its own proven path.
-// The night recorder's engine has no owner: there the recorder is the owner, and its status is mirrored here
+// - while a recording runs, whoever asks for the headband gets a [RecordingBand]: a handle that reads the recorder's
+//   stream through the tap (signal/live_tap.dart) and never touches the headband (Record first, DECISIONS 897). Work,
+//   Meditate and the other sessions run on it as activities of that recording.
+// The recorder's engine has no owner: there the recorder is the owner, and its status is mirrored here
 // ([recorderData]). Tests make their own owner over a fake finder; without one every finder is as it was.
 import 'dart:async';
 
@@ -23,19 +26,11 @@ import '../recorder/chunk_writer.dart' show Sample;
 import '../recorder/headband.dart';
 import '../recorder/status.dart';
 import '../signal/live_signal.dart';
-import '../signal/live_tap.dart' show nightTapBatches, nightTapRenew;
+import '../signal/live_tap.dart' show nightTapBatches, nightTapRenew, nightTapSamples, tapPanel, tapRide;
 import '../signal/quality.dart';
 import 'battery_estimate.dart';
 import 'device_status.dart';
 import 'lend.dart';
-
-/// The headband is recording a night: no session may take it.
-class HeldByNight implements Exception {
-  const HeldByNight();
-
-  @override
-  String toString() => 'The night recording holds the headband. Stop the night first.';
-}
 
 class HeadbandConnection {
   HeadbandConnection({
@@ -74,8 +69,9 @@ class HeadbandConnection {
   /// Tells the headband watcher that the screen holds the headband (lib/auto, DECISIONS 602).
   final Future<void> Function(bool on)? hold;
 
-  /// Takes, renews or lets go the night tap's lease (signal/live_tap.dart) for the panel during a night.
-  final void Function(bool on)? leaseNight;
+  /// Takes, renews or lets go one user's lease of the recorder's tap (signal/live_tap.dart): the panel's during a
+  /// recording, and the one of the handles that ride on it.
+  final void Function(bool on, String user)? leaseNight;
 
   /// Sends a lend message to the recorder's engine (lend.dart).
   final void Function(Object message)? sendToNight;
@@ -108,6 +104,10 @@ class HeadbandConnection {
   bool _searching = false;
   String? _problem;
   final Set<SharedBand> _handles = {};
+
+  /// The handles that read the running recording's stream (Work, Meditate, ... as activities of it).
+  final Set<RecordingBand> _riders = {};
+  bool _rideInRange = false;
   StreamSubscription<List<Sample>>? _signalSub;
   StreamSubscription<bool>? _rangeSub;
   StreamSubscription<Map<String, double>>? _resistSub;
@@ -134,6 +134,10 @@ class HeadbandConnection {
   /// the phone takes about a second; 7 s on the owner's night of 2026-11-25).
   static const Duration lendStartWait = Duration(seconds: 20);
   DateTime? _lendAt;
+
+  /// The recorder said nothing for this long (it sends its status about once a second): the recording is over for
+  /// the handles that ride on it.
+  static const Duration rideEndsAfter = Duration(seconds: 30);
   static final AppLog _log = AppLog('headband');
 
   bool get _reconnecting {
@@ -182,7 +186,12 @@ class HeadbandConnection {
     void Function(String name, int rssi)? onFound,
   }) async {
     if (_disposed) return null;
-    if (_lending || nightRuns) throw const HeldByNight();
+    // a recording runs: its stream is the headband (no search, no connection, no contact check of the asker's own)
+    if (_lending || nightRuns) {
+      final h = _ride();
+      onFound?.call(h.name, h.rssi ?? 0);
+      return h;
+    }
     _lingerTimer?.cancel();
     _lingerTimer = null;
     _triedAt = _now();
@@ -559,8 +568,14 @@ class HeadbandConnection {
         unawaited(_readBattery(band));
       }
     }
-    if (_panelWatchers > 0 && nightRuns && _ticks % nightTapRenew.inSeconds == 0) leaseNight?.call(true);
-    if (band == null && _connecting == null && !nightRuns && _panelWatchers == 0 && !_reconnecting) {
+    if (_ticks % nightTapRenew.inSeconds == 0 && nightRuns) {
+      if (_panelWatchers > 0) leaseNight?.call(true, tapPanel);
+      if (_riders.isNotEmpty) leaseNight?.call(true, tapRide);
+    }
+    // the recorder went quiet without saying idle (its service is gone): the riders hear that the stream ended
+    final heard = _nightAt;
+    if (_riders.isNotEmpty && !_lending && (heard == null || _now().difference(heard) >= rideEndsAfter)) _endRides();
+    if (band == null && _connecting == null && !nightRuns && _panelWatchers == 0 && !_reconnecting && _riders.isEmpty) {
       _clock?.cancel();
       _clock = null;
     }
@@ -632,10 +647,10 @@ class HeadbandConnection {
     if (on && _panelWatchers == 1) {
       if (_names.isNotEmpty && panel == null) panel = LiveSignal(names: _names);
       panel?.newRun();
-      if (nightRuns) leaseNight?.call(true);
+      if (nightRuns) leaseNight?.call(true, tapPanel);
       _startClock();
     }
-    if (!on && _panelWatchers == 0 && nightRuns) leaseNight?.call(false);
+    if (!on && _panelWatchers == 0 && nightRuns) leaseNight?.call(false, tapPanel);
   }
 
   // ---- the night ------------------------------------------------------------------------------------------------
@@ -646,6 +661,16 @@ class HeadbandConnection {
     if (_disposed) return;
     final lend = lendFromNight(data);
     if (lend != null) return _onLendMessage(lend);
+    if (_riders.isNotEmpty) {
+      final samples = nightTapSamples(data);
+      if (samples != null) {
+        for (final batch in samples) {
+          for (final h in _riders) {
+            if (h._streaming) h._signal.add(batch);
+          }
+        }
+      }
+    }
     final batches = _panelWatchers > 0 && !_lending ? nightTapBatches(data) : null;
     if (batches != null) {
       for (final b in batches) {
@@ -659,6 +684,7 @@ class HeadbandConnection {
     final was = nightRuns;
     _night = s;
     _nightAt = _now();
+    _rideRange(s);
     // idle ends the lend: the night is over. But a recorder that has not said `start` yet is idle because it is
     // newly born (the screen's status request can reach the new service before its first step): that answer is not
     // an end, while the offer is young. An offer nobody starts on is withdrawn by the same line after [lendStartWait].
@@ -674,9 +700,68 @@ class HeadbandConnection {
     }
     if (!was && nightRuns) {
       _startClock();
-      if (_panelWatchers > 0) leaseNight?.call(true);
+      if (_panelWatchers > 0) leaseNight?.call(true, tapPanel);
     }
+    if (s.phase == Phase.idle) _endRides();
     _emit();
+  }
+
+  // ---- riding on the recording ----------------------------------------------------------------------------------
+
+  /// The running recording as the screens need it (its id, its spans); null when none runs.
+  RecordingLive? get recording => nightRuns ? _night?.rec : null;
+
+  RecordingBand _ride() {
+    final h = RecordingBand._(this);
+    if (_riders.isEmpty) _rideInRange = _night?.phase == Phase.recording || _lending;
+    _riders.add(h);
+    _startClock();
+    _log.info('a session rides on the recording', {'riders': _riders.length});
+    _emit();
+    return h;
+  }
+
+  void _leaseRide() => leaseNight?.call(true, tapRide);
+
+  /// The recorder lost the headband or has it back: the riders hear it as out of range and in range; they never
+  /// reconnect by themselves (the recorder does).
+  void _rideRange(RecorderStatus s) {
+    if (_riders.isEmpty || s.phase == Phase.idle || s.phase == Phase.stopping) return;
+    final inRange = s.phase == Phase.recording;
+    if (inRange == _rideInRange) return;
+    _rideInRange = inRange;
+    for (final h in _riders.toList()) {
+      if (!h._range.isClosed) h._range.add(inRange);
+    }
+  }
+
+  /// The recording ended under its riders: each hears "out of range" and is over ([RecordingBand.ended]).
+  void _endRides() {
+    if (_riders.isEmpty) return;
+    final users = _riders.toList();
+    _riders.clear();
+    _log.info('the recording ended under a session', {'riders': users.length});
+    for (final h in users) {
+      h._end();
+    }
+  }
+
+  void _endRide(RecordingBand h) {
+    if (!_riders.remove(h)) return h._close();
+    h._close();
+    if (_riders.isEmpty && nightRuns) leaseNight?.call(false, tapRide);
+    _emit();
+  }
+
+  /// The recorder's contact reading and when it was measured (an empty reading when it has none: riding never checks
+  /// contact by itself).
+  ({Map<String, double?> ohms, DateTime at}) get _nightContact {
+    final n = _night;
+    final at = n?.contactAtMs ?? n?.nightStartMs ?? 0;
+    return (
+      ohms: n?.contactOhms ?? const {},
+      at: at > 0 ? DateTime.fromMillisecondsSinceEpoch(at) : _now(),
+    );
   }
 
   static bool _mismatch(LiveSignal p, LiveBatch b) => p.channels != b.channels;
@@ -693,6 +778,7 @@ class HeadbandConnection {
   void nightEnded() {
     _night = null;
     _nightAt = null;
+    _endRides();
     if (_lending) _endLend(keep: true);
     _emit();
   }
@@ -780,6 +866,10 @@ class HeadbandConnection {
       h._close();
     }
     _handles.clear();
+    for (final h in _riders.toList()) {
+      h._close();
+    }
+    _riders.clear();
     if (band != null) {
       if (streaming) await _quietly(band.stopSignal());
       await _quietly(band.disconnectAndDispose());
@@ -867,4 +957,88 @@ class SharedBand implements Headband, KnownContact {
 
 class _MendingBand extends SharedBand implements MendsDrops {
   _MendingBand(super.owner, super.real) : super._();
+}
+
+/// A handle to the recording that runs (Record first, DECISIONS 897): a headband to its user, fed by the recorder's
+/// tap with every sample the recorder saves, in order, with its packet number. It never touches the headband: no
+/// search, no connection, no contact check (it gives the recorder's reading), and when the recorder loses the headband
+/// it only says "out of range" until the recorder has it back.
+class RecordingBand implements Headband, KnownContact, RidesRecorder {
+  RecordingBand._(this._owner);
+  final HeadbandConnection _owner;
+  final StreamController<List<Sample>> _signal = StreamController<List<Sample>>.broadcast(sync: true);
+  final StreamController<Map<String, double>> _resistance = StreamController<Map<String, double>>.broadcast(sync: true);
+  final StreamController<bool> _range = StreamController<bool>.broadcast(sync: true);
+  bool _streaming = false;
+  bool _gone = false;
+  bool _ended = false;
+
+  /// The recording stopped while this handle was in use: nothing more comes, and a new start is a new matter.
+  @override
+  bool get ended => _ended;
+
+  @override
+  String get name => 'The recording';
+  @override
+  String get address => 'recording';
+  @override
+  String get serial => '';
+  @override
+  BandId get id => BandId(name: name, address: address);
+  @override
+  int? get rssi => _owner._night?.rssi;
+  @override
+  Stream<List<Sample>> get signal => _signal.stream;
+  @override
+  Stream<Map<String, double>> get resistance => _resistance.stream;
+  @override
+  Stream<bool> get rangeChanges => _range.stream;
+
+  @override
+  ({Map<String, double?> ohms, DateTime at})? get knownContact => _gone ? null : _owner._nightContact;
+
+  @override
+  Future<void> startSignal() async {
+    if (_gone) throw StateError('the recording has stopped');
+    _streaming = true;
+    _owner._leaseRide();
+  }
+
+  @override
+  Future<void> stopSignal() async => _streaming = false;
+
+  /// "Measure again" during a recording: the recorder's last reading, the headband is left alone.
+  @override
+  Future<void> startResist() async {
+    final ohms = _owner._nightContact.ohms;
+    if (ohms.isEmpty || _resistance.isClosed) return;
+    scheduleMicrotask(() {
+      if (!_resistance.isClosed) _resistance.add({for (final e in ohms.entries) e.key: e.value ?? double.infinity});
+    });
+  }
+
+  @override
+  Future<void> stopResist() async {}
+  @override
+  Future<bool> isInRange() async => !_gone && _owner._rideInRange;
+  @override
+  Future<int> battery() async => _owner._night?.battery ?? (throw StateError('no battery reading'));
+  @override
+  Future<void> disconnectAndDispose() async => _owner._endRide(this);
+
+  void _end() {
+    if (_gone) return;
+    _gone = true;
+    _ended = true;
+    _streaming = false;
+    if (!_range.isClosed) _range.add(false);
+  }
+
+  void _close() {
+    _gone = true;
+    _streaming = false;
+    unawaited(_signal.close());
+    unawaited(_resistance.close());
+    unawaited(_range.close());
+  }
 }

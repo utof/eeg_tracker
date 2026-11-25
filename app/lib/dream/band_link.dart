@@ -5,6 +5,8 @@
 // starts) is mended on the night recorder's rule (DECISIONS 49, 520): no data for 8 s, the stream is restarted once;
 // still none 40 s after the last batch, the headband is let go and reached again as after a drop.
 // It hands every batch over as it arrived; finding holes in the signal is the session's job.
+// On a recording that runs (a [RidesRecorder] handle, Record first DECISIONS 897) none of the mending is the link's:
+// the recorder reconnects. The link only says lost and back, and never asks the finder again.
 // Used by the dream catcher, sound for states, the nap coach, the hands-free calibration, and the meditation and
 // alpha-theta sessions (DECISIONS 270): the reconnect rules live here and nowhere else.
 // Every headband it reaches is either the session's or let go: one reached after Stop, after a deadline, or by a
@@ -245,7 +247,7 @@ class BandLink {
   /// headband is let go and reached again ([LinkEvent.drop], then the reconnect tries).
   void tick() {
     final band = _band, from = _quietFrom;
-    if (_closed || lost || band == null || from == null) return;
+    if (_closed || lost || band == null || from == null || band is RidesRecorder) return;
     final quiet = _now().difference(from);
     if (quiet >= timing.reconnectAfter) {
       _stalled(band, quiet);
@@ -277,6 +279,7 @@ class BandLink {
   }
 
   void _onRange(Headband band, bool inRange) {
+    if (band is RidesRecorder) return _onRecorderRange(band, inRange);
     if (inRange || _closed || !identical(band, _band) || _lostBands.contains(band)) return;
     _lostBands.add(band); // no SDK call goes near a headband that is out of range
     if (lost) return; // a reconnect's headband dropped while its stream started: that try failed
@@ -284,6 +287,25 @@ class BandLink {
     _band = null;
     onEvent?.call(LinkEvent.drop, 'drop (out of range); reconnecting');
     unawaited(_reconnect(band));
+  }
+
+  /// The recorder lost the headband, has it back, or stopped: the link follows, and reaches for nothing.
+  void _onRecorderRange(Headband band, bool inRange) {
+    if (_closed || !identical(band, _band) || inRange == !lost) return;
+    lost = !inRange;
+    if (inRange) {
+      _quietFrom = _now();
+      onEvent?.call(LinkEvent.reconnected, 'the recorder has the headband again');
+    } else {
+      final over = (band as RidesRecorder).ended;
+      onEvent?.call(LinkEvent.drop, over ? 'the recording stopped' : 'the recorder lost the headband; it is reconnecting');
+    }
+  }
+
+  /// The recording this link rode on has stopped (nothing more will come; the session should end).
+  bool get recordingEnded {
+    final band = _band;
+    return band is RidesRecorder && (band as RidesRecorder).ended;
   }
 
   /// [inRange]: the old headband stalled in range, so it is let go first (a BrainBit held by a sensor object nobody

@@ -514,8 +514,8 @@ class RecorderTaskHandler extends TaskHandler {
       unawaited(_sleepCommand(data));
     } else if (data is Map && data['kind'] == 'span') {
       _spanCommand(data);
-    } else if (nightTapLeaseFrom(data) case final on?) {
-      _signalTap(on: on);
+    } else if (nightTapLeaseFrom(data) case final lease?) {
+      _signalTap(on: lease.on, user: lease.user);
     } else if (data is Map && data['kind'] == lendKind) {
       _lend?.onMessage(data);
     }
@@ -611,9 +611,10 @@ class RecorderTaskHandler extends TaskHandler {
     'alert': ?_alert,
   };
 
-  /// The Signal view took or renewed its lease ([on]), or let it go.
-  void _signalTap({required bool on}) {
-    _tap.lease(on: on && !_stopping);
+  /// A user of the tap (the panel, the Signal view, the activities on this recording) took or renewed its lease
+  /// ([on]), or let it go.
+  void _signalTap({required bool on, required String user}) {
+    _tap.lease(on: on && !_stopping, user: user);
     if (!_tap.on) return _endTap();
     ChunkWriter.onLive = _tap.add;
     _tapTimer ??= Timer.periodic(nightTapEvery, (_) => _tap.on ? _tap.flush() : _endTap());

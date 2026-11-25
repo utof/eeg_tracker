@@ -9,6 +9,7 @@ import 'package:eeg_tracker/dream/band_link.dart';
 import 'package:eeg_tracker/headband/connection.dart';
 import 'package:eeg_tracker/headband/device_status.dart';
 import 'package:eeg_tracker/headband/lend.dart';
+import 'package:eeg_tracker/recorder/chunk_writer.dart' show ChunkWriter, Sample;
 import 'package:eeg_tracker/recorder/header.dart' show recordsIn;
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/night_recorder.dart';
@@ -79,7 +80,30 @@ class World {
       sendToNight: (m) {
         if (screenAlive) lend?.onMessage(m);
       },
+      // the recorder's tap, as recorder_service.dart wires it
+      leaseNight: (on, user) {
+        leases.add((on, user));
+        tap.lease(on: on, user: user);
+        ChunkWriter.onLive = tap.on ? saved : null;
+      },
     );
+    tapTimer = Timer.periodic(const Duration(milliseconds: 10), (_) => tap.on ? tap.flush() : null);
+  }
+
+  final List<(bool, String)> leases = [];
+  late final NightTapSender tap = NightTapSender(
+    send: (m) {
+      if (screenAlive) owner.recorderData(m);
+    },
+  );
+  late final Timer tapTimer;
+
+  /// The packet numbers of every sample the recorder saved while the tap was leased.
+  final List<int> savedPacks = [];
+
+  void saved(String stem, int first, DateTime arrival, List<Sample> samples) {
+    savedPacks.addAll(samples.map((x) => x.pack));
+    tap.add(stem, first, arrival, samples);
   }
 
   final CountingBand band = CountingBand();
@@ -145,6 +169,8 @@ class World {
   String log() => dir.listSync().whereType<File>().where((f) => f.path.endsWith('.log')).map((f) => f.readAsStringSync()).join();
 
   Future<void> close() async {
+    tapTimer.cancel();
+    ChunkWriter.onLive = null;
     await recorder?.stop();
     await owner.dispose();
     try {
@@ -376,7 +402,95 @@ void main() {
     expect(w.band.count('disconnect'), 1);
   });
 
-  test('during a night no session takes the headband: the owner refuses in plain words', () async {
+  // ---- Record first, step 4 (DECISIONS 897): a session started during a recording rides on the recorder's stream ----
+
+  test('during a recording a session gets the recorder\'s stream: every saved sample in order, and no SDK call', () async {
+    final nightBand = CountingBand(label: 'N');
+    final w = World(nightBands: [nightBand]);
+    addTearDown(w.close);
+    await w.startNight();
+    await until(() => w.recording);
+    int own() => nightBand.calls.where((c) => c != 'battery').length; // the recorder reads its battery by itself
+    final callsBefore = own();
+
+    final packs = <int>[];
+    final link = BandLink(finder: w.owner.finder, timing: _quick, onBatch: (_, b) => packs.addAll(b.map((x) => x.pack)));
+    expect(await link.connect(), isTrue);
+    final sw = Stopwatch()..start();
+    final ohms = await link.contact();
+    expect(sw.elapsedMilliseconds, lessThan(15), reason: 'a contact check of its own was made');
+    expect(ohms, w.statuses.last.contactOhms, reason: "the recorder's reading is the session's");
+    await link.startSignal();
+    await until(() => packs.length >= 300, what: '300 samples through the tap');
+    await link.close();
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+
+    expect(w.real.calls, isEmpty, reason: "the screen's engine reached for the headband");
+    expect(w.nightFinder.scans + w.nightFinder.directs, 1, reason: 'a second connection was made');
+    expect(own(), callsBefore, reason: 'the session made an SDK call on the recording headband');
+    expect(nightBand.count('startResist'), 1, reason: 'only the recorder\'s own check at its start');
+    // every sample the recorder saved while the session listened, in the recorder's order
+    expect(packs, isNotEmpty);
+    final from = w.savedPacks.indexOf(packs.first);
+    expect(from, greaterThanOrEqualTo(0));
+    expect(packs, w.savedPacks.sublist(from, from + packs.length));
+    for (var i = 1; i < packs.length; i++) {
+      expect(packs[i], (packs[i - 1] + 1) % 2048, reason: 'a sample is missing at $i');
+    }
+    expect(w.leases.where((l) => l.$2 == tapRide && l.$1), isNotEmpty);
+    expect(w.leases.last, (false, tapRide), reason: 'the session let its lease go');
+    expect(w.statuses.last.phase, Phase.recording, reason: 'the recording goes on');
+  });
+
+  test('the recording headband drops under a session: the session waits, the recorder reconnects, the stream is back', () async {
+    final first = CountingBand(label: 'N'), second = CountingBand(label: 'N2');
+    final w = World(nightBands: [first, second]);
+    addTearDown(w.close);
+    await w.startNight();
+    await until(() => w.recording);
+    final got = <int>[];
+    final events = <LinkEvent>[];
+    final link = BandLink(
+      finder: w.owner.finder,
+      timing: _quick,
+      onBatch: (_, b) => got.add(b.length),
+      onEvent: (e, _) => events.add(e),
+    );
+    await link.connect();
+    await link.startSignal();
+    await until(() => got.isNotEmpty);
+    first.goOutOfRange();
+    await until(() => link.lost, what: 'the session hearing of the drop');
+    await until(() => !link.lost && second.emitted > 0, what: 'the recorder reconnected');
+    final n = got.length;
+    await until(() => got.length > n, what: 'samples after the reconnect');
+    link.tick();
+    expect(events, [LinkEvent.drop, LinkEvent.reconnected]);
+    expect(w.real.calls, isEmpty, reason: 'the session searched or connected by itself');
+    expect(w.nightFinder.scans + w.nightFinder.directs, 2, reason: 'only the recorder reconnects');
+    await link.close();
+  });
+
+  test('the recording stops under a session: the session hears it, and the next start connects as before', () async {
+    final w = World(nightBands: [CountingBand(label: 'N')]);
+    addTearDown(w.close);
+    await w.startNight();
+    await until(() => w.recording);
+    final link = BandLink(finder: w.owner.finder, timing: _quick, onBatch: (_, _) {});
+    await link.connect();
+    await link.startSignal();
+    expect(link.recordingEnded, isFalse);
+    await w.recorder!.stop();
+    w.owner.nightEnded();
+    await until(() => link.recordingEnded && link.lost, what: 'the session hearing the stop');
+    await link.close();
+    final a = await startLink(w.owner);
+    await until(() => a.got.isNotEmpty);
+    expect(w.real.scans, 1, reason: 'between recordings a session connects by itself, as before');
+    await a.link.close();
+  });
+
+  test('a session on a lent recording (Signal, Sleep, then Work): still one connection', () async {
     final w = World();
     addTearDown(w.close);
     final a = await startLink(w.owner);
@@ -384,8 +498,45 @@ void main() {
     await a.link.close();
     await w.startNight();
     await until(() => w.recording);
-    await expectLater(w.owner.finder.find(const Duration(milliseconds: 10)), throwsA(isA<HeldByNight>()));
-    expect(const HeldByNight().toString(), contains('night'));
+    final got = <int>[];
+    final link = BandLink(finder: w.owner.finder, timing: _quick, onBatch: (_, b) => got.add(b.length));
+    expect(await link.connect(), isTrue);
+    await link.contact();
+    await link.startSignal();
+    await until(() => got.length > 5, what: 'the lent recording\'s samples at the session');
+    await link.close();
+    expect(w.real.scans, 1);
+    expect(w.real.directs, 0);
+    expect(w.band.count('startResist'), 1);
+    expect(w.band.count('startSignal'), 1);
+    expect(w.nightFinder.calls, isEmpty);
+  });
+
+  test("the tap's leases are one per user: the panel letting go does not cut a session's stream", () {
+    var now = DateTime(2099, 1, 1, 12);
+    final sent = <Object>[];
+    final tap = NightTapSender(send: sent.add, clock: () => now);
+    final batch = [for (var i = 0; i < 4; i++) Sample(i, [for (var c = 0; c < 8; c++) (c + 1) * 1e-6])];
+    tap.lease(on: true, user: tapPanel);
+    tap.lease(on: true, user: tapRide);
+    tap.lease(on: false, user: tapPanel);
+    expect(tap.on, isTrue);
+    tap.add('run', 0, now, batch);
+    // the last user lets go: what was gathered for it still goes out
+    tap.lease(on: false, user: tapRide);
+    expect(tap.on, isFalse);
+    final got = nightTapSamples(sent.single)!.single;
+    expect(got.map((x) => x.pack), [0, 1, 2, 3]);
+    expect(got.first.volts, hasLength(8), reason: 'any number of channels');
+    expect(got.first.volts[7], closeTo(8e-6, 1e-12));
+    // one user's lease running out leaves the other's
+    tap.lease(on: true, user: tapPanel);
+    now = now.add(const Duration(seconds: 10));
+    tap.lease(on: true, user: tapRide);
+    now = now.add(const Duration(seconds: 10));
+    expect(tap.on, isTrue);
+    now = now.add(const Duration(seconds: 10));
+    expect(tap.on, isFalse);
   });
 
   test('the status every screen shows: state, electrodes from the one judge, the battery estimate', () async {

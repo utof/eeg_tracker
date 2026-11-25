@@ -57,8 +57,8 @@ HeadbandConnection startPhoneConnection() {
     },
     linger: keepConnectionFor,
     hold: AutoChannel.screenHolds,
-    leaseNight: (on) {
-      FlutterForegroundTask.sendDataToTask(nightTapLeaseMessage(on: on));
+    leaseNight: (on, user) {
+      FlutterForegroundTask.sendDataToTask(nightTapLeaseMessage(on: on, user: user));
       if (on) FlutterForegroundTask.sendDataToTask(statusCommand);
     },
     sendToNight: FlutterForegroundTask.sendDataToTask,
