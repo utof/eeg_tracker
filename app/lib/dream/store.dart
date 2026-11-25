@@ -144,6 +144,7 @@ class DreamSession {
     required this.ending,
     required this.prompts,
     required this.recording,
+    this.span,
     required this.firstTimerS,
     this.baselineS,
     this.rounds = const [],
@@ -165,6 +166,10 @@ class DreamSession {
 
   /// Stem of the session's EEG in `files/recordings/`, or null when it could not be written.
   final String? recording;
+
+  /// The span of the day's recording this session ran on as an activity (spans/activities.dart): then [recording]
+  /// is that recording's id and the session's signal is its samples inside the span; null: a session of its own.
+  final String? span;
 
   /// Round 1's timer (s after lights off).
   final int firstTimerS;
@@ -197,6 +202,7 @@ class DreamSession {
     'ending': ending.name,
     'prompts': prompts,
     'recording': recording,
+    'span': ?span,
     'firstTimerS': firstTimerS,
     'baselineS': baselineS,
     'rounds': [for (final r in rounds) r.toJson()],
@@ -229,6 +235,7 @@ class DreamSession {
       ending: ending,
       prompts: {for (final e in prompts.entries) '${e.key}': '${e.value}'},
       recording: rec as String?,
+      span: j['span'] is String ? j['span'] as String : null,
       firstTimerS: timer,
       baselineS: baseline as int?,
       rounds: rs,

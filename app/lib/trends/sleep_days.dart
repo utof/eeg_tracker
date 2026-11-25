@@ -29,7 +29,7 @@ const double regularitySpreadCapMin = 720;
 
 /// Whether the sleep model's numbers may use [r] at all (see the top of the file).
 bool countsForSleepNumbers(SleepReport r) {
-  if (!r.scored || r.wearerAnswer == answerSomeoneElse || r.periods.isEmpty) return false;
+  if (!r.scored || r.noSleepFound || r.wearerAnswer == answerSomeoneElse || r.periods.isEmpty) return false;
   final asleep = r.extras?.asleep;
   return asleep == null || asleep.min <= 0 || asleep.noisyShare <= noisyNightShare;
 }

@@ -121,6 +121,13 @@ RecordingHeader headerOf(Headband band) => band is OtherBoard ? (band as OtherBo
 /// stream (that would start the mending over, every 10 s); its own no-data rule stays the backstop.
 abstract class MendsDrops {}
 
+/// A handle to the recording that runs (headband/connection.dart `RecordingBand`): its samples are the recorder's, and
+/// so is the reconnecting. A session's link on one never searches, restarts the stream or reconnects: it waits for
+/// "in range" again, and [ended] says the recording has stopped (Record first, DECISIONS 897).
+abstract class RidesRecorder {
+  bool get ended;
+}
+
 /// A headband that already has a contact reading in force (a handle to the one live connection, headband/connection.dart;
 /// a connection lent to the night, headband/lend.dart): the reading and when it was measured, or null when a check is
 /// due. With one, no new contact check is made: the stream is not interrupted (DECISIONS 855).

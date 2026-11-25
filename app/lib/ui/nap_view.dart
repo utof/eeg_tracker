@@ -32,7 +32,7 @@ class NapViewModel {
     this.noData = false,
     this.end,
     this.notes = const [],
-    this.nightRunning = false,
+    this.recordingRuns = false,
     this.latest,
     this.justEnded = false,
     this.earlier = const [],
@@ -63,7 +63,7 @@ class NapViewModel {
   final List<String> notes;
 
   /// A night is being recorded: the headband is taken.
-  final bool nightRunning;
+  final bool recordingRuns;
 
   /// The newest nap (its report comes first), and whether it has just ended.
   final NapSession? latest;
@@ -180,7 +180,7 @@ class NapView extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
           child: FilledButton.icon(
-            onPressed: m.nightRunning ? null : onLightsOff,
+            onPressed: onLightsOff,
             icon: Icon(m.stage == NapStage.failed ? Icons.refresh : Icons.bedtime_outlined),
             label: Text(m.stage == NapStage.failed ? 'Try again' : 'Lights off'),
           ),
@@ -192,14 +192,15 @@ class NapView extends StatelessWidget {
   Widget _status(BuildContext context) {
     final m = model, text = Theme.of(context).textTheme, latest = m.latest;
     final (String word, String sentence, MarkShape mark, Color color) = switch (m.stage) {
-      _ when m.nightRunning => (
-        'Night recording',
-        'The headband is busy recording the night. A nap can start after Stop.',
-        MarkShape.ringedDot,
-        Night.caution,
-      ),
       NapStage.failed => ('Could not start', m.message, MarkShape.dash, Night.problem),
       _ when m.justEnded && latest != null => ('Nap over', _overSentence(latest), MarkShape.ring, Night.inkMuted),
+      _ when m.recordingRuns => (
+        'Ready',
+        'A recording is running: the nap starts on it, with no new search. Lie down, tap Lights off. The nap ends '
+            'before deep sleep starts, or at ${m.lengthMin} minutes.',
+        MarkShape.ring,
+        Night.inkMuted,
+      ),
       _ => (
         'Ready',
         'Headband on, lie down, tap Lights off. The nap ends before deep sleep starts, or at ${m.lengthMin} minutes.',

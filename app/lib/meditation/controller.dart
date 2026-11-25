@@ -56,6 +56,7 @@ import '../feedback/mapping.dart';
 import '../feedback/session.dart';
 import '../recorder/chunk_writer.dart' show Sample, fileStem;
 import '../recorder/headband.dart' show HeadbandFinder;
+import '../spans/activities.dart' show ActivityRef, activityRef;
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
 import '../handsfree/live.dart';
 import '../session_clock.dart';
@@ -307,6 +308,7 @@ class MeditationController extends ChangeNotifier {
   Session? get session => _session;
 
   BandLink? _link;
+  ActivityRef? _rides;
   SessionSound? _sound;
   Session? _session;
   AlphaThetaEngine? _engine;
@@ -366,7 +368,7 @@ class MeditationController extends ChangeNotifier {
       );
       _link = link;
       if (!await link.connect(onFound: (name) => _set(Stage.connecting, 'Found $name. Connecting.'))) {
-        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?', run);
+        return await _fail('Headband not found. Is it switched on and charged?', run);
       }
       if (!_live(run)) return await link.close();
       _set(Stage.contact, 'Checking contact. Keep still for a few seconds.');
@@ -392,6 +394,8 @@ class MeditationController extends ChangeNotifier {
       final engine = kind == SessionKind.alphaTheta ? AlphaThetaEngine() : null;
       final s = engine?.core ?? Session();
       engine != null ? engine.contact(contact) : s.contact(contact);
+      // an activity of the day's recording: its summary and log name the recording and the span
+      _rides = link.ridesRecorder ? activityRef() : null;
       _routeAtStart = route;
       _bluetoothUsed = route.bluetooth;
       s.log.note({
@@ -399,6 +403,7 @@ class MeditationController extends ChangeNotifier {
         'lengthS': sessionLength.inSeconds,
         if (silentLength > Duration.zero) 'silentS': silentLength.inSeconds,
         'headband': link.name,
+        ...?_rides?.toJson(),
         if (audioRoute != null) 'audioRoute': route.toJson(),
         if (_slot != null) 'check': _checkInfo(),
       });
@@ -755,7 +760,7 @@ class MeditationController extends ChangeNotifier {
     final summary = _summary(complete: false, end: MeditationSummary.endRunning);
     if (summary == null) return;
     _saving = st
-        .save(summary, _session!.log)
+        .save(summary, _session!.log, extra: _rides?.toJson())
         .catchError((Object _) {}) // storage full: the final save says so
         .whenComplete(() => _saving = null);
   }
@@ -869,7 +874,7 @@ class MeditationController extends ChangeNotifier {
     if (st != null) {
       try {
         await _saving; // a checkpoint's rename must not come after the final one
-        await st.save(summary, s.log);
+        await st.save(summary, s.log, extra: _rides?.toJson());
         earlier = [
           for (final e in st.list())
             if (e.start != summary.start) e,

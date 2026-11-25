@@ -21,7 +21,7 @@ class WorkViewModel {
   const WorkViewModel({
     required this.stage,
     this.message = '',
-    this.nightRunning = false,
+    this.recordingRuns = false,
     this.eyesClosedFirst = false,
     this.level = DrowsyLevel.unknown,
     this.eyesClosedNow = false,
@@ -51,7 +51,7 @@ class WorkViewModel {
 
   final WorkStage stage;
   final String message;
-  final bool nightRunning, eyesClosedFirst;
+  final bool recordingRuns, eyesClosedFirst;
   final DrowsyLevel level;
   final bool eyesClosedNow, noisy;
   final List<WorkCell> cells;
@@ -153,8 +153,8 @@ class WorkView extends StatelessWidget {
         word: failed ? 'Not started' : 'Ready',
         line: failed
             ? m.message
-            : m.nightRunning
-            ? 'The headband is recording the night. A work session starts between nights.'
+            : m.recordingRuns
+            ? 'A recording is running: the work session starts on it, with no new search and no second file.'
             : 'Wear the headband while you work. The phone watches for heavy eyelids and suggests a break now and then.',
       ),
       if (!failed && m.message.isNotEmpty) Para(m.message, color: Night.inkMuted),
@@ -168,7 +168,7 @@ class WorkView extends StatelessWidget {
       SwitchListTile(
         contentPadding: EdgeInsets.zero,
         value: m.eyesClosedFirst,
-        onChanged: m.nightRunning ? null : onEyesClosedFirst,
+        onChanged: onEyesClosedFirst,
         title: Text('Start with 1 minute eyes closed', style: text.bodyLarge),
         subtitle: Text(
           'Helps tell closed eyes from heavy eyelids later. Optional.',
@@ -253,7 +253,7 @@ class WorkView extends StatelessWidget {
       case WorkStage.setup:
       case WorkStage.failed:
         return FilledButton.icon(
-          onPressed: m.nightRunning ? null : onStart,
+          onPressed: onStart,
           style: FilledButton.styleFrom(minimumSize: big, backgroundColor: Night.liveFill, foregroundColor: Night.onLiveFill),
           icon: const Icon(Icons.play_arrow_rounded),
           label: Text(m.stage == WorkStage.failed ? 'Try again' : 'Start work session'),

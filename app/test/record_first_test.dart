@@ -9,6 +9,7 @@ import 'package:eeg_tracker/recorder/header.dart';
 import 'package:eeg_tracker/recorder/night_recorder.dart';
 import 'package:eeg_tracker/recorder/status.dart';
 import 'package:eeg_tracker/sleep/night_scorer.dart';
+import 'package:eeg_tracker/spans/activities.dart' show undoOffCommand;
 import 'package:eeg_tracker/spans/span.dart';
 import 'package:eeg_tracker/spans/span_log.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -314,5 +315,104 @@ void sleepOnARecording() {
     expect(gaveUp, 1);
     expect(store.state.active, isFalse);
     expect(File('${dir.path}/${after.id}.log').readAsStringSync(), contains('no data for 6 h: the recording stops itself'));
+  });
+
+  test('"Still going? Undo" after the 60-minute rule: what it ended is open again, the sleep kit back on', () async {
+    final first = FakeBand('a');
+    final ended = <List<Span>>[];
+    final r = NightRecorder(
+      finder: FakeFinder([first]),
+      dir: dir,
+      store: store,
+      onStatus: statuses.add,
+      onStuck: (_) async {},
+      timing: fast,
+      watch: null,
+      clock: clock,
+      spanLog: SpanLog(spansDirFor(dir.path), clock: clock),
+      onSpansEnded: ended.add,
+    );
+    final running = r.run(restartedBySystem: false);
+    await wait(200);
+    r.openSpan('work');
+    final lastData = now;
+    first.goOutOfRange();
+    await wait(100);
+    expect(statuses.last.rec.undoable, isEmpty);
+    now = now.add(const Duration(minutes: 61));
+    await wait(150);
+    // the rule ended both, told whoever shows the notice, and offers Undo
+    expect([for (final s in ended.single) (s.kind, s.end)], [('sleep', lastData), ('work', lastData)]);
+    expect([for (final s in statuses.last.rec.undoable) s.kind], ['sleep', 'work']);
+    expect(statuses.last.rec.sleep, isFalse);
+
+    r.spanCommand(undoOffCommand);
+    final back = statuses.last.rec;
+    expect([for (final s in back.spans) (s.kind, s.closed, s.endedBy)], [('sleep', false, null), ('work', false, null)]);
+    expect(back.spans.map((s) => s.id), ended.single.map((s) => s.id), reason: 'the same spans, not new ones');
+    expect(back.sleep, isTrue, reason: 'the sleep kit is attached again');
+    expect(back.undoable, isEmpty);
+    final file = spans();
+    expect([for (final s in file.spans) (s.kind, s.end)], [('sleep', null), ('work', null)], reason: 'the last line per span wins');
+    await r.stop();
+    await running;
+    expect(File('${dir.path}/${back.id}.log').readAsStringSync(), contains('Undo: sleep, work go on'));
+  });
+
+  test('Sleep pressed while an activity is still marked ends that activity: one at a time', () async {
+    final r = NightRecorder(
+      finder: FakeFinder([FakeBand('a')]),
+      dir: dir,
+      store: store,
+      onStatus: statuses.add,
+      onStuck: (_) async {},
+      timing: fast,
+      watch: null,
+      clock: clock,
+      spanLog: SpanLog(spansDirFor(dir.path), clock: clock),
+      sleep: false,
+    );
+    final running = r.run(restartedBySystem: false);
+    await wait(200);
+    r.openSpan('work'); // its page was closed: the span stayed open
+    now = now.add(const Duration(minutes: 30));
+    r.startSleep();
+    expect([for (final s in statuses.last.rec.spans) (s.kind, s.closed, s.endedBy)], [('work', true, 'other_activity'), ('sleep', false, null)]);
+    expect(statuses.last.rec.spans.first.end, now);
+    await r.stop();
+    await running;
+  });
+
+  test('the notices: what the 60-minute rule ended, and a recording that stopped itself', () {
+    final at = DateTime(2026, 11, 25, 14, 5);
+    Span off(int n, String kind) => Span(id: 'r-$n', kind: kind, start: at.subtract(const Duration(hours: 1)), end: at, endedBy: 'headband_off', source: 'owner_button');
+    final one = spansEndedNotice([off(1, 'work')], awayMinutes: 60);
+    expect(one.title, 'Headband off for 60 minutes');
+    expect(one.text, 'Work was ended at 14:05, the last moment with a signal. Still going? Open the app and tap Undo.');
+    expect(spansEndedNotice([off(1, 'sleep'), off(2, 'work')], awayMinutes: 60).text, startsWith('Sleep and Work were ended at 14:05'));
+    expect(undoLine([off(1, 'work')]), 'Work ended at 14:05: the headband was off for an hour. Still going?');
+    expect(undoLine(const []), isNull);
+    final stopped = recordingStoppedNotice(awayHours: 6);
+    expect(stopped.title, 'Recording stopped');
+    expect(stopped.text, contains('6 hours'));
+    expect(stopped.text, contains('What was this recording?'));
+  });
+
+  test('Undo is not offered once something else was marked after the rule, or for an end you made', () async {
+    final at = DateTime(2026, 11, 25, 14, 5);
+    Span span(int n, String kind, {DateTime? end, String? by, DateTime? start}) =>
+        Span(id: 'r-$n', kind: kind, start: start ?? at.subtract(const Duration(hours: 1)), end: end, endedBy: by, source: 'owner_button');
+    final off = span(1, 'work', end: at, by: 'headband_off');
+    expect(RecordingLive(id: 'r', spans: [off]).undoable, [off]);
+    expect(RecordingLive(id: 'r', spans: [span(1, 'work', end: at, by: 'owner')]).undoable, isEmpty);
+    expect(
+      RecordingLive(id: 'r', spans: [off, span(2, 'meditate', start: at.add(const Duration(minutes: 90)))]).undoable,
+      isEmpty,
+      reason: 'you went on to something else',
+    );
+    // an older headband_off end is not offered again beside a newer one
+    final older = span(1, 'sleep', end: at.subtract(const Duration(hours: 5)), by: 'headband_off', start: at.subtract(const Duration(hours: 9)));
+    final newer = span(2, 'work', end: at, by: 'headband_off');
+    expect(RecordingLive(id: 'r', spans: [older, newer]).undoable, [newer]);
   });
 }

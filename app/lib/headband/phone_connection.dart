@@ -12,6 +12,7 @@ import '../recorder/recorder_service.dart' show statusCommand;
 import '../session_keeper.dart' show PhoneSessionKeeper;
 import '../share/shared_session.dart' show sharedAlert;
 import '../signal/live_tap.dart' show nightTapLeaseMessage;
+import '../spans/activities.dart';
 import 'battery_estimate.dart';
 import 'connection.dart';
 import 'device_status.dart';
@@ -57,8 +58,8 @@ HeadbandConnection startPhoneConnection() {
     },
     linger: keepConnectionFor,
     hold: AutoChannel.screenHolds,
-    leaseNight: (on) {
-      FlutterForegroundTask.sendDataToTask(nightTapLeaseMessage(on: on));
+    leaseNight: (on, user) {
+      FlutterForegroundTask.sendDataToTask(nightTapLeaseMessage(on: on, user: user));
       if (on) FlutterForegroundTask.sendDataToTask(statusCommand);
     },
     sendToNight: FlutterForegroundTask.sendDataToTask,
@@ -76,5 +77,14 @@ HeadbandConnection startPhoneConnection() {
   }());
   return c;
 }
+
+/// The activities of the recording as the app wires them (spans/activities.dart): commands go to the recorder's
+/// service. The Record tab sets how the recorder is started and stopped. Call once, after [startPhoneConnection].
+Activities startPhoneActivities(HeadbandConnection owner) => Activities(
+  owner: owner,
+  send: FlutterForegroundTask.sendDataToTask,
+  serviceRuns: () => FlutterForegroundTask.isRunningService,
+  askStatus: () => FlutterForegroundTask.sendDataToTask(statusCommand),
+);
 
 File? _lostFile;

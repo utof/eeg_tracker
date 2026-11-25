@@ -768,6 +768,24 @@ def check_talking(replay: Path, stage: Path, also: list[Result]) -> Result:
         if confirm:
             sh(f"input tap {confirm[1]} {confirm[2]}")
         time.sleep(5)
+        # Work started the recording (Record first step 4, DECISIONS 984): once it has ended the app asks; "Stop
+        # everything" ends the recording too, and its sheet "What was this recording?" is skipped
+        t1 = time.time()
+        while time.time() - t1 < 40:
+            ask = emu.match("Stop everything", exact=True)
+            if ask:
+                sh(f"input tap {ask[1]} {ask[2]}")
+                time.sleep(3)
+                continue
+            skip = emu.match("Skip", exact=True) if emu.match("What was this recording?", exact=True) else None
+            if skip:
+                sh(f"input tap {skip[1]} {skip[2]}")
+                details.append("Work had started the recording: Stop everything, then the sheet skipped")
+                time.sleep(2)
+                break
+            if emu.match("Done", exact=True) and time.time() - t1 > 15:
+                break  # the work page's own end, no question: an app of before step 4
+            time.sleep(2)
     newest = sh(f"ls -t {FILES}/work-sessions/*.work.json 2>/dev/null | head -1", check=False).strip()
     if not newest:
         return Result(name, "FAIL", "no work session was saved", details)
@@ -775,6 +793,8 @@ def check_talking(replay: Path, stage: Path, also: list[Result]) -> Result:
     breaks = j.get("breaks") if isinstance(j.get("breaks"), list) else []
     count = len(breaks)
     details.append(f"saved: headband {j.get('headband')!r}, breaks {count}, ended {j.get('ended')!r}")
+    if j.get("span"):
+        details.append(f"the session ran on recording {j.get('recording')!r}, span {j.get('span')!r}; raw {j.get('raw')!r}")
     if "Replay" not in str(j.get("headband")):
         return Result(name, "FAIL", f"the session did not use the replay (headband {j.get('headband')!r})", details)
     if count or broke:

@@ -29,12 +29,13 @@ import '../phone.dart';
 import '../start_log.dart';
 import '../share/isolate.dart';
 import '../share/protocol.dart';
+import '../share/shared_session.dart' show shareSessionKind;
 import '../signal/live_tap.dart';
 import '../sleep/live_log.dart' show LiveStageLog, liveStagesDirFor;
 import '../sleep/live_stager.dart';
 import '../sleep/night_scorer.dart';
 import '../sleep/onnx_runs.dart';
-import '../spans/span.dart' show spansDirFor;
+import '../spans/span.dart' show recordingStoppedNotice, spansDirFor, spansEndedNotice;
 import '../spans/after_restart.dart';
 import '../spans/span_log.dart';
 import 'brainbit.dart';
@@ -58,15 +59,10 @@ const String _autoKey = 'autoStart';
 /// The recording starts with Sleep (`1`: a sleep span and the sleep kit from its start) or with Record alone (`0`).
 const String _sleepKey = 'startSleep';
 
-/// Opens or closes a span of the running recording (Record first, DECISIONS 884): the recorder writes it and answers
-/// with its status, which lists the spans.
-Map<String, Object?> openSpanCommand(String kind, {String? session}) => {
-  'kind': 'span',
-  'op': 'open',
-  'span_kind': kind,
-  'session': ?session,
-};
-Map<String, Object?> closeSpanCommand(String id, {String by = 'owner'}) => {'kind': 'span', 'op': 'close', 'id': id, 'by': by};
+/// The recording starts with this span as its first one (an activity pressed while nothing recorded: Work, Meditate,
+/// ...; Record first step 4, DECISIONS 884); absent: none.
+const String _spanKey = 'startSpan';
+
 /// A night started while the screen's engine holds a live connection: its offer to lend it (headband/lend.dart,
 /// DECISIONS 856). Read once by the recorder at its start, then removed.
 const String _lendKey = 'lend';
@@ -172,11 +168,17 @@ Future<ServiceRequestResult> startRecorderService(
   List<String>? autoNotes,
   bool fromWatcher = false,
   bool sleep = true,
+  String? span,
 }) async {
   if (!fromWatcher) await AutoChannel.release();
   if (recordingsDir != null) await FlutterForegroundTask.saveData(key: _dirKey, value: recordingsDir);
   if (await FlutterForegroundTask.isRunningService) return const ServiceRequestSuccess();
   await FlutterForegroundTask.saveData(key: _sleepKey, value: sleep ? '1' : '0');
+  if (span == null || sleep) {
+    await FlutterForegroundTask.removeData(key: _spanKey);
+  } else {
+    await FlutterForegroundTask.saveData(key: _spanKey, value: span);
+  }
   if (autoNotes == null) {
     await FlutterForegroundTask.removeData(key: _autoKey);
   } else {
@@ -339,6 +341,7 @@ class RecorderTaskHandler extends TaskHandler {
     final plan = await _alarmPlan();
     final auto = await _autoNotes();
     final sleep = await _startsWithSleep();
+    final firstSpan = sleep ? null : await _firstSpan();
     // Stop (or the system's destroy) came while this was starting: it has been answered; no night starts after it.
     if (_stopping) return;
     final diy = _diy = this.finder == null ? diyNightFor(rec) : null;
@@ -393,7 +396,13 @@ class RecorderTaskHandler extends TaskHandler {
               return (scorer: s, alarm: alarm(rec, s), cues: cues(rec, s));
             },
       onGiveUp: () => unawaited(_giveUp()),
+      // the 60-minute rule ended what was marked: one notice, with the way back (Undo on the Record tab)
+      onSpansEnded: (ended) {
+        final n = spansEndedNotice(ended, awayMinutes: const RecorderTiming().spansAway.inMinutes);
+        unawaited(Phone.bandNotice(n.title, n.text));
+      },
       sleep: sleep,
+      firstSpan: firstSpan,
       sleepSource: auto != null ? 'auto_start' : 'owner_button',
       startNotes: [
         ...?diy?.notes,
@@ -510,12 +519,16 @@ class RecorderTaskHandler extends TaskHandler {
       } else {
         _alarmOffEarly = true;
       }
+    } else if (data is Map && data['kind'] == shareSessionKind) {
+      // a session that runs on this recording (Work, ...): /state tells the paired laptop about it
+      final s = data['session'];
+      _share?.setSession(s is Map ? {for (final e in s.entries) '${e.key}': e.value} : null);
     } else if (data is Map && data['kind'] == 'sleep') {
       unawaited(_sleepCommand(data));
     } else if (data is Map && data['kind'] == 'span') {
       _spanCommand(data);
-    } else if (nightTapLeaseFrom(data) case final on?) {
-      _signalTap(on: on);
+    } else if (nightTapLeaseFrom(data) case final lease?) {
+      _signalTap(on: lease.on, user: lease.user);
     } else if (data is Map && data['kind'] == lendKind) {
       _lend?.onMessage(data);
     }
@@ -543,6 +556,8 @@ class RecorderTaskHandler extends TaskHandler {
   /// Hours without the headband: the recording is ended as by Stop, and the service goes.
   Future<void> _giveUp() async {
     await _stop(endNight: true);
+    final n = recordingStoppedNotice(awayHours: const RecorderTiming().stopAway.inHours);
+    unawaited(Phone.bandNotice(n.title, n.text));
     FlutterForegroundTask.sendDataToMain(gaveUpMessage);
     await FlutterForegroundTask.stopService();
   }
@@ -550,13 +565,10 @@ class RecorderTaskHandler extends TaskHandler {
   void _spanCommand(Map<Object?, Object?> data) {
     final r = _recorder;
     if (r == null || _stopping) return;
-    final kind = data['span_kind'], id = data['id'], by = data['by'], session = data['session'];
-    if (data['op'] == 'open' && kind is String && kind.isNotEmpty) {
-      r.openSpan(kind, session: session is String ? session : null);
-    } else if (data['op'] == 'close' && id is String) {
-      r.closeSpan(id, by: by is String ? by : 'owner');
-    }
+    final span = r.spanCommand(data);
     _send(r.status);
+    // a closed span's own files (the activity's report) go to the paired laptop without waiting (DECISIONS 842)
+    if (span != null && span.closed) unawaited(Phone.pushSoon());
   }
 
   static Future<LendOffer?> _lendOffer() async {
@@ -611,9 +623,10 @@ class RecorderTaskHandler extends TaskHandler {
     'alert': ?_alert,
   };
 
-  /// The Signal view took or renewed its lease ([on]), or let it go.
-  void _signalTap({required bool on}) {
-    _tap.lease(on: on && !_stopping);
+  /// A user of the tap (the panel, the Signal view, the activities on this recording) took or renewed its lease
+  /// ([on]), or let it go.
+  void _signalTap({required bool on, required String user}) {
+    _tap.lease(on: on && !_stopping, user: user);
     if (!_tap.on) return _endTap();
     ChunkWriter.onLive = _tap.add;
     _tapTimer ??= Timer.periodic(nightTapEvery, (_) => _tap.on ? _tap.flush() : _endTap());
@@ -682,6 +695,15 @@ class RecorderTaskHandler extends TaskHandler {
     try {
       final raw = await FlutterForegroundTask.getData<String>(key: _alarmKey);
       return raw == null ? null : AlarmPlan.fromJson(jsonDecode(raw));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<String?> _firstSpan() async {
+    try {
+      final kind = await FlutterForegroundTask.getData<String>(key: _spanKey);
+      return kind == null || kind.isEmpty ? null : kind;
     } catch (_) {
       return null;
     }

@@ -69,7 +69,7 @@ final Map<String, Widget> states = {
       ),
     ),
   ),
-  'settings_night': _settings(SettingsViewModel(calibration: _record(_none), nightRunning: true)),
+  'settings_night': _settings(SettingsViewModel(calibration: _record(_none), recordingRuns: true)),
   'settings_on_uncalibrated': _settings(const SettingsViewModel(on: true)),
   'cal_setup': _cal(const CalViewModel(stage: CalStage.setup)),
   'cal_connecting': _cal(const CalViewModel(stage: CalStage.connecting, message: 'Found BrainBit Black. Connecting.')),
@@ -186,11 +186,12 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: nightTheme(),
-        home: SettingsView(model: const SettingsViewModel(nightRunning: true), onToggle: (_) {}, onCalibrate: () => calibrate++, onInfo: () {}),
+        home: SettingsView(model: const SettingsViewModel(recordingRuns: true), onToggle: (_) {}, onCalibrate: () => calibrate++, onInfo: () {}),
       ),
     );
     await tester.scrollUntilVisible(find.text('Calibrate'), 200);
     await tester.tap(find.text('Calibrate'));
-    expect(calibrate, 1, reason: 'the headband is busy with the night');
+    expect(calibrate, 2, reason: 'during a recording the calibration reads it');
+    expect(find.textContaining('A recording is running: the calibration reads it'), findsOneWidget);
   });
 }

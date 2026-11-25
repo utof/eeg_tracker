@@ -82,7 +82,13 @@ class ShareControl extends ChangeNotifier {
 
   /// The session's summary to the server (/state's `session`), with the newest headband notice beside it (`alert`,
   /// DECISIONS 857).
-  void _sessionChanged() => _host?.setSession(sessionWithAlert(_session.value, sharedAlert.value));
+  /// While a recording runs the recorder's service serves, so it is told too (a session that runs as an activity of
+  /// the recording, Record first step 4): the paired laptop's tray keeps seeing the work session.
+  void _sessionChanged() {
+    final session = sessionWithAlert(_session.value, sharedAlert.value);
+    _host?.setSession(session);
+    sendToRecorder({'kind': shareSessionKind, 'session': session});
+  }
 
   void _alertChanged() => _sessionChanged();
 

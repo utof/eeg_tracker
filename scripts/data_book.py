@@ -730,8 +730,8 @@ def _report_numbers(rep: Report, stages: list[str] | None, probs: list[list[int]
 SESSION_COLUMNS = [
     "session", "kind", "start", "end", "minutes", "ended", "started_by", "wearer", "worn_min", "usable_min",
     "talking_min", "meeting_min", "drowsy_min", "eyes_closed_min", "active_min", "settled_min", "asleep_min",
-    "breaks", "break_min", "hints", "hints_taken", "sharp_mean", "rating", "plan", "raw", "detector_version",
-    "file", "file_sha256",
+    "breaks", "break_min", "hints", "hints_taken", "sharp_mean", "rating", "plan", "raw", "recording", "span",
+    "detector_version", "file", "file_sha256",
 ]
 READ_LEVELS, DROWSY_LEVELS = {"alert", "getting_drowsy", "drowsy"}, {"getting_drowsy", "drowsy"}
 
@@ -774,7 +774,7 @@ def _phone_work(j: dict) -> dict:
                 talking_min=round(muscle / 60, 1), meeting_min=_num(j.get("meeting_min")),
                 eyes_closed_min=_num(minutes.get("eyes_closed")), active_min=_num(j.get("active_min")),
                 breaks=len(brk), break_min=brk_min, hints=len(hints), hints_taken=sum(h.get("taken") is True for h in hints),
-                sharp_mean=_r(sum(taps) / len(taps), 2) if taps else None, raw=j.get("raw"),
+                sharp_mean=_r(sum(taps) / len(taps), 2) if taps else None,
                 detector_version=f"{j.get('app')} v{j.get('version')}")
 
 
@@ -801,7 +801,10 @@ def session_rows(local: Path, hashes: Hashes) -> list[dict]:
                 continue
             rel = f.relative_to(local).as_posix()
             row = dict(session=f.name[: -len(suffix)], kind=kind, start=iso(j.get("start")), ended=j.get("ended"),
-                       wearer=ds._wearer(j), file=rel, file_sha256=hashes.sha(rel))  # noqa: SLF001
+                       wearer=ds._wearer(j), file=rel, file_sha256=hashes.sha(rel),  # noqa: SLF001
+                       raw=spans.own_raw(j), recording=None, span=None)
+            if spans.rode_on_recording(j):  # the day's recording and the span of it: join to spans.tsv
+                row.update(recording=j.get("recording"), span=j["span"])
             start = ds.parse_time(j["start"])
             if kind == "work" and j.get("kind") == "work_session":
                 row.update(_phone_work(j), end=iso(j.get("end")), minutes=_span_min(j.get("start"), j.get("end")))
@@ -816,7 +819,7 @@ def session_rows(local: Path, hashes: Hashes) -> list[dict]:
             elif kind == "nap_coach" and _num(j.get("endS")) is not None:
                 stages = j.get("stages") if isinstance(j.get("stages"), str) else ""
                 row.update(end=iso(start + timedelta(seconds=_num(j["endS"]) or 0)),
-                           minutes=round((_num(j["endS"]) or 0) / 60, 1), ended=j.get("end"), raw=j.get("recording"),
+                           minutes=round((_num(j["endS"]) or 0) / 60, 1), ended=j.get("end"),
                            asleep_min=sum(stages.count(c) for c in "123R") / 2,
                            detector_version=f"nap coach v{j.get('version')} (live stages)")
             elif kind == "sound":
@@ -824,7 +827,7 @@ def session_rows(local: Path, hashes: Hashes) -> list[dict]:
                 plan = j.get("plan") if isinstance(j.get("plan"), dict) else {}
                 row.update(end=iso(start + timedelta(seconds=end_s)) if end_s is not None else None,
                            minutes=_r(end_s / 60) if end_s is not None else None, ended=j.get("end"),
-                           raw=j.get("recording"), rating=j.get("rating"),
+                           rating=j.get("rating"),
                            plan=" ".join(str(plan.get(k)) for k in ("state", "bed", "beat") if plan.get(k)) or None,
                            detector_version=f"sound for states v{j.get('version')}")
             else:
@@ -836,7 +839,7 @@ def session_rows(local: Path, hashes: Hashes) -> list[dict]:
 # ---- spans.tsv ------------------------------------------------------------------------------------------------------
 
 SPAN_COLUMNS = ["span_id", "recording", "kind", "label", "start", "end", "minutes", "source", "started_recording",
-                "ended_by", "session", "paused_minutes", "estimate"]
+                "ended_by", "session", "paused_minutes", "active_minutes", "estimate"]
 
 
 def span_rows(local: Path) -> list[dict]:
@@ -847,7 +850,9 @@ def span_rows(local: Path) -> list[dict]:
             rows.append(dict(span_id=s.span, recording=rec_id, kind=s.kind, label=s.label, start=iso(s.start_unix),
                              end=iso(s.end_unix), minutes=_r(s.minutes), source=s.source,
                              started_recording=s.started_recording, ended_by=s.ended_by, session=s.session,
-                             paused_minutes=_r(s.paused_minutes) if s.paused else None, estimate=s.estimate))
+                             paused_minutes=_r(s.paused_minutes) if s.paused else None,
+                             active_minutes=_r(s.minutes - s.paused_minutes) if s.minutes is not None else None,
+                             estimate=s.estimate))
     return rows
 
 

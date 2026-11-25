@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Record first on a temporary emulator (DECISIONS 880-910): Record, Sleep on the running recording, Stop sleep,
-Stop, the sheet "What was this recording?".
+"""Record first on a temporary emulator (DECISIONS 880-910, 980-984): Record, Work on the running recording, Stop
+work, Sleep on the running recording, Stop sleep, Stop, the sheet "What was this recording?", then Work pressed with
+nothing recording.
 
 usage: python3 app/tool/record_check.py --apk <the REPLAY build> [--adb-port 5053] [--work DIR] [--out DIR] [--keep]
+       [--adb-connect HOST:PORT]   (an emulator somebody else runs, as tool/precheck.py: `_local/remote/precheck_emu.sh`
+       with PRECHECK=<this file>)
 
 The replay build's headband plays a made-up quiet recording (tool/replay_scenario.dart), so no headband and no
 recording of anyone is needed. It checks:
@@ -12,7 +15,12 @@ recording of anyone is needed. It checks:
   4. Stop, then "Stop", ends the recording and the sheet comes; a chip and Save write a tag with source
      `owner_stop_sheet` into the recording's tags file;
   5. the sleep span gets a report file of its own (`nights/<date>.report.json` with `span`) (a SKIP when the scoring
-     has not come to it within 3 minutes).
+     has not come to it within 3 minutes);
+  W1. Work on the running recording (after 1): a work span that did not start the recording, no second file set, the
+     work session's own file names the recording and the span;
+  W2. Stop work: the span closes, nothing is asked, the recording goes on;
+  W3. Work pressed with nothing recording (after 5): the recorder starts, the work span says it started the
+     recording; Stop work asks, "Stop everything" ends the recording.
 The emulator, its adb server and the helpers are the pre-install check's (tool/precheck.py). Emulator only: run it
 inside `_local/build_slot.sh heavy`, with --work on a disk with 8 GB free.
 """
@@ -72,6 +80,112 @@ def size(path: str) -> int:
     return int(out) if out.isdigit() else 0
 
 
+def sets() -> list[str]:
+    return sorted(pc.sh(f"ls {REC}/*.f32 2>/dev/null", check=False).split())
+
+
+def work_file(span: str) -> dict:
+    """The work session file that names [span]."""
+    for f in pc.sh(f"ls {pc.FILES}/work-sessions/*.work.json 2>/dev/null", check=False).split():
+        try:
+            j = json.loads(cat(f))
+        except ValueError:
+            continue
+        if isinstance(j, dict) and j.get("span") == span:
+            return j
+    return {}
+
+
+def start_work() -> tuple[bool, list[str]]:
+    """Taps Work on the Record tab's bar, then the work page's own start. True when both were found."""
+    if not tap(wait(lambda: pc.bar_button("Work"), limit=30)):
+        return False, pc.screen_words("w-no-chip")
+    started = tap(wait(lambda: emu.match("Start work session", False), limit=40))
+    return started, pc.screen_words("w-page")
+
+
+def stop_work() -> bool:
+    """The work page's Stop, and its "Stop the work session?" when it asks."""
+    if not tap(wait(lambda: emu.match("Stop", True), limit=20)):
+        return False
+    if emu.match("Stop the work session?", False):
+        tap(emu.match("Stop", True))
+    return True
+
+
+def work_on_recording(rec: str) -> list[pc.Result]:
+    """W1 and W2: Work on the recording [rec] that runs, then Stop work."""
+    out: list[pc.Result] = []
+    n_sets = len(sets())
+    started, words = start_work()
+    got = wait(lambda: [s for s in spans(rec) if s.get("kind") == "work"], limit=60) if started else []
+    s = got[0] if got else {}
+    time.sleep(25)  # the session reads the recording's stream for a while
+    words += pc.screen_words("w1-running")
+    ok = bool(got) and s.get("end") is None and s.get("started_recording") is False and s.get("source") == "owner_button"
+    same_file = len(sets()) == n_sets
+    out.append(pc.Result("W1 Work on the running recording: a span on it, no second file", "PASS" if ok and same_file else "FAIL",
+                         f"span {json.dumps(s)}; file sets before {n_sets}, now {len(sets())}", words))
+    if not ok:
+        pc.sh("input keyevent 4", check=False)
+        return out
+    stopped = stop_work()
+    closed = wait(lambda: [x for x in spans(rec) if x.get("kind") == "work" and x.get("end")], limit=40)
+    asked = emu.match("has ended", False)
+    a = size(f"{REC}/{rec}.f32")
+    time.sleep(8)
+    b = size(f"{REC}/{rec}.f32")
+    c = closed[0] if closed else {}
+    wf = work_file(c.get("span", "-"))
+    ok2 = stopped and bool(closed) and c.get("ended_by") == "owner" and not asked and b > a
+    named = wf.get("recording") == rec and wf.get("raw") == rec
+    out.append(pc.Result("W2 Stop work: the span closes, nothing is asked, the recording goes on", "PASS" if ok2 and named else "FAIL",
+                         f"span end {c.get('end')!r} by {c.get('ended_by')!r}; asked: {bool(asked)}; the recording grew {a} -> {b} "
+                         f"bytes; the work file names recording {wf.get('recording')!r}, span {wf.get('span')!r}, raw {wf.get('raw')!r}",
+                         pc.screen_words("w2-stopped")))
+    pc.sh("input keyevent 4", check=False)  # back to the Record tab
+    time.sleep(2)
+    return out
+
+
+def work_starts_recording(before: set[str]) -> list[pc.Result]:
+    """W3: Work pressed with nothing recording, then Stop work and "Stop everything"."""
+    pc.open_tab("Record")
+    started, words = start_work()
+
+    def new_log() -> str | None:
+        new = sorted(f for f in pc.sh(f"ls {REC}/*.log 2>/dev/null", check=False).split() if f not in before)
+        return new[-1] if new and "recording started" in cat(new[-1]) else None
+
+    log = wait(new_log, limit=150) if started else None
+    if not log:
+        return [pc.Result("W3 Work with nothing recording starts the recorder", "FAIL",
+                          f"Work's start tapped: {started}; no new recording within 150 s", words + pc.screen_words("w3-no-recording"))]
+    rec = log.rsplit("/", 1)[1][: -len(".log")]
+    got = wait(lambda: [s for s in spans(rec) if s.get("kind") == "work"], limit=40)
+    s = got[0] if got else {}
+    time.sleep(15)
+    stopped = stop_work()
+    asked = wait(lambda: emu.match("Stop everything", True), limit=30) if stopped else None
+    words += pc.screen_words("w3-asked")
+    tap(asked)
+
+    wait(lambda: any(x.get("kind") == "work" and x.get("end") for x in spans(rec)), limit=40)
+    time.sleep(6)
+    a = size(f"{REC}/{rec}.f32")
+    time.sleep(8)
+    b = size(f"{REC}/{rec}.f32")
+    c = next((x for x in spans(rec) if x.get("kind") == "work"), {})
+    ok = bool(got) and s.get("started_recording") is True and bool(asked) and bool(c.get("end")) and a == b
+    words += pc.screen_words("w3-after")
+    sheet = emu.match("What was this recording?", True)
+    if sheet:
+        tap(emu.match("Skip", True))
+    return [pc.Result("W3 Work with nothing recording starts the recorder; Stop everything ends it", "PASS" if ok else "FAIL",
+                      f"recording {rec}; span {json.dumps(c)}; asked Stop everything: {bool(asked)}; the file after it {a} -> {b} "
+                      f"bytes; the sheet came: {bool(sheet)}", words)]
+
+
 def check(apk: Path, stage: Path) -> list[pc.Result]:
     results: list[pc.Result] = []
     f32 = pc.make_quiet(stage)
@@ -117,6 +231,9 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     results.append(pc.Result("1 Record records, with no sleep marked", "PASS" if named == rec and no_spans else "FAIL",
                              f"recording {rec}; its header names {named!r}; spans file: {'none' if no_spans else 'there'}",
                              [w for w in words if "Recording" in w or "marked" in w][:4]))
+
+    # W1, W2. Work on the running recording, then Stop work
+    results += work_on_recording(rec)
 
     # 2. Sleep on the running recording
     tapped = tap(wait(lambda: pc.bar_button("Sleep"), limit=30))
@@ -182,6 +299,9 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     else:
         results.append(pc.Result("5 the sleep span has its own report", "SKIP", "no report within 3 minutes of Stop",
                                  pc.screen_words("5-no-report")))
+
+    # W3. Work pressed with nothing recording
+    results += work_starts_recording(set(pc.sh(f"ls {REC}/*.log 2>/dev/null", check=False).split()))
     return results
 
 
@@ -193,16 +313,19 @@ def main() -> int:
     p.add_argument("--adb-port", type=int, default=5053)
     p.add_argument("--work", type=Path, default=Path("/var/tmp"),
                    help="where the run's folder (emulator, staged files, logs) is made; a disk with 8 GB free")
+    p.add_argument("--adb-connect", metavar="HOST:PORT", help="use the emulator already reachable at this adb address "
+                   "(a tunnel to another machine's) instead of making one here")
     a = p.parse_args()
     if not a.apk.is_file():
         p.error(f"{a.apk} is not there")
     pc.use_adb_port(a.adb_port)
     work = a.work / f"eeg-record-check-{time.strftime('%Y-%m-%d-%H%M%S')}"
     out = a.out or work / "out"
+    work.mkdir(parents=True, exist_ok=True)
     out.mkdir(parents=True, exist_ok=True)
     pc.OUT = out
     results: list[pc.Result] = []
-    em = pc.Emulator(work, a.keep)
+    em = pc.Emulator(work, a.keep, a.adb_connect)
     t0 = time.time()
     try:
         em.create()

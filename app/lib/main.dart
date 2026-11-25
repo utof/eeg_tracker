@@ -16,7 +16,9 @@ import 'phone.dart' show Phone;
 import 'recorder/recorder_service.dart';
 import 'share/push/task.dart' show runPushTask;
 import 'sharp/prompts.dart';
+import 'spans/activities.dart';
 import 'start_log.dart';
+import 'ui/activity_stop.dart';
 import 'ui/auto_hooks.dart';
 import 'ui/device_status.dart';
 import 'ui/night_screen.dart';
@@ -32,7 +34,8 @@ void main() {
   FlutterForegroundTask.initCommunicationPort(); // status messages from the recorder isolate
   initRecorderService();
   // the one headband connection every screen shares (lib/headband/connection.dart, DECISIONS 855)
-  HeadbandConnection.shared = startPhoneConnection();
+  final owner = HeadbandConnection.shared = startPhoneConnection();
+  Activities.shared = startPhoneActivities(owner); // Work, Meditate, ... as activities of the recording (DECISIONS 980)
   unawaited(logAppStart('screen')); // why the process before this one ended (files/app-starts.log, DECISIONS 734)
   // AnySleep's weights ship in the APK (assets/models); its MIT licence travels with them.
   LicenseRegistry.addLicense(() async* {
@@ -69,6 +72,9 @@ class _EegTrackerAppState extends State<EegTrackerApp> {
   late final AutoHooks _auto = AutoHooks(_navigator); // the headband watcher (lib/auto, DECISIONS 600)
   bool _asking = false;
 
+  /// "Stop everything or keep recording?" after an activity that started the recording (ui/activity_stop.dart).
+  late final ActivityStopAsker? _stopAsker = Activities.shared == null ? null : ActivityStopAsker(Activities.shared!, _navigator);
+
   /// The home page is named by its tab (`tab:Signal`).
   final UsageNavigatorObserver _usage = UsageNavigatorObserver(
     rename: (name) => name == 'NightScreen' ? 'tab:${Usage.homeTab}' : name,
@@ -81,11 +87,13 @@ class _EegTrackerAppState extends State<EegTrackerApp> {
     _sharp.onOpen = () => unawaited(_openQuestion());
     WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_openQuestion()));
     _auto.install();
+    _stopAsker?.install();
   }
 
   @override
   void dispose() {
     _auto.dispose();
+    _stopAsker?.dispose();
     _sharp.onOpen = null;
     super.dispose();
   }

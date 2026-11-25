@@ -144,3 +144,103 @@ def test_the_headers_recording_field_reads_back_and_is_checked() -> None:
     for bad in ("", "x" * 33, 5):
         with pytest.raises(rc.HeaderError):
             rc.parse({**j, "recording": bad})
+
+
+# ---- activities on a recording (Record first, step 4) ---------------------------------------------------------------
+
+ACTIVITIES = GOLDEN / "activities.spans.jsonl"
+DAY = "2026-11-25-110200"
+
+
+def test_a_session_file_with_a_span_field_finds_its_span_and_the_window_of_the_recording() -> None:
+    files = {DAY: spans.read(ACTIVITIES)}
+    nap = {"recording": DAY, "span": f"{DAY}-2", "start": "2026-11-25T13:00:00+03:00"}
+    s = spans.span_of(nap, files)
+    assert s is not None and s.kind == "nap" and spans.rode_on_recording(nap)
+    assert spans.window(s) == (s.start_unix, s.end_unix) and s.end_unix - s.start_unix == 35 * 60
+    assert spans.session_window(nap, files) == (s.start_unix, s.end_unix)
+    # the work session: the same recording, its own span
+    assert spans.span_of({"recording": DAY, "span": f"{DAY}-1", "raw": DAY}, files).kind == "work"  # type: ignore[union-attr]
+
+
+def test_an_old_session_file_has_no_span_and_keeps_its_own_raw_set() -> None:
+    files = {DAY: spans.read(ACTIVITIES)}
+    old = {"recording": "2026-11-20-101500", "start": "2026-11-20T10:15:00+03:00"}
+    assert not spans.rode_on_recording(old) and spans.span_of(old, files) is None
+    assert spans.own_raw(old) == "2026-11-20-101500"
+    assert spans.own_raw({"raw": "2026-11-20-101500"}) == "2026-11-20-101500"
+    assert spans.own_raw({"recording": DAY, "span": f"{DAY}-2"}) is None
+    assert spans.own_raw({"recording": DAY, "span": f"{DAY}-1", "raw": DAY}) is None
+
+
+def test_a_span_that_is_not_found_or_a_recording_that_is_null_gives_none() -> None:
+    files = {DAY: spans.read(ACTIVITIES)}
+    assert spans.span_of({"recording": DAY, "span": f"{DAY}-99"}, files) is None
+    assert spans.span_of({"recording": None, "span": "x-1"}, files) is None
+    assert spans.span_of({"recording": "other", "span": f"{DAY}-1"}, files) is None
+    assert spans.session_window({"recording": None, "span": "x-1"}, files) is None
+    for bad in ({"span": 5}, {"span": ""}, {"span": None}):
+        assert not spans.rode_on_recording(bad)
+
+
+def test_the_window_of_an_open_span_has_no_end() -> None:
+    s = spans.parse(line("r-1", "work", "2026-11-21T10:00:00+03:00", None)).spans[0]
+    assert spans.window(s) == (s.start_unix, None)
+
+
+def test_spans_tsv_has_active_minutes_and_all_the_activity_kinds(tmp_path: Path) -> None:
+    put(tmp_path, DAY, *ACTIVITIES.read_text().splitlines())
+    out = tmp_path / "data"
+    assert db.main(["--local", str(tmp_path), "--out", str(out), "--quiet"], out=lambda m: None) == 0
+    rows = {r["kind"]: r for r in csv.DictReader(io.StringIO((out / "spans.tsv").read_text()), delimiter="\t")}
+    assert list(rows) == ["work", "nap", "meditate", "check_in", "calibration", "alpha_theta", "sound", "dream_catcher"]
+    w = rows["work"]
+    assert (w["minutes"], w["paused_minutes"], w["active_minutes"], w["started_recording"]) == ("325", "35", "290", "1")
+    assert w["session"] == "work-sessions/2026-11-25-110502.work.json" and w["ended_by"] == "owner"
+    m = rows["meditate"]
+    assert (m["minutes"], m["paused_minutes"], m["active_minutes"], m["ended_by"]) == ("20", "", "20", "activity")
+    assert rows["dream_catcher"]["ended_by"] == "recording_stopped"
+    assert db.SPAN_COLUMNS.index("active_minutes") == db.SPAN_COLUMNS.index("paused_minutes") + 1
+
+
+def test_sessions_tsv_joins_a_session_to_its_span(tmp_path: Path) -> None:
+    phone = tmp_path / "phone"
+    (phone / "naps").mkdir(parents=True)
+    (phone / "work-sessions").mkdir(parents=True)
+    (phone / "sound-states").mkdir(parents=True)
+    put(tmp_path, DAY, *ACTIVITIES.read_text().splitlines())
+    (phone / "naps" / "2026-11-25-130000.nap.json").write_text(json.dumps(
+        {"version": 1, "start": "2026-11-25T13:00:00+03:00", "endS": 2100, "ended": "wake", "stages": "12",
+         "recording": DAY, "span": f"{DAY}-2"}))
+    (phone / "work-sessions" / "2026-11-25-110502.work.json").write_text(json.dumps(
+        {"version": 1, "kind": "work_session", "app": "eeg_tracker work", "start": "2026-11-25T11:05:00+03:00",
+         "end": "2026-11-25T16:30:00+03:00", "ended": "stopped", "raw": DAY, "recording": DAY, "span": f"{DAY}-1"}))
+    (phone / "sound-states" / "2026-11-20-100000.sound.json").write_text(json.dumps(
+        {"version": 1, "start": "2026-11-20T10:00:00+03:00", "endS": 600, "ended": "time",
+         "recording": "2026-11-20-100000"}))
+    out = tmp_path / "data"
+    assert db.main(["--local", str(tmp_path), "--out", str(out), "--quiet"], out=lambda m: None) == 0
+    text = (out / "sessions.tsv").read_text()
+    head = text.splitlines()[0].split("\t")
+    assert "recording" in head and "span" in head
+    rows = {r["kind"]: r for r in csv.DictReader(io.StringIO(text), delimiter="\t")}
+    assert (rows["nap_coach"]["recording"], rows["nap_coach"]["span"], rows["nap_coach"]["raw"]) == (DAY, f"{DAY}-2", "")
+    assert (rows["work"]["recording"], rows["work"]["span"], rows["work"]["raw"]) == (DAY, f"{DAY}-1", "")
+    old = rows["sound"]  # an old file: its recording names its own raw set, and there is no span
+    assert (old["recording"], old["span"], old["raw"]) == ("", "", "2026-11-20-100000")
+    spans_by_id = {r["span_id"] for r in csv.DictReader(io.StringIO((out / "spans.tsv").read_text()), delimiter="\t")}
+    assert {rows["nap_coach"]["span"], rows["work"]["span"]} <= spans_by_id
+
+
+def test_truth_rows_from_the_activities_golden_file(tmp_path: Path) -> None:
+    import truth
+    put(tmp_path, DAY, *ACTIVITIES.read_text().splitlines())
+    rows, rejected, counts = truth.build(tmp_path)
+    assert rejected == [] and counts["spans"] == 6
+    got = {r["context"].removeprefix("activity button: "): (r["label"], r["source"], r["recording"]) for r in rows}
+    assert got == {"work": ("working", "owner_activity_button", DAY), "nap": ("in_bed", "owner_activity_button", DAY),
+                   "meditate": ("meditating", "owner_activity_button", DAY),
+                   "alpha_theta": ("neurofeedback", "owner_activity_button", DAY),
+                   "sound": ("sound_session", "owner_activity_button", DAY),
+                   "dream_catcher": ("resting", "owner_activity_button", DAY)}
+    assert "check_in" not in got and "calibration" not in got

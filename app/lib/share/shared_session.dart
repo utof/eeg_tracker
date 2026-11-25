@@ -9,6 +9,9 @@ final ValueNotifier<Map<String, Object?>?> sharedSession = ValueNotifier<Map<Str
 /// DECISIONS 857), for /state's `alert`: it travels beside the session's summary. Null: none in this app run.
 final ValueNotifier<Map<String, Object?>?> sharedAlert = ValueNotifier<Map<String, Object?>?>(null);
 
+/// The message that carries the session's summary to the recorder's service (its server answers during a recording).
+const String shareSessionKind = 'shareSession';
+
 /// What the server gets as the session: [session] with [alert] beside it (null when there is neither).
 Map<String, Object?>? sessionWithAlert(Map<String, Object?>? session, Map<String, Object?>? alert) =>
     alert == null ? session : {...?session, 'alert': alert};

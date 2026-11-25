@@ -471,7 +471,7 @@ Map<String, Map<String, double>> dailySeries(TrendInputs inputs, {Map<String, Ma
   // asleep of all the day's nights together
   final jaw = <String, List<ExtrasAsleep>>{};
   for (final r in inputs.nights) {
-    if (!r.scored) continue;
+    if (!r.scored || r.noSleepFound) continue;
     final d = wakeDay(finalWake(r));
     out['asleep']![d] = (out['asleep']![d] ?? 0) + r.asleepMin;
     final a = r.extras?.asleep;
@@ -609,7 +609,7 @@ TrendsModel buildTrends(
   }
   final spans = <SleepSpan>[
     for (final r in inputs.nights)
-      if (r.scored)
+      if (r.scored && !r.noSleepFound)
         for (final p in r.periods) (start: p.start, end: p.end),
   ];
   final all = {for (final s in series.values) ...s.keys};
@@ -619,7 +619,7 @@ TrendsModel buildTrends(
     rows: rows,
     pressure: PressureModel(spans),
     forecast: sleepinessForecast(series['kss']!, today),
-    nights: inputs.nights.where((r) => r.scored).length,
+    nights: inputs.nights.where((r) => r.scored && !r.noSleepFound).length,
     mornings: inputs.mornings.length,
     sessions: inputs.sessions.where((s) => s.runS > 0).length,
     daysWithData: all.length,

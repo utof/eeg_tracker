@@ -55,7 +55,7 @@ class MorningViewModel {
     this.rechecking = false,
     this.noSignal = false,
     this.secondsLeft = 0,
-    this.nightRunning = false,
+    this.recordingRuns = false,
     this.doneTodayAt,
     this.outcome,
     this.wearer,
@@ -72,7 +72,7 @@ class MorningViewModel {
   final List<ContactLine> contact;
   final bool rechecking, noSignal;
   final int secondsLeft;
-  final bool nightRunning;
+  final bool recordingRuns;
 
   /// When today's first check-in was saved ("09:12"), or null.
   final String? doneTodayAt;
@@ -112,7 +112,7 @@ class MorningView extends StatelessWidget {
     return switch (m.stage) {
       MorningStage.intro || MorningStage.failed => _page(context, _intro(context), _action(
         FilledButton.icon(
-          onPressed: m.nightRunning ? null : onCheckContact,
+          onPressed: onCheckContact,
           icon: const Icon(Icons.sensors_rounded),
           label: Text(m.stage == MorningStage.failed ? 'Try again' : 'Check contact'),
         ),
@@ -183,13 +183,14 @@ class MorningView extends StatelessWidget {
             ],
           ),
         ),
-      if (m.nightRunning)
+      if (m.recordingRuns)
         const Para(
-          'A night is being recorded. Stop it first: the headband talks to one thing at a time.',
-          color: Night.caution,
+          'A recording is running: the check-in reads it, with no new search. Its contact step shows the '
+          "recording's last reading.",
+          color: Night.inkMuted,
           top: 20,
-        )
-      else if (m.doneTodayAt != null) ...[
+        ),
+      if (m.doneTodayAt != null) ...[
         Para(
           'Checked in today at ${m.doneTodayAt}. Another one is kept too; the trends use the first of the day.',
           color: Night.inkMuted,

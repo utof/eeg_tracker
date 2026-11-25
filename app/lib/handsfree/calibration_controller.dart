@@ -23,6 +23,7 @@ import '../feedback/features.dart' show fs;
 import '../meditation/controller.dart' show gapSamples;
 import '../recorder/chunk_writer.dart';
 import '../recorder/headband.dart';
+import '../spans/activities.dart' show ActivityRef, activityRef;
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
 import '../sound/check_in_sound.dart';
 import 'store.dart';
@@ -141,6 +142,7 @@ class CalibrationController extends ChangeNotifier {
   CheckInSound? _sound;
   Detectors? _seen;
   ChunkWriter? _writer;
+  ActivityRef? _rides;
   final List<GestureSecond> _inputs = [];
   Gestures _loose = Gestures(settings: const GestureSettings(clenchOn: false, glanceOn: false));
   final List<EyeMove> _moves = [];
@@ -176,7 +178,7 @@ class CalibrationController extends ChangeNotifier {
       if (!_live(run)) return await link.close();
       if (!found) {
         _link = null;
-        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?', run);
+        return await _fail('Headband not found. Is it switched on and charged?', run);
       }
       _set(CalStage.contact, 'Checking contact. Keep still for a few seconds.');
       final ohms = await link.contact();
@@ -335,9 +337,9 @@ class CalibrationController extends ChangeNotifier {
     clenchLine = cal.settings.clenchX;
     glanceSize = cal.settings.glanceUv;
     _mark('hands-free calibration: double clench ${cal.clenchSeen} of 3, look left then right ${cal.glanceSeen} of 3');
-    final stem = _writer?.stem;
+    final stem = _rides?.recording ?? _writer?.stem;
     _closeWriter(keep: true);
-    final rec = CalibrationRecord.of(cal, _startedAt ?? _now(), recording: stem);
+    final rec = CalibrationRecord.of(cal, _startedAt ?? _now(), recording: stem, span: _rides?.span);
     final st = store;
     if (st == null) {
       saveNote = 'This calibration was not saved.';
@@ -373,6 +375,9 @@ class CalibrationController extends ChangeNotifier {
   }
 
   void _openWriter(String band) {
+    // an activity of the day's recording keeps no raw file of its own
+    _rides = (_link?.ridesRecorder ?? false) ? activityRef() : null;
+    if (_rides != null) return;
     final dir = _eegDir;
     if (dir == null) return;
     try {

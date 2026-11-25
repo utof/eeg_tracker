@@ -164,11 +164,11 @@ Widget _v(MorningViewModel m) => MorningView(
 final Map<String, Widget> _states = {
   'morning_intro': _v(const MorningViewModel(stage: MorningStage.intro)),
   'morning_intro_done': _v(const MorningViewModel(stage: MorningStage.intro, doneTodayAt: '09:12')),
-  'morning_intro_night': _v(const MorningViewModel(stage: MorningStage.intro, nightRunning: true)),
+  'morning_intro_night': _v(const MorningViewModel(stage: MorningStage.intro, recordingRuns: true)),
   'morning_failed': _v(
     const MorningViewModel(
       stage: MorningStage.failed,
-      message: 'Headband not found. Is it switched on, charged, and free (no night recording)?',
+      message: 'Headband not found. Is it switched on and charged?',
     ),
   ),
   'morning_connecting': _v(const MorningViewModel(stage: MorningStage.connecting, message: 'Found BrainBit. Connecting.')),

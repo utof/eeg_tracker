@@ -12,6 +12,12 @@ Export data and Share on Wi-Fi copy the folder to `<local>/phone/spans/`. This i
   for_recording(local, id)        -> SpansFile  (empty when the recording has no file)
   all(local)                      -> {recording id: SpansFile}  (the id is the file name minus `.spans.jsonl`)
   sleep_spans(spans_file)         the spans of kind `sleep` or `nap`
+  rode_on_recording(session)      True when a session file's JSON has a `span` (it rode on a recording)
+  span_of(session, files)         -> the Span a session file rode on (its `recording` + `span`), or None
+  window(span)                    -> (start, end) unix seconds of the span (end None while open): the samples of the
+                                  recording to take for that activity's raw signal
+  session_window(session, files)  -> window(span_of(...)), or None
+  own_raw(session)                -> the stem of the session's own raw set, None when it rode on a recording
   no_sleep_sets(local)            -> the file sets (stems) that "Not sleep" says are no sleep, over all files
   hidden_nights(local)            -> the evening dates whose report "Not sleep" hides, over all files
 
@@ -205,6 +211,39 @@ def all(local: Path | str) -> dict[str, SpansFile]:  # noqa: A001 - the document
 def sleep_spans(f: SpansFile) -> list[Span]:
     """Spans of kind `sleep` or `nap`: the only ones a sleep report comes from."""
     return [s for s in f.spans if s.is_sleep]
+
+
+def rode_on_recording(session: object) -> bool:
+    """A session file with a `span` field rode on a recording (Record first, step 4): no raw set of its own."""
+    return isinstance(session, dict) and _need(session.get("span")) is not None
+
+
+def span_of(session: object, files: dict[str, SpansFile]) -> Span | None:
+    """The span a session file (work, meditation, nap, ...) rode on, from its `recording` and `span` fields."""
+    if not rode_on_recording(session):
+        return None
+    assert isinstance(session, dict)
+    rec, sid = _need(session.get("recording")), _need(session.get("span"))
+    f = files.get(rec) if rec is not None else None
+    return next((s for s in f.spans if s.span == sid), None) if f is not None else None
+
+
+def window(s: Span) -> tuple[int | float, int | float | None]:
+    """The recording's samples between these two times (unix seconds) are the activity's signal; end None: still open."""
+    return s.start_unix, s.end_unix
+
+
+def session_window(session: object, files: dict[str, SpansFile]) -> tuple[int | float, int | float | None] | None:
+    s = span_of(session, files)
+    return None if s is None else window(s)
+
+
+def own_raw(session: object) -> str | None:
+    """The stem of the raw file set a session wrote itself (`raw`, or `recording` in the older nap, dream catcher and
+    sound files); None for a session that rode on a recording, whose `recording` names the day's recording."""
+    if not isinstance(session, dict) or rode_on_recording(session):
+        return None
+    return _need(session.get("raw")) or _need(session.get("recording"))
 
 
 def no_sleep_of(files: dict[str, SpansFile]) -> set[str]:

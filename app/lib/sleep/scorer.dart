@@ -267,6 +267,7 @@ class SleepScorer {
       if (answered != null) rep['wearer'] = answered;
       final span = night.spanField;
       if (span != null) rep['span'] = span; // which sleep spans it covers (docs/data-format.md)
+      markNoSleepFound(rep); // a stretch the app started by itself with under 10 minutes asleep (DECISIONS 987)
       store.write(rep, name: night.name);
       marker.deleteSync();
       progressStore.delete(night.name);
