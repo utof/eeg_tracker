@@ -1,5 +1,9 @@
 // A long recording goes on in a new file set (DECISIONS 1035-1037): the headband's stream is never touched, every
 // sample lands in exactly one set, and what reads a recording sees no seam.
+// Real time (a fake headband's timers): tagged `realtime`, run apart from the parallel step (dart_test.yaml).
+@Tags(['realtime'])
+library;
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';

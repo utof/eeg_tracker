@@ -203,7 +203,7 @@ void main() {
     expect(File('${rec.path}/${r.night[1]}.f32').existsSync(), isTrue);
   });
 
-  test('beside a live recording: old recordings are packed and cleared, and no byte of the live one is touched', () async {
+  test('beside a live recording: old recordings are packed and cleared, and no byte of the live one is touched', tags: 'realtime', () async {
     final now = DateTime.now();
     // an older recording, days ago: a day set and a night, checked by the laptop 5 days ago, old enough to pack
     final old = allDay();
