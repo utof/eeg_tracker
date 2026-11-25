@@ -36,14 +36,14 @@ class Run {
     this.t0, {
     this.recordBytes = 20,
     this.columns = const [0, 1, 2, 3],
-    double? end,
+    this.endAt,
     this.recording,
-  }) : _end = end;
+  });
   final File file;
 
   /// Arrival of its last batch (unix time); by its length when it has no index.
-  double get end => _end ?? t0 + count / sampleRate;
-  final double? _end;
+  double get end => endAt ?? t0 + count / sampleRate;
+  final double? endAt;
 
   /// The recording its file set belongs to (the header's `recording`); null: a set from before Record first.
   final String? recording;
@@ -301,7 +301,7 @@ List<Run> runsOf(File f32, {List<String> names = channelNames, String who = 'The
   if (records == 0) return const [];
   final columns = List<int>.unmodifiable(header.pick(names, who: who));
   Run run(int first, int count, double t0, [double? end]) =>
-      Run(f32, first, count, t0, recordBytes: recordBytes, columns: columns, end: end, recording: header.recording);
+      Run(f32, first, count, t0, recordBytes: recordBytes, columns: columns, endAt: end, recording: header.recording);
   final idxFile = File('${f32.path.substring(0, f32.path.length - 4)}.idx');
   final rows = <(double, int)>[];
   if (idxFile.existsSync()) {

@@ -110,7 +110,10 @@ class ExportProgress {
   final String path;
 }
 
+/// [stillWritten]: the files left out because a recording that runs is writing their file set: they come with the
+/// next export, and an export without them still counts as complete.
 typedef ExportOutcome = ({
+  List<String> stillWritten,
   int files,
   int bytes,
   bool complete,
@@ -165,7 +168,8 @@ Map<String, Object?> buildManifest({
 
 /// Exports what is new (or [everything]) from [filesDir] to [target]. Never throws: a failure stops the copying,
 /// is returned in words, and what was copied before it stays listed in the manifest (when it can still be written).
-/// [stopRequested] is asked before each file.
+/// [stopRequested] is asked before each file. [open]: the plain `.f32` paths of the file sets being written, whose
+/// files are left out.
 Future<ExportOutcome> runExport({
   required Directory filesDir,
   required ExportTarget target,
@@ -173,12 +177,20 @@ Future<ExportOutcome> runExport({
   DateTime Function() clock = DateTime.now,
   void Function(ExportProgress p)? onProgress,
   bool Function()? stopRequested,
+  Set<String> open = const {},
 }) async {
   final at = clock();
   final store = ExportStore(filesDir);
   final state = store.load();
   final stored = storedFiles(filesDir);
-  final todo = everything ? stored : newOrChanged(stored, state);
+  // the file set a recording writes now (storage/open_sets.dart, DECISIONS 1040) is not copied half-way
+  final openStems = {
+    for (final p in open)
+      if (p.startsWith('${filesDir.path}/') && p.endsWith('.f32')) p.substring(filesDir.path.length + 1, p.length - 3),
+  };
+  bool isOpen(StoredFile f) => openStems.any(f.path.startsWith);
+  final stillWritten = [for (final f in stored) if (isOpen(f)) f.path];
+  final todo = [for (final f in everything ? stored : newOrChanged(stored, state)) if (!isOpen(f)) f];
   final total = todo.fold(0, (n, f) => n + f.bytes);
   final written = isoLocal(at);
   var done = 0, bytes = 0;
@@ -186,7 +198,15 @@ Future<ExportOutcome> runExport({
   try {
     await target.open();
   } on Object catch (e) {
-    return (files: 0, bytes: 0, complete: false, error: _why(e), notExported: [for (final f in todo) f.path], at: at);
+    return (
+      files: 0,
+      bytes: 0,
+      complete: false,
+      error: _why(e),
+      notExported: [for (final f in todo) f.path],
+      at: at,
+      stillWritten: stillWritten,
+    );
   }
   try {
     for (final f in todo) {
@@ -248,5 +268,13 @@ Future<ExportOutcome> runExport({
   state.lastExport = at;
   if (complete) state.lastComplete = at;
   store.save(state);
-  return (files: done, bytes: bytes, complete: complete, error: error, notExported: notExported, at: at);
+  return (
+    files: done,
+    bytes: bytes,
+    complete: complete,
+    error: error,
+    notExported: notExported,
+    at: at,
+    stillWritten: stillWritten,
+  );
 }

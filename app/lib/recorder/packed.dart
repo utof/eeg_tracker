@@ -601,20 +601,23 @@ PackedFile packOne(String path) {
 Future<PackedFile> packInBackground(String path) => Isolate.run(() => packOne(path), debugName: 'pack-recording');
 
 /// Packs the closed recordings older than [packAfter] in [filesDir], one file at a time through [pack] (an isolate
-/// on the phone), asking [busy] before each: it stops as soon as a night or a session records. Appends a line to
+/// on the phone), asking [busy] before each: it stops as soon as a sleep stretch or a session records. [open]: the
+/// plain `.f32` paths of the sets being written, which are left alone. Appends a line to
 /// `files/packing.jsonl` when it packed something or failed. Never throws.
 Future<PackRun> packOldRecordings(
   Directory filesDir, {
   required Future<bool> Function() busy,
   required Future<PackedFile> Function(String path) pack,
   DateTime Function() clock = DateTime.now,
+  Set<String> open = const {},
 }) async {
   final run = PackRun();
   var marked = false;
   try {
     if (await busy()) return run;
     removePackingLeftovers(filesDir);
-    final todo = packCandidates(filesDir, clock());
+    // never the set a recording writes (storage/open_sets.dart, DECISIONS 1039), whatever its age says
+    final todo = [for (final f in packCandidates(filesDir, clock())) if (!open.contains(f.path)) f];
     if (todo.isNotEmpty) {
       Activity.begin('packing'); // the battery samples (lib/logs, DECISIONS 715)
       marked = true;

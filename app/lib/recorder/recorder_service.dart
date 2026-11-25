@@ -38,6 +38,7 @@ import '../sleep/onnx_runs.dart';
 import '../spans/span.dart' show recordingStoppedNotice, sleepResumedNotice, spansDirFor, spansEndedNotice;
 import '../spans/after_restart.dart';
 import '../spans/span_log.dart';
+import '../storage/open_sets.dart' show openSets;
 import 'brainbit.dart';
 import 'chunk_writer.dart' show ChunkWriter;
 import 'headband.dart';
@@ -252,6 +253,22 @@ const Duration shareRetryEvery = Duration(seconds: 60);
 bool shareEndedByItself(String note) => note.contains('could not') || note.contains('stopped');
 
 Future<NightState> loadNight() async => _PrefsNightStore().load();
+
+/// The file sets a recording writes now (storage/open_sets.dart): empty while the recorder's service does not run.
+/// For the housekeeping that runs beside a recording (packing, clearing, Export; DECISIONS 1039): it leaves them alone.
+Future<Set<String>> openSetsNow(Directory filesDir) async {
+  if (!await FlutterForegroundTask.isRunningService) return const {};
+  final n = await loadNight();
+  return openSets(filesDir, n.active ? n.recording : null);
+}
+
+/// Whether the recorder runs with a sleep stretch open: the live sleep model has the phone then, and housekeeping
+/// waits (as the sleep scoring of an earlier night does, DECISIONS 887).
+Future<bool> sleepRecordsNow() async {
+  if (!await FlutterForegroundTask.isRunningService) return false;
+  final n = await loadNight();
+  return !n.active || n.sleepKit;
+}
 
 /// The saved night with a recording that ended without a Stop put right (spans/after_restart.dart): call only while
 /// the service does not run. True in the second place: a recording was just ended that way.

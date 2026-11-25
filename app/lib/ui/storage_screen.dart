@@ -7,7 +7,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import '../recorder/recorder_service.dart' show openSetsNow, sleepRecordsNow;
 
 import '../export/store.dart' show sizeText;
 import '../phone.dart';
@@ -27,9 +27,13 @@ Future<String?> storageBusy() async {
   if (dreamSessionRunning || soundSessionRunning || napSessionRunning || workSessionRunning) {
     return 'A session records: clearing waits until it ends.';
   }
+  // beside a recording with no sleep stretch open, clearing works: the file set being written is left alone
+  // (DECISIONS 1039)
   try {
-    if (await FlutterForegroundTask.isRunningService) return 'A night records: clearing waits until Stop.';
-  } catch (_) {}
+    if (await sleepRecordsNow()) return 'Sleep is being recorded: clearing waits until you stop sleep.';
+  } catch (_) {
+    return 'The recorder did not answer: try again in a moment.';
+  }
   return null;
 }
 
@@ -39,8 +43,11 @@ Future<StorageUsage> scanInBackground(String filesDir) =>
     Isolate.run(() => scanStorage(Directory(filesDir), now: DateTime.now()), debugName: 'storage-scan');
 
 /// [planClear] in a background isolate; top-level for the same reason as [scanInBackground].
-Future<ClearPlan> planInBackground(String filesDir, Set<String> items, ClearMode mode) =>
-    Isolate.run(() => planClear(Directory(filesDir), items, mode: mode, now: DateTime.now()), debugName: 'storage-plan');
+Future<ClearPlan> planInBackground(String filesDir, Set<String> items, ClearMode mode, {Set<String> open = const {}}) =>
+    Isolate.run(
+      () => planClear(Directory(filesDir), items, mode: mode, now: DateTime.now(), open: open),
+      debugName: 'storage-plan',
+    );
 
 class StorageScreen extends StatefulWidget {
   const StorageScreen({
@@ -50,7 +57,11 @@ class StorageScreen extends StatefulWidget {
     this.laptop,
     this.busy = storageBusy,
     this.space = Phone.storageSpace,
+    this.open = openSetsNow,
   });
+
+  /// The file sets being written now (a recording that runs): never cleared.
+  final Future<Set<String>> Function(Directory filesDir) open;
 
   /// The app's `files/` folder.
   final String filesDir;
@@ -214,12 +225,13 @@ class _StorageScreenState extends State<StorageScreen> {
     final dir = widget.filesDir;
     ClearRun? run;
     try {
-      final plan = await planInBackground(dir, items, mode);
+      final plan = await planInBackground(dir, items, mode, open: await widget.open(Directory(dir)));
       run = await runClear(
         Directory(dir),
         plan,
         busy: () async => await widget.busy() != null,
         laptop: widget.laptop,
+        open: () => widget.open(Directory(dir)),
       );
     } catch (e) {
       _say('Not cleared: $e');

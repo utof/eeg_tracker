@@ -1,29 +1,30 @@
 // Export data (DECISIONS rows 150-156): opened from the night screen's "Your data" section between nights. Picks
 // the folder once (the system picker; the app keeps the grant), then copies what is new, or everything, through
-// lib/export/ and DataExport.kt. Never while a night records or a session holds the headband; the page stays in
-// front while it copies (Back waits for Stop) and keeps the screen on.
+// lib/export/ and DataExport.kt. Never while a sleep stretch records or a session holds the headband; beside a
+// recording with no sleep stretch open it copies everything but the file set being written (DECISIONS 1040). The page
+// stays in front while it copies (Back waits for Stop) and keeps the screen on.
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import '../export/exporter.dart';
 import '../export/store.dart';
 import '../logs/activity.dart' show Activity;
 import '../logs/log.dart' show AppLog;
 import '../phone.dart';
+import '../recorder/recorder_service.dart' show openSetsNow, sleepRecordsNow;
 import 'dream_screen.dart' show dreamSessionRunning;
 import 'export_view.dart';
 import 'nap_screen.dart' show napSessionRunning;
 import 'states_screen.dart' show soundSessionRunning;
 
-/// Why nothing may be exported now, or null: a night records, or a session holds the headband.
+/// Why nothing may be exported now, or null: a sleep stretch records, or a session holds the headband.
 Future<String?> exportBlocked() async {
-  if (await FlutterForegroundTask.isRunningService) {
-    return 'A night is recording. Stop it first: nothing is exported while it records.';
+  if (await sleepRecordsNow()) {
+    return 'Sleep is being recorded. Stop sleep first: nothing is exported during it.';
   }
   if (dreamSessionRunning || soundSessionRunning || napSessionRunning) return 'A session is running. Export after it ends.';
   return null;
@@ -101,6 +102,13 @@ class _ExportScreenState extends State<ExportScreen> {
       setState(() => _blocked = blocked);
       return;
     }
+    final Set<String> open;
+    try {
+      open = await openSetsNow(files);
+    } catch (_) {
+      setState(() => _blocked = 'The recorder did not answer. Try again in a moment.');
+      return;
+    }
     setState(() {
       _stop = false;
       _outcome = null;
@@ -117,6 +125,7 @@ class _ExportScreenState extends State<ExportScreen> {
         if (mounted) setState(() => _progress = p);
       },
       stopRequested: () => _stop,
+      open: open,
     );
     Activity.end('export');
     AppLog('export').info(outcome.complete ? 'export done' : 'export not complete', {
