@@ -51,7 +51,7 @@ warning or an error also `error`, the first 25 frames of `stack`, the `screen` s
 
 **Usage** (`ev`), only while **Record how I use the app** is on:
 
-- `view` the screen on top: a page's widget name (`MeditationScreen`), a home tab (`tab:Signal`), `dialog`, `sheet`
+- `view` the screen on top: a page's widget name (`MeditationScreen`), a home tab (`tab:Signal`; `tab:Night` in the logs of older builds is the first tab, now `tab:Record`, and the Usage page reads it so), `dialog`, `sheet`
 - `app` the app came to the front or left it
 - `tap`: `control` (its kind: `FilledButton`, `Switch`, `ListTile`, ... or `nothing` for a tap on no control),
   `label` (the control's own words, at most 40 characters, every digit as `#`; never words the owner typed, see
