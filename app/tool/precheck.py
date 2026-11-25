@@ -987,6 +987,8 @@ def main() -> int:
     p.add_argument("--out", type=Path, help="where the logs go (default: the run's folder under /var/tmp)")
     p.add_argument("--only", default="abcd", help="which checks, e.g. 'bd'")
     p.add_argument("--keep", action="store_true", help="keep the AVD and the copies (the emulator still stops)")
+    p.add_argument("--work", type=Path, default=Path("/var/tmp"),
+                   help="where the run's own folder (AVD, unpacked nights) is made; default /var/tmp")
     p.add_argument("--adb-port", type=int, default=ADB_PORT, help="our private adb server's port (default 5041)")
     p.add_argument("--stage-only", action="store_true", help="only put the seed nights into the emulator's cache "
                    f"({SEED_CACHE}), then stop: for saving an emulator snapshot that already holds them")
@@ -1000,7 +1002,7 @@ def main() -> int:
         if apk is not None and not apk.is_file():
             p.error(f"{apk} is not there")
     stamp = time.strftime("%Y-%m-%d-%H%M%S")
-    work = Path(f"/var/tmp/eeg-precheck-{stamp}")
+    work = a.work / f"eeg-precheck-{stamp}"
     out = a.out or work / "out"
     work.mkdir(parents=True, exist_ok=True)  # (with --out and --adb-connect nothing else makes it before the adb server's log)
     out.mkdir(parents=True, exist_ok=True)
