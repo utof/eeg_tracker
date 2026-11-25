@@ -181,6 +181,8 @@ void main() {
     expect(openSets(files, 'no-such-recording'), isEmpty);
     // by the files' own times, not their names: the phone's clock set back names a new set before the old ones
     final early = writeSet(DateTime(2026, 11, 18, 3), 1, recording: r.id);
+    // (written a moment after the others: file times are kept to the millisecond or the second, so say it outright)
+    File('${rec.path}/$early.f32').setLastModifiedSync(DateTime.now().add(const Duration(seconds: 5)));
     expect(openSets(files, r.id).map((p) => p.split('/').last), ['$early.f32']);
     for (final f in rec.listSync().whereType<File>().where((f) => f.path.contains(early))) {
       f.deleteSync();
