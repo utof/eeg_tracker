@@ -144,8 +144,10 @@ Each line says what it does. In brackets: how well the research backs it **for t
 - `scripts/phone_night_check.py`: did the phone record the night well? After the import,
   `uv run --project analysis python scripts/phone_night_check.py 2026-11-19 --compare 2026-11-17` (the evening
   dates) prints every gap with its reason, lost packets, restarts by Android, both batteries, contact, the phone's
-  sleep report and a plain verdict with the top three things to fix. Works on a laptop night too; plain `python3`
-  skips only the signal numbers. Reads files only.
+  sleep report and a plain verdict with the top three things to fix. A recording that has a spans file (Record
+  first) is reported by its sleep stretches, and the numbers of the night count only inside them; a recording with
+  nothing marked as sleep is said to be no night. Works on a laptop night too; plain `python3` skips only the
+  signal numbers. Reads files only.
 - `scripts/catalog.py`: one table of every night on the laptop (laptop, phone and DIY-board nights: files, hours, missing
   minutes, the sleep report's numbers, morning check-in) and the SHA-256 of every file, so the next run says what
   grew, changed or went missing; `--check` re-hashes everything. Reads the data only; writes `_local/catalog/`.

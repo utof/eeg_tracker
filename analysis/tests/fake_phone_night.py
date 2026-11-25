@@ -52,7 +52,7 @@ class PhoneRun:
     contact: str | None = "O1=120000 O2=95000 T3=48000 T4=31000"
     signal: str = "-70 dBm"
     head: list[str] = field(default_factory=list)  # notes before "connected": a restart, how it reconnected
-    end: str = "stop"  # stop | drop | stall | killed | stuck
+    end: str = "stop"  # stop | drop | stall | lender | killed | stuck
     night_end: bool = False  # Stop ended the night: the end-of-night lines follow
     after: list[tuple[float, str]] = field(default_factory=list)  # (seconds after the last data, line): reconnect
     # tries, which the app appends to the last closed run's log
@@ -64,6 +64,7 @@ class PhoneRun:
     app_counts: str | None = None  # the app's packet line ("N samples, missing ..."), the night's; else this run's
     names: tuple[str, ...] = ("O1", "O2", "T3", "T4")  # the channels in record order
     header: bool = False  # write <stamp>.header.json (scripts/recording.py), as recordings since 2026-11-20 have
+    recording: str | None = None  # the header's `recording` id (Record first): the set then belongs to that recording
 
     @property
     def first(self) -> datetime:
@@ -156,6 +157,10 @@ def log_lines(run: PhoneRun, n: int) -> list[tuple[float, str]]:
         lines += [(end + 40 + d, x) for d, x in total]
         lines += [(end + 40.4, f"drop (no data); last data {last}; reconnecting"),
                   (end + 40.5, f"stopped, battery {b1}%")]
+    elif run.end == "lender":  # the screen that lent its live connection was closed: the recorder takes over at once
+        lines += [(end + 0.1, "the screen that lent the connection is gone; saving and reconnecting at once")]
+        lines += [(end + d, x) for d, x in total]
+        lines += [(end + 0.4, f"drop (lender gone); last data {last}; reconnecting"), (end + 0.5, f"stopped, battery {b1}%")]
     elif run.end == "stuck":
         lines.append((end + 30, 'SDK call "battery" stuck for 30 s; saved, restarting the app process'))
     if run.night_end:
@@ -177,10 +182,12 @@ def write_run(folder: Path, run: PhoneRun, seed: int = 1) -> Path:
     rec["v"] = signal(n, run, seed)
     name = stem(run.start)
     rec.tofile(folder / f"{name}.f32")
-    if run.header:
+    if run.header or run.recording:
+        import dataclasses  # noqa: PLC0415
         import recording  # noqa: PLC0415  (scripts/)
-        recording.write(folder / f"{name}.f32", recording.brainbit("fake_phone_night.py") if run.names == recording.BRAINBIT_NAMES
-                        else recording.diy_board(run.names, FS, layout="Helmet plan (8)", made_by="fake_phone_night.py"))
+        head = (recording.brainbit("fake_phone_night.py") if run.names == recording.BRAINBIT_NAMES
+                else recording.diy_board(run.names, FS, layout="Helmet plan (8)", made_by="fake_phone_night.py"))
+        recording.write(folder / f"{name}.f32", dataclasses.replace(head, recording=run.recording))
     t, first = arrivals(run, n)
     idx = np.zeros(len(t), dtype=IDX)
     idx["t"], idx["i"] = t, first
@@ -188,6 +195,23 @@ def write_run(folder: Path, run: PhoneRun, seed: int = 1) -> Path:
     text = "".join(f"{logtime(run.start + timedelta(seconds=s))} {line}\n" for s, line in log_lines(run, n))
     (folder / f"{name}.log").write_text(text)
     return folder / f"{name}.f32"
+
+
+def span_line(rid: str, n: int, kind: str, a: datetime, b: datetime | None, source: str = "owner_button",
+              ended_by: str | None = None) -> str:
+    """One line of a spans file (docs/data-format.md, "What you were doing in a recording")."""
+    d = {"v": 1, "span": f"{rid}-{n}", "kind": kind, "label": "in_bed", "start": a.isoformat(timespec="seconds"),
+         "end": None if b is None else b.isoformat(timespec="seconds"), "source": source,
+         "started_recording": source == "owner_button", "made": a.isoformat(timespec="seconds")}
+    if ended_by:
+        d["ended_by"] = ended_by
+    return json.dumps(d)
+
+
+def write_spans(folder: Path, rid: str, *lines: str) -> None:
+    """`<folder>/<recording id>.spans.jsonl`; the folder is `spans/` beside `recordings/`."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{rid}.spans.jsonl").write_text("\n".join(lines) + "\n")
 
 
 def write_empty_run(folder: Path, start: datetime, lines: list[tuple[float, str]]) -> None:

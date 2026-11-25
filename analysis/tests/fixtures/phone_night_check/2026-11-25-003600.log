@@ -1,0 +1,190 @@
+2026-11-25T00:36:00.277 started on the connection that was already live on the screen: no search, no new contact check
+2026-11-25T00:36:00.277 drift-off detector on; lights off counts from the first sample until Lights off
+2026-11-25T00:36:00.281 wifi connected, 144 Mbps, -49 dBm, 2.4 GHz; default route vpn over wifi; screen on; idle no; lock not held
+2026-11-25T00:36:00.299 sharing on Wi-Fi: not shared on this Wi-Fi until the paired laptop says it is home
+2026-11-25T00:36:00.299 sharing on Wi-Fi on: port 8765, 1 Wi-Fi address
+2026-11-25T00:36:00.301 connected BB Black AA:BB:CC:DD:EE:FF serial 000000 battery 84% signal unknown (no scan)
+2026-11-25T00:36:00.314 phone android 34, battery-opt exempt yes, background restricted no, power save no, standby bucket 5, notifications yes, xiaomi OS1.0, wifi sleep policy 2, vpn yes
+2026-11-25T00:36:00.334 phone battery 77% charge 2671000 uAh current -1111000 uA plugged ac temp 26.1 C
+2026-11-25T00:36:00.334 phone step counter: off
+2026-11-25T00:36:06.336 contact check: no resistance data arrived
+2026-11-25T00:36:07.356 recording started, 250 Hz
+2026-11-25T00:36:07.494 sharing on Wi-Fi: the paired laptop says this is the home Wi-Fi
+2026-11-25T00:36:10.292 wifi connected, 144 Mbps, -49 dBm, 2.4 GHz; default route vpn over wifi; screen on; idle no; lock held
+2026-11-25T00:36:17.434 samples 2512 (+2512) battery 84%
+2026-11-25T00:36:27.487 samples 5024 (+2512) battery 84%
+2026-11-25T00:36:37.520 samples 7536 (+2520) battery 84%
+2026-11-25T00:36:47.544 samples 10048 (+2504) battery 84%
+2026-11-25T00:36:57.592 samples 12552 (+2504) battery 84%
+2026-11-25T00:37:07.635 samples 15056 (+2528) battery 84%
+2026-11-25T00:37:07.644 phone battery 78% charge 2697000 uAh current -1097000 uA plugged ac temp 26.5 C
+2026-11-25T00:37:17.695 samples 17576 (+2504) battery 83%
+2026-11-25T00:37:27.773 samples 20096 (+2512) battery 83%
+2026-11-25T00:37:37.857 samples 22608 (+2512) battery 83%
+2026-11-25T00:37:47.907 samples 25144 (+2536) battery 83%
+2026-11-25T00:37:57.957 samples 27648 (+2520) battery 83%
+2026-11-25T00:38:08.046 samples 30160 (+2504) battery 83%
+2026-11-25T00:38:08.059 phone battery 78% charge 2723000 uAh current -1173000 uA plugged ac temp 26.5 C
+2026-11-25T00:38:18.164 samples 32704 (+2536) battery 83%
+2026-11-25T00:38:28.218 samples 35216 (+2520) battery 83%
+2026-11-25T00:38:38.301 samples 37736 (+2512) battery 83%
+2026-11-25T00:38:48.352 samples 40256 (+2520) battery 83%
+2026-11-25T00:38:58.434 samples 42776 (+2520) battery 83%
+2026-11-25T00:39:08.493 samples 45288 (+2520) battery 83%
+2026-11-25T00:39:08.507 phone battery 79% charge 2748000 uAh current -1024000 uA plugged ac temp 26.7 C
+2026-11-25T00:39:18.578 samples 47816 (+2520) battery 83%
+2026-11-25T00:39:28.623 samples 50328 (+2512) battery 83%
+2026-11-25T00:39:38.661 samples 52840 (+2512) battery 83%
+2026-11-25T00:39:48.735 samples 55352 (+2512) battery 83%
+2026-11-25T00:39:58.767 samples 57872 (+2520) battery 83%
+2026-11-25T00:40:08.812 samples 60384 (+2512) battery 83%
+2026-11-25T00:40:08.817 phone battery 80% charge 2770000 uAh current -959000 uA plugged ac temp 26.9 C
+2026-11-25T00:40:18.899 samples 62896 (+2520) battery 83%
+2026-11-25T00:40:28.962 samples 65416 (+2512) battery 83%
+2026-11-25T00:40:39.016 samples 67928 (+2520) battery 83%
+2026-11-25T00:40:49.074 samples 70432 (+2496) battery 83%
+2026-11-25T00:40:59.159 samples 72968 (+2544) battery 83%
+2026-11-25T00:41:09.222 samples 75488 (+2512) battery 83%
+2026-11-25T00:41:09.233 phone battery 80% charge 2795000 uAh current -1144000 uA plugged ac temp 27.2 C
+2026-11-25T00:41:19.285 samples 78000 (+2512) battery 82%
+2026-11-25T00:41:29.338 samples 80520 (+2520) battery 82%
+2026-11-25T00:41:39.422 samples 83016 (+2496) battery 82%
+2026-11-25T00:41:49.488 samples 85544 (+2544) battery 82%
+2026-11-25T00:41:59.622 samples 88080 (+2520) battery 82%
+2026-11-25T00:42:09.669 samples 90600 (+2520) battery 82%
+2026-11-25T00:42:09.676 phone battery 81% charge 2811000 uAh current -766000 uA plugged ac temp 27.7 C
+2026-11-25T00:42:19.710 samples 93112 (+2520) battery 82%
+2026-11-25T00:42:29.739 samples 95624 (+2504) battery 82%
+2026-11-25T00:42:39.779 samples 98128 (+2504) battery 82%
+2026-11-25T00:42:49.825 samples 100640 (+2512) battery 82%
+2026-11-25T00:42:59.840 samples 103152 (+2512) battery 82%
+2026-11-25T00:43:09.876 samples 105656 (+2504) battery 82%
+2026-11-25T00:43:09.894 phone battery 81% charge 2826000 uAh current -781000 uA plugged ac temp 28.4 C
+2026-11-25T00:43:19.973 samples 108168 (+2512) battery 82%
+2026-11-25T00:43:30.013 samples 110688 (+2520) battery 82%
+2026-11-25T00:43:30.830 drift-off: eyes-closed baseline done
+2026-11-25T00:43:40.065 samples 113192 (+2504) battery 82%
+2026-11-25T00:43:50.154 samples 115720 (+2528) battery 82%
+2026-11-25T00:44:00.200 samples 118224 (+2504) battery 82%
+2026-11-25T00:44:10.270 samples 120744 (+2528) battery 82%
+2026-11-25T00:44:10.300 phone battery 82% charge 2844000 uAh current -1064000 uA plugged ac temp 28.8 C
+2026-11-25T00:44:20.347 samples 123272 (+2520) battery 81%
+2026-11-25T00:44:30.413 samples 125792 (+2520) battery 81%
+2026-11-25T00:44:40.455 samples 128296 (+2504) battery 81%
+2026-11-25T00:44:50.285 wifi connected, 144 Mbps, -55 dBm, 2.4 GHz; default route vpn over wifi; screen off; idle no; lock held
+2026-11-25T00:44:50.501 samples 130808 (+2512) battery 81%
+2026-11-25T00:45:00.577 samples 133320 (+2528) battery 81%
+2026-11-25T00:45:10.625 samples 135832 (+2496) battery 81%
+2026-11-25T00:45:10.637 phone battery 82% charge 2851000 uAh current 76000 uA unplugged temp 28.9 C
+2026-11-25T00:45:20.690 samples 138352 (+2536) battery 81%
+2026-11-25T00:45:30.735 samples 140872 (+2504) battery 81%
+2026-11-25T00:45:40.784 samples 143376 (+2504) battery 81%
+2026-11-25T00:45:50.834 samples 145896 (+2520) battery 81%
+2026-11-25T00:46:00.287 sharing on Wi-Fi: the laptop fetched 34 files or parts of files, 3.0 MB
+2026-11-25T00:46:00.882 samples 148384 (+2496) battery 81%
+2026-11-25T00:46:00.882 packets: 148391 samples, missing 0 in 0 gaps, repeated 0, longest gap 0 samples
+2026-11-25T00:46:10.925 samples 150904 (+2512) battery 81%
+2026-11-25T00:46:10.936 phone battery 82% charge 2850000 uAh current 91000 uA unplugged temp 28.6 C
+2026-11-25T00:46:20.983 samples 153432 (+2528) battery 81%
+2026-11-25T00:46:31.030 samples 155944 (+2512) battery 81%
+2026-11-25T00:46:41.078 samples 158448 (+2512) battery 81%
+2026-11-25T00:46:51.125 samples 160960 (+2520) battery 81%
+2026-11-25T00:47:01.171 samples 163472 (+2512) battery 81%
+2026-11-25T00:47:11.218 samples 166000 (+2512) battery 81%
+2026-11-25T00:47:11.232 phone battery 82% charge 2848000 uAh current 87000 uA unplugged temp 28.3 C
+2026-11-25T00:47:21.285 samples 168504 (+2520) battery 81%
+2026-11-25T00:47:31.336 samples 171016 (+2504) battery 81%
+2026-11-25T00:47:41.387 samples 173536 (+2512) battery 81%
+2026-11-25T00:47:51.436 samples 176040 (+2512) battery 81%
+2026-11-25T00:48:01.502 samples 178552 (+2512) battery 81%
+2026-11-25T00:48:11.551 samples 181072 (+2512) battery 81%
+2026-11-25T00:48:11.562 phone battery 82% charge 2845000 uAh current 116000 uA unplugged temp 28.1 C
+2026-11-25T00:48:21.610 samples 183584 (+2520) battery 81%
+2026-11-25T00:48:31.659 samples 186104 (+2512) battery 81%
+2026-11-25T00:48:41.706 samples 188608 (+2504) battery 81%
+2026-11-25T00:48:51.755 samples 191120 (+2512) battery 81%
+2026-11-25T00:49:01.802 samples 193632 (+2528) battery 81%
+2026-11-25T00:49:11.847 samples 196136 (+2504) battery 81%
+2026-11-25T00:49:11.856 phone battery 82% charge 2842000 uAh current 232000 uA unplugged temp 28.2 C
+2026-11-25T00:49:21.902 samples 198648 (+2496) battery 81%
+2026-11-25T00:49:31.954 samples 201168 (+2520) battery 80%
+2026-11-25T00:49:42.004 samples 203680 (+2528) battery 80%
+2026-11-25T00:49:52.061 samples 206192 (+2504) battery 80%
+2026-11-25T00:50:02.118 samples 208704 (+2504) battery 80%
+2026-11-25T00:50:12.166 samples 211224 (+2528) battery 80%
+2026-11-25T00:50:12.178 phone battery 82% charge 2840000 uAh current 69000 uA unplugged temp 28.4 C
+2026-11-25T00:50:22.228 samples 213744 (+2512) battery 80%
+2026-11-25T00:50:32.276 samples 216256 (+2512) battery 80%
+2026-11-25T00:50:42.330 samples 218752 (+2520) battery 80%
+2026-11-25T00:50:52.378 samples 221272 (+2496) battery 80%
+2026-11-25T00:51:02.422 samples 223792 (+2520) battery 80%
+2026-11-25T00:51:12.475 samples 226304 (+2512) battery 80%
+2026-11-25T00:51:12.487 phone battery 82% charge 2839000 uAh current 113000 uA unplugged temp 28.5 C
+2026-11-25T00:51:22.530 samples 228816 (+2512) battery 80%
+2026-11-25T00:51:32.562 samples 231320 (+2520) battery 80%
+2026-11-25T00:51:42.608 samples 233832 (+2496) battery 80%
+2026-11-25T00:51:52.655 samples 236352 (+2520) battery 80%
+2026-11-25T00:52:02.703 samples 238848 (+2512) battery 80%
+2026-11-25T00:52:12.746 samples 241368 (+2504) battery 80%
+2026-11-25T00:52:12.757 phone battery 82% charge 2836000 uAh current 62000 uA unplugged temp 28.7 C
+2026-11-25T00:52:22.801 samples 243872 (+2512) battery 80%
+2026-11-25T00:52:32.861 samples 246392 (+2520) battery 80%
+2026-11-25T00:52:42.911 samples 248912 (+2512) battery 80%
+2026-11-25T00:52:52.951 samples 251424 (+2512) battery 80%
+2026-11-25T00:53:02.994 samples 253936 (+2512) battery 80%
+2026-11-25T00:53:10.276 wifi connected, 144 Mbps, -58 dBm, 2.4 GHz; default route vpn over wifi; screen on; idle no; lock held
+2026-11-25T00:53:13.064 samples 256440 (+2504) battery 80%
+2026-11-25T00:53:13.074 phone battery 82% charge 2834000 uAh current 458000 uA unplugged temp 28.9 C
+2026-11-25T00:53:23.105 samples 258960 (+2520) battery 80%
+2026-11-25T00:53:33.161 samples 261472 (+2520) battery 80%
+2026-11-25T00:53:43.210 samples 263984 (+2512) battery 80%
+2026-11-25T00:53:53.264 samples 266496 (+2512) battery 80%
+2026-11-25T00:54:03.333 samples 269016 (+2520) battery 80%
+2026-11-25T00:54:13.386 samples 271528 (+2504) battery 80%
+2026-11-25T00:54:13.402 phone battery 81% charge 2822000 uAh current 327000 uA unplugged temp 29.4 C
+2026-11-25T00:54:23.439 samples 274040 (+2520) battery 80%
+2026-11-25T00:54:33.502 samples 276560 (+2512) battery 79%
+2026-11-25T00:54:43.525 samples 279072 (+2512) battery 79%
+2026-11-25T00:54:53.577 samples 281568 (+2512) battery 79%
+2026-11-25T00:55:03.611 samples 284088 (+2504) battery 79%
+2026-11-25T00:55:13.650 samples 286600 (+2512) battery 79%
+2026-11-25T05:17:23.942 packets: 4218327 samples, missing 0 in 0 gaps, repeated 0, longest gap 0 samples
+2026-11-25T05:17:33.992 samples 4220840 (+2512) battery 37%
+2026-11-25T05:17:34.004 phone battery 71% charge 2458000 uAh current 54000 uA unplugged temp 23.5 C
+2026-11-25T05:17:44.054 samples 4223352 (+2520) battery 37%
+2026-11-25T05:17:54.101 samples 4225872 (+2520) battery 37%
+2026-11-25T05:18:04.145 samples 4228376 (+2496) battery 37%
+2026-11-25T05:18:14.203 samples 4230880 (+2512) battery 37%
+2026-11-25T05:18:24.255 samples 4233408 (+2528) battery 37%
+2026-11-25T05:18:34.303 samples 4235928 (+2512) battery 37%
+2026-11-25T05:18:34.314 phone battery 71% charge 2457000 uAh current 58000 uA unplugged temp 23.5 C
+2026-11-25T05:18:44.358 samples 4238440 (+2512) battery 37%
+2026-11-25T05:18:54.411 samples 4240944 (+2512) battery 37%
+2026-11-25T05:19:04.459 samples 4243456 (+2520) battery 37%
+2026-11-25T05:19:14.505 samples 4245976 (+2504) battery 37%
+2026-11-25T05:19:24.552 samples 4248472 (+2504) battery 37%
+2026-11-25T05:19:34.599 samples 4251000 (+2520) battery 37%
+2026-11-25T05:19:34.609 phone battery 71% charge 2455000 uAh current 62000 uA unplugged temp 23.5 C
+2026-11-25T05:19:44.656 samples 4253512 (+2520) battery 36%
+2026-11-25T05:19:54.712 samples 4256008 (+2512) battery 36%
+2026-11-25T05:20:04.757 samples 4258536 (+2504) battery 36%
+2026-11-25T05:20:14.815 samples 4261032 (+2504) battery 36%
+2026-11-25T05:20:24.862 samples 4263552 (+2528) battery 36%
+2026-11-25T05:20:34.901 samples 4266064 (+2496) battery 36%
+2026-11-25T05:20:34.913 phone battery 71% charge 2454000 uAh current 58000 uA unplugged temp 23.5 C
+2026-11-25T05:20:44.963 samples 4268592 (+2528) battery 36%
+2026-11-25T05:20:55.012 samples 4271088 (+2496) battery 36%
+2026-11-25T05:21:05.062 samples 4273608 (+2528) battery 36%
+2026-11-25T05:21:15.116 samples 4276080 (+2464) battery 36%
+2026-11-25T05:21:25.166 samples 4278200 (+2120) battery 36%
+2026-11-25T05:21:35.209 samples 4278800 (+600) battery 36%
+2026-11-25T05:21:35.222 phone battery 71% charge 2453000 uAh current 54000 uA unplugged temp 23.4 C
+2026-11-25T05:21:36.224 headband out of range; saving
+2026-11-25T05:21:36.231 packets: 4278799 samples, missing 0 in 0 gaps, repeated 0, longest gap 0 samples
+2026-11-25T05:21:36.231 total samples 4278800, 285.3 min
+2026-11-25T05:21:36.231 drop (out of range); last data 2026-11-25T05:21:32.085; reconnecting
+2026-11-25T05:21:48.597 reconnect try 1 (direct to AA:BB:CC:DD:EE:FF): failed after 10.3 s: PlatformException(java.lang.UnsupportedOperationException: [Error]:[108] [Cannot create BLE device.], UnsupportedOperationException, Cause: null, Stacktrace: ja...
+2026-11-25T05:22:03.864 reconnect try 2 (direct to AA:BB:CC:DD:EE:FF): failed after 10.3 s: PlatformException(java.lang.UnsupportedOperationException: [Error]:[108] [Cannot create BLE device.], UnsupportedOperationException, Cause: null, Stacktrace: ja...
+2026-11-25T05:22:10.288 wifi off; default route vpn; screen off; idle no; lock held
+2026-11-25T05:22:30.042 reconnect try 3 (scan): not found after 16.2 s
+2026-11-25T05:23:04.255 reconnect try 4 (direct to AA:BB:CC:DD:EE:FF): connected after 4.2 s
