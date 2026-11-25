@@ -33,21 +33,130 @@ class SleepExperimentPage {
 /// "3 with, 6 without so far" for the one line on Trends.
 String pilesLine(Piles p) => '${p.nWith} with, ${p.nWithout} without so far';
 
-/// The evening's question with its three one-tap answers.
+/// The evening's question with its three one-tap answers. [dense]: the Record tab's line (less air above, a muted
+/// question).
 class AnswerQuestion extends StatelessWidget {
-  const AnswerQuestion({super.key, required this.kind, required this.question, required this.value, required this.onChanged});
+  const AnswerQuestion({super.key, required this.kind, required this.question, required this.value, required this.onChanged, this.dense = false});
   final ExperimentKind kind;
   final String question;
   final Answer? value;
   final ValueChanged<Answer>? onChanged;
+  final bool dense;
 
   @override
-  Widget build(BuildContext context) => ChoiceQuestion<Answer>(
-    question: question,
-    choices: [(Answer.withIt, kind.withLabel), (Answer.without, kind.withoutLabel), (Answer.neither, kind.neitherLabel)],
-    value: value,
-    onChanged: onChanged ?? (_) {},
-  );
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Padding(
+      padding: EdgeInsets.only(top: dense ? 0 : 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            question,
+            style: dense ? text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.35) : text.bodyLarge?.copyWith(height: 1.4),
+          ),
+          SizedBox(height: dense ? 6 : 10),
+          AnswerButtons(
+            choices: [(Answer.withIt, kind.withLabel), (Answer.without, kind.withoutLabel), (Answer.neither, kind.neitherLabel)],
+            value: value,
+            onChanged: onChanged ?? (_) {},
+            minHeight: dense ? 44 : 52,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Three answers as one control (DECISIONS 1082). Side by side, each as wide as its words need, so a longer label
+/// ("None after noon") never breaks in two; when the three do not fit the width (large text, a narrow phone) they
+/// stand under each other. A label is always one line.
+class AnswerButtons extends StatelessWidget {
+  const AnswerButtons({super.key, required this.choices, required this.value, required this.onChanged, this.minHeight = 52});
+  final List<(Answer, String)> choices;
+  final Answer? value;
+  final ValueChanged<Answer> onChanged;
+  final double minHeight;
+
+  /// Air on each side of a label, and what the measuring may be off by.
+  static const double _pad = 10, _slack = 2;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = (Theme.of(context).textTheme.labelLarge ?? const TextStyle()).copyWith(height: 1.2);
+    final scaler = MediaQuery.textScalerOf(context);
+    return LayoutBuilder(
+      builder: (context, box) {
+        final needs = [
+          for (final (_, label) in choices)
+            () {
+              final p = TextPainter(text: TextSpan(text: label, style: style), textDirection: TextDirection.ltr, textScaler: scaler, maxLines: 1)..layout();
+              final w = p.width + 2 * _pad + _slack;
+              p.dispose();
+              return w;
+            }(),
+        ];
+        // the frame and the two rules between the three
+        final sideBySide = needs.fold(0.0, (a, b) => a + b) + choices.length + 1 <= box.maxWidth;
+        Widget one(int i) {
+          final (answer, label) = choices[i];
+          final on = answer == value;
+          return Semantics(
+            button: true,
+            inMutuallyExclusiveGroup: true,
+            checked: on,
+            child: Material(
+              color: on ? Night.surfaceHigh : Colors.transparent,
+              child: InkWell(
+                onTap: () => onChanged(answer),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: minHeight, minWidth: sideBySide ? 0 : double.infinity),
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: _pad),
+                      child: Text(label, maxLines: 1, softWrap: false, style: style.copyWith(color: on ? Night.ink : Night.inkMuted)),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+
+        final radius = BorderRadius.circular(sideBySide ? minHeight / 2 : 16);
+        return DecoratedBox(
+          position: DecorationPosition.foreground,
+          decoration: BoxDecoration(border: Border.all(color: Night.rule), borderRadius: radius),
+          child: ClipRRect(
+            borderRadius: radius,
+            child: sideBySide
+                ? IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (var i = 0; i < choices.length; i++) ...[
+                          if (i > 0) const VerticalDivider(width: 1, thickness: 1, color: Night.rule),
+                          // the spare width is shared out by what each label needs
+                          Expanded(flex: (needs[i] * 10).ceil(), child: one(i)),
+                        ],
+                      ],
+                    ),
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (var i = 0; i < choices.length; i++) ...[
+                        if (i > 0) const Divider(height: 1, thickness: 1, color: Night.rule),
+                        one(i),
+                      ],
+                    ],
+                  ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class SleepExperimentView extends StatelessWidget {
