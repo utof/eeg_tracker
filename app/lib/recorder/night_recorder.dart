@@ -169,6 +169,7 @@ class NightRecorder {
     this.spanLog,
     this.kit,
     this.onGiveUp,
+    this.onSpansEnded,
     this.sleep = true,
     this.firstSpan,
     this.sleepSource = 'owner_button',
@@ -240,6 +241,9 @@ class NightRecorder {
 
   /// The recording gave up after [RecorderTiming.stopAway] without any data: the service stops it.
   final void Function()? onGiveUp;
+
+  /// The 60-minute rule ended these spans (the service tells the owner: "Still going? Undo").
+  final void Function(List<Span> ended)? onSpansEnded;
 
   /// The one guard over the smart alarm, the lucid cues and [scorer]: an exception in the scorer, more than its share
   /// of this isolate's time (the model's own thread and the scaling isolate are not counted: they do not hold the
@@ -1716,6 +1720,20 @@ class NightRecorder {
     final open = _spans.where((s) => !s.closed && s.isSleep).lastOrNull;
     if (open != null) return open;
     final t = _now();
+    _attachKit(plan);
+    final span = openSpan(kind, source: source, at: t);
+    _startDrift();
+    _startCues();
+    _logLine(
+      'sleep kit on for ${span.id}'
+      '${plan == null ? '' : '; smart alarm set: wake by ${_hm(plan.endMs)}, window from ${_hm(plan.startMs)}'}',
+    );
+    _set(_withAlarm(_withDrift(_status)));
+    return span;
+  }
+
+  /// A fresh sleep kit for a sleep span that starts (or goes on after Undo): the live model, the alarm, the cues.
+  void _attachKit(AlarmPlan? plan) {
     final make = kit;
     if (make != null && !_noDetectors) {
       final k = make();
@@ -1727,15 +1745,30 @@ class NightRecorder {
     _alarmMade = false;
     _alarmLast = null;
     _driftUsed = false;
-    final span = openSpan(kind, source: source, at: t);
-    _startDrift();
-    _startCues();
-    _logLine(
-      'sleep kit on for ${span.id}'
-      '${plan == null ? '' : '; smart alarm set: wake by ${_hm(plan.endMs)}, window from ${_hm(plan.startMs)}'}',
-    );
+  }
+
+  /// "Still going? Undo": the spans the 60-minute rule ended last are open again, as if it had not ended them
+  /// (their own start, no end); a sleep span gets a fresh sleep kit, without its smart alarm (that window has
+  /// passed or was turned off with the kit). Empty when there is nothing to undo.
+  List<Span> undoHeadbandOff() {
+    if (!_begun || _stopping) return const [];
+    final back = RecordingLive(id: _night.recording, spans: _spans).undoable;
+    if (back.isEmpty) return const [];
+    final open = <Span>[];
+    for (final s in back) {
+      final again = s.reopened();
+      _putSpan(again);
+      if (_night.recording != null) _marker('span: ${s.kind} start (again: Undo)', _now());
+      open.add(again);
+    }
+    if (open.any((s) => s.isSleep)) {
+      _attachKit(null);
+      _startDrift();
+      _startCues();
+    }
+    _logLine('Undo: ${[for (final s in open) s.kind].join(', ')} go${open.length == 1 ? 'es' : ''} on');
     _set(_withAlarm(_withDrift(_status)));
-    return span;
+    return open;
   }
 
   /// Stop sleep: the open sleep span is closed and the sleep kit detached; the recording goes on. Null without one.
@@ -1778,7 +1811,9 @@ class NightRecorder {
     if (last != null && gone >= timing.spansAway.inMilliseconds && _spans.any((s) => !s.closed)) {
       final at = DateTime.fromMillisecondsSinceEpoch(last);
       _note('no data for ${timing.spansAway.inMinutes} min: what was marked ends at the last data');
+      final open = [for (final s in _spans) if (!s.closed) s.id];
       _closeSpans('headband_off', at);
+      onSpansEnded?.call([for (final s in _spans) if (open.contains(s.id)) s]);
       unawaited(_detachKit());
       _set(_withAlarm(_withDrift(_status)));
     }
@@ -1829,6 +1864,7 @@ class NightRecorder {
       return openSpan(kind, session: session is String ? session : null, startedRecording: data['started_recording'] == true);
     }
     if (data['op'] == 'close' && id is String) return closeSpan(id, by: by is String ? by : 'owner');
+    if (data['op'] == 'undo_off') return undoHeadbandOff().firstOrNull;
     return null;
   }
 

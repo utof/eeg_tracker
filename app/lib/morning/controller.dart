@@ -22,6 +22,7 @@ import '../recorder/chunk_writer.dart' show ChunkWriter, Sample, fileStem, unixS
 import '../recorder/contact.dart' show channelNames;
 import '../signal/quality.dart';
 import '../recorder/headband.dart';
+import '../spans/activities.dart' show ActivityRef, activityRef;
 import '../session_keeper.dart';
 import '../sound/check_in_sound.dart';
 import 'measures.dart';
@@ -134,6 +135,7 @@ class MorningController extends ChangeNotifier {
   bool get leftLost => _lostBands.isNotEmpty;
 
   Headband? _band;
+  ActivityRef? _rides;
   CheckInSound? _sound;
   ChunkWriter? _writer;
   StreamSubscription<List<Sample>>? _signalSub;
@@ -186,7 +188,7 @@ class MorningController extends ChangeNotifier {
         sdkTimeout: timing.sdkTimeout,
       );
       if (band == null) {
-        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?', run);
+        return await _fail('Headband not found. Is it switched on and charged?', run);
       }
       // reached after Stop: nobody else lets it go
       if (!_live(run)) return await BandLink.letGo(band, timing.sdkTimeout, streaming: false);
@@ -211,7 +213,9 @@ class MorningController extends ChangeNotifier {
       soundNote = note;
       _sound = sound;
       final st = store;
-      if (st != null) {
+      // an activity of the day's recording keeps no raw file of its own: its signal is that recording's, in its span
+      _rides = band is RidesRecorder ? activityRef() : null;
+      if (st != null && _rides == null) {
         try {
           _writer = ChunkWriter.open(st.dir, _now());
         } catch (e) {
@@ -437,7 +441,7 @@ class MorningController extends ChangeNotifier {
             flush: true,
           );
         }
-        st.save(res, start);
+        st.save({...res, ...?_rides?.toJson()}, start);
       }
       result = res;
       _set(MorningStage.result, '');

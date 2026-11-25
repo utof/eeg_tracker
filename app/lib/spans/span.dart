@@ -295,6 +295,34 @@ List<String> _strings(Object? v) => [
       if (x is String) x,
 ];
 
+String _hmOf(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+String _wordsOf(List<Span> spans) {
+  final words = [for (final s in spans) spanWord(s.kind)];
+  return words.length < 2 ? words.join() : '${words.sublist(0, words.length - 1).join(', ')} and ${words.last}';
+}
+
+/// The phone notification when the 60-minute rule ended what was marked ([ended]: those spans, closed).
+({String title, String text}) spansEndedNotice(List<Span> ended, {required int awayMinutes}) => (
+  title: 'Headband off for $awayMinutes minutes',
+  text:
+      '${_wordsOf(ended)} ${ended.length == 1 ? 'was' : 'were'} ended at ${ended.isEmpty ? '' : _hmOf(ended.first.end!)}, '
+      'the last moment with a signal. Still going? Open the app and tap Undo.',
+);
+
+/// The Record tab's line for the same ([undoable]: `RecordingLive.undoable`); null when there is nothing to undo.
+String? undoLine(List<Span> undoable) => undoable.isEmpty
+    ? null
+    : '${_wordsOf(undoable)} ended at ${_hmOf(undoable.first.end!)}: the headband was off for an hour. Still going?';
+
+/// The phone notification when the recording stopped itself after [awayHours] without the headband.
+({String title, String text}) recordingStoppedNotice({required int awayHours}) => (
+  title: 'Recording stopped',
+  text:
+      'No headband for $awayHours hours, so the recording stopped itself. Its files are kept. Open the app to answer '
+      '"What was this recording?".',
+);
+
 /// The running recording's line under its buttons: what is marked in it, in order ("Recording since 11:02 · Work
 /// 11:05-12:40 · Sleep since 23:10"); [sinceMs]: when the recording started (unix ms; 0: unknown).
 String spansLine(List<Span> spans, {int sinceMs = 0}) {

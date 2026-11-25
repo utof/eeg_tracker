@@ -40,7 +40,7 @@ class NapScreen extends StatefulWidget {
 }
 
 class _NapScreenState extends State<NapScreen> {
-  final BrainBitFinder _finder = BrainBitFinder();
+  final BrainBitFinder _finder = BrainBitFinder(activity: 'nap');
   final SoloudNapSound _audio = SoloudNapSound();
   late final NapController _c = NapController(
     finder: _finder,
@@ -50,7 +50,7 @@ class _NapScreenState extends State<NapScreen> {
     keeper: PhoneSessionKeeper(), // a locked phone must not freeze the nap (DECISIONS row 460)
   );
   int _length = NapRule.defaultMin;
-  bool _nightRunning = false;
+  bool _recordingRuns = false;
   bool _face = false;
   bool _dim = false;
   NapStage _lastStage = NapStage.setup;
@@ -61,6 +61,8 @@ class _NapScreenState extends State<NapScreen> {
   void initState() {
     super.initState();
     _c.addListener(_changed);
+    // the recording was stopped under this session (the notification's Stop, the 6-hour rule): it ends too
+    _finder.onRecordingStopped = () => unawaited(_c.stop());
     unawaited(_prepare());
   }
 
@@ -82,7 +84,7 @@ class _NapScreenState extends State<NapScreen> {
     final running = await FlutterForegroundTask.isRunningService;
     if (!mounted) return;
     setState(() {
-      _nightRunning = running;
+      _recordingRuns = running;
       _load();
     });
   }
@@ -145,10 +147,6 @@ class _NapScreenState extends State<NapScreen> {
   }
 
   Future<void> _lightsOff() async {
-    if (await FlutterForegroundTask.isRunningService) {
-      setState(() => _nightRunning = true);
-      return;
-    }
     final phone = await Phone.snapshot().catchError((Object _) => const PhoneSnapshot({}));
     if (!await nearbyAllowed(phone.sdkInt) && !await requestNearby(phone.sdkInt)) {
       return _say('Allow Nearby devices first: without it the headband cannot be found.');
@@ -213,7 +211,7 @@ class _NapScreenState extends State<NapScreen> {
       noData: c.noData,
       end: c.end,
       notes: [?c.saveNote],
-      nightRunning: _nightRunning,
+      recordingRuns: _recordingRuns,
       latest: latest,
       justEnded: _justEnded && c.stage == NapStage.done,
       earlier: _naps.length > 1 ? _naps.sublist(1, _naps.length.clamp(1, 11)) : const [],

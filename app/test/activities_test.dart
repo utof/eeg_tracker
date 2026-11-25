@@ -7,6 +7,7 @@ import 'dart:io';
 
 import 'package:eeg_tracker/dream/band_link.dart';
 import 'package:eeg_tracker/headband/connection.dart';
+import 'package:eeg_tracker/headband/device_status.dart';
 import 'package:eeg_tracker/headband/finder.dart';
 import 'package:eeg_tracker/headband/lend.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart' show ChunkWriter;
@@ -332,6 +333,61 @@ void main() {
     expect(d.statuses.last.rec.spans, isEmpty);
     await link.close();
     expect(d.acts.ask.value, isNull);
+  });
+
+  test('while Sleep is marked no other activity starts: it says so, and nothing is written', () async {
+    final d = Day();
+    addTearDown(d.close);
+    await d.record(sleep: true);
+    await until(() => d.recording);
+    final door = BrainBitFinder(activity: 'work');
+    await expectLater(
+      door.find(const Duration(milliseconds: 10)),
+      throwsA(isA<ActivityRefused>().having((e) => e.why, 'why', allOf(contains('Sleep'), contains('Stop sleep')))),
+    );
+    expect([for (final s in d.statuses.last.rec.spans) s.kind], ['sleep']);
+    expect(d.acts.current.value, isNull);
+  });
+
+  test('a span left open by a session whose screen went away is ended when another activity starts', () async {
+    final d = Day();
+    addTearDown(d.close);
+    await d.record();
+    await until(() => d.recording);
+    d.toRecorder(openSpanCommand('work')); // Work of an earlier run of the app: its screen is gone, its span is open
+    final med = await d.session('meditate');
+    await until(() => med.got.isNotEmpty);
+    final spans = d.statuses.last.rec.spans;
+    expect([for (final s in spans) (s.kind, s.closed, s.endedBy)], [('work', true, 'other_activity'), ('meditate', false, null)]);
+    await med.link.close();
+  });
+
+  test('the same activity pressed again while its span is still open goes on in that span', () async {
+    final d = Day();
+    addTearDown(d.close);
+    await d.record();
+    await until(() => d.recording);
+    d.toRecorder(openSpanCommand('work'));
+    final work = await d.session('work');
+    await until(() => work.got.isNotEmpty);
+    expect(d.statuses.last.rec.spans, hasLength(1));
+    await work.link.close();
+    await until(() => d.statuses.last.rec.open() == null);
+    expect(d.spans.single.kind, 'work');
+  });
+
+  test('the headband card says what is marked on the recording', () {
+    final now = DateTime(2099, 1, 1, 14, 30);
+    RecorderStatus st(List<Span> spans) => RecorderStatus(
+      phase: Phase.recording,
+      nightStartMs: now.millisecondsSinceEpoch - 60000,
+      lastDataMs: now.millisecondsSinceEpoch - 500,
+      rec: RecordingLive(id: 'r', sleep: false, spans: spans),
+    );
+    final work = Span(id: 'r-1', kind: 'work', start: now, source: 'owner_button');
+    expect(DeviceStatus.fromRecorder(st([work]), now: now).word, 'Recording · Work');
+    expect(DeviceStatus.fromRecorder(st([work.closedAt(now, 'owner')]), now: now).word, 'Recording');
+    expect(DeviceStatus.fromRecorder(st(const []), now: now).word, 'Recording');
   });
 
   test('the span commands as plain maps', () {

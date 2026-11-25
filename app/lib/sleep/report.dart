@@ -75,6 +75,10 @@ class SleepReport {
 
   String get nightOf => json['night_of'] as String;
   bool get scored => json['scored'] == true;
+
+  /// A sleep stretch the app started by itself in which under [noSleepFoundBelowMin] minutes of sleep were found
+  /// ([markNoSleepFound]): listed as "no sleep found", counted for nothing.
+  bool get noSleepFound => json['no_sleep_found'] == true;
   DateTime get dataStart => DateTime.parse(json['data_start'] as String).toLocal();
   DateTime get dataEnd => DateTime.parse(json['data_end'] as String).toLocal();
   Map<String, dynamic> get total => (json['total'] as Map).cast<String, dynamic>();
@@ -173,6 +177,26 @@ class SleepReport {
 /// saw over the same samples, for `extras`, `drift_off` and the check's eye movements; [extrasError]: why that pass
 /// failed. [stages] come with the walking veto already on ([walking]: the walking detector's answer per epoch, null
 /// when it did not look; [walkingChanged]: how many asleep epochs it turned awake), for `walking`.
+/// Under this many minutes asleep a sleep stretch nobody pressed is "no sleep found" (the noise limit of
+/// sleep/periods.dart; spec section 6, DECISIONS 886 and 987). A planning value.
+const double noSleepFoundBelowMin = 10;
+
+/// Marks [rep] `no_sleep_found` when its sleep stretch was started by the app itself (`span.from` `auto` or
+/// `migrated`) and its scoring found under [noSleepFoundBelowMin] minutes asleep; takes the mark away otherwise.
+/// A stretch you pressed or confirmed is never marked: a night with no sleep is worth seeing.
+Map<String, dynamic> markNoSleepFound(Map<String, dynamic> rep) {
+  final span = rep['span'], total = rep['total'];
+  final from = span is Map ? span['from'] : null;
+  final asleep = total is Map && total['asleep_min'] is num ? (total['asleep_min'] as num).toDouble() : null;
+  final none = rep['scored'] == true && (from == 'auto' || from == 'migrated') && asleep != null && asleep < noSleepFoundBelowMin;
+  if (none) {
+    rep['no_sleep_found'] = true;
+  } else {
+    rep.remove('no_sleep_found');
+  }
+  return rep;
+}
+
 Map<String, dynamic> buildReport({
   required String nightOf,
   required DateTime built,

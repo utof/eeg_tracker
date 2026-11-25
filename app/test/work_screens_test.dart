@@ -28,7 +28,7 @@ const _quiet = 'The media volume is low (2 of 15), so the break chime may not be
 
 final Map<String, WorkViewModel> states = {
   'setup': WorkViewModel(stage: WorkStage.setup, sessions: [_past, _other], wearerOn: true),
-  'night': const WorkViewModel(stage: WorkStage.setup, nightRunning: true),
+  'night': const WorkViewModel(stage: WorkStage.setup, recordingRuns: true),
   'connecting': const WorkViewModel(stage: WorkStage.connecting, message: 'Found BrainBit. Connecting.'),
   'eyes_closed': const WorkViewModel(stage: WorkStage.eyesClosed, closedLeft: 42),
   'calibrating': const WorkViewModel(stage: WorkStage.calibrating, calibrationLeftMin: 2.5, cells: [WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none, WorkCell.none], wornMin: 1.5, stretchMin: 1.5),
@@ -44,7 +44,7 @@ final Map<String, WorkViewModel> states = {
   'done_raw': WorkViewModel(stage: WorkStage.done, summary: _past, rawNote: 'The raw EEG (54 MB) is kept with your recordings, apart from your nights, and goes out with Export data.'),
   'done_marked': WorkViewModel(stage: WorkStage.done, summary: _other, wearerOn: true),
   'done': WorkViewModel(stage: WorkStage.done, summary: _past, wearerOn: true, afterBreak: 'After your break: drowsiness went down (drowsy before, alert after).'),
-  'failed': const WorkViewModel(stage: WorkStage.failed, message: 'Headband not found. Is it switched on, charged, and free (no night recording)?'),
+  'failed': const WorkViewModel(stage: WorkStage.failed, message: 'Headband not found. Is it switched on and charged?'),
 };
 
 void main() {
@@ -145,9 +145,11 @@ void main() {
     expect(find.textContaining('The raw EEG (54 MB) is kept with your recordings'), findsOneWidget);
   });
 
-  testWidgets('during a night the page says so and Start is off', (tester) async {
-    await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: WorkView(model: states['night']!, onStart: () => fail('no start'))));
-    expect(find.textContaining('recording the night'), findsOneWidget);
+  testWidgets('during a recording the page says the session starts on it, and Start starts', (tester) async {
+    var started = 0;
+    await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: WorkView(model: states['night']!, onStart: () => started++)));
+    expect(find.textContaining('A recording is running: the work session starts on it'), findsOneWidget);
     await tester.tap(find.text('Start work session'));
+    expect(started, 1);
   });
 }

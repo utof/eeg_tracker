@@ -54,7 +54,7 @@ const Duration maxRecording = Duration(hours: 24);
 
 /// Version of the kept summaries (a change drops them).
 const int _setsVersion = 4;
-const int _sessionsVersion = 2;
+const int _sessionsVersion = 3;
 
 enum ArchiveKind {
   night('Night', 'sleep'),
@@ -257,7 +257,12 @@ class SessionFile {
     this.companions = const [],
     this.rawCompanions = const [],
     this.rawBytes = 0,
+    this.rides = false,
   });
+
+  /// The session ran as an activity of the recording it names (its file has a `span`; Record first step 4): it is
+  /// listed inside that recording and never says what the recording was.
+  final bool rides;
 
   final ArchiveKind kind;
 
@@ -293,6 +298,7 @@ class SessionFile {
     'companions': companions,
     'raw_companions': rawCompanions,
     'raw_bytes': rawBytes,
+    if (rides) 'rides': true,
   };
 
   static SessionFile? fromJson(Object? j) {
@@ -310,6 +316,7 @@ class SessionFile {
       companions: [for (final x in c) if (x is String) x],
       rawCompanions: [for (final x in rc) if (x is String) x],
       rawBytes: j['raw_bytes'] is int ? j['raw_bytes'] as int : 0,
+      rides: j['rides'] == true,
     );
   }
 }
@@ -783,6 +790,7 @@ Object? _summarizeSession(File f, SessionSpec spec, Directory filesDir) {
     companions: companions..sort(),
     rawCompanions: raw,
     rawBytes: rawBytes,
+    rides: j['span'] is String,
   ).toJson();
 }
 
@@ -1059,7 +1067,7 @@ ArchiveItem _chainItem(
   List<(DateTime, String)> workStarts,
 ) {
   final first = chain.first;
-  final work = mine.where((s) => s.kind == ArchiveKind.work).firstOrNull;
+  final work = mine.where((s) => s.kind == ArchiveKind.work && !s.rides).firstOrNull;
   var kind = _kindOfWriter(first.writer);
   // a work session's own raw signal (written beside it by a later version) is the work session
   if (work != null && first.auto == null && (kind == ArchiveKind.recording || kind == ArchiveKind.night)) {

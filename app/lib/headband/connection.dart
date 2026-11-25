@@ -976,6 +976,9 @@ class RecordingBand implements Headband, KnownContact, RidesRecorder {
   /// Called once when the user lets this handle go (an activity closes its span here, spans/activities.dart).
   Future<void> Function()? onLetGo;
 
+  /// Called once when the recording stops under this handle.
+  void Function()? onEnded;
+
   /// The recording stopped while this handle was in use: nothing more comes, and a new start is a new matter.
   @override
   bool get ended => _ended;
@@ -1040,6 +1043,9 @@ class RecordingBand implements Headband, KnownContact, RidesRecorder {
     _ended = true;
     _streaming = false;
     if (!_range.isClosed) _range.add(false);
+    final then = onEnded;
+    onEnded = null;
+    if (then != null) scheduleMicrotask(then);
   }
 
   void _close() {

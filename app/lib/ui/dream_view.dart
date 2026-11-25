@@ -39,7 +39,7 @@ class DreamViewModel {
     this.noData = false,
     this.contact = const {},
     this.notes = const [],
-    this.nightRunning = false,
+    this.recordingRuns = false,
     this.theme = const PromptInfo(),
     this.question = const PromptInfo(),
     this.recording,
@@ -71,7 +71,7 @@ class DreamViewModel {
   final List<String> notes;
 
   /// A night is being recorded: the headband is taken.
-  final bool nightRunning;
+  final bool recordingRuns;
 
   /// The sleep ending must start the night recording, which Android allows from a locked phone only to an app
   /// that may run in the background (DECISIONS rows 194 and 467): the face asks you not to lock the phone.
@@ -270,7 +270,7 @@ class DreamView extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
           child: FilledButton.icon(
-            onPressed: m.nightRunning || m.recording != null ? null : onLightsOff,
+            onPressed: m.recording != null ? null : onLightsOff,
             icon: Icon(m.stage == DreamStage.failed ? Icons.refresh : Icons.bedtime_outlined),
             label: Text(m.stage == DreamStage.failed ? 'Try again' : 'Lights off'),
           ),
@@ -282,13 +282,13 @@ class DreamView extends StatelessWidget {
   Widget _status(BuildContext context) {
     final m = model, text = Theme.of(context).textTheme, latest = m.latest;
     final (String word, String sentence, MarkShape mark, Color color) = switch (m.stage) {
-      _ when m.nightRunning => (
-        'Night recording',
-        'The headband is busy recording the night. The dream catcher can start after Stop.',
-        MarkShape.ringedDot,
-        Night.caution,
-      ),
       DreamStage.failed => ('Could not start', m.message, MarkShape.dash, Night.problem),
+      _ when m.recordingRuns && !(m.justEnded && latest != null) => (
+        'Ready',
+        'A recording is running: the dream catcher starts on it, with no new search. Lie down and tap Lights off.',
+        MarkShape.ring,
+        Night.inkMuted,
+      ),
       _ when m.justEnded && latest != null => (
         'Session over',
         [

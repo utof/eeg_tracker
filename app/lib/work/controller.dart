@@ -38,6 +38,7 @@ import '../dream/band_link.dart';
 import '../feedback/features.dart' show fs, median;
 import '../logs/usage.dart' show Usage;
 import '../recorder/chunk_writer.dart' show ChunkWriter, Sample, unixSeconds;
+import '../spans/activities.dart' show ActivityRef, activityRef;
 import '../recorder/header.dart' show brainBitHeader, sessionWork;
 import '../recorder/headband.dart' show HeadbandFinder;
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
@@ -281,6 +282,10 @@ class WorkController extends ChangeNotifier {
 
   /// The raw EEG being written, and when it was last flushed to the storage device.
   ChunkWriter? _writer;
+
+  /// The session runs as an activity of the day's recording (spans/activities.dart): its signal is that recording's
+  /// samples inside this span, and it writes no raw file of its own.
+  ActivityRef? ridesOn;
   DateTime? _syncedAt;
 
   /// Meetings: the phone's last answer about a call, when it was asked, an ask under way; the meeting now (its
@@ -316,7 +321,7 @@ class WorkController extends ChangeNotifier {
       _link = link;
       void found(String name) => _live(run) ? _set(WorkStage.connecting, 'Found $name. Connecting.') : null;
       if (!await link.connect(onFound: found)) {
-        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?', run);
+        return await _fail('Headband not found. Is it switched on and charged?', run);
       }
       if (!_live(run)) return await link.close();
       _set(WorkStage.contact, 'Checking contact. Keep still for a few seconds.');
@@ -389,7 +394,8 @@ class WorkController extends ChangeNotifier {
   KeepSpec _keep() {
     _cardKey = _cardText(withMinutes: false);
     // no audio focus: only a short chime plays now and then, and music or a podcast while working goes on (row 468)
-    return KeepSpec(title: 'Work session', text: _cardText(), headband: true, focus: false, button: onBreak ? 'Back' : null);
+    // on a recording the recorder's own notification is the headband's: no second headband line (DECISIONS 981)
+    return KeepSpec(title: 'Work session', text: _cardText(), headband: ridesOn == null, focus: false, button: onBreak ? 'Back' : null);
   }
 
   void _reset() {
@@ -421,6 +427,7 @@ class WorkController extends ChangeNotifier {
     _syncedAt = null;
     rawStem = null;
     rawNote = null;
+    ridesOn = null;
     _phoneCall = false;
     _callPolling = false;
     _callPolledAt = null;
@@ -668,6 +675,13 @@ class WorkController extends ChangeNotifier {
 
   /// Opens the session's raw EEG files before the first sample: the nights' file set, its header saying `work`.
   void _openRaw(String band, DateTime now) {
+    final ref = (_link?.ridesRecorder ?? false) ? activityRef() : null;
+    if (ref != null) {
+      ridesOn = ref;
+      rawStem = ref.recording;
+      rawNote = 'The signal of this session is in the recording that was running: no second file was written.';
+      return;
+    }
     final dir = recordingsDir;
     if (dir == null) return;
     try {
@@ -955,6 +969,7 @@ class WorkController extends ChangeNotifier {
       'headband': _link?.name,
       'contact_ohms': contact,
       'raw': rawStem,
+      ...?ridesOn?.toJson(),
       'closed_alpha': closedAlpha,
       'baseline': d?.baseline?.toJson(),
       'calibrated_at_s': d?.calibratedAtS,

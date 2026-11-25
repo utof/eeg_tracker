@@ -32,6 +32,9 @@ Map<String, Object?> openSpanCommand(String kind, {String? session, bool started
 
 Map<String, Object?> closeSpanCommand(String id, {String by = 'owner'}) => {'kind': 'span', 'op': 'close', 'id': id, 'by': by};
 
+/// "Still going? Undo": opens again what the 60-minute rule ended (`RecordingLive.undoable`; DECISIONS 899, 986).
+const Map<String, Object?> undoOffCommand = {'kind': 'span', 'op': 'undo_off'};
+
 /// Why an activity could not start, in the owner's words.
 class ActivityRefused implements Exception {
   const ActivityRefused(this.why);
@@ -66,6 +69,9 @@ class ActivityRun {
 
   String get word => spanWord(kind);
 }
+
+/// What the session that rides on the recording now names in its own file; null when none does.
+ActivityRef? activityRef() => Activities.shared?.ref;
 
 /// Where an activity's signal is: what its own session file names instead of a raw file of its own.
 class ActivityRef {
@@ -147,6 +153,19 @@ class Activities {
     }
     final ActivityRun run;
     if (running) {
+      final rec = await _recording();
+      // one activity at a time (DECISIONS 983): a sleep or a nap that is marked is ended by its own Stop first
+      final sleep = rec?.openSleep;
+      if (sleep != null && sleep.kind != kind) {
+        final at = '${sleep.start.hour.toString().padLeft(2, '0')}:${sleep.start.minute.toString().padLeft(2, '0')}';
+        throw ActivityRefused(
+          '${spanWord(sleep.kind)} is marked since $at. Stop sleep on the Record tab first, then start ${spanWord(kind)}.',
+        );
+      }
+      // a span whose session is gone (its screen was closed, the app restarted) ends when the next activity starts
+      for (final other in rec?.spans ?? const <Span>[]) {
+        if (!other.closed && other.kind != kind) send(closeSpanCommand(other.id, by: 'other_activity'));
+      }
       run = ActivityRun(kind, startedRecording: false);
       send(openSpanCommand(kind));
     } else {
@@ -165,6 +184,16 @@ class Activities {
     current.value = run;
     _log.info('activity started', {'kind': kind, 'span': span.id, 'started_recording': run.startedRecording});
     return run;
+  }
+
+  /// The running recording once the recorder has told it (its service may run before its first status arrives here).
+  Future<RecordingLive?> _recording() async {
+    final sw = Stopwatch()..start();
+    while (owner.recording == null && sw.elapsed < answerWait) {
+      askStatus?.call();
+      await Future<void>.delayed(askEvery);
+    }
+    return owner.recording;
   }
 
   /// The open span of [kind] in the recorder's status, asked for until it shows or [answerWait] is over.

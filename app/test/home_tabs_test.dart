@@ -128,7 +128,10 @@ void main() {
       if (running) {
         expect(where[HomeTab.night], containsAll(['Lights off', 'Stop', 'Recording', 'Headband']));
         expect(where[HomeTab.sessions], contains('Sound'));
-        expect(where[HomeTab.sessions]!.any((s) => s.startsWith('The headband is busy with the night')), isTrue);
+        // the sessions are there during a recording too: they start on it (Record first step 4, DECISIONS 980, 983)
+        expect(where[HomeTab.sessions], containsAll(['Meditate', 'Dream catcher', 'Nap coach', 'Work session']));
+        expect(where[HomeTab.sessions]!.any((s) => s.startsWith('Sleep is marked on the recording')), isTrue);
+        expect(where[HomeTab.sessions]!.any((s) => s.contains('busy with the night')), isFalse);
         expect(where[HomeTab.more]!.any((s) => s.contains('Shared on Wi-Fi')), isTrue);
       } else {
         expect(where[HomeTab.night], containsAll(['Sleep', 'Sleep report', 'Morning check-in', 'Try these', 'Phone']));

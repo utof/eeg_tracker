@@ -27,6 +27,7 @@ class CalibrationRecord {
     required this.leftKnown,
     required this.others,
     this.recording,
+    this.span,
   });
 
   final DateTime made;
@@ -43,9 +44,13 @@ class CalibrationRecord {
   /// The calibration's EEG in `recordings/` (its stem), if it was kept.
   final String? recording;
 
+  /// The span of the day's recording this session ran on as an activity (spans/activities.dart): then [recording]
+  /// is that recording's id and the session's signal is its samples inside the span; null: a session of its own.
+  final String? span;
+
   bool get usable => settings.clenchOn || settings.glanceOn;
 
-  factory CalibrationRecord.of(GestureCalibration c, DateTime made, {String? recording}) => CalibrationRecord(
+  factory CalibrationRecord.of(GestureCalibration c, DateTime made, {String? recording, String? span}) => CalibrationRecord(
     made: made,
     settings: c.settings,
     tries: c.tries,
@@ -54,6 +59,7 @@ class CalibrationRecord {
     leftKnown: c.leftKnown,
     others: c.others,
     recording: recording,
+    span: span,
   );
 
   Map<String, Object?> toJson() => {
@@ -65,6 +71,7 @@ class CalibrationRecord {
     'leftKnown': leftKnown,
     'others': others,
     'recording': recording,
+    'span': ?span,
     'rules': {
       'clenchShare': GestureRule.calShareClench,
       'glanceShare': GestureRule.calShareGlance,
@@ -94,6 +101,7 @@ class CalibrationRecord {
       leftKnown: lk,
       others: o,
       recording: rec as String?,
+      span: j['span'] is String ? j['span'] as String : null,
     );
   }
 

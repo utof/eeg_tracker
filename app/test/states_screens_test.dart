@@ -80,7 +80,7 @@ final Map<String, StatesViewModel> states = {
     plan: SoundPlan.of(SoundState.wake, beat: Beat.binaural),
     useHeadband: false,
   ),
-  'night_running': StatesViewModel(stage: SoundStage.setup, plan: SoundPlan.of(SoundState.asleep, minutes: 45), nightRunning: true),
+  'night_running': StatesViewModel(stage: SoundStage.setup, plan: SoundPlan.of(SoundState.asleep, minutes: 45), recordingRuns: true),
   'ended_relax': StatesViewModel(stage: SoundStage.done, plan: _relax, last: made(_relax), justEnded: true, earlier: _earlier),
   'ended_asleep': StatesViewModel(stage: SoundStage.done, plan: _asleep, last: _asleepSession, justEnded: true),
   'later_rated': StatesViewModel(

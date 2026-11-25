@@ -337,7 +337,7 @@ void main() {
       await tester.pumpWidget(
         _app(
           SettingsView(
-            model: const SettingsViewModel(on: false, nightRunning: false),
+            model: const SettingsViewModel(on: false, recordingRuns: false),
             onToggle: (_) {},
             onCalibrate: () {},
             onInfo: () {},

@@ -37,13 +37,15 @@ class MeditationStore {
   /// Writes the session log, then the summary (the summary last, so a listed summary always has its log), each to
   /// a new file renamed over the old one (a cut write never leaves a half file).
   /// The log is encoded off the screen's thread: 20 minutes are about 8 MB of JSON.
-  Future<void> save(MeditationSummary summary, SessionLog log) async {
+  /// [extra]: fields added to the summary (the recording and span of a session that ran as an activity of the day's
+  /// recording, spans/activities.dart).
+  Future<void> save(MeditationSummary summary, SessionLog log, {Map<String, Object?>? extra}) async {
     dir.createSync(recursive: true);
     final logPath = '${dir.path}/${summary.logFile}';
     final summaryPath = '${dir.path}/${stemFor(summary.start)}$suffix';
     final json = log.toJson();
     await Isolate.run(() => _replace(logPath, jsonEncode(json)));
-    _replace(summaryPath, const JsonEncoder.withIndent(' ').convert(summary.toJson()));
+    _replace(summaryPath, const JsonEncoder.withIndent(' ').convert({...summary.toJson(), ...?extra}));
   }
 
   static void _replace(String path, String text) {

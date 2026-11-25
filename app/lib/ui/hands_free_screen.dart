@@ -50,7 +50,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   HandsFreeStore? _store;
   HandsFreeState _state = const HandsFreeState();
-  bool _nightRunning = false;
+  bool _recordingRuns = false;
   bool? _studyOn, _memoryOn;
   String? _error;
 
@@ -93,7 +93,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _memoryOn = memoryOn;
       _store = store;
       _state = store?.load() ?? const HandsFreeState();
-      _nightRunning = running;
+      _recordingRuns = running;
       _error = store == null ? 'The app\'s folder is not known yet, so nothing can be saved.' : null;
       _recordings = rec;
       _wearer = wearer;
@@ -185,7 +185,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     model: SettingsViewModel(
       on: _state.on,
       calibration: _state.calibration,
-      nightRunning: _nightRunning,
+      recordingRuns: _recordingRuns,
       error: _error,
       wearerOn: _wearer?.on,
       wearerStatus: _wearer == null ? '' : wearerStatus(_wearer!),
@@ -219,9 +219,9 @@ class CalibrationScreen extends StatefulWidget {
 }
 
 class _CalibrationScreenState extends State<CalibrationScreen> {
-  final BrainBitFinder _finder = BrainBitFinder();
+  final BrainBitFinder _finder = BrainBitFinder(activity: 'calibration');
   late final CalibrationController _c = CalibrationController(finder: _finder, sound: SoloudCheckInSound.new, store: widget.store);
-  bool _nightRunning = false;
+  bool _recordingRuns = false;
   bool _screenOn = false;
   CalStage _lastStage = CalStage.setup;
 
@@ -229,8 +229,10 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
   void initState() {
     super.initState();
     _c.addListener(_changed);
+    // the recording was stopped under this session (the notification's Stop, the 6-hour rule): it ends too
+    _finder.onRecordingStopped = () => unawaited(_c.stop());
     unawaited(FlutterForegroundTask.isRunningService.then((r) {
-      if (mounted) setState(() => _nightRunning = r);
+      if (mounted) setState(() => _recordingRuns = r);
     }));
   }
 
@@ -251,10 +253,6 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
   }
 
   Future<void> _start() async {
-    if (await FlutterForegroundTask.isRunningService) {
-      setState(() => _nightRunning = true);
-      return;
-    }
     final phone = await Phone.snapshot().catchError((Object _) => const PhoneSnapshot({}));
     if (!await nearbyAllowed(phone.sdkInt) && !await requestNearby(phone.sdkInt)) {
       _say('Allow Nearby devices first: without it the headband cannot be found.');
@@ -304,7 +302,7 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
           glanceSize: c.glanceSize,
           result: c.result,
           saveNote: c.saveNote,
-          nightRunning: _nightRunning,
+          recordingRuns: _recordingRuns,
           shaped: List.of(c.shaped),
           linesAreYours: c.linesAreYours,
         ),

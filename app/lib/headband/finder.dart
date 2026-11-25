@@ -100,6 +100,10 @@ class BrainBitFinder implements HeadbandFinder {
   /// The activity this door started (null: none runs through it).
   ActivityRun? run;
 
+  /// The recording was stopped under the activity (Stop on the recorder's notification, the 6-hour rule): the screen
+  /// ends its session here.
+  void Function()? onRecordingStopped;
+
   /// Sessions refuse the DIY board (they read O1 O2 T3 T4); a test sets what the setting says.
   static Future<bool> Function() diyChosen = () async => (await loadDiyBoard()).settings.useDiy;
 
@@ -163,6 +167,7 @@ class BrainBitFinder implements HeadbandFinder {
     }
     if (band is RecordingBand) {
       band.onLetGo = () => acts.end(started);
+      band.onEnded = () => onRecordingStopped?.call();
     } else if (band != null) {
       // the recording ended between the span and the stream: the session got a connection of its own
       await acts.end(started, by: 'recording_stopped');

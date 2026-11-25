@@ -302,6 +302,9 @@ class BandLink {
     }
   }
 
+  /// The link reads the stream of the recording that runs (it holds no headband of its own).
+  bool get ridesRecorder => _band is RidesRecorder;
+
   /// The recording this link rode on has stopped (nothing more will come; the session should end).
   bool get recordingEnded {
     final band = _band;

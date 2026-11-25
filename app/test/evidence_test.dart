@@ -34,6 +34,7 @@ void main() {
       'share-on-wifi',
       'walking',
       'pulse',
+      'record-first',
     ]) {
       final md = await rootBundle.loadString('assets/evidence/$name.md');
       expect(md, startsWith('# '), reason: name);

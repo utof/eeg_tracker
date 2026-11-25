@@ -91,6 +91,7 @@ class NapSession {
     required this.start,
     required this.lengthMin,
     required this.recording,
+    this.span,
     required this.live,
     this.endS = 0,
     this.end,
@@ -112,6 +113,10 @@ class NapSession {
 
   /// Stem of the nap's EEG in `files/recordings/`, or null when it could not be written.
   final String? recording;
+
+  /// The span of the day's recording this session ran on as an activity (spans/activities.dart): then [recording]
+  /// is that recording's id and the session's signal is its samples inside the span; null: a session of its own.
+  final String? span;
   final NapLiveInfo live;
 
   /// Seconds after lights off when it ended, and why (null: still running, or the app stopped).
@@ -161,6 +166,7 @@ class NapSession {
     'start': start.toIso8601String(),
     'lengthMin': lengthMin,
     'recording': recording,
+    'span': ?span,
     'endS': (endS * 10).round() / 10,
     'end': end?.name,
     'wakeS': wakeS == null ? null : (wakeS! * 10).round() / 10,
@@ -186,6 +192,7 @@ class NapSession {
       start: start,
       lengthMin: length,
       recording: rec as String?,
+      span: j['span'] is String ? j['span'] as String : null,
       live: live,
       endS: endS,
       end: end,

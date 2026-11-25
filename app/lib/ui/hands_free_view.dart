@@ -58,14 +58,14 @@ class SettingsViewModel {
   const SettingsViewModel({
     this.on = false,
     this.calibration,
-    this.nightRunning = false,
+    this.recordingRuns = false,
     this.error,
     this.wearerOn,
     this.wearerStatus = '',
   });
   final bool on;
   final CalibrationRecord? calibration;
-  final bool nightRunning;
+  final bool recordingRuns;
   final String? error;
 
   /// "Was this you?" (DECISIONS 370-379): the switch and its status in words; null when not known (no folder).
@@ -213,12 +213,12 @@ class SettingsView extends StatelessWidget {
           Align(
             alignment: Alignment.centerLeft,
             child: c == null
-                ? FilledButton.icon(onPressed: m.nightRunning ? null : onCalibrate, icon: const Icon(Icons.tune), label: const Text('Calibrate'))
-                : OutlinedButton.icon(onPressed: m.nightRunning ? null : onCalibrate, icon: const Icon(Icons.tune), label: const Text('Calibrate again')),
+                ? FilledButton.icon(onPressed: onCalibrate, icon: const Icon(Icons.tune), label: const Text('Calibrate'))
+                : OutlinedButton.icon(onPressed: onCalibrate, icon: const Icon(Icons.tune), label: const Text('Calibrate again')),
           ),
-          if (m.nightRunning) ...[
+          if (m.recordingRuns) ...[
             const SizedBox(height: 8),
-            Text('The headband is busy with the night. Calibrate after Stop.', style: muted),
+            Text('A recording is running: the calibration reads it, with no new search.', style: muted),
           ],
           const SectionHeading('What it is'),
           Text(
@@ -350,7 +350,7 @@ class CalViewModel {
     this.glanceSize = GestureRule.glanceUv,
     this.result,
     this.saveNote,
-    this.nightRunning = false,
+    this.recordingRuns = false,
     this.shaped = const [],
     this.linesAreYours = false,
   });
@@ -376,7 +376,7 @@ class CalViewModel {
   final double glanceSize;
   final GestureCalibration? result;
   final String? saveNote;
-  final bool nightRunning;
+  final bool recordingRuns;
 
   bool get running => stage == CalStage.still || stage == CalStage.trying;
 }
@@ -415,7 +415,7 @@ class CalibrationView extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final Widget action = switch (m.stage) {
       CalStage.setup || CalStage.failed => FilledButton.icon(
-        onPressed: m.nightRunning ? null : onStart,
+        onPressed: onStart,
         icon: const Icon(Icons.play_arrow_rounded),
         label: Text(m.stage == CalStage.failed ? 'Try again' : 'Start'),
       ),
@@ -482,10 +482,8 @@ class CalibrationView extends StatelessWidget {
       step(1, 'Sit still for 30 seconds, jaw relaxed.'),
       step(2, 'On each low tone, clench your teeth twice: short and firm, about a second apart. Three times.'),
       step(3, 'On each rising tone, look far left, then far right, then back. Eyes only, head still. Three times.'),
-      if (model.nightRunning)
-        Para('The headband is busy with the night. Calibrate after Stop.', color: Night.caution)
-      else
-        Para('Nothing changes in your sessions until you switch hands-free on in Settings.', color: Night.inkMuted),
+      if (model.recordingRuns) Para('A recording is running: the calibration reads it, with no new search.', color: Night.inkMuted),
+      Para('Nothing changes in your sessions until you switch hands-free on in Settings.', color: Night.inkMuted),
     ];
   }
 

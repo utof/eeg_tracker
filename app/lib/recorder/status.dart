@@ -380,6 +380,16 @@ class RecordingLive {
   /// The open span of [kind], or of any kind.
   Span? open([String? kind]) => spans.where((s) => !s.closed && (kind == null || s.kind == kind)).lastOrNull;
 
+  /// What the 60-minute rule ended last (the headband was off or lost that long; `ended_by: headband_off`), offered
+  /// as "Still going? Undo" until something else is marked after it (DECISIONS 899, 986). Empty: nothing to undo.
+  List<Span> get undoable {
+    final off = [for (final s in spans) if (s.closed && s.endedBy == 'headband_off') s];
+    if (off.isEmpty) return const [];
+    final last = off.map((s) => s.end!).reduce((a, b) => a.isAfter(b) ? a : b);
+    if (spans.any((s) => !s.closed || s.start.isAfter(last))) return const [];
+    return [for (final s in off) if (s.end == last) s];
+  }
+
   /// The open sleep span (kind `sleep` or `nap`).
   Span? get openSleep => spans.where((s) => !s.closed && s.isSleep).lastOrNull;
 

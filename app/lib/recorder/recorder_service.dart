@@ -34,7 +34,7 @@ import '../sleep/live_log.dart' show LiveStageLog, liveStagesDirFor;
 import '../sleep/live_stager.dart';
 import '../sleep/night_scorer.dart';
 import '../sleep/onnx_runs.dart';
-import '../spans/span.dart' show spansDirFor;
+import '../spans/span.dart' show recordingStoppedNotice, spansDirFor, spansEndedNotice;
 import '../spans/after_restart.dart';
 import '../spans/span_log.dart';
 import 'brainbit.dart';
@@ -395,6 +395,11 @@ class RecorderTaskHandler extends TaskHandler {
               return (scorer: s, alarm: alarm(rec, s), cues: cues(rec, s));
             },
       onGiveUp: () => unawaited(_giveUp()),
+      // the 60-minute rule ended what was marked: one notice, with the way back (Undo on the Record tab)
+      onSpansEnded: (ended) {
+        final n = spansEndedNotice(ended, awayMinutes: const RecorderTiming().spansAway.inMinutes);
+        unawaited(Phone.bandNotice(n.title, n.text));
+      },
       sleep: sleep,
       firstSpan: firstSpan,
       sleepSource: auto != null ? 'auto_start' : 'owner_button',
@@ -546,6 +551,8 @@ class RecorderTaskHandler extends TaskHandler {
   /// Hours without the headband: the recording is ended as by Stop, and the service goes.
   Future<void> _giveUp() async {
     await _stop(endNight: true);
+    final n = recordingStoppedNotice(awayHours: const RecorderTiming().stopAway.inHours);
+    unawaited(Phone.bandNotice(n.title, n.text));
     FlutterForegroundTask.sendDataToMain(gaveUpMessage);
     await FlutterForegroundTask.stopService();
   }

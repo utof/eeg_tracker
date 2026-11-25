@@ -152,6 +152,24 @@ void main() {
       expect(l.days.single.$1, '2026-11-18');
     });
 
+    test('a work session that ran as an activity of a recording is listed inside it and does not rename it', () {
+      // Record at 10:00, Work on it from 10:05 (Record first step 4): the work file names the recording and its span
+      final day = writeSet(rec, at(10, 0), seconds: 120, log: ['connected BB Black serial 1 battery 90% signal -60 dBm']);
+      writeJson(File('${files.path}/work-sessions/2026-11-18-100500.work.json'), {
+        'start': at(10, 5).toIso8601String(),
+        'end': at(10, 40).toIso8601String(),
+        'raw': day,
+        'recording': day,
+        'span': '$day-1',
+      });
+      final l = listArchive(files);
+      expect(l.items, hasLength(1), reason: 'the session is part of the recording, not an item of its own');
+      final item = only(l, day);
+      expect(item.kind, isNot(ArchiveKind.work), reason: 'the recording was started by Record, not by Work');
+      expect(item.sessions.single.path, 'work-sessions/2026-11-18-100500.work.json');
+      expect(item.sessions.single.rides, isTrue);
+    });
+
     test('a meditation\'s whole log is its raw signal', () {
       final m = Directory('${files.path}/meditations')..createSync();
       writeJson(File('${m.path}/2026-11-18-200000.meditation.json'), {

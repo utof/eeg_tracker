@@ -34,6 +34,7 @@ import '../dream/band_link.dart';
 import '../feedback/features.dart' show fs;
 import '../handsfree/live.dart';
 import '../meditation/controller.dart' show gapPauseS, gapSamples;
+import '../spans/activities.dart' show activityRef;
 import '../recorder/chunk_writer.dart';
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
@@ -205,6 +206,9 @@ class NapController extends ChangeNotifier {
   NapSound? _sound;
   ChunkWriter? _writer;
   String? _recording;
+
+  /// The span this session runs on as an activity of the day's recording (then it writes no EEG file of its own).
+  String? _span;
   Detectors? _seen;
   DriftOff? _drift;
   LiveStager? _stager;
@@ -243,7 +247,7 @@ class NapController extends ChangeNotifier {
     _link = link;
     try {
       if (!await link.connect(onFound: (name) => _set(NapStage.connecting, 'Found $name. Connecting.'))) {
-        return await _fail('Headband not found. Is it switched on, charged, and free (no night recording)?', run);
+        return await _fail('Headband not found. Is it switched on and charged?', run);
       }
       if (!_live(run)) return await link.close();
       _set(NapStage.contact, 'Checking contact. Lie still for a few seconds.');
@@ -355,6 +359,7 @@ class NapController extends ChangeNotifier {
     _sound = null;
     _writer = null;
     _recording = null;
+    _span = null;
     _seen = null;
     _hands = null;
     _drift = null;
@@ -390,6 +395,13 @@ class NapController extends ChangeNotifier {
   // ---- the EEG file ----
 
   void _openWriter(String band) {
+    final ref = (_link?.ridesRecorder ?? false) ? activityRef() : null;
+    if (ref != null) {
+      // an activity of the day's recording: its signal is that recording's samples inside the span
+      _recording = ref.recording;
+      _span = ref.span;
+      return;
+    }
     final dir = recordingsDir;
     if (dir == null) return;
     try {
@@ -615,6 +627,7 @@ class NapController extends ChangeNotifier {
       start: at,
       lengthMin: lengthMin,
       recording: _recording,
+      span: _span,
       live: NapLiveInfo(
         mode: s?.mode ?? LiveMode.timer,
         why: s == null ? 'The sleep model was not available.' : s.why,

@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../recorder/status.dart' show BoardLive;
+import '../sleep/report.dart' show noSleepFoundBelowMin;
 import 'alarm_view.dart';
 import 'archive_view.dart' show ArchiveEntry;
 import 'diy_board_view.dart';
@@ -31,7 +32,11 @@ class SleepSummary {
     this.periods = 0,
     this.scoringStep,
     this.blocked,
+    this.noSleepFound = false,
   });
+
+  /// The app started this sleep stretch by itself and its scoring found under 10 minutes asleep (DECISIONS 987).
+  final bool noSleepFound;
 
   /// `2026-11-17`.
   final String nightOf;
@@ -54,6 +59,9 @@ class NightViewModel {
     required this.running,
     this.sleeping = true,
     this.spansLine,
+    this.activityLine,
+    this.activityWord,
+    this.undoLine,
     this.stopSheetLine,
     this.busy = false,
     this.minutes,
@@ -73,6 +81,7 @@ class NightViewModel {
     this.lightsOffLine,
     this.lightsOffTapped = false,
     this.napLine,
+    this.napReportsLine,
     this.share,
     this.alarmLine,
     this.alarmAction,
@@ -96,6 +105,17 @@ class NightViewModel {
 
   /// What was marked in the running recording ("Sleep since 23:10"); null: nothing yet.
   final String? spansLine;
+
+  /// The activity marked now in the running recording, other than sleep ("Work since 14:05"); null: none. Its page
+  /// may be closed (the span stays: it is what you said you were doing), so the bar offers to end it.
+  final String? activityLine;
+
+  /// That activity's word for the button ("Work" -> "End Work").
+  final String? activityWord;
+
+  /// The 60-minute rule ended what was marked ("Work ended at 14:05: the headband was off for an hour. Still
+  /// going?"); the bar offers Undo. Null: nothing to undo.
+  final String? undoLine;
 
   /// The last recording's sheet "What was this recording?" still waits ("11:02-19:40 · 8 h 38 min"); null: no card.
   final String? stopSheetLine;
@@ -138,6 +158,9 @@ class NightViewModel {
 
   /// The nap coach's newest nap in a line ("Last nap: 30 min, woke you before deep sleep"), if any.
   final String? napLine;
+
+  /// The nap reports in a line ("2 nap reports. Last: Sat 21 Nov 13:00-13:35 · asleep 22 min"); null: none yet.
+  final String? napReportsLine;
 
   /// Share on Wi-Fi's switch and sentence (lib/share/control.dart `line`); null until the setting is read.
   final ShareLine? share;
@@ -202,7 +225,19 @@ class NightView extends StatelessWidget {
     this.onRecord,
     this.onSleepNow,
     this.onStopSheet,
+    this.onEndActivity,
+    this.onNapReports,
+    this.onUndo,
   });
+
+  /// "Still going? Undo" ([NightViewModel.undoLine]).
+  final VoidCallback? onUndo;
+
+  /// Opens the nap reports' page.
+  final VoidCallback? onNapReports;
+
+  /// Ends the activity marked now ([NightViewModel.activityLine]); the recording goes on.
+  final VoidCallback? onEndActivity;
 
   /// Opens the last recording's sheet.
   final VoidCallback? onStopSheet;
@@ -369,13 +404,15 @@ class NightView extends StatelessWidget {
           // the app's log, how it is used and what costs battery (lib/logs, DECISIONS 712-716)
           if (tab == HomeTab.more) ...[const SectionHeading('How the app runs'), const RecordsLinks()],
           const TabStart(HomeTab.sessions),
-          if (tab == HomeTab.sessions && m.running) _Busy(),
-          // The headband connects to one thing at a time, so meditation waits for the night to end.
-          if (!m.running) ...[const SectionHeading('Meditation'), _Meditation(onMeditate: onMeditate)],
-          // The dream catcher holds the headband too, so it also waits for the night to end (DECISIONS row 110).
-          if (!m.running) ...[const SectionHeading('Dream catcher'), _Dream(line: m.dreamLine, onDream: onDream)],
-          // The nap coach holds the headband too (DECISIONS row 173).
-          if (!m.running) ...[const SectionHeading('Nap coach'), _Nap(line: m.napLine, onNap: onNap)],
+          // While a recording runs the sessions start on it as activities: the same stream, no new search, no second
+          // file (Record first step 4, DECISIONS 980). Only an open sleep keeps them waiting (one at a time, 983).
+          if (tab == HomeTab.sessions && m.running) _OnRecording(sleeping: m.sleeping),
+          const SectionHeading('Meditation'),
+          _Meditation(onMeditate: onMeditate),
+          const SectionHeading('Dream catcher'),
+          _Dream(line: m.dreamLine, onDream: onDream),
+          const SectionHeading('Nap coach'),
+          _Nap(line: m.napLine, onNap: onNap, reportsLine: m.napReportsLine, onReports: onNapReports),
           // Lucid dream cues: the evening practice and the morning questions, between nights (DECISIONS 308).
           if (!m.running && onLucid != null) ...[const SectionHeading('Lucid dreams'), _Lucid(line: m.lucidLine, onLucid: onLucid)],
           // Memory cues, the assistant's proposal: the evening task and the morning test, once switched on (DECISIONS
@@ -384,11 +421,9 @@ class NightView extends StatelessWidget {
             const SectionHeading('Memory cues'),
             _Memory(line: m.memoryLine!, onMemory: onMemory),
           ],
-          // The work session holds the headband too, so it waits for the night to end (DECISIONS 447).
-          if (!m.running && onWork != null) ...[const SectionHeading('Work'), _Work(onWork: onWork)],
-          // Sound for states also plays during a night, by its timer alone (DECISIONS row 130).
+          if (onWork != null) ...[const SectionHeading('Work'), _Work(onWork: onWork)],
           const SectionHeading('Sound'),
-          _Sound(running: m.running, onSound: onSound),
+          _Sound(onSound: onSound),
         ]),
       ),
       bottomNavigationBar: tab != null && tab != HomeTab.night
@@ -397,7 +432,26 @@ class NightView extends StatelessWidget {
               top: false,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-                child: _Action(m, onStart: onStart, onRecord: onRecord, onSleepNow: onSleepNow, onStopSheet: onStopSheet, onStop: onStop, onLightsOff: onLightsOff, onAlarm: onAlarm),
+                child: _Action(
+                  m,
+                  onStart: onStart,
+                  onRecord: onRecord,
+                  onSleepNow: onSleepNow,
+                  onStopSheet: onStopSheet,
+                  onStop: onStop,
+                  onLightsOff: onLightsOff,
+                  onAlarm: onAlarm,
+                  onEndActivity: onEndActivity,
+                  onUndo: onUndo,
+                  // each opens its page; pressing its own start there marks it on the recording, or starts recording
+                  activities: [
+                    if (onNap != null) (word: 'Nap', icon: Icons.airline_seat_flat_outlined, open: onNap!),
+                    if (onWork != null) (word: 'Work', icon: Icons.laptop_outlined, open: onWork!),
+                    if (onMeditate != null) (word: 'Meditate', icon: Icons.self_improvement, open: onMeditate!),
+                    if (onSound != null) (word: 'Sound', icon: Icons.graphic_eq, open: onSound!),
+                    if (onDream != null) (word: 'Dream catcher', icon: Icons.nights_stay_outlined, open: onDream!),
+                  ],
+                ),
               ),
             ),
     );
@@ -695,11 +749,17 @@ class _Sleep extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (s.scored)
+        if (s.noSleepFound)
+          Text(
+            'No sleep found on the night of $night. The app started that recording by itself and marked it as sleep, '
+            'but under ${noSleepFoundBelowMin.round()} minutes of sleep were in it, so it is not counted as a night.',
+            style: body,
+          )
+        else if (s.scored)
           Readout(parts: durationParts(s.asleepMin ?? 0), label: 'asleep, night of $night')
         else
           Text('The night of $night was too short to score.', style: body),
-        if (s.scored) ...[
+        if (s.scored && !s.noSleepFound) ...[
           const SizedBox(height: 12),
           Text(
             '${n == 0
@@ -793,14 +853,49 @@ class _QuickChecks extends StatelessWidget {
   }
 }
 
-/// Sessions while a night records: why most of them wait.
-class _Busy extends StatelessWidget {
+/// Sessions while a recording runs: they start on it.
+class _OnRecording extends StatelessWidget {
+  const _OnRecording({required this.sleeping});
+  final bool sleeping;
+
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: 12),
     child: Text(
-      'The headband is busy with the night: the sessions that use it start after Stop. Sound plays by its timer.',
+      sleeping
+          ? 'Sleep is marked on the recording. Stop sleep on the Record tab first; then a session starts on the same '
+                'recording.'
+          : 'The headband is recording. A session you start here is marked on that recording: the same signal, no new '
+                'search, no second file.',
       style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
+    ),
+  );
+}
+
+/// A feature that can run on a recording: its word, and what opens its page.
+typedef ActivityButton = ({String word, IconData icon, VoidCallback open});
+
+/// The activities in one row that scrolls sideways: each opens its own page.
+class _Activities extends StatelessWidget {
+  const _Activities(this.items, {required this.enabled});
+  final List<ActivityButton> items;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) => SingleChildScrollView(
+    scrollDirection: Axis.horizontal,
+    child: Row(
+      children: [
+        for (final a in items)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ActionChip(
+              avatar: Icon(a.icon, size: 18),
+              label: Text(a.word),
+              onPressed: enabled ? a.open : null,
+            ),
+          ),
+      ],
     ),
   );
 }
@@ -861,9 +956,13 @@ class _Dream extends StatelessWidget {
 }
 
 class _Nap extends StatelessWidget {
-  const _Nap({required this.line, required this.onNap});
+  const _Nap({required this.line, required this.onNap, this.reportsLine, this.onReports});
   final String? line;
   final VoidCallback? onNap;
+
+  /// The nap reports' line and page (ui/nap_reports_screen.dart).
+  final String? reportsLine;
+  final VoidCallback? onReports;
 
   @override
   Widget build(BuildContext context) {
@@ -883,6 +982,11 @@ class _Nap extends StatelessWidget {
           icon: const Icon(Icons.airline_seat_flat_angled_outlined),
           label: const Text('Nap coach'),
         ),
+        if (reportsLine != null) ...[
+          const SizedBox(height: 12),
+          Text(reportsLine!, style: muted),
+          TextButton(onPressed: onReports, child: const Text('Nap reports')),
+        ],
       ],
     );
   }
@@ -959,8 +1063,7 @@ class _Work extends StatelessWidget {
 }
 
 class _Sound extends StatelessWidget {
-  const _Sound({required this.running, required this.onSound});
-  final bool running;
+  const _Sound({required this.onSound});
   final VoidCallback? onSound;
 
   @override
@@ -970,10 +1073,8 @@ class _Sound extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          running
-              ? 'Calm sound to fall asleep to, stopping by its timer (the headband is busy with the night).'
-              : 'Calm sound for falling asleep, relaxing, focus, a break or waking up; a beat if you like. With the '
-                    'headband, see what your brain does.',
+          'Calm sound for falling asleep, relaxing, focus, a break or waking up; a beat if you like. With the '
+          'headband, see what your brain does.',
           style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
         ),
         const SizedBox(height: 16),
@@ -984,8 +1085,22 @@ class _Sound extends StatelessWidget {
 }
 
 class _Action extends StatelessWidget {
-  const _Action(this.m, {required this.onStart, required this.onStop, this.onRecord, this.onSleepNow, this.onStopSheet, this.onLightsOff, this.onAlarm});
+  const _Action(
+    this.m, {
+    required this.onStart,
+    required this.onStop,
+    this.onRecord,
+    this.onSleepNow,
+    this.onStopSheet,
+    this.onLightsOff,
+    this.onAlarm,
+    this.onEndActivity,
+    this.onUndo,
+    this.activities = const [],
+  });
   final NightViewModel m;
+  final VoidCallback? onEndActivity, onUndo;
+  final List<ActivityButton> activities;
   final VoidCallback? onRecord, onSleepNow, onStopSheet;
   final VoidCallback onStart;
   final VoidCallback onStop;
@@ -1006,6 +1121,34 @@ class _Action extends StatelessWidget {
             m.spansLine ?? 'Recording. Nothing marked: this is not counted as sleep.',
             style: text.bodyMedium?.copyWith(color: Night.inkMuted, height: 1.35),
           ),
+          if (m.undoLine != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(child: Text(m.undoLine!, style: text.bodyLarge?.copyWith(color: Night.caution, height: 1.3))),
+                if (onUndo != null) TextButton(onPressed: m.busy ? null : onUndo, child: const Text('Undo')),
+              ],
+            ),
+          ],
+          // what is marked now, and the way to end it when its page is closed
+          if (m.activityLine != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: Text('Now: ${m.activityLine}', style: text.bodyLarge?.copyWith(color: Night.live, height: 1.3)),
+                ),
+                if (onEndActivity != null)
+                  TextButton(onPressed: m.busy ? null : onEndActivity, child: Text('End ${m.activityWord ?? 'it'}')),
+              ],
+            ),
+          ],
+          if (activities.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text('Mark on this recording (no new search, no second file):', style: text.bodySmall?.copyWith(color: Night.inkMuted)),
+            const SizedBox(height: 4),
+            _Activities(activities, enabled: !m.busy),
+          ],
           const SizedBox(height: 10),
           if (m.alarmLine != null && onSleepNow != null) ...[
             AlarmLine(line: m.alarmLine!, action: m.alarmAction ?? 'Set alarm', onAction: m.busy ? null : onAlarm),
@@ -1060,7 +1203,7 @@ class _Action extends StatelessWidget {
     );
     // Record: the headband records until Stop and nothing is assumed to be a night; Sleep: the same recording with
     // a sleep stretch from its start, the alarm and the sound cues (Record first, DECISIONS 880-881)
-    final start = onRecord == null
+    final buttons = onRecord == null
         ? sleep
         : Row(
             children: [
@@ -1073,6 +1216,23 @@ class _Action extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               Expanded(child: sleep),
+            ],
+          );
+    // an activity pressed while nothing records starts the recording too (DECISIONS 884)
+    final start = activities.isEmpty || onRecord == null
+        ? buttons
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              buttons,
+              const SizedBox(height: 6),
+              Text(
+                'Or start with one of these (each also starts recording):',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Night.inkMuted),
+              ),
+              const SizedBox(height: 4),
+              _Activities(activities, enabled: !m.busy),
             ],
           );
     final line = m.alarmLine;
