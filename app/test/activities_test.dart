@@ -289,12 +289,18 @@ void main() {
     await link.startSignal();
     expect(d.statuses.last.rec.open('work'), isNotNull);
     expect(d.statuses.last.phase, isNot(Phase.recording));
+    final early = activityRef(); // a session takes it when it starts (work, nap, meditation ...) and reads it when it saves
+    expect((early?.recording, early?.span), (null, '?-1'));
     await Future<void>.delayed(const Duration(milliseconds: 50));
     expect(got, isEmpty);
     d.nightFinder.bands.add(d.band);
     await until(() => got.length > 3, what: 'the stream after the headband was found');
     // the span opened before the recording had its id: it is the recording's first all the same
     expect(d.spans.single.id, '${d.recordingId}-1');
+    // and what the session writes into its own file names that recording and that span, not the "?-1" of its start
+    final ref = activityRef();
+    expect((ref?.recording, ref?.span), (d.recordingId, '${d.recordingId}-1'), reason: 'the session file could not be joined to its signal');
+    expect((early?.recording, early?.span), (d.recordingId, '${d.recordingId}-1'), reason: 'a reference taken at the start must follow the span');
     await link.close();
     await until(() => d.spans.single.closed, what: 'the span closed under its final id');
     expect(d.screenFinder.calls, isEmpty);

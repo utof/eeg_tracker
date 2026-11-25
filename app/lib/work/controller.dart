@@ -968,7 +968,7 @@ class WorkController extends ChangeNotifier {
       'ended': end ? 'stopped' : 'running',
       'headband': _link?.name,
       'contact_ohms': contact,
-      'raw': rawStem,
+      'raw': ridesOn?.recording ?? rawStem,
       ...?ridesOn?.toJson(),
       'closed_alpha': closedAlpha,
       'baseline': d?.baseline?.toJson(),
