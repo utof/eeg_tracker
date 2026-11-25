@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:eeg_tracker/headband/replay.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/header.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
@@ -231,6 +232,22 @@ void main() {
     expect([for (final f in sets) ...packs(f)], [for (var i = 0; i < band.emitted; i++) i]);
     expect(files('log').first.readAsStringSync(), contains('could not start the next file set'));
     expect(band.calls.where((c) => c == 'startSignal'), hasLength(1));
+  });
+
+  test('the emulator check\'s short roll-over is the replay plan\'s alone: no plan or no replay build, the app\'s own limits', () {
+    const t = RecorderTiming();
+    expect((t.rollAfter, t.rollBytes), (const Duration(hours: 4), 128 * 1024 * 1024));
+    final replay = replayDirFor(dir.path)..createSync();
+    expect(replayRollBytes(dir.path, allowed: true), isNull, reason: 'no plan');
+    (ChunkWriter.open(replay, DateTime(2026, 11, 25, 9))..addBatch(DateTime(2026, 11, 25, 9), [Sample.four(pack: 0, o1: 0, o2: 0, t3: 0, t4: 0)])).close();
+    File('${replay.path}/plan.json').writeAsStringSync('{"loop": true}');
+    expect(replayRollBytes(dir.path, allowed: true), isNull, reason: 'a plan that does not ask');
+    File('${replay.path}/plan.json').writeAsStringSync('{"loop": true, "roll_bytes": 100000}');
+    expect(replayRollBytes(dir.path, allowed: true), 100000);
+    expect(replayRollBytes(dir.path), isNull, reason: 'not a replay build: the plan is never read');
+    File('${replay.path}/plan.json').writeAsStringSync('{"roll_bytes": 5}');
+    expect(() => ReplayPlan.load(replay), throwsA(isA<ReplayError>()));
+    expect(replayRollBytes(dir.path, allowed: true), isNull);
   });
 
   test('the app is killed in the middle of a roll-over: what was received is on disk, and the recording goes on', () async {

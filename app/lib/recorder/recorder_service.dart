@@ -17,6 +17,7 @@ import '../headband/battery_estimate.dart';
 import '../headband/connection.dart';
 import '../headband/lend.dart';
 import '../headband/lost_watch.dart';
+import '../headband/replay.dart' show replayRollBytes;
 import '../headband/diy/night.dart';
 import '../logs/activity.dart' show Activity;
 import '../logs/engine.dart' show EngineRecords;
@@ -254,6 +255,13 @@ bool shareEndedByItself(String note) => note.contains('could not') || note.conta
 
 Future<NightState> loadNight() async => _PrefsNightStore().load();
 
+/// The recorder's timing: its own, but for the emulator check's short roll-over in a replay build (headband/replay.dart
+/// [replayRollBytes]; a constant false in the owner's app).
+RecorderTiming _timing(String recordingsDir) {
+  final roll = replayRollBytes(recordingsDir);
+  return roll == null ? const RecorderTiming() : RecorderTiming(rollBytes: roll);
+}
+
 /// The file sets a recording writes now (storage/open_sets.dart): empty while the recorder's service does not run.
 /// For the housekeeping that runs beside a recording (packing, clearing, Export; DECISIONS 1039): it leaves them alone.
 Future<Set<String>> openSetsNow(Directory filesDir) async {
@@ -402,7 +410,7 @@ class RecorderTaskHandler extends TaskHandler {
       stepProbe: ChannelStepProbe(StepSettings(stepsDirFor(rec))),
       onStatus: _onStatus,
       onStuck: _restartProcess,
-      timing: diy == null ? const RecorderTiming() : diyRecorderTiming,
+      timing: diy == null ? _timing(rec) : diyRecorderTiming,
       // the owner's hands-free double clench, read when the detector starts (DECISIONS 247); none of the BrainBit's
       // detectors for the DIY board (they read O1 O2 T3 T4)
       watch: diy == null ? () => LiveDrift(handsFree: nightGestures(Directory(rec).parent)) : null,

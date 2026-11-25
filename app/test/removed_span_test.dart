@@ -227,7 +227,7 @@ void main() {
 
   test('an open "Did you sleep?" about a stretch that was taken away is not asked; put back, it is asked again', () {
     final t = theTest(); // Sleep 14:17:52 to 14:21:29, pressed by mistake
-    var now = DateTime(2026, 11, 25, 15);
+    final now = DateTime(2026, 11, 25, 15);
     final confirm = ConfirmQuestions(files, clock: () => now);
     final guess = Estimate(
       detector: 'sleep-periods',
