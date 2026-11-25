@@ -3,12 +3,19 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:eeg_tracker/archive/items.dart' show sessionFilesIn;
+import 'package:eeg_tracker/confirm/questions.dart';
+import 'package:eeg_tracker/feedback/session_log.dart';
+import 'package:eeg_tracker/meditation/store.dart';
+import 'package:eeg_tracker/meditation/tracker.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/nights.dart';
 import 'package:eeg_tracker/spans/not_sleep.dart';
 import 'package:eeg_tracker/spans/span.dart';
 import 'package:eeg_tracker/spans/span_log.dart';
+import 'package:eeg_tracker/work/store.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_labels/shared_labels.dart';
 
 void main() {
   late Directory files, rec, nights;
@@ -156,6 +163,109 @@ void main() {
     expect(setSpanRemoved(files, log.read(id).removed.first, removed: false), ['naps/2026-11-25-110000']);
     expect(napsIn(rec).single.spanIds, [nap.id]);
     expect(report('naps/2026-11-25-110000').existsSync(), isTrue);
+  });
+
+  test('a removed Work or Meditate mark takes the activity\'s own file out of the lists; put back, it is there again', () async {
+    final a = DateTime(2026, 11, 25, 11), id = writeSet(a, 60 * 60);
+    final w0 = a.add(const Duration(minutes: 5)), m0 = a.add(const Duration(minutes: 31));
+    final work = log.add(id, kind: 'work', start: w0, end: w0.add(const Duration(minutes: 20)), source: 'owner_button');
+    final med = log.add(id, kind: 'meditate', start: m0, end: m0.add(const Duration(minutes: 10)), source: 'owner_button');
+    // each activity's own file names its recording and its span (spans/activities.dart [ActivityRef])
+    final works = WorkStore(Directory('${files.path}/work-sessions'));
+    works.save({
+      'kind': 'work_session',
+      'start': w0.toIso8601String(),
+      'end': w0.add(const Duration(minutes: 20)).toIso8601String(),
+      'worn_min': 20,
+      'recording': id,
+      'span': work.id,
+    });
+    // a second work session of its own, from before Record first: never touched
+    works.save({'kind': 'work_session', 'start': DateTime(2026, 11, 20, 10).toIso8601String(), 'end': DateTime(2026, 11, 20, 11).toIso8601String(), 'worn_min': 55});
+    final meds = MeditationStore(Directory('${files.path}/meditations'));
+    final summary = MeditationSummary(
+      start: m0,
+      lengthMin: 10,
+      runS: 600,
+      complete: true,
+      settledS: 300,
+      longestSettledS: 52,
+      bells: 2,
+      restless: {for (final r in Restless.values) r: 0},
+      drifting: 0,
+      drowsyS: 0,
+      calm: const [0.5],
+      iafHz: 9.75,
+      note: '',
+      logFile: '${fileStem(m0)}.log.json',
+    );
+    await meds.save(summary, SessionLog({'start': m0.toIso8601String()}), extra: {'recording': id, 'span': med.id});
+
+    List<String> archive() => [for (final f in sessionFilesIn(files)) f.path]..sort();
+    expect(works.list().map((s) => s.start), [w0, DateTime(2026, 11, 20, 10)]);
+    expect(meds.list().map((s) => s.start), [m0]);
+    expect(archive(), hasLength(3));
+
+    setSpanRemoved(files, work, removed: true);
+    expect(works.list().map((s) => s.start), [DateTime(2026, 11, 20, 10)]);
+    expect((await works.listAsync()).map((s) => s.start), [DateTime(2026, 11, 20, 10)]);
+    expect(meds.list(), hasLength(1));
+    expect(archive(), ['meditations/${fileStem(m0)}.meditation.json', 'work-sessions/2026-11-20-100000.work.json']);
+    setSpanRemoved(files, med, removed: true);
+    expect(meds.list(), isEmpty);
+    expect(archive(), ['work-sessions/2026-11-20-100000.work.json']);
+    // nothing was deleted
+    expect(File('${files.path}/work-sessions/${fileStem(w0)}.work.json').existsSync(), isTrue);
+    expect(File('${files.path}/meditations/${fileStem(m0)}.meditation.json').existsSync(), isTrue);
+
+    setSpanRemoved(files, log.read(id).removed.firstWhere((s) => s.id == work.id), removed: false);
+    setSpanRemoved(files, log.read(id).removed.firstWhere((s) => s.id == med.id), removed: false);
+    expect(works.list().map((s) => s.start), [w0, DateTime(2026, 11, 20, 10)]);
+    expect(meds.list().map((s) => s.start), [m0]);
+    expect(archive(), hasLength(3));
+  });
+
+  test('an open "Did you sleep?" about a stretch that was taken away is not asked; put back, it is asked again', () {
+    final t = theTest(); // Sleep 14:17:52 to 14:21:29, pressed by mistake
+    final now = DateTime(2026, 11, 25, 15);
+    final confirm = ConfirmQuestions(files, clock: () => now);
+    final guess = Estimate(
+      detector: 'sleep-periods',
+      version: 'test',
+      label: Labels.nap,
+      start: pressed.add(const Duration(seconds: 20)),
+      end: stopped.subtract(const Duration(seconds: 10)),
+      recording: t.recording,
+      confidence: 0.9,
+      made: stopped,
+    );
+    // another guess, hours away from the stretch: it is none of the removal's business
+    final other = Estimate(
+      detector: 'sleep-periods',
+      version: 'test',
+      label: Labels.nap,
+      start: DateTime(2026, 11, 25, 10),
+      end: DateTime(2026, 11, 25, 10, 40),
+      recording: 'another',
+      confidence: 0.9,
+      made: DateTime(2026, 11, 25, 10, 40),
+    );
+    confirm.register([guess, other]);
+    expect(confirm.pending().map((q) => q.estimate.id), containsAll([guess.id, other.id]));
+    expect(confirm.pendingFor(t.recording, pressed, stopped).map((q) => q.estimate.id), [guess.id]);
+
+    setSpanRemoved(files, t, removed: true);
+    expect(confirm.pending().map((q) => q.estimate.id), [other.id]);
+    expect(confirm.pendingFor(t.recording, pressed, stopped), isEmpty);
+    // nothing was answered for you: no Yes, no No, no label
+    expect(confirm.store.read().answered(guess.id), isFalse);
+
+    setSpanRemoved(files, log.read(t.recording).removed.single, removed: false);
+    expect(confirm.pending().map((q) => q.estimate.id), containsAll([guess.id, other.id]));
+
+    // a stretch filed again under another recording (`moved_to`) was not taken away by you: its question stays
+    log.write(log.read(t.recording).spans.single.asRemoved(true, movedTo: 'elsewhere-1'));
+    expect(confirm.pending().map((q) => q.estimate.id), containsAll([guess.id, other.id]));
   });
 
   test('the recording that runs now is the recorder\'s: its marks cannot be removed from the Archive', () {

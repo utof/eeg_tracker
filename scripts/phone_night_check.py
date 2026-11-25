@@ -195,6 +195,11 @@ RULES = [(k, re.compile(p)) for k, p in [
     ("span", r"span: (?P<kind>\S+) (?P<what>start|end)(?: \(again: Undo\))?"),
     ("span_note", r"sleep kit (?:on for|off after) .*|the headband is back: sleep goes on by itself .*|Undo: .*"),
     ("notice", r"notice: .*"),  # P: a notification the app showed
+    # P: a long recording goes on in a new file set of the same recording, on the same connection, without a gap
+    # (every 4 hours or 128 MB, DECISIONS 1035): the old set's last line and the new one's first
+    ("rolled", r"file set full; the recording goes on without a gap in (?P<next>\S+)"),
+    ("continues", r"continues (?P<prev>\S+) without a gap \(.*\)"),
+    ("error", r"could not start the next file set: .*; this one goes on"),
 ]]
 HELPER_PROBLEM = re.compile(r"\bstopped(?: by an error)?: |could not")
 PHONE_ONLY = {"phone_settings", "phone_battery", "battery_summary", "try", "reconnected", "service_restart",

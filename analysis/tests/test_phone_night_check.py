@@ -859,6 +859,11 @@ NEW_LINES = LENDER_LINES + [
     "notice: Low battery. The headband is at 5 %",
     "no data for 20 min: what was marked ends at the last data",
     "no data for 6 h: the recording stops itself",
+    # a long recording goes on in a new file set (DECISIONS 1035)
+    "file set full; the recording goes on without a gap in 2026-11-25-130000",
+    "continues 2026-11-25-090000 without a gap (same connection; a new file set every 4.0 h or 128 MB)",
+    "could not start the next file set: FileSystemException: No space left on device; this one goes on",
+    "could not save the newest data: FileSystemException; the next file set waits",
 ]
 
 

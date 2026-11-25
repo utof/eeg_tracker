@@ -328,7 +328,12 @@ void sleepOnARecording() {
     await r.stop();
     await running;
     expect([for (final s in spans().spans) (s.kind, s.endedBy)], [('sleep', 'owner'), ('nap', 'recording_stopped')]);
-    expect(Directory(dir.path).listSync().where((f) => f.path.endsWith('.f32')), hasLength(1));
+    // Sleep and Stop sleep never open a file set. Ten hours passed on the clock, so the recording went on in a second
+    // set once (the 4-hour roll-over, DECISIONS 1035): still one recording, on the one connection.
+    final sets = Directory(dir.path).listSync().whereType<File>().where((f) => f.path.endsWith('.f32')).toList();
+    expect(sets, hasLength(2));
+    expect({for (final f in sets) readHeader(f).recording}, hasLength(1));
+    expect(band.calls.where((c) => c == 'startSignal'), hasLength(1));
   });
 
   test('the headband gone 60 minutes: open spans end at the last data; 6 hours: the recording stops itself', () async {

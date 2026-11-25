@@ -75,6 +75,7 @@ class NightViewModel {
     this.checks = const [],
     this.nightsOnPhone = 0,
     this.exportLine,
+    this.storageLine,
     this.sleep,
     this.soFarLine,
     this.dreamLine,
@@ -142,6 +143,10 @@ class NightViewModel {
   /// When the last export was and what is only on this phone since (lib/export/store.dart `exportLine`); null
   /// when there is nothing to export. [warn] from 3 days with something new, or never exported.
   final ({String text, bool warn})? exportLine;
+
+  /// What the raw recordings take on the phone and what of them waits for the laptop (storage/storage.dart
+  /// `storageLine`, DECISIONS 1041); null with none.
+  final String? storageLine;
 
   /// The Sleep section, shown between nights.
   final SleepSummary? sleep;
@@ -375,14 +380,17 @@ class NightView extends StatelessWidget {
           const TabStart(HomeTab.more),
           // The Archive leads More: every recording on the phone, open to browse during a night too (DECISIONS 700-709).
           if (onArchive != null) ...[const SectionHeading('Archive'), ArchiveEntry(onOpen: onArchive)],
-          // A night being recorded is not finished, so Export waits for Stop (DECISIONS rows 56, 150); Share on
-          // Wi-Fi is there during the night too (rows 220-229).
-          if (m.share != null || (!m.running && (m.nightsOnPhone > 0 || m.exportLine != null))) ...[
+          // While a sleep stretch records only Share on Wi-Fi is here (rows 220-229). A recording with no sleep
+          // stretch open may run all day, so Export is there beside it, without the file set being written (DECISIONS
+          // 1040).
+          if (m.share != null ||
+              (!(m.running && m.sleeping) && (m.nightsOnPhone > 0 || m.exportLine != null || m.storageLine != null))) ...[
             const SectionHeading('Your data'),
             _YourData(
-              running: m.running,
+              running: m.running && m.sleeping,
               nights: m.nightsOnPhone,
               line: m.exportLine,
+              storageLine: m.storageLine,
               onExportData: onExportData,
               onExport: onExport,
               share: m.share,
@@ -640,11 +648,15 @@ class _YourData extends StatelessWidget {
     required this.line,
     required this.onExportData,
     required this.onExport,
+    this.storageLine,
     this.share,
     this.onShare,
     this.onShareDetails,
   });
+
+  /// A sleep stretch records: only Share on Wi-Fi is shown.
   final bool running;
+  final String? storageLine;
   final ShareLine? share;
   final ValueChanged<bool>? onShare;
   final VoidCallback? onShareDetails;
@@ -671,6 +683,20 @@ class _YourData extends StatelessWidget {
                     'where other apps cannot read them.',
           style: muted,
         ),
+        if (storageLine != null) ...[
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(top: 1),
+                child: Icon(Icons.sd_storage_outlined, size: 22, color: Night.inkMuted),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Text(storageLine!, style: muted)),
+            ],
+          ),
+        ],
         if (l != null) ...[
           const SizedBox(height: 10),
           Row(

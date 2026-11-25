@@ -34,7 +34,12 @@ recording of anyone is needed. It checks:
   S1. (real phone, 2026-11-25: "the sheet did not show") that recording was started with Sleep and Sleep covers all
      of it, so by design no sheet comes after "Stop everything" and no "Answer" line waits on the Record tab;
      `spans/stop-sheet.json` names the recording with `saved` false.
-`--only main` runs 1-5, A1 and W1-W3, `--only lent` L1-L3 and S1; without it, everything.
+  R1. (review finding 10, DECISIONS 1035-1037) a long recording goes on in a new file set: with the replay plan's
+     `roll_bytes` at 100 kB (20 s of signal; the app's own limits are 4 hours or 128 MB) Record must write three file
+     sets or more of one recording on one connection: each closed set's log names the next, each next one names the
+     one before, the packet counter goes on by one across every seam, the first batch of a set arrives under 0.5 s
+     after the last of the set before, and no log has a drop or a reconnect.
+`--only main` runs 1-5, A1 and W1-W3, `--only lent` L1-L3 and S1, `--only roll` R1; without it, everything but R1.
 The emulator, its adb server and the helpers are the pre-install check's (tool/precheck.py). Emulator only: run it
 inside `_local/build_slot.sh heavy`, with --work on a disk with 8 GB free.
 """
@@ -44,6 +49,7 @@ import argparse
 import json
 import re
 import shutil
+import struct
 import sys
 import time
 from pathlib import Path
@@ -464,6 +470,78 @@ def lent_night() -> list[pc.Result]:
     return out
 
 
+def roll_over(stage: Path, before: set[str]) -> list[pc.Result]:
+    """R1: Record with a 100 kB roll-over; the file sets of the recording are pulled and read here."""
+    name = "R1 a long recording goes on in new file sets, without a gap"
+    if not tap(wait(lambda: pc.bar_button("Record"), limit=60)):
+        return [pc.Result(name, "FAIL", "the Record button was not found", pc.screen_words("R1-no-button"))]
+
+    def started() -> str | None:
+        new = sorted(f for f in pc.sh(f"ls {REC}/*.log 2>/dev/null", check=False).split() if f not in before)
+        return new[0] if new and "recording started" in cat(new[0]) else None
+
+    log = wait(started, limit=150)
+    if not log:
+        return [pc.Result(name, "FAIL", "no recording started within 150 s of Record", pc.screen_words("R1-no-recording"))]
+    rec = log.rsplit("/", 1)[1][: -len(".log")]
+    got = wait(lambda: len(rec_sets(rec)) >= 4, limit=240, every=5)
+    words = pc.screen_words("R1-recording")
+    tap(wait(lambda: pc.bar_button("Stop"), limit=20))
+    tap(wait(lambda: emu.match("Stop", True) if emu.match("Stop recording?", True) else None, limit=20))
+    wait(lambda: "end of night" in cat(sorted(rec_sets(rec))[-1][: -len(".f32")] + ".log"), limit=60)
+    stems = sorted(f.rsplit("/", 1)[1][: -len(".f32")] for f in rec_sets(rec))
+    local = stage / "roll"
+    local.mkdir(parents=True, exist_ok=True)
+    for stem in stems:
+        for ext in (".f32", ".idx", ".log", ".header.json"):
+            pc.adb("pull", f"{REC}/{stem}{ext}", str(local / f"{stem}{ext}"), check=False)
+    details = [f"file sets: {' '.join(stems)}", *[w for w in words if "Recording" in w or "econnect" in w][:3]]
+    problems: list[str] = []
+    if not got or len(stems) < 3:
+        problems.append(f"{len(stems)} file sets after 4 minutes, 3 or more were due")
+    packs: list[tuple[int, int, int]] = []  # per set: samples, first counter, last counter
+    times: list[tuple[float, float]] = []  # per set: first and last batch arrival
+    for stem in stems:
+        raw = (local / f"{stem}.f32").read_bytes() if (local / f"{stem}.f32").exists() else b""
+        idx = (local / f"{stem}.idx").read_bytes() if (local / f"{stem}.idx").exists() else b""
+        text = (local / f"{stem}.log").read_text() if (local / f"{stem}.log").exists() else ""
+        try:
+            named = json.loads((local / f"{stem}.header.json").read_text()).get("recording")
+        except (OSError, ValueError):
+            named = None
+        if named != rec:
+            problems.append(f"{stem}: its header names {named!r}, not {rec}")
+        n = len(raw) // 20
+        if n == 0 or len(idx) < 16:
+            problems.append(f"{stem}: no samples")
+            continue
+        packs.append((n, struct.unpack_from("<I", raw, 0)[0], struct.unpack_from("<I", raw, (n - 1) * 20)[0]))
+        times.append((struct.unpack_from("<d", idx, 0)[0], struct.unpack_from("<d", idx, len(idx) // 16 * 16 - 16)[0]))
+        if "drop (" in text or "reconnected (" in text:
+            problems.append(f"{stem}: its log has a drop or a reconnect")
+        details.append(f"{stem}: {n} samples, counter {packs[-1][1]}..{packs[-1][2]}; "
+                       + " | ".join(l.split(" ", 1)[1] for l in text.splitlines() if "file set" in l or "without a gap" in l))
+    if len(packs) == len(stems):
+        for k in range(1, len(stems)):
+            step = (packs[k][1] - packs[k - 1][2]) % 2048
+            gap = times[k][0] - times[k - 1][1]
+            if step != 1:
+                problems.append(f"between {stems[k - 1]} and {stems[k]} the counter steps by {step}, not 1")
+            if not 0 < gap < 0.5:
+                problems.append(f"between {stems[k - 1]} and {stems[k]} the batches are {gap:.3f} s apart")
+            prev = (local / f"{stems[k - 1]}.log").read_text()
+            cur = (local / f"{stems[k]}.log").read_text()
+            if f"the recording goes on without a gap in {stems[k]}" not in prev:
+                problems.append(f"{stems[k - 1]}: its log does not name {stems[k]}")
+            if f"continues {stems[k - 1]} without a gap" not in cur:
+                problems.append(f"{stems[k]}: its log does not name {stems[k - 1]}")
+    total = sum(p[0] for p in packs)
+    return [pc.Result(name, "FAIL" if problems else "PASS",
+                      "; ".join(problems) if problems else
+                      f"{len(stems)} file sets of recording {rec}, {total} samples, the counter goes on by one across every seam",
+                      details)]
+
+
 def check(apk: Path, stage: Path, only: str = "") -> list[pc.Result]:
     results: list[pc.Result] = []
     f32 = pc.make_quiet(stage)
@@ -473,7 +551,8 @@ def check(apk: Path, stage: Path, only: str = "") -> list[pc.Result]:
     pc.wait_main(240)
     pc.stop_app()
     plan = stage / "plan-quiet.json"
-    plan.write_text(json.dumps({"files": [f"quiet/{f32.name}"], "speed": 1, "loop": True}))
+    plan.write_text(json.dumps({"files": [f"quiet/{f32.name}"], "speed": 1, "loop": True,
+                                **({"roll_bytes": 100000} if only == "roll" else {})}))
     pairs = [(plan, "replay/plan.json")]
     for ext in (".f32", ".idx", ".log", ".header.json"):
         pairs.append((f32.with_name(stem + ext), f"replay/quiet/{stem}{ext}"))
@@ -488,6 +567,8 @@ def check(apk: Path, stage: Path, only: str = "") -> list[pc.Result]:
     pc.open_tab("Record")
     if only == "lent":
         return lent_night()
+    if only == "roll":
+        return roll_over(stage, before)
 
     # 1. Record
     if not tap(wait(lambda: pc.bar_button("Record"), limit=60)):
@@ -602,7 +683,8 @@ def main() -> int:
                    help="where the run's folder (emulator, staged files, logs) is made; a disk with 8 GB free")
     p.add_argument("--adb-connect", metavar="HOST:PORT", help="use the emulator already reachable at this adb address "
                    "(a tunnel to another machine's) instead of making one here")
-    p.add_argument("--only", choices=["main", "lent"], default="", help="main: 1-5 and W1-W3; lent: L1-L3; default: all")
+    p.add_argument("--only", choices=["main", "lent", "roll"], default="",
+                   help="main: 1-5 and W1-W3; lent: L1-L3; roll: R1; default: all but R1")
     a = p.parse_args()
     if not a.apk.is_file():
         p.error(f"{a.apk} is not there")

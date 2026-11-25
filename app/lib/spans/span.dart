@@ -343,6 +343,13 @@ SpansFile readSpans(File f) {
 }
 
 /// `files/spans/`, beside the recordings folder [recordingsDir] (`files/recordings/`).
+/// The ids of the marks taken away in the Archive ("Remove this mark", "Not sleep"; DECISIONS 1025) and not put back:
+/// an activity's own file that names one of them (its `span`) is left out of every list (DECISIONS 1042).
+Set<String> removedSpanIds(Directory spansDir) => {
+  for (final f in spansIn(spansDir).values)
+    for (final s in f.removed) s.id,
+};
+
 Directory spansDirFor(String recordingsDir) => Directory('${Directory(recordingsDir).parent.path}/spans');
 
 File spansFileOf(Directory spansDir, String recording) => File('${spansDir.path}/$recording$spansSuffix');

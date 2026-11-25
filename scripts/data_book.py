@@ -1103,13 +1103,16 @@ def estimate_rows(local: Path) -> list[dict]:
     """estimates.tsv: what the phone's detectors thought happened and what the owner said to each. `answer`: yes, no,
     not_sure (its own answer, no label), said (a blind card: `said` is the label picked, `agrees` 1 when it is the
     detector's guess), not_answered (`why_not` says why; never a Yes or a No), or empty: still waiting. An estimate
-    is not a label until it has a truth row (`label_id`). `times_confirmed` 1 only when the owner set the times
+    is not a label until it has a truth row (`label_id`; empty too for a Yes whose sleep stretch was taken away later). `times_confirmed` 1 only when the owner set the times
     (`confirmed_start`, `confirmed_end`); `start` and `end` stay the detector's. Rebuilt whole from
     `<local>/phone/confirm/` (truth.read_confirm)."""
     rows = []
+    # a Yes whose sleep stretch was taken away afterwards has no truth row (truth.confirm_rows), so none is named:
+    # the Yes stays as what was said (DECISIONS 1044)
+    taken = truth.taken_away(local)
     for c in truth.read_confirm(local):
         e = c.estimate
-        row = truth.confirm_row(c)
+        row = None if c.answer == "yes" and e.get("id") in taken else truth.confirm_row(c)
         conf = e.get("confidence")
         yes = c.answer == "yes"
         rows.append(dict(estimate_id=e["id"], start=iso(e.get("start")), end=iso(e.get("end")),

@@ -16,7 +16,9 @@ import 'screens_test.dart' show loadFonts;
 
 void _no() {}
 
-NightViewModel _model({required bool running}) => NightViewModel(
+NightViewModel _model({required bool running, bool sleeping = true, String? storageLine}) => NightViewModel(
+  sleeping: sleeping,
+  storageLine: storageLine,
   title: running ? 'Recording' : 'Ready',
   sentence: running ? 'All is well. You can put the phone down.' : 'Last night is saved. Put the headband on to start a new one.',
   tone: running ? Tone.live : Tone.calm,
@@ -28,7 +30,7 @@ NightViewModel _model({required bool running}) => NightViewModel(
   rssi: running ? -64 : null,
   contactOhms: const {'O1': 8e5, 'O2': 9e5, 'T3': 1.8e6, 'T4': null},
   nightsOnPhone: 3,
-  exportLine: running ? null : (text: 'Last export yesterday; 3 new files since.', warn: false),
+  exportLine: running && sleeping ? null : (text: 'Last export yesterday; 3 new files since.', warn: false),
   sleep: running ? null : const SleepSummary(nightOf: '2026-11-19', scored: true, asleepMin: 412, periods: 2),
   dreamLine: 'Last session: 3 answers, Tue 18 Nov 23:10.',
   napLine: 'Last nap: 30 min.',
@@ -144,6 +146,19 @@ void main() {
       expect(where[HomeTab.trends], contains('the Trends page'));
     });
   }
+
+  testWidgets('a recording with no sleep stretch open keeps Export and the storage line on More; with Sleep on only sharing', (tester) async {
+    const line = 'Recordings on this phone: 412 MB. 96 MB waits for the laptop to check it.';
+    await _pump(tester, _page(_model(running: true, sleeping: false, storageLine: line), HomeTab.more));
+    expect(_texts(tester), containsAll(['Your data', line, 'Export data', 'Export a night', 'Last export yesterday; 3 new files since.']));
+    expect(_texts(tester).any((s) => s.contains('Shared on Wi-Fi')), isTrue);
+    await _pump(tester, _page(_model(running: true, storageLine: line), HomeTab.more));
+    expect(_texts(tester), isNot(contains('Export data')));
+    expect(_texts(tester), isNot(contains(line)));
+    expect(_texts(tester).any((s) => s.contains('Shared on Wi-Fi')), isTrue);
+    await _pump(tester, _page(_model(running: false, storageLine: line), HomeTab.more));
+    expect(_texts(tester), containsAll([line, 'Export data']));
+  });
 
   testWidgets('the app opens on Night with Start night pinned; the bar has five tabs; Back returns to Night', (tester) async {
     final key = GlobalKey<HomeTabsState>();

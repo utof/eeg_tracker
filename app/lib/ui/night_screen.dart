@@ -18,7 +18,8 @@ import 'experiments_view.dart' show experimentLine;
 import '../recorder/headband.dart';
 import '../recorder/nights.dart';
 import '../recorder/packed.dart' show packInBackground, packOldRecordings;
-import '../storage/clear.dart' show ClearMode, autoClear, planClear;
+import '../storage/clear.dart' show ClearMode, ClearPlan, autoClear, planClear;
+import '../storage/storage.dart' show rawOnPhone, storageLine;
 import '../recorder/recorder_service.dart';
 import '../recorder/status.dart';
 import '../confirm/questions.dart';
@@ -308,6 +309,9 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   String? _memoryLine;
   String? _checkedInAt, _experiment, _unusual;
   Pending? _pending;
+
+  /// The raw recordings on the phone and what of them waits for the laptop (storage/storage.dart [rawOnPhone]).
+  ({int bytes, int waiting})? _raw;
   AlarmSetup _alarm = const AlarmSetup();
   AlarmClockState _clockState = const AlarmClockState({});
 
@@ -376,7 +380,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
 
   void _onProofs() {
     final dir = _dir;
-    if (dir == null || _running || _packing != null) return;
+    if (dir == null || _packing != null) return;
+    // beside a recording too ([_packingMustWait] says when not)
     _packing = _moveOld(dir).whenComplete(() => _packing = null);
   }
 
@@ -536,17 +541,21 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     if (mounted && running != _running) setState(() => _running = running);
   }
 
-  /// Packs the raw recordings nothing has written for a day (DECISIONS 540-549), after the sleep scorer: between
-  /// nights, one file at a time off the screen's thread. It stops before the next file as soon as a night or a session
-  /// records, the scorer runs again, the app leaves the screen or another page is in front. One run at a time.
+  /// Packs the raw recordings nothing has written for a day (DECISIONS 540-549), after the sleep scorer, one file at
+  /// a time off the screen's thread. It stops before the next file as soon as a sleep stretch or a session records,
+  /// the scorer runs again, the app leaves the screen or another page is in front. One run at a time. Beside a
+  /// recording with no sleep stretch open it runs too (DECISIONS 1039), and leaves the file set being written alone.
   static Future<void>? _packing;
 
   void _packOld(String dir) {
-    _packing ??= packOldRecordings(Directory(dir).parent, busy: _packingMustWait, pack: packInBackground)
+    final files = Directory(dir).parent;
+    _packing ??= _openSets(files)
+        .then((open) => packOldRecordings(files, busy: _packingMustWait, pack: packInBackground, open: open))
         .then((run) {
           if (run.failed.isNotEmpty) debugPrint('packing: ${run.failed.length} not packed: ${run.failed.first.$2}');
         })
         .then((_) => _moveOld(dir))
+        .catchError((Object _) {}) // the recorder did not say what it writes: nothing is packed this time
         .whenComplete(() => _packing = null);
   }
 
@@ -556,28 +565,40 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   /// run here, where the readers are known.
   Future<void> _moveOld(String dir) async {
     final laptop = _share.config.laptop;
+    final files = Directory(dir).parent;
     final run = await autoClear(
-      Directory(dir).parent,
+      files,
       busy: _packingMustWait,
       paired: laptop != null,
       laptop: laptop?.name,
-      plan: (Directory files, Map<String, DateTime> before) => Isolate.run(
-        () => planClear(files, before.keys.toSet(), mode: ClearMode.keepTime, now: DateTime.now(), before: before),
-        debugName: 'storage-plan',
-      ),
+      plan: _planKeepTime,
+      open: () => _openSets(files),
     );
     if (run != null && run.removed.isNotEmpty) {
       debugPrint('storage: ${run.removed.length} left the phone, the laptop has them (${(run.freedBytes / 1e6).round()} MB)');
     }
   }
 
+  /// The keep-time plan in a background isolate. Static: a closure made in the State would carry the screen along.
+  static Future<ClearPlan> _planKeepTime(Directory files, Map<String, DateTime> before, Set<String> open) => Isolate.run(
+    () => planClear(files, before.keys.toSet(), mode: ClearMode.keepTime, now: DateTime.now(), before: before, open: open),
+    debugName: 'storage-plan',
+  );
+
+  /// The file sets being written now; a failure to ask is "wait" for whoever asked (it throws).
+  static Future<Set<String>> _openSets(Directory files) => openSetsNow(files);
+
+  /// Whether packing and clearing must wait now. Beside a recording they run only while no sleep stretch is open
+  /// (the sleep scoring's own rule, [_scoringStop]: the live sleep model has the phone during a sleep stretch) and
+  /// once the recorder has said which recording runs, so its open file set is known (DECISIONS 1039).
   Future<bool> _packingMustWait() async {
     if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? false)) return true;
     if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) return true;
     if (nightScoringBusy || dreamSessionRunning || soundSessionRunning || napSessionRunning || workSessionRunning) {
       return true;
     }
-    return FlutterForegroundTask.isRunningService;
+    if (!await FlutterForegroundTask.isRunningService) return false;
+    return _scoringStop(running: true) != null || _status?.rec.id == null;
   }
 
   Future<void> _refresh() async {
@@ -596,7 +617,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     if (endedAlone && mounted) _say('The recording stopped when the phone restarted. What was marked ends at its last data.');
     _sweepYeses(dir, running: running);
     // the nights' chaining opens every recording's index (and a packed one's header): off the screen's thread
-    final nights = dir == null || running ? const <NightFiles>[] : await _listNights(dir);
+    // (beside a recording too: the Archive's list and Export work while it runs, DECISIONS 1040)
+    final nights = dir == null ? const <NightFiles>[] : await _listNights(dir);
     final now = DateTime.now();
     final lines = dir == null ? null : nightLines(dir, now);
     final alarm = dir == null ? const AlarmSetup() : AlarmSetupStore.forRecordings(dir).read();
@@ -651,7 +673,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     if (trusted && _scoringStop(running: running) == null) {
       _scoring?.runSoon(then: dir == null ? null : () => _packOld(dir));
     }
-    final pending = dir == null || running ? null : await _pendingExport(dir);
+    final pending = dir == null ? null : await _pendingExport(dir);
+    final rawNow = dir == null ? null : await _rawOnPhone(dir);
     String? experiment;
     try {
       experiment = dir == null ? null : experimentLine(currentExperiment(dir, now));
@@ -685,6 +708,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       _experiment = experiment;
       _unusual = unusual;
       _pending = pending;
+      _raw = rawNow;
       _alarm = alarm;
       _clockState = clockState;
       _diy = diy;
@@ -792,6 +816,16 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     final files = Directory(dir).parent.path;
     try {
       return await Isolate.run(() => pendingExport(Directory(files)));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// What the raw recordings take and what waits for the laptop, read off the screen's thread.
+  static Future<({int bytes, int waiting})?> _rawOnPhone(String dir) async {
+    final files = Directory(dir).parent.path;
+    try {
+      return await Isolate.run(() => rawOnPhone(Directory(files)));
     } catch (_) {
       return null;
     }
@@ -1043,7 +1077,21 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   /// picker failed on a packed recording's length; DECISIONS 629).
   Future<void> _export() async {
     final dir = _dir;
-    final nights = dir == null ? _nights : await _listNights(dir);
+    var nights = dir == null ? _nights : await _listNights(dir);
+    if (dir != null && _running) {
+      // a night whose last file set is still being written is not offered: its copy would end in the middle
+      final Set<String> open;
+      try {
+        open = await _openSets(Directory(dir).parent);
+      } catch (_) {
+        return _say('Not now: the recorder did not answer. Try again in a moment.');
+      }
+      final whole = [for (final n in nights) if (!n.recordings.any((f) => open.contains(f.path))) n];
+      if (whole.isEmpty && nights.isNotEmpty) {
+        return _say('The newest night is still being written to. It can be exported after Stop, or in a few hours.');
+      }
+      nights = whole;
+    }
     if (nights.isEmpty || !mounted) return;
     final night = await showModalBottomSheet<NightFiles>(
       context: context,
@@ -1089,9 +1137,9 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     unawaited(_refresh());
   }
 
-  /// Export data: everything new, from its own page, only between nights (DECISIONS rows 150-156).
+  /// Export data: everything new, from its own page (DECISIONS rows 150-156); beside a recording too, without the
+  /// file set being written (DECISIONS 1040).
   Future<void> _exportData() async {
-    if (_running) return;
     await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ExportScreen()));
     unawaited(_refresh());
   }
@@ -1289,7 +1337,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
         wifi: diy || _share.on,
       ),
       nightsOnPhone: _nights.length,
-      exportLine: _running || _pending == null
+      storageLine: _raw == null ? null : storageLine(_raw!, paired: _share.config.laptop != null),
+      exportLine: _pending == null
           ? null
           : exportLine(
               lastComplete: _pending!.lastComplete,

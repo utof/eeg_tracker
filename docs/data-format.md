@@ -847,6 +847,13 @@ file of the recording, its record included, the session files, the report and th
 Record first (DECISIONS 880-899, spec `docs/specs/2026-11-21-record-first-design.md`): one **recording** is everything
 between Record (or Sleep) and Stop, one or more file sets whose headers carry its id (`recording`, the first set's
 stem). What you did in it is kept as **spans**: `spans/<recording id>.spans.jsonl`, one JSON object per line, add-only.
+A recording goes on in a new file set after a drop or a restart, and after 4 hours or 128 MB of one set (a
+**roll-over**, DECISIONS 1035-1037: same connection, the headband is not stopped; the old set's `.log` ends with
+`file set full; the recording goes on without a gap in <stem>`, the new one's starts with `continues <stem> without a
+gap (...)`). Every sample is in exactly one of the two sets. The joiners (`scripts/to_bdf.py` `chains`,
+`app/lib/sleep/night_signal.dart` `chainsOf`) take a set of the same recording whose first sample lies within 0.5 s of
+the arrival of the last batch of the set before it as its continuation: placed sample to sample, no `BAD_gap` and no
+held samples at the seam. After a drop the next set starts seconds later and is placed by the clock, as before.
 A span is written when it opens and again whenever it changes: **the last line with a given `span` id is the span**;
 spans are listed in the order they first appear. A line is on storage before the tap that made it is answered. A line
 that is not a JSON object, has a `v` other than 1, or is neither a span nor a `reviewed` line is skipped (a kill in
@@ -1351,7 +1358,7 @@ What the phone's detectors thought happened and what you answered when the app a
 | `yes_means` | the confidence a Yes gets as a truth row: `certain`, or `likely` when the detector itself found minutes that do not fit (a night with wake-ups) |
 | `made` | when the estimate was first kept |
 | `answer`, `answered`, `via` | `yes`, `no`, `not_sure` (its own answer, no label), `said` (a blind card), `not_answered` (no answer came: never a Yes or a No) or empty (still waiting); when; `card`, `notification` or `stop_sheet` |
-| `label_id` | the truth row a yes or a no made (`confirm:...` in `truth.tsv`) |
+| `label_id` | the truth row a yes or a no made (`confirm:...` in `truth.tsv`); empty for a Yes whose sleep stretch you took away afterwards ("Not sleep" in the Archive): the Yes stays as what was said, and there is no truth row |
 | `owner_words` | a blind card's own words, and the few words you added |
 | `card` | what the card showed: `normal` (the guess), `blind` (no guess); empty when no card was shown (a stop-sheet chip) |
 | `said`, `agrees` | a blind card: the label you picked, and 1 when it is the detector's `label` (sleep and a nap count as one), 0 when not; empty when your words name no label |
