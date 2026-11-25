@@ -12,7 +12,9 @@ notification batch of today, starts the app and checks:
   4. "Not sure" in the notification is stored as `not_sure`; back in the app the question is not asked again and
      the labels file has no row for it;
   5. the 2-batch limit: a new walk arrives after today's second batch: no notification comes, the next one is planned
-     for tomorrow, and the question is on the card.
+     for tomorrow, and the question is on the card;
+  6. more waiting than a batch holds (4): five more walks arrive; every one of the six open questions is on the card,
+     in time order, and none is written down as not answered (DECISIONS 1000).
 Emulator only: run it inside `_local/build_slot.sh heavy`, with --work on a disk with 8 GB free.
 """
 from __future__ import annotations
@@ -129,6 +131,26 @@ def made_up(stage: Path, now: datetime) -> tuple[list[tuple[Path, str]], dict]:
                 "blind": estimate_id("walking", "walking", v0, v1, rec)},
         "earlier": earlier, "now": now,
     }
+
+
+def asking_day(t: datetime) -> datetime:
+    """queue.dart `askingDay`: the day runs 04:00 to 04:00."""
+    return (t - timedelta(hours=4)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def half_hour(t: datetime) -> datetime:
+    t = t.replace(second=0, microsecond=0)
+    return t + timedelta(minutes=((t.minute + 15) // 30) * 30 - t.minute)
+
+
+def card_words(a: datetime, b: datetime, now: datetime) -> str:
+    """The stretch as the card says it at [now]: to the minute on the stretch's own day, else to the half hour
+    (estimate.dart `spanWords`, queue.dart `timesAsked`). A walk's card also holds the guess."""
+    if asking_day(b) == asking_day(now):
+        return span(a, b, now)
+    x, y = hm(half_hour(a)), hm(half_hour(b))
+    about = f"about {x}" if x == y else f"about {x} to {y}"
+    return f"yesterday, {about}" if b.date() < now.date() else about
 
 
 def tap(word: str, exact: bool = True, limit: float = 30) -> bool:
@@ -281,6 +303,46 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
         f"notification now: {title2!r}; next batch planned for {at.isoformat() if at else None}",
         ["asks.jsonl before:"] + before.splitlines() + ["asks.jsonl after:"] + after.splitlines() + [f"armed.json: {armed}"]
         + pc.screen_words("third-batch")))
+
+    # 6: more waiting than a batch holds. Five more walks (30 minutes each, 8 to 14 hours back, 90 minutes apart: well
+    # before everything above) make six open questions; a batch holds 4. Every one is on the card, none is closed.
+    pc.stop_app()
+    now3 = device_now().replace(second=0, microsecond=0)
+    walks: list[tuple[datetime, datetime]] = []
+    rec3 = ""
+    for shift in range(60):  # none of the five may draw blind (a blind card does not say its times the same way)
+        walks = [(now3 - timedelta(hours=8 + 1.5 * k, minutes=shift + 30), now3 - timedelta(hours=8 + 1.5 * k, minutes=shift))
+                 for k in range(5)][::-1]
+        rec3 = (walks[0][0] - timedelta(minutes=10)).strftime("%Y-%m-%d-%H%M%S")
+        if not any(blind(estimate_id("walking", "walking", a, b, rec3)) for a, b in walks):
+            break
+    p = stage / f"walking/{rec3}.walk.json"
+    p.write_text(json.dumps(walk_file(rec3, walks[0][0] - timedelta(minutes=5), [(a, b, "sure") for a, b in walks])))
+    pc.seed([(p, f"walking/{rec3}.walk.json")], stage)
+    pc.start_app()
+    pc.wait_main(240)
+    words = [f"{card_words(a, b, now3)}. The headband thinks you walked" for a, b in walks]
+    capitals = [capital(w) for w in words]
+    first = pc.find_on_tab("Record", capitals[0], limit=180)
+    found: list[bool] = []
+    for text in capitals:
+        hit = emu.match(text, False)
+        for _ in range(10):
+            if hit:
+                break
+            pc.sh("input swipe 540 1500 540 900 400")
+            time.sleep(2)
+            hit = emu.match(text, False)
+        found.append(bool(hit))
+    time.sleep(10)  # the card's own pass writes down what is too old: give it time to show that it writes nothing
+    new_ids = [estimate_id("walking", "walking", a, b, rec3) for a, b in walks]
+    silent = [a for a in answers() if a.get("answer") == "not_answered" and a.get("estimate_id") in new_ids]
+    results.append(pc.Result(
+        "6 more waiting than a batch holds: every open question stays on the card, none is closed unasked",
+        "PASS" if first and all(found) and not silent else "FAIL",
+        f"five more walks arrived (a batch holds 4): on the card, top to bottom {found}; "
+        f"not_answered lines for them: {len(silent)}",
+        [json.dumps(capitals)] + [json.dumps(a) for a in silent] + pc.screen_words("fifth-question")))
     return results
 
 
