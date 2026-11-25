@@ -327,6 +327,14 @@ class Probe:
     def pid_alive(self) -> bool:
         return bool(self.adb.shell("pidof", PKG_SOURCE, quiet=True).stdout.strip())
 
+    def wait_dead(self, seconds: int) -> bool:
+        """The process goes a moment after the swipe: look for up to `seconds` before saying it is still there."""
+        for _ in range(seconds):
+            time.sleep(1)
+            if not self.pid_alive():
+                return True
+        return False
+
     def top_is_source(self) -> bool:
         out = self.adb.shell("dumpsys", "activity", "activities", quiet=True).stdout
         return bool(re.search(r"(topResumedActivity|ResumedActivity)=.*" + re.escape(PKG_SOURCE), out))
@@ -376,21 +384,19 @@ class Probe:
             else:
                 print("  (recents: no card named 'Probe source' found in the screen dump)")
             self.home()
-            time.sleep(1)
-            if not self.pid_alive():
+            if self.wait_dead(5):
                 self.swipe_method.add("recents swipe by adb")
                 return True
         if mode in ("auto", "manual") and sys.stdin.isatty():
             input("  >> On the phone: open recents, swipe 'Probe source' away, press Home, then press Enter here. ")
-            if not self.pid_alive():
+            if self.wait_dead(3):
                 self.swipe_method.add("swiped by hand")
                 return True
         elif mode == "manual":
             sys.exit("--swipe manual needs a terminal (stdin) to ask you to swipe")
         a.shell("am", "kill", PKG_SOURCE)
-        time.sleep(1)
         self.swipe_method.add("am kill (not the real swipe)")
-        return not self.pid_alive()
+        return self.wait_dead(3)
 
     # --- one cell
     def device_epoch(self) -> int:
