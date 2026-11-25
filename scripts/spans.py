@@ -20,6 +20,8 @@ Export data and Share on Wi-Fi copy the folder to `<local>/phone/spans/`. This i
   own_raw(session)                -> the stem of the session's own raw set, None when it rode on a recording
   no_sleep_sets(local)            -> the file sets (stems) that "Not sleep" says are no sleep, over all files
   hidden_nights(local)            -> the evening dates whose report "Not sleep" hides, over all files
+  taken_ids(local)                -> the ids of the spans taken away (or filed again elsewhere), over all files
+  report_all_taken(report, ids)   True for a sleep report made only from spans that were taken away since
 
 The rules, as the format doc has them: the last line with a given `span` id is the span; spans are listed in the order
 they first appear; a line that is not a JSON object, has a `v` other than 1, or is neither a span nor a `reviewed`
@@ -40,6 +42,7 @@ Standard library only (the recorder hub imports night_files, which imports this,
 from __future__ import annotations
 
 import argparse, json, sys
+from builtins import all as builtins_all  # this module's own `all(local)` is the documented name
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -265,6 +268,19 @@ def no_sleep_of(files: dict[str, SpansFile]) -> set[str]:
 
 def hidden_of(files: dict[str, SpansFile]) -> set[str]:
     return {x for f in files.values() if f.reviewed == "no_sleep" for x in f.hides}
+
+
+def taken_ids(local: Path | str) -> set[str]:
+    """The ids of every span that was taken away or filed again elsewhere, over all spans files of the phone's folder."""
+    return {s.span for f in all(local).values() for s in f.removed}
+
+
+def report_all_taken(report: object, taken: set[str]) -> bool:
+    """A sleep report (its JSON) that came from sleep spans every one of which was taken away since: the phone has
+    put its own away (`nights/not-sleep/`); a copy of it must not make a night by itself."""
+    span = report.get("span") if isinstance(report, dict) else None
+    ids = span.get("spans") if isinstance(span, dict) else None
+    return isinstance(ids, list) and bool(ids) and builtins_all(i in taken for i in ids)
 
 
 def no_sleep_sets(local: Path | str) -> set[str]:

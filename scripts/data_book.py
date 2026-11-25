@@ -1200,6 +1200,11 @@ def build(local: Path, out: Path, now: datetime, full: bool = False, say: Callab
     problems: list[str] = []
     nights = catalog.nights_on(local)
     reports = read_reports(local, hashes)
+    # a report made from sleep spans that the owner has all taken away since ("Not sleep" on a stretch, DECISIONS
+    # 1025): the phone put its own away, the copies here must not make a night by themselves
+    taken = spans.taken_ids(local)
+    reports = {nid: kept for nid, reps in reports.items()
+               if (kept := [r for r in reps if not spans.report_all_taken(r.data, taken)])}
     hidden = spans.hidden_nights(local)  # "Not sleep": a night no recording makes any more is left out, report and all
     nights = [r for r in nights if r["raw"] or r["date"] not in hidden or r["source"] == "diy"]
     for nid, reps in reports.items():  # a report kept by hand whose night's raw files are gone: a row from it alone

@@ -292,3 +292,26 @@ def test_a_removed_stretch_is_in_no_night_no_nap_no_truth_row_and_no_spans_row(p
     put_spans(sdir, test_id, stray, _removed(stray), stray)
     assert [n.span_ids for n in nf.all_nights(rec)] == [[f"{test_id}-1"]]
     assert [r["span_id"] for r in db.span_rows(local)] == [f"{test_id}-1"]
+
+
+def test_nights_tsv_leaves_out_a_night_whose_only_stretch_was_taken_away(tmp_path: Path) -> None:
+    """The phone scored the 20-minute stretch, the laptop copied that report, then the owner said "Not sleep": the
+    phone puts its report away, but the laptop's copy stays in phone/nights/. It must not make a night by itself."""
+    local = make_book_local(tmp_path, hidden=False)
+    rid = "2026-11-21-230000"
+    rep = {"night_of": "2026-11-21", "total": {"asleep_min": 15.0}, "periods": [],
+           "data_start": clock(21, 23, 5).astimezone().isoformat(), "data_end": clock(21, 23, 25).astimezone().isoformat(),
+           "span": {"recording": [rid], "spans": [f"{rid}-1"], "kind": "night", "from": "pressed"}}
+    (local / "phone" / "nights" / "2026-11-21.report.json").write_text(json.dumps(rep))
+
+    def nights() -> list[str]:
+        out: list[str] = []
+        assert db.main(["--local", str(local), "--out", str(local / "data"), "--quiet"], out=out.append) == 0, out
+        return [r["night"] for r in csv.DictReader(io.StringIO((local / "data" / "nights.tsv").read_text()), delimiter="\t")]
+
+    assert nights() == ["2026-11-20", "2026-11-21"]
+    live = span_line(rid, 1, "sleep", clock(21, 23, 5), clock(21, 23, 25))
+    put_spans(local / "phone" / "spans", rid, live, _removed(live))
+    assert nights() == ["2026-11-20"]
+    put_spans(local / "phone" / "spans", rid, live, _removed(live), live)
+    assert nights() == ["2026-11-20", "2026-11-21"]
