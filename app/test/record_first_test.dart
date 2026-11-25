@@ -309,7 +309,19 @@ void sleepOnARecording() {
     expect([for (final s in after.spans) (s.kind, s.endedBy, s.end)], [('sleep', 'headband_off', lastData), ('work', 'headband_off', lastData)]);
     expect(after.sleep, isFalse);
     expect(gaveUp, 0);
-    now = now.add(const Duration(hours: 5));
+    // a span pressed now, with the headband still away, is not the rule's to end: its 60 minutes start at the press
+    final pressed = now;
+    r.openSpan('meditate');
+    await wait(150);
+    expect(statuses.last.rec.open('meditate'), isNotNull, reason: 'ended a minute after it was pressed');
+    now = now.add(const Duration(minutes: 59));
+    await wait(150);
+    expect(statuses.last.rec.open('meditate'), isNotNull);
+    now = now.add(const Duration(minutes: 2));
+    await wait(150);
+    final late = statuses.last.rec.spans.last;
+    expect((late.kind, late.endedBy, late.end), ('meditate', 'headband_off', pressed), reason: 'no data in it: it ends where it began');
+    now = now.add(const Duration(hours: 4));
     await wait(150);
     await running;
     expect(gaveUp, 1);
@@ -354,9 +366,61 @@ void sleepOnARecording() {
     expect(back.undoable, isEmpty);
     final file = spans();
     expect([for (final s in file.spans) (s.kind, s.end)], [('sleep', null), ('work', null)], reason: 'the last line per span wins');
+    // the headband is still away: many loop turns later the Undo still stands, and nothing new was told
+    await wait(200);
+    now = now.add(const Duration(minutes: 30));
+    await wait(200);
+    expect([for (final s in statuses.last.rec.spans) (s.kind, s.closed)], [('sleep', false), ('work', false)], reason: 'the rule undid the Undo');
+    expect(statuses.last.rec.sleep, isTrue);
+    expect(ended, hasLength(1), reason: 'a second "Headband off for 60 minutes" notice');
+    // another 60 minutes without the headband after the Undo: the rule speaks again, and ends them at the same last data
+    now = now.add(const Duration(minutes: 31));
+    await wait(200);
+    expect(ended, hasLength(2));
+    expect([for (final s in statuses.last.rec.spans) (s.kind, s.endedBy, s.end)], [('sleep', 'headband_off', lastData), ('work', 'headband_off', lastData)]);
     await r.stop();
     await running;
     expect(File('${dir.path}/${back.id}.log').readAsStringSync(), contains('Undo: sleep, work go on'));
+  });
+
+  test('Sleep pressed after the headband was away for over an hour stays marked (the evening: dinner, a shower, then bed)', () async {
+    final band = FakeBand('a'), again = FakeBand('b');
+    final finder = FakeFinder([band]);
+    final ended = <List<Span>>[];
+    final r = NightRecorder(
+      finder: finder,
+      dir: dir,
+      store: store,
+      onStatus: statuses.add,
+      onStuck: (_) async {},
+      timing: fast,
+      watch: null,
+      clock: clock,
+      spanLog: SpanLog(spansDirFor(dir.path), clock: clock),
+      onSpansEnded: ended.add,
+      sleep: false,
+    );
+    final running = r.run(restartedBySystem: false);
+    await wait(200);
+    band.goOutOfRange();
+    await wait(100);
+    now = now.add(const Duration(minutes: 90));
+    await wait(150);
+    final pressed = now;
+    final sleep = r.startSleep()!;
+    await wait(300); // many loop turns with the headband still not back
+    expect(statuses.last.rec.openSleep?.id, sleep.id, reason: 'Sleep was ended within a minute of the press');
+    expect(statuses.last.rec.sleep, isTrue, reason: 'the sleep kit was taken off');
+    expect(ended, isEmpty, reason: 'a "Headband off for 60 minutes" notice for a span pressed a moment ago');
+    // the headband is back ten minutes later: the night goes on in that span
+    now = now.add(const Duration(minutes: 10));
+    finder.bands.add(again);
+    await wait(300);
+    expect(statuses.last.phase, Phase.recording);
+    expect(statuses.last.rec.openSleep?.start, pressed);
+    await r.stop();
+    await running;
+    expect(spans().spans.single.endedBy, 'recording_stopped');
   });
 
   test('Sleep pressed while an activity is still marked ends that activity: one at a time', () async {

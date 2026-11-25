@@ -21,6 +21,14 @@ recording of anyone is needed. It checks:
   W2. Stop work: the span closes, nothing is asked, the recording goes on;
   W3. Work pressed with nothing recording (after 5): the recorder starts, the work span says it started the
      recording; Stop work asks, "Stop everything" ends the recording.
+  L1. (review finding 6) Signal, then Sleep: the night starts on the Signal tab's live connection (lent by the screen's
+     engine). The app is then swiped from Recents: the recording must go on, or pick up within 90 s, with the gap in
+     its log; the sleep span stays open.
+  L2. The app's whole process is then ended (kill -9, as Android does under memory pressure): Android must start the
+     recorder again and the same recording must get data again within 150 s.
+  L3. The app is opened again: it shows the running recording (Stop is offered, not Record), and "Stop everything"
+     ends it with the sleep span closed.
+`--only main` runs 1-5 and W1-W3, `--only lent` L1-L3; without it, everything.
 The emulator, its adb server and the helpers are the pre-install check's (tool/precheck.py). Emulator only: run it
 inside `_local/build_slot.sh heavy`, with --work on a disk with 8 GB free.
 """
@@ -28,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 import time
@@ -186,7 +195,167 @@ def work_starts_recording(before: set[str]) -> list[pc.Result]:
                       f"bytes; the sheet came: {bool(sheet)}", words)]
 
 
-def check(apk: Path, stage: Path) -> list[pc.Result]:
+def rec_sets(rec: str) -> dict[str, int]:
+    """Every raw file of the recording [rec] (its header names it) with its size."""
+    out: dict[str, int] = {}
+    for h in pc.sh(f"grep -l '\"recording\": *\"{rec}\"' {REC}/*.header.json 2>/dev/null", check=False).split():
+        f = h[: -len(".header.json")] + ".f32"
+        out[f] = size(f)
+    if not out:
+        out[f"{REC}/{rec}.f32"] = size(f"{REC}/{rec}.f32")
+    return out
+
+
+def growth(rec: str, limit: float, every: float = 3) -> tuple[float | None, float, list[str]]:
+    """Watches the recording's files for [limit] s: (seconds until bytes came after the first pause, or 0.0 when they
+    never paused, or None when they never came back; the longest pause in s; one line per change)."""
+    t0 = time.time()
+    last = sum(rec_sets(rec).values())
+    last_at = t0
+    longest = 0.0
+    paused = False
+    back: float | None = 0.0
+    lines: list[str] = []
+    while time.time() - t0 < limit:
+        time.sleep(every)
+        now = time.time()
+        total = sum(rec_sets(rec).values())
+        if total > last:
+            if paused:
+                back = now - t0
+                lines.append(f"bytes again {back:.0f} s after the start of the watch, after a pause of {now - last_at:.0f} s")
+                paused = False
+            longest = max(longest, now - last_at - every)
+            last, last_at = total, now
+        elif now - last_at > every * 2.5 and not paused:
+            paused = True
+            back = None
+            lines.append(f"no new bytes since {last_at - t0:.0f} s into the watch")
+    if paused:
+        longest = max(longest, time.time() - last_at)
+    return back, max(longest, 0.0), lines
+
+
+def swipe_away() -> tuple[bool, str]:
+    """Takes the app's task out of Recents, as the owner's swipe does. True when its activity is gone."""
+    def task() -> str:
+        for line in pc.sh("am stack list 2>/dev/null", check=False).splitlines():
+            m = re.search(r"taskId=(\d+): " + pc.PKG.replace(".", r"\."), line)
+            if m:
+                return m.group(1)
+        return ""
+
+    tid = task()
+    w, h = emu.screen_size()
+    pc.sh("input keyevent KEYCODE_APP_SWITCH", check=False)
+    time.sleep(3)
+    pc.sh(f"input swipe {w // 2} {h // 2} {w // 2} {h // 12} 200", check=False)
+    time.sleep(3)
+    how = "the Recents swipe"
+    if task():
+        # the gesture missed the card: Android's own removal of the task (what the swipe calls)
+        pc.sh(f"am stack remove {tid}", check=False)
+        time.sleep(3)
+        how = f"am stack remove {tid}"
+    pc.sh("input keyevent KEYCODE_HOME", check=False)
+    return not task(), how
+
+
+def lent_night() -> list[pc.Result]:
+    """L1-L3: a night on the lent connection, the app swiped away, the process ended, the app opened again."""
+    n1 = "L1 Signal, Sleep, the app swiped from Recents: the recording goes on"
+    before = set(pc.sh(f"ls {REC}/*.log 2>/dev/null", check=False).split())
+    if not pc.open_tab("Signal"):
+        return [pc.Result(n1, "FAIL", "the Signal tab was not found", pc.screen_words("l-tab"))]
+
+    def live() -> bool:
+        texts = [l for l, _, _ in emu.nodes()]
+        return any(t.strip().startswith("Live") for t in texts) and any("Connected" in t for t in texts)
+
+    if not wait(live, limit=120, every=4):
+        return [pc.Result(n1, "FAIL", "the Signal tab got no live signal within 2 minutes", pc.screen_words("l-signal"))]
+    pc.open_tab("Record")
+    if not tap(wait(lambda: pc.bar_button("Sleep"), limit=30)):
+        return [pc.Result(n1, "FAIL", "the Sleep button was not found", pc.screen_words("l-no-sleep"))]
+
+    def started() -> str | None:
+        new = sorted(f for f in pc.sh(f"ls {REC}/*.log 2>/dev/null", check=False).split() if f not in before)
+        return new[0] if new and "recording started" in cat(new[0]) else None
+
+    log = wait(started, limit=120)
+    if not log:
+        return [pc.Result(n1, "FAIL", "no recording within 120 s of Sleep", pc.screen_words("l-no-recording"))]
+    rec = log.rsplit("/", 1)[1][: -len(".log")]
+    lent = "started on the connection that was already live" in cat(log)
+    time.sleep(20)
+    a = sum(rec_sets(rec).values())
+    pid = pc.app_pid()
+    gone, how = swipe_away()
+    back, pause, lines = growth(rec, 120)
+    logs = "".join(cat(f[: -len(".f32")] + ".log") for f in rec_sets(rec))
+    span = next((x for x in spans(rec) if x.get("kind") == "sleep"), {})
+    said = [l for l in logs.splitlines() if "no data" in l or "reconnect" in l or "connected " in l or "gap" in l or "lost" in l]
+    details = [f"recording {rec}; lent: {lent}; process {pid} before, {pc.app_pid() or 'none'} after; the task left Recents: {gone} ({how})",
+               f"bytes before the swipe {a}, at the end {sum(rec_sets(rec).values())}; longest pause {pause:.0f} s", *lines,
+               f"file sets: {json.dumps(rec_sets(rec))}", f"sleep span: {json.dumps(span)}", *("  log: " + l for l in said[-12:])]
+    ok = lent and gone and back is not None and back <= 90 and span.get("end") is None and bool(span)
+    words = ("the recording never paused" if back == 0.0 else
+             f"the recording paused {pause:.0f} s and went on {back:.0f} s after the swipe" if back is not None else
+             "the recording did not come back within 120 s of the swipe")
+    out = [pc.Result(n1, "PASS" if ok else "FAIL", words if lent and gone else f"lent {lent}, swiped {gone}; {words}", details)]
+
+    # L2. the whole process ended
+    n2 = "L2 the app's process ended (kill -9): Android starts the recorder again, the same recording goes on"
+    pid = pc.app_pid()
+    if pid:
+        pc.sh(f"kill -9 {pid}", check=False)
+    t0 = time.time()
+    new_pid = wait(lambda: (p := pc.app_pid()) and p != pid and p, limit=120, every=2)
+    up_after = time.time() - t0
+    sets_before = set(rec_sets(rec))
+    back2, pause2, lines2 = growth(rec, 150)
+    now_sets = rec_sets(rec)
+    logs = "".join(cat(f[: -len(".f32")] + ".log") for f in now_sets)
+    restarted = "service restarted by Android" in logs
+    span = next((x for x in spans(rec) if x.get("kind") == "sleep"), {})
+    ok2 = bool(pid) and bool(new_pid) and back2 is not None and span.get("end") is None and bool(span)
+    out.append(pc.Result(n2, "PASS" if ok2 else "FAIL",
+                         (f"a new process after {up_after:.0f} s; data again {back2:.0f} s after it, in "
+                          f"{len(set(now_sets) - sets_before)} new file set(s) of the same recording") if ok2 else
+                         f"process before {pid or 'none'}, after {new_pid or 'none'}; data back: {back2}",
+                         [f"longest pause {pause2:.0f} s; the log says restarted by Android: {restarted}", *lines2,
+                          f"file sets: {json.dumps(now_sets)}", f"sleep span: {json.dumps(span)}",
+                          *("  log: " + l for l in logs.splitlines() if "restart" in l or "previous process" in l)][:20]))
+
+    # L3. the app opened again knows the recording, and stops it
+    n3 = "L3 the app opened again shows the running recording; Stop everything ends it"
+    pc.bring_to_front()
+    shown = pc.wait_main(240)
+    pc.open_tab("Record")
+    stop = wait(lambda: pc.bar_button("Stop"), limit=60)
+    offers_record = pc.bar_button("Record") is not None
+    words3 = pc.screen_words("l3-open")
+    tap(stop)
+    confirm = wait(lambda: emu.match("Stop everything", True) or emu.match("Stop", True), limit=20)
+    tap(confirm)
+    ended = wait(lambda: [x for x in spans(rec) if x.get("kind") == "sleep" and x.get("end")], limit=90)
+    time.sleep(6)
+    x = sum(rec_sets(rec).values())
+    time.sleep(8)
+    y = sum(rec_sets(rec).values())
+    sheet = emu.match("What was this recording?", True)
+    if sheet:
+        tap(emu.match("Skip", True))
+    e = ended[0] if ended else {}
+    ok3 = shown and bool(stop) and not offers_record and bool(ended) and x == y
+    out.append(pc.Result(n3, "PASS" if ok3 else "FAIL",
+                         f"main screen {shown}; Stop offered {bool(stop)}, Record offered {offers_record}; sleep span ended "
+                         f"{e.get('end')!r} by {e.get('ended_by')!r}; the files after Stop {x} -> {y} bytes",
+                         words3 + pc.screen_words("l3-after")))
+    return out
+
+
+def check(apk: Path, stage: Path, only: str = "") -> list[pc.Result]:
     results: list[pc.Result] = []
     f32 = pc.make_quiet(stage)
     stem = f32.name[: -len(".f32")]
@@ -208,6 +377,8 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     if not pc.wait_main(240):
         return [pc.Result("the app", "FAIL", "its main screen did not come", pc.screen_words("no-main"))]
     pc.open_tab("Record")
+    if only == "lent":
+        return lent_night()
 
     # 1. Record
     if not tap(wait(lambda: pc.bar_button("Record"), limit=60)):
@@ -302,6 +473,10 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
 
     # W3. Work pressed with nothing recording
     results += work_starts_recording(set(pc.sh(f"ls {REC}/*.log 2>/dev/null", check=False).split()))
+    if only != "main":
+        time.sleep(5)
+        pc.open_tab("Record")
+        results += lent_night()
     return results
 
 
@@ -315,6 +490,7 @@ def main() -> int:
                    help="where the run's folder (emulator, staged files, logs) is made; a disk with 8 GB free")
     p.add_argument("--adb-connect", metavar="HOST:PORT", help="use the emulator already reachable at this adb address "
                    "(a tunnel to another machine's) instead of making one here")
+    p.add_argument("--only", choices=["main", "lent"], default="", help="main: 1-5 and W1-W3; lent: L1-L3; default: all")
     a = p.parse_args()
     if not a.apk.is_file():
         p.error(f"{a.apk} is not there")
@@ -330,7 +506,7 @@ def main() -> int:
     try:
         em.create()
         em.start()
-        results = check(a.apk, work / "stage")
+        results = check(a.apk, work / "stage", a.only)
         (out / "logcat.txt").write_text(pc.logcat())
     except Exception as e:  # the list says what ran
         results.append(pc.Result("the check itself", "FAIL", f"{type(e).__name__}: {e}"))

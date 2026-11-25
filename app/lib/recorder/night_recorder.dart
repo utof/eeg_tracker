@@ -1761,6 +1761,7 @@ class NightRecorder {
     final open = <Span>[];
     for (final s in back) {
       final again = s.reopened();
+      _saidOnMs[_spans.indexWhere((x) => x.id == s.id)] = _now().millisecondsSinceEpoch;
       _putSpan(again);
       if (_night.recording != null) _marker('span: ${s.kind} start (again: Undo)', _now());
       open.add(again);
@@ -1805,20 +1806,32 @@ class NightRecorder {
     unawaited(_save().catchError((Object _) {}));
   }
 
-  /// The headband has been lost for a long time (DECISIONS 899). After [RecorderTiming.spansAway] every open span is
-  /// closed at the last data ("you were doing this" is no longer known) and the sleep kit detached; after
-  /// [RecorderTiming.stopAway] the recording stops itself (through the service when it gave [onGiveUp]). A process
-  /// that has no data yet counts from its own start.
+  /// The headband has been lost for a long time (DECISIONS 899, 1014). An open span is closed at the last data ("you
+  /// were doing this" is no longer known) once the headband has been away for [RecorderTiming.spansAway] counted from
+  /// the latest of: the last data, the span's own start (Sleep pressed while the headband is away is the owner saying
+  /// "now"), and the owner's Undo of this rule ([_saidOnMs]). The sleep kit is detached when no sleep span stays
+  /// open. After [RecorderTiming.stopAway] the recording stops itself (through the service when it gave [onGiveUp]).
+  /// A process that has no data yet counts from its own start.
   void _away() {
     final last = _status.lastDataMs;
-    final gone = _now().millisecondsSinceEpoch - (last ?? (_awayFromMs ??= _now().millisecondsSinceEpoch));
-    if (last != null && gone >= timing.spansAway.inMilliseconds && _spans.any((s) => !s.closed)) {
+    final nowMs = _now().millisecondsSinceEpoch;
+    final gone = nowMs - (last ?? (_awayFromMs ??= nowMs));
+    final due = <String>[
+      if (last != null && gone >= timing.spansAway.inMilliseconds)
+        for (var k = 0; k < _spans.length; k++)
+          if (!_spans[k].closed &&
+              nowMs - max(last, max(_spans[k].start.millisecondsSinceEpoch, _saidOnMs[k] ?? 0)) >=
+                  timing.spansAway.inMilliseconds)
+            _spans[k].id,
+    ];
+    if (last != null && due.isNotEmpty) {
       final at = DateTime.fromMillisecondsSinceEpoch(last);
       _note('no data for ${timing.spansAway.inMinutes} min: what was marked ends at the last data');
-      final open = [for (final s in _spans) if (!s.closed) s.id];
-      _closeSpans('headband_off', at);
-      onSpansEnded?.call([for (final s in _spans) if (open.contains(s.id)) s]);
-      unawaited(_detachKit());
+      for (final id in due) {
+        closeSpan(id, by: 'headband_off', at: at);
+      }
+      onSpansEnded?.call([for (final s in _spans) if (due.contains(s.id)) s]);
+      if (!_spans.any((s) => !s.closed && s.isSleep)) unawaited(_detachKit());
       _set(_withAlarm(_withDrift(_status)));
     }
     if (gone < timing.stopAway.inMilliseconds || _gaveUp) return;
@@ -1829,6 +1842,10 @@ class NightRecorder {
   }
 
   bool _gaveUp = false;
+
+  /// When the owner undid the 60-minute rule for a span (by its place in [_spans]; unix ms): the rule counts that
+  /// span's 60 minutes from then.
+  final Map<int, int> _saidOnMs = {};
 
   /// The spans opened before the first file set still need their line in its log and markers.
   bool _markOpenSpans = false;
