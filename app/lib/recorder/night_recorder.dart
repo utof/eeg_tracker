@@ -170,6 +170,7 @@ class NightRecorder {
     this.kit,
     this.onGiveUp,
     this.sleep = true,
+    this.firstSpan,
     this.sleepSource = 'owner_button',
     this.bandBattery,
     DateTime Function()? clock,
@@ -194,7 +195,11 @@ class NightRecorder {
   /// False: Record alone, no span, no kit (Record first, DECISIONS 880-881).
   final bool sleep;
 
-  /// Who started that first sleep span: `owner_button`, or `auto_start` for the headband watcher.
+  /// A new recording that does not start with Sleep starts with this span (an activity pressed while nothing
+  /// recorded: `work`, `meditate`, ...); like Sleep's, it remembers that it started the recording. Null: none.
+  final String? firstSpan;
+
+  /// Who started that first span: `owner_button`, or `auto_start` for the headband watcher.
   final String sleepSource;
   final NightStore store;
   final void Function(RecorderStatus status) onStatus;
@@ -436,6 +441,8 @@ class NightRecorder {
       if (sleep) {
         openSpan('sleep', source: sleepSource, startedRecording: true, at: _now());
         _startDrift();
+      } else if (firstSpan != null) {
+        openSpan(firstSpan!, source: sleepSource, startedRecording: true, at: _now());
       }
       final t = _now();
       // the drift-off line first, then any line _startDrift kept (hands-free), then the smart alarm's
@@ -1812,6 +1819,17 @@ class NightRecorder {
     // before the first file set there is no log to write into in time order: the line comes when the set opens
     if (_night.recording != null) _marker('span: $kind start', t);
     return span;
+  }
+
+  /// A span command of the screen applied (spans/activities.dart `openSpanCommand`, `closeSpanCommand`): the span it
+  /// opened or closed, or null when it did nothing.
+  Span? spanCommand(Map<Object?, Object?> data) {
+    final kind = data['span_kind'], id = data['id'], by = data['by'], session = data['session'];
+    if (data['op'] == 'open' && kind is String && kind.isNotEmpty) {
+      return openSpan(kind, session: session is String ? session : null, startedRecording: data['started_recording'] == true);
+    }
+    if (data['op'] == 'close' && id is String) return closeSpan(id, by: by is String ? by : 'owner');
+    return null;
   }
 
   /// Closes the open span [id] now (or [at]); null when there is none.

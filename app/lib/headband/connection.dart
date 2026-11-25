@@ -973,6 +973,9 @@ class RecordingBand implements Headband, KnownContact, RidesRecorder {
   bool _gone = false;
   bool _ended = false;
 
+  /// Called once when the user lets this handle go (an activity closes its span here, spans/activities.dart).
+  Future<void> Function()? onLetGo;
+
   /// The recording stopped while this handle was in use: nothing more comes, and a new start is a new matter.
   @override
   bool get ended => _ended;
@@ -1024,7 +1027,12 @@ class RecordingBand implements Headband, KnownContact, RidesRecorder {
   @override
   Future<int> battery() async => _owner._night?.battery ?? (throw StateError('no battery reading'));
   @override
-  Future<void> disconnectAndDispose() async => _owner._endRide(this);
+  Future<void> disconnectAndDispose() async {
+    _owner._endRide(this);
+    final then = onLetGo;
+    onLetGo = null;
+    await then?.call();
+  }
 
   void _end() {
     if (_gone) return;

@@ -14,6 +14,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import '../phone.dart';
 import '../recorder/brainbit.dart' show SdkFinder;
 import '../recorder/headband.dart';
+import '../spans/activities.dart';
 import 'connection.dart';
 import 'diy/board.dart' show DiyFinder;
 import 'diy/settings.dart';
@@ -87,9 +88,20 @@ class BrainBitFinder implements HeadbandFinder {
   /// In the screen's engine a finder made without [pick] is a door to the one connection (headband/connection.dart,
   /// DECISIONS 855): its headbands are handles to the connection every screen shares, and [dispose] leaves that
   /// connection to its owner. [own]: a finder of its own all the same (the owner's real one).
-  BrainBitFinder({Future<HeadbandFinder> Function()? pick, bool recorder = false, bool own = false})
+  /// [activity]: the session behind this door is an activity of the recording (a span kind: `work`, `meditate`, ...;
+  /// spans/activities.dart, DECISIONS 980): asking for the headband opens its span on the running recording, or
+  /// starts the recorder first, and the session reads the recording's stream; letting the headband go closes the span.
+  BrainBitFinder({Future<HeadbandFinder> Function()? pick, bool recorder = false, bool own = false, this.activity})
     : _pickWith = pick ?? (() => _default(recorder: recorder)),
       _shared = pick == null && !recorder && !own ? HeadbandConnection.shared : null;
+
+  final String? activity;
+
+  /// The activity this door started (null: none runs through it).
+  ActivityRun? run;
+
+  /// Sessions refuse the DIY board (they read O1 O2 T3 T4); a test sets what the setting says.
+  static Future<bool> Function() diyChosen = () async => (await loadDiyBoard()).settings.useDiy;
 
   final Future<HeadbandFinder> Function() _pickWith;
 
@@ -137,8 +149,26 @@ class BrainBitFinder implements HeadbandFinder {
   }();
 
   @override
-  Future<Headband?> find(Duration scanFor, {void Function(String name, int rssi)? onFound}) async =>
-      (await _pick()).find(scanFor, onFound: onFound);
+  Future<Headband?> find(Duration scanFor, {void Function(String name, int rssi)? onFound}) async {
+    final acts = Activities.shared, kind = activity;
+    if (kind == null || acts == null || _shared == null) return (await _pick()).find(scanFor, onFound: onFound);
+    // the activity's sessions read BrainBit's O1 O2 T3 T4: refused for the DIY board before anything is started
+    if (await diyChosen()) throw const NotForDiyBoard();
+    final started = run = await acts.begin(kind);
+    Headband? band;
+    try {
+      band = await (await _pick()).find(scanFor, onFound: onFound);
+    } finally {
+      if (band == null) await acts.end(started, by: 'activity');
+    }
+    if (band is RecordingBand) {
+      band.onLetGo = () => acts.end(started);
+    } else if (band != null) {
+      // the recording ended between the span and the stream: the session got a connection of its own
+      await acts.end(started, by: 'recording_stopped');
+    }
+    return band;
+  }
 
   @override
   Future<Headband> connectDirect(BandId id) async => (await _pick()).connectDirect(id);
