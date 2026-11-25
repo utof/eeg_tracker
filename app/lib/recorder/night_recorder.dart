@@ -82,6 +82,7 @@ class RecorderTiming {
     this.driftBudgetAfter = const Duration(minutes: 10),
     this.rollAfter = const Duration(hours: 4),
     this.rollBytes = 128 * 1024 * 1024,
+    this.rollRetry = const Duration(minutes: 5),
   });
 
   /// A file set open this long, or whose `.f32` holds this many bytes, is closed and the recording goes on in a new
@@ -90,6 +91,10 @@ class RecorderTiming {
   /// hour x 4 = 72 MB for the BrainBit; the size limit is for a board with more channels or a higher rate.
   final Duration rollAfter;
   final int rollBytes;
+
+  /// After a roll-over that could not be done (the next set's files could not be made), the next try comes this much
+  /// later; the open set goes on meanwhile.
+  final Duration rollRetry;
 
   /// Buffered samples go to the files and a status goes to the screen this often.
   final Duration tick;
@@ -1485,7 +1490,11 @@ class NightRecorder {
   bool _rollDue(ChunkWriter w) =>
       !_stopping &&
       w.samplesWritten > 0 &&
+      (_rollFailedAt == null || _now().difference(_rollFailedAt!) >= timing.rollRetry) &&
       (_now().difference(w.opened) >= timing.rollAfter || w.bytesWritten >= timing.rollBytes);
+
+  /// When a roll-over last failed; null: none since the last one that worked.
+  DateTime? _rollFailedAt;
 
   /// The recording goes on in a new file set of the same recording, on the same connection (DECISIONS 1035-1036): the
   /// way a new set follows a drop, without the drop. Nothing waits in here, so no batch can arrive between the steps:
@@ -1499,6 +1508,7 @@ class NightRecorder {
     try {
       old.sync();
     } catch (e) {
+      _rollFailedAt = _now();
       old.log('could not save the newest data: ${_short(e)}; the next file set waits');
       return null;
     }
@@ -1506,9 +1516,11 @@ class NightRecorder {
     try {
       next = _openSet(dir, _now(), header: old.header, inRecording: true, recording: _night.recording);
     } catch (e) {
+      _rollFailedAt = _now();
       old.log('could not start the next file set: ${_short(e)}; this one goes on');
       return null;
     }
+    _rollFailedAt = null;
     _logPackets(old);
     old.log('total samples ${old.samplesWritten}, ${(old.samplesWritten / sampleRateHz / 60).toStringAsFixed(1)} min');
     old.log('file set full; the recording goes on without a gap in ${next.stem}');

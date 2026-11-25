@@ -77,6 +77,7 @@ RecorderTiming rolling({int bytes = 1 << 40, Duration after = const Duration(day
   rescanFor: fast.rescanFor,
   rollAfter: after,
   rollBytes: bytes,
+  rollRetry: Duration.zero,
 );
 
 void main() {
@@ -232,6 +233,8 @@ void main() {
     expect([for (final f in sets) ...packs(f)], [for (var i = 0; i < band.emitted; i++) i]);
     expect(files('log').first.readAsStringSync(), contains('could not start the next file set'));
     expect(band.calls.where((c) => c == 'startSignal'), hasLength(1));
+    // by default a failed roll-over is tried again 5 minutes later, not at every 10-second check
+    expect(const RecorderTiming().rollRetry, const Duration(minutes: 5));
   });
 
   test('the emulator check\'s short roll-over is the replay plan\'s alone: no plan or no replay build, the app\'s own limits', () {

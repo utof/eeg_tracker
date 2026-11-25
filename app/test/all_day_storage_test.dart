@@ -179,6 +179,14 @@ void main() {
     expect(open.map((p) => p.split('/').last), ['${r.night[1]}.f32']);
     expect(openSets(files, null), isEmpty);
     expect(openSets(files, 'no-such-recording'), isEmpty);
+    // by the files' own times, not their names: the phone's clock set back names a new set before the old ones
+    final early = writeSet(DateTime(2026, 11, 18, 3), 1, recording: r.id);
+    expect(openSets(files, r.id).map((p) => p.split('/').last), ['$early.f32']);
+    for (final f in rec.listSync().whereType<File>().where((f) => f.path.contains(early))) {
+      f.deleteSync();
+    }
+    forgetNightSets();
+    expect(openSets(files, r.id).map((p) => p.split('/').last), ['${r.night[1]}.f32']);
     final plan = planClear(files, {'nights.raw'}, mode: ClearMode.checked, now: now, open: open);
     final planned = {for (final g in plan.groups) ...g.sets.map((s) => s.split('/').last)};
     expect(planned, {'${r.day[0]}.f32', '${r.day[1]}.f32'}, reason: 'the night holds the open set: it stays whole');
