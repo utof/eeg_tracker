@@ -880,6 +880,12 @@ span is moved to `nights/not-sleep/<span id>.report.json`, never deleted, and co
 (unless another report was made there meanwhile). With `moved_to` the span was not taken away by you: the app filed
 it again under the recording that holds its hours (below, "A Yes to a sleep estimate"), and `moved_to` is its id there.
 
+**A Yes to a sleep estimate** ("Did you sleep 01:30-08:31?", `source` `owner_confirmed` with `estimate`) is one
+span, whole, in the file of the recording that holds its start (DECISIONS 1028): the `recording` id of the file set
+that holds that moment, and for a file set from before Record first the set's own stem. It is not cut where a file set
+ends. A span the app once filed under another recording (the night report's first file) is written again under the
+right one, and its old line gets `removed: true` and `moved_to`.
+
 **An activity on a recording.** Work, Meditate, alpha-theta, Sound, Dream catcher, the Nap coach, the check-in and
 the hands-free calibration run as a span on the recording (`source` `owner_button`), with `started_recording` `true`
 when their button started the recorder. They write no raw EEG of their own. Their own file (`work-sessions/*.work.json`,

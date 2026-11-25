@@ -315,3 +315,31 @@ def test_nights_tsv_leaves_out_a_night_whose_only_stretch_was_taken_away(tmp_pat
     assert nights() == ["2026-11-20"]
     put_spans(local / "phone" / "spans", rid, live, _removed(live), live)
     assert nights() == ["2026-11-20", "2026-11-21"]
+
+
+def test_a_yes_filed_again_under_the_recording_that_holds_it_is_one_row_there(tmp_path: Path) -> None:
+    """DECISIONS 1028, the owner's phone on 2026-11-25: the Yes to "Did you sleep 01:30-08:31?" was written under the
+    awake evening recording (the night report's first file). The app files it again under the file set that holds
+    01:30 and marks the old one `removed` with `moved_to`. The laptop then has one row, under the right recording, and
+    the old-style night (three sets chained by time) is what it was."""
+    rec, sdir = tmp_path / "phone" / "recordings", tmp_path / "phone" / "spans"
+    make_set(rec, datetime(2026, 11, 24, 18, 23, 44), 5.7, None)
+    make_set(rec, clock(25, 0, 36), 4.75, None)
+    make_set(rec, datetime(2026, 11, 25, 5, 23, 4), 6.3, None)
+    a, b = datetime(2026, 11, 25, 1, 30, 52), datetime(2026, 11, 25, 8, 31, 22)
+    wrong = json.dumps({**json.loads(span_line("2026-11-24-182344", 1, "sleep", a, b, "owner_confirmed")),
+                        "estimate": "est:192b8daeafb5e51a"})
+    put_spans(sdir, "2026-11-24-182344", wrong)
+    before = [(n.name, [r.stem for r in n.recs]) for n in nf.all_nights(rec)]
+    assert before == [("2026-11-24", ["2026-11-24-182344", "2026-11-25-003600", "2026-11-25-052304"])]
+    assert [r["recording"] for r in db.span_rows(tmp_path)] == ["2026-11-24-182344"]  # the wrong one, as the phone had it
+
+    put_spans(sdir, "2026-11-24-182344", wrong, _removed(wrong, moved_to="2026-11-25-003600-1"))
+    put_spans(sdir, "2026-11-25-003600", json.dumps({**json.loads(wrong), "span": "2026-11-25-003600-1"}))
+    rows = db.span_rows(tmp_path)
+    assert [(r["span_id"], r["recording"], r["estimate"]) for r in rows] == [
+        ("2026-11-25-003600-1", "2026-11-25-003600", "est:192b8daeafb5e51a")]
+    assert [(n.name, [r.stem for r in n.recs]) for n in nf.all_nights(rec)] == before
+    # the row's recording is a file set that holds the stretch's start
+    held = {r.stem: (r.start, r.end) for r in nf.recordings(rec)}[rows[0]["recording"]]
+    assert held[0] <= a.timestamp() <= held[1]

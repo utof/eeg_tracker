@@ -10,7 +10,7 @@ import 'package:shared_labels/shared_labels.dart';
 import '../archive/tags.dart';
 import '../confirm/questions.dart';
 import '../recorder/header.dart' show tryHeader;
-import '../recorder/nights.dart' show dataEndOf, stemTime;
+import '../recorder/nights.dart' show RecordingsAt, dataEndOf, stemTime;
 import 'span.dart';
 import 'span_log.dart';
 
@@ -168,38 +168,72 @@ bool saveStopSheet(
   return true;
 }
 
-/// A Yes on a sleep estimate (the confirm questions, wherever it was answered): a sleep span of its recording, source
+/// A Yes on a sleep estimate (the confirm questions, wherever it was answered): a sleep span, source
 /// `owner_confirmed` with the estimate's id, so that stretch gets its report (DECISIONS 889, 1016). Its times are the
 /// ones you set when [answer] has them ("Yes, but the times are off"), else the detector's; a span this estimate
 /// already has is corrected to them (a new line of the same span). Nothing for another label or an estimate without
 /// a recording; false when it could not be written (the recording still runs: [active] is its id; the next
 /// [sweepConfirmedSleep] writes it). The span says only that the stretch gets a report: whether its times are yours
 /// is the answer's to say (the laptop's truth table reads the answer, never this span).
-bool confirmedSleep(Directory filesDir, Estimate e, {Answered? answer, String? Function()? active}) {
-  final recording = e.recording;
-  if (recording == null || recording.isEmpty || !e.label.sameAs(Labels.asleep)) return true;
+/// **Which recording** (DECISIONS 1028): the one that holds the stretch's start, by its id (a file set from before
+/// Record first is its own recording), found from the files; the estimate's own `recording` (the first file of the
+/// night's report, which may be an awake evening recording hours before) only when no file set holds any of it. A
+/// span this estimate has under another recording is filed again where it belongs (the old one says `removed`,
+/// `moved_to`). A span of this estimate that you took away in the Archive is not made again.
+bool confirmedSleep(Directory filesDir, Estimate e, {Answered? answer, String? Function()? active, RecordingsAt? sets}) =>
+    _fileYes(filesDir, e, answer: answer, active: active, sets: sets) != _Filed.waiting;
+
+enum _Filed { same, wrote, waiting }
+
+_Filed _fileYes(Directory filesDir, Estimate e, {Answered? answer, String? Function()? active, RecordingsAt? sets}) {
+  final named = e.recording;
+  if (named == null || named.isEmpty || !e.label.sameAs(Labels.asleep)) return _Filed.same;
   final yours = answer != null && answer.timesConfirmed;
   final start = yours ? answer.start! : e.start, end = yours ? answer.end! : e.end;
-  final log = SpanLog.screen(Directory('${filesDir.path}/spans'), active: active ?? () => null);
+  final spansDir = Directory('${filesDir.path}/spans');
+  final home = (sets ?? RecordingsAt(Directory('${filesDir.path}/recordings'))).holding(start, end) ?? named;
+  final log = SpanLog.screen(spansDir, active: active ?? () => null);
   try {
-    final has = log.read(recording).spans.where((s) => s.estimate == e.id).lastOrNull;
-    if (has != null) {
-      if (has.start != start || has.end != end) log.write(has.withTimes(start, end));
-      return true;
+    final files = spansIn(spansDir);
+    // taken away by you ("Not sleep"): the Yes stands in the answers, the stretch stays away
+    if (files.values.any((f) => f.removed.any((s) => s.estimate == e.id && s.movedTo == null))) return _Filed.same;
+    final has = [for (final f in files.values) ...f.spans.where((s) => s.estimate == e.id)];
+    var here = has.where((s) => s.recording == home).lastOrNull;
+    var wrote = false;
+    if (here == null) {
+      final from = has.lastOrNull; // filed under another recording before: the same stretch, moved
+      here = log.add(
+        home,
+        kind: from?.kind ?? (e.label.id == 'nap' ? 'nap' : 'sleep'),
+        start: start,
+        end: end,
+        source: 'owner_confirmed',
+        estimate: e.id,
+      );
+      wrote = true;
+    } else if (here.start != start || here.end != end) {
+      log.write(here = here.withTimes(start, end));
+      wrote = true;
     }
-    log.add(recording, kind: e.label.id == 'nap' ? 'nap' : 'sleep', start: start, end: end, source: 'owner_confirmed', estimate: e.id);
-    return true;
+    for (final s in has) {
+      if (s.id == here.id) continue;
+      log.write(s.asRemoved(true, movedTo: here.id));
+      wrote = true;
+    }
+    return wrote ? _Filed.wrote : _Filed.same;
   } on SpansBusy {
-    return false;
+    return _Filed.waiting;
   } on FileSystemException {
-    return false;
+    return _Filed.waiting;
   }
 }
 
 /// Every Yes on a sleep estimate that has no span yet gets it now ([confirmedSleep], safe to repeat): a Yes tapped in
 /// the notification is written by Android without the app's hook, and a Yes given while that recording still ran
-/// could not be written into the recorder's file. Run at the app's start, when it comes to the front and after Stop.
-/// [written]: spans made or corrected now; [waiting]: Yeses whose recording still runs.
+/// could not be written into the recorder's file. A span filed under a recording that does not hold its hours (the
+/// app did that until 2026-11-25) is filed again under the right one here, once. Run at the app's start, when it
+/// comes to the front and after Stop. [written]: Yeses whose span was made, corrected or moved now; [waiting]: Yeses
+/// whose recording still runs.
 ({int written, int waiting}) sweepConfirmedSleep(Directory filesDir, {String? Function()? active}) {
   final ConfirmState state;
   try {
@@ -207,17 +241,18 @@ bool confirmedSleep(Directory filesDir, Estimate e, {Answered? answer, String? F
   } catch (_) {
     return (written: 0, waiting: 0);
   }
-  final spansDir = Directory('${filesDir.path}/spans');
+  final sets = RecordingsAt(Directory('${filesDir.path}/recordings'));
   var written = 0, waiting = 0;
   for (final a in state.answers.entries) {
     final e = state.estimates[a.key];
-    final recording = e?.recording;
-    if (e == null || a.value.answer != Answer.yes || recording == null || recording.isEmpty || !e.label.sameAs(Labels.asleep)) continue;
-    final yours = a.value.timesConfirmed;
-    final start = yours ? a.value.start! : e.start, end = yours ? a.value.end! : e.end;
-    final has = readSpans(spansFileOf(spansDir, recording)).spans.where((s) => s.estimate == e.id).lastOrNull;
-    if (has != null && has.start == start && has.end == end) continue;
-    confirmedSleep(filesDir, e, answer: a.value, active: active) ? written++ : waiting++;
+    if (e == null || a.value.answer != Answer.yes) continue;
+    switch (_fileYes(filesDir, e, answer: a.value, active: active, sets: sets)) {
+      case _Filed.wrote:
+        written++;
+      case _Filed.waiting:
+        waiting++;
+      case _Filed.same:
+    }
   }
   return (written: written, waiting: waiting);
 }
