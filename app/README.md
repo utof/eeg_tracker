@@ -14,6 +14,17 @@ below). The **Smart alarm**, set just above Sleep, wakes you in a window you cho
 night, never in deep sleep, and always by the window's end (below). **Sound** (at the bottom, also during a night) plays calm sound
 for a state, with an optional beat, and with the headband shows what your brain does (below).
 
+**While a recording runs** (Record first step 4, DECISIONS 980-989), Work, Meditate, alpha-theta, Sound, the Dream
+catcher, the Nap coach, the check-in and the hands-free calibration start **on that recording**: the same signal, no
+new search for the headband, no second file, no new contact check. Each is written into the recording as a stretch
+("Work 14:05-16:30", `files/spans/`), and its own file names the recording and the stretch. The Record tab's bar shows
+what is marked now and offers **Nap, Work, Meditate, Sound, Dream catcher** (each opens its page; its own start marks
+it). Pressed while nothing records, any of them starts the recording too, and when it ends the app asks **Stop
+everything** or **Keep recording**. While Sleep or a nap is marked, the others wait for Stop sleep. Nap reports have
+their own page (Sessions, under Nap coach). If the headband is off for an hour, what was marked ends at the last
+signal, with a notice and **Undo** on the Record tab; after 6 hours the recording stops itself and says so. A sleep
+the app started by itself with under 10 minutes asleep reads "No sleep found" and is not counted as a night.
+
 **The bar at the bottom** (since 2026-11-20, DECISIONS 597): **Night** (the night screen: status, the strip, Sleep,
 Morning, Try these, Headband, Phone, with Record and Sleep pinned; the app opens here), **Sessions** (Meditation, Dream
 catcher, Nap coach, Lucid dreams, Work, Sound), **Signal** (the head, live traces and raw data, below), **Trends** and
