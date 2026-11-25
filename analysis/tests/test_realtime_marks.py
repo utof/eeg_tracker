@@ -30,7 +30,7 @@ def test_the_marker_is_registered() -> None:
 
 def test_the_python_real_time_files_are_marked() -> None:
     for name in PYTHON_FILES:
-        assert re.search(r"^pytestmark = pytest\.mark\.realtime$", (TESTS / name).read_text(), re.M), name
+        assert re.search(r"^pytestmark = pytest\.mark\.realtime\b", (TESTS / name).read_text(), re.M), name
 
 
 def test_the_kept_link_test_is_marked() -> None:

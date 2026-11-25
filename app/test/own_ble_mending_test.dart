@@ -1,6 +1,9 @@
 // Our own connection's headband object while it mends a drop (lib/headband/own/own_headband.dart), with connection
 // tries that take a while, as on a phone: what it writes into the night's log when the signal is stopped or started
 // in the middle of a drop.
+@Tags(['realtime'])
+library;
+
 import 'package:eeg_tracker/headband/own/own_headband.dart';
 import 'package:eeg_tracker/headband/own/settings.dart';
 import 'package:eeg_tracker/recorder/headband.dart';

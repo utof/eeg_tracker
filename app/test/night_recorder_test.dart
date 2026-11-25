@@ -417,7 +417,7 @@ void main() {
     expect(log, contains('reconnect try 2 (direct to AA:BB): failed'));
     expect(log, contains('reconnect try 3 (scan): connected'));
     expect(files('f32'), hasLength(2));
-  });
+  }, tags: 'realtime');
 
   test('a headband that answers but reports out of range gets only the state read', () async {
     final first = FakeBand('a');

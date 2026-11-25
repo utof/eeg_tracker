@@ -10,17 +10,21 @@ import 'package:eeg_tracker/share/isolate.dart';
 import 'package:eeg_tracker/share/protocol.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Four free ports in a row.
+/// Four free ports in a row: the OS names the first (nothing picks a port by the clock, so two runs of this file on
+/// one machine do not choose alike), the three after it are checked.
 Future<int> freeRun() async {
-  for (var p = 39000 + DateTime.now().millisecond * 7; p < 60000; p += 11) {
+  for (var attempt = 0; attempt < 200; attempt++) {
+    final probe = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
+    final p = probe.port;
+    await probe.close();
     final held = <ServerSocket>[];
     try {
-      for (var k = 0; k <= sparePorts; k++) {
+      for (var k = 1; k <= sparePorts; k++) {
         held.add(await ServerSocket.bind(InternetAddress.anyIPv4, p + k));
       }
       return p;
     } catch (_) {
-      // taken: the next run
+      // one of the next three is taken: ask again
     } finally {
       for (final s in held) {
         await s.close();

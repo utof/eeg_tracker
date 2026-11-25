@@ -1,5 +1,8 @@
 // Our own Bluetooth driver (lib/headband/own/driver.dart) on the fake headband (test/own_ble/fake_headband.dart):
 // the same cases as the laptop driver's tests (analysis/tests/test_own_ble_driver.py).
+@Tags(['realtime'])
+library;
+
 import 'dart:io';
 
 import 'package:eeg_tracker/headband/own/driver.dart';

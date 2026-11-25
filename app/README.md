@@ -173,6 +173,18 @@ flutter test --concurrency=1               # writer, recorder rules (fake headba
 flutter build apk --release --target-platform android-arm64
 ```
 
+On a busy machine run the tests in two steps: the tests that wait on the wall clock (tagged `realtime`, see
+`dart_test.yaml`) fail when the CPU is shared and pass alone.
+
+```bash
+flutter test --exclude-tags realtime --concurrency=4    # everything else, in parallel
+flutter test --tags realtime --concurrency=1            # the real-time ones, alone
+```
+
+None of the tests needs a fixed port: they take free ones from the operating system, so two runs on one machine do
+not meet. `python3 tests/with_ports_held.py -- flutter test` runs a suite with the app's own ports (8765-8768,
+8770-8772) all taken, inside a private network namespace that nothing else on the machine sees.
+
 `flutter test` also renders the night screen in six states (two also at the owner's 393 dp width), the meditation
 screen in eleven, the sleep report in nine, the replay check's and alpha-theta's pages in nineteen, the dream catcher in thirteen, the nap coach in sixteen, the check-in, trends
 and Morning section in eighteen, sound for states in fourteen, Export data in nine, Headband connection in eleven, Try these in seven and "Was this you?" in thirteen

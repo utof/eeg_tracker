@@ -33,6 +33,8 @@ import recorder_poll  # noqa: E402
 import recording  # noqa: E402
 import to_bdf  # noqa: E402
 
+pytestmark = pytest.mark.realtime  # fake headband / board timers: run apart on a loaded machine (conftest.py)
+
 VECTORS = json.loads((FAKE / "golden" / "e9_vectors.json").read_text())
 LSB_24 = 4.5 / (24 * 8388608)  # volts per count at gain 24 and the internal 4.5 V reference, by hand
 STATE_KEYS = {"status", "battery", "battery_note", "minutes", "age", "names", "fs", "contact", "contact_t", "data"}

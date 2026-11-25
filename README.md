@@ -193,7 +193,9 @@ Walking minutes and steps come with each day: from the phone's walk files, and f
 [docs/detectors.md](docs/detectors.md#walking-pace-and-estimated-steps-decisions-800-809)).
 
 Tests (no headband): `uv run --project analysis --with pytest pytest analysis/tests` (add `-m "not slow"` to skip
-the 2.5-minute fake-headband run) and `node --test tests/js/*.test.mjs`.
+the 2.5-minute fake-headband run) and `node --test tests/js/*.test.mjs`. On a busy machine the tests marked
+`realtime` (they wait on the wall clock) go apart: `pytest -n 4 -m "not realtime"` (with `--with pytest-xdist`), then
+`pytest -m realtime` alone.
 
 **One headband, many readers.** The headband allows one Bluetooth connection, so the recorder owns it, always
 records to disk, and shares the data: `GET /stream` (server-sent events: every batch of samples in µV and every
