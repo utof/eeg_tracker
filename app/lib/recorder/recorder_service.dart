@@ -35,7 +35,7 @@ import '../sleep/live_log.dart' show LiveStageLog, liveStagesDirFor;
 import '../sleep/live_stager.dart';
 import '../sleep/night_scorer.dart';
 import '../sleep/onnx_runs.dart';
-import '../spans/span.dart' show recordingStoppedNotice, spansDirFor, spansEndedNotice;
+import '../spans/span.dart' show recordingStoppedNotice, sleepResumedNotice, spansDirFor, spansEndedNotice;
 import '../spans/after_restart.dart';
 import '../spans/span_log.dart';
 import 'brainbit.dart';
@@ -403,6 +403,11 @@ class RecorderTaskHandler extends TaskHandler {
       // the 60-minute rule ended what was marked: one notice, with the way back (Undo on the Record tab)
       onSpansEnded: (ended) {
         final n = spansEndedNotice(ended, awayMinutes: const RecorderTiming().spansAway.inMinutes);
+        unawaited(Phone.bandNotice(n.title, n.text));
+      },
+      // the headband came back after that rule had ended Sleep: the app marked it again by itself, and says so
+      onSleepResumed: (span) {
+        final n = sleepResumedNotice(span);
         unawaited(Phone.bandNotice(n.title, n.text));
       },
       sleep: sleep,

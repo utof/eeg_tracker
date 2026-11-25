@@ -423,6 +423,130 @@ void sleepOnARecording() {
     expect(spans().spans.single.endedBy, 'recording_stopped');
   });
 
+  // ---- the rest of the night after the 60-minute rule (DECISIONS 1015) ----
+
+  /// A recording whose headband was lost for 61 minutes; [also]: a span opened beside what the start opened.
+  Future<({NightRecorder r, Future<void> running, FakeFinder finder, DateTime lastData, List<Span> resumed})> lostAnHour({
+    bool sleep = true,
+    String? also,
+    bool resume = true,
+  }) async {
+    final band = FakeBand('a');
+    final finder = FakeFinder([band]);
+    final resumed = <Span>[];
+    final r = NightRecorder(
+      finder: finder,
+      dir: dir,
+      store: store,
+      onStatus: statuses.add,
+      onStuck: (_) async {},
+      timing: fast,
+      watch: null,
+      clock: clock,
+      spanLog: SpanLog(spansDirFor(dir.path), clock: clock),
+      onSleepResumed: resumed.add,
+      sleep: sleep,
+      resumeSleep: resume,
+    );
+    final running = r.run(restartedBySystem: false);
+    await wait(200);
+    if (also != null) r.openSpan(also);
+    final lastData = now;
+    band.goOutOfRange();
+    await wait(100);
+    now = now.add(const Duration(minutes: 61));
+    await wait(150);
+    expect(statuses.last.rec.spans.every((s) => s.endedBy == 'headband_off'), isTrue);
+    return (r: r, running: running, finder: finder, lastData: lastData, resumed: resumed);
+  }
+
+  test('the 60-minute rule ended Sleep and the headband comes back: the app opens a new sleep stretch by itself from '
+      'the first new sample, marked as its own guess', () async {
+    final w = await lostAnHour();
+    now = now.add(const Duration(minutes: 40));
+    final back = now;
+    w.finder.bands.add(FakeBand('b'));
+    await wait(300);
+    final rec = statuses.last.rec;
+    expect(statuses.last.phase, Phase.recording);
+    expect([for (final s in rec.spans) (s.kind, s.source, s.end, s.endedBy)], [
+      ('sleep', 'owner_button', w.lastData, 'headband_off'),
+      ('sleep', 'auto_resume', null, null),
+    ]);
+    expect(rec.spans.last.start, back, reason: 'from the first new sample: the gap stays a gap');
+    expect(rec.sleep, isTrue, reason: 'the sleep kit is on again');
+    expect(rec.resumed?.id, rec.spans.last.id);
+    expect(rec.undoable, isEmpty);
+    expect(w.resumed.single.id, rec.spans.last.id, reason: 'told once');
+    await wait(200);
+    expect(w.resumed, hasLength(1));
+    expect(statuses.last.rec.spans, hasLength(2));
+    await w.r.stop();
+    await w.running;
+    final file = spans().spans;
+    expect([for (final s in file) (s.source, s.endedBy)], [('owner_button', 'headband_off'), ('auto_resume', 'recording_stopped')]);
+    expect(File('${dir.path}/${rec.id}.log').readAsStringSync() + dir.listSync().whereType<File>().where((f) => f.path.endsWith('.log')).map((f) => f.readAsStringSync()).join(),
+        contains('sleep goes on by itself'));
+  });
+
+  test('Undo of the app\'s own resume: that stretch ends where it began, the sleep kit is off, and it is not opened again', () async {
+    final w = await lostAnHour();
+    now = now.add(const Duration(minutes: 5));
+    final back = now;
+    w.finder.bands.add(FakeBand('b'));
+    await wait(300);
+    expect(statuses.last.rec.resumed, isNotNull);
+    now = now.add(const Duration(minutes: 20));
+    w.r.spanCommand(undoOffCommand);
+    final rec = statuses.last.rec;
+    expect([for (final s in rec.spans) (s.source, s.end, s.endedBy)], [
+      ('owner_button', w.lastData, 'headband_off'),
+      ('auto_resume', back, 'undone'),
+    ]);
+    expect(rec.sleep, isFalse);
+    expect(rec.resumed, isNull);
+    await wait(200); // samples keep coming
+    expect(statuses.last.rec.spans, hasLength(2), reason: 'resumed again after the owner said no');
+    expect(statuses.last.rec.sleep, isFalse);
+    await w.r.stop();
+    await w.running;
+  });
+
+  test('only Sleep is resumed: Work ended by the 60-minute rule stays ended when the headband comes back', () async {
+    final w = await lostAnHour(sleep: false, also: 'work');
+    w.finder.bands.add(FakeBand('b'));
+    await wait(300);
+    expect(statuses.last.phase, Phase.recording);
+    expect([for (final s in statuses.last.rec.spans) (s.kind, s.endedBy)], [('work', 'headband_off')]);
+    expect(w.resumed, isEmpty);
+    await w.r.stop();
+    await w.running;
+  });
+
+  test('the owner\'s Undo before the headband is back leaves nothing to resume; and the switch turns resuming off', () async {
+    final w = await lostAnHour();
+    w.r.spanCommand(undoOffCommand);
+    w.finder.bands.add(FakeBand('b'));
+    await wait(300);
+    expect([for (final s in statuses.last.rec.spans) (s.source, s.closed)], [('owner_button', false)]);
+    expect(w.resumed, isEmpty);
+    await w.r.stop();
+    await w.running;
+    statuses.clear();
+    store = MemoryNightStore();
+    for (final f in dir.listSync()) {
+      f.deleteSync(recursive: true);
+    }
+    final off = await lostAnHour(resume: false);
+    off.finder.bands.add(FakeBand('c'));
+    await wait(300);
+    expect(statuses.last.phase, Phase.recording);
+    expect([for (final s in statuses.last.rec.spans) (s.source, s.endedBy)], [('owner_button', 'headband_off')]);
+    expect(statuses.last.rec.undoable, hasLength(1), reason: 'the rule\'s own Undo is still offered');
+    await off.r.stop();
+    await off.running;
+  });
+
   test('Sleep pressed while an activity is still marked ends that activity: one at a time', () async {
     final r = NightRecorder(
       finder: FakeFinder([FakeBand('a')]),

@@ -1242,7 +1242,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       spansLine: s == null ? null : spansLine(s.rec.spans, sinceMs: s.nightStartMs),
       activityLine: _openActivity == null ? null : '${spanWord(_openActivity!.kind)} since ${_hm(_openActivity!.start)}',
       activityWord: _openActivity == null ? null : spanWord(_openActivity!.kind),
-      undoLine: !_running || s == null ? null : undoLine(s.rec.undoable),
+      undoLine: !_running || s == null ? null : undoLine(s.rec.undoable, resumed: s.rec.resumed),
       stopSheetLine: _running || _sheetPlan == null
           ? null
           : '${_hm(_sheetPlan!.start)}-${_hm(_sheetPlan!.end)}',

@@ -86,6 +86,27 @@ def test_nights_come_from_closed_sleep_spans_and_read_only_their_windows(phone: 
         ("2026-11-22-073000", [(clock(22, 7, 30).timestamp(), clock(22, 8).timestamp())], [f"{rid}-4"])]
 
 
+def test_a_stretch_the_app_resumed_by_itself_is_part_of_the_night_and_an_undone_one_is_not(phone: tuple[Path, Path]) -> None:
+    """DECISIONS 1015: the 60-minute rule ended Sleep at 02:00, the headband came back at 03:30 and the app opened a new
+    stretch (`auto_resume`): the night's report covers both, the gap stays a gap. One the owner took away with Undo
+    ends where it began and gives nothing."""
+    rec, sdir = phone
+    rid = "2026-11-21-220000"
+    make_set(rec, clock(21, 22), 10, rid)
+    put_spans(sdir, rid,
+              span_line(rid, 1, "sleep", clock(21, 23), clock(22, 2)),
+              span_line(rid, 2, "sleep", clock(22, 3, 30), clock(22, 7), "auto_resume"))
+    n, = nf.all_nights(rec)
+    assert n.windows == [(clock(21, 23).timestamp(), clock(22, 2).timestamp()),
+                         (clock(22, 3, 30).timestamp(), clock(22, 7).timestamp())]
+    assert n.span_ids == [f"{rid}-1", f"{rid}-2"] and n.span_from == "pressed"
+    put_spans(sdir, rid,
+              span_line(rid, 1, "sleep", clock(21, 23), clock(22, 2)),
+              span_line(rid, 2, "sleep", clock(22, 3, 30), clock(22, 3, 30), "auto_resume"))
+    n, = nf.all_nights(rec)
+    assert n.span_ids == [f"{rid}-1"]
+
+
 def test_spans_far_apart_are_two_nights_and_the_source_names_span_from(phone: tuple[Path, Path]) -> None:
     rec, sdir = phone
     rid = "2026-11-21-220000"

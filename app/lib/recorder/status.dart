@@ -427,6 +427,10 @@ class RecordingLive {
     return [for (final s in off) if (s.end == last) s];
   }
 
+  /// The open sleep stretch the app opened by itself when the headband came back after the 60-minute rule (source
+  /// `auto_resume`, DECISIONS 1015): shown as the app's guess, with Undo. Null: none.
+  Span? get resumed => spans.where((s) => !s.closed && s.source == 'auto_resume').lastOrNull;
+
   /// The open sleep span (kind `sleep` or `nap`).
   Span? get openSleep => spans.where((s) => !s.closed && s.isSleep).lastOrNull;
 

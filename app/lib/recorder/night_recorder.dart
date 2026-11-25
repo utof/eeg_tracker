@@ -149,6 +149,12 @@ enum _End { stopped, lost, stalled, failed, stuck }
 /// The recorder's lines in the app log (lib/logs, DECISIONS 718): drops, reconnects and their times, the notes.
 final AppLog _log = AppLog('recorder');
 
+/// The one switch for "the rest of the night" (DECISIONS 1015): when the 60-minute rule has ended a Sleep stretch and
+/// the headband's samples come back before Stop, the recorder opens a new sleep stretch by itself from the first new
+/// sample (source `auto_resume`: the app's guess, shown as such, with Undo). False: it stays ended until the owner
+/// taps Undo or Sleep.
+const bool resumeSleepWhenBack = true;
+
 class NightRecorder {
   NightRecorder({
     required this.finder,
@@ -170,6 +176,8 @@ class NightRecorder {
     this.kit,
     this.onGiveUp,
     this.onSpansEnded,
+    this.onSleepResumed,
+    this.resumeSleep = resumeSleepWhenBack,
     this.sleep = true,
     this.firstSpan,
     this.sleepSource = 'owner_button',
@@ -244,6 +252,13 @@ class NightRecorder {
 
   /// The 60-minute rule ended these spans (the service tells the owner: "Still going? Undo").
   final void Function(List<Span> ended)? onSpansEnded;
+
+  /// The recorder opened a sleep stretch by itself when the headband came back ([resumeSleepWhenBack]); the service
+  /// tells the owner.
+  final void Function(Span resumed)? onSleepResumed;
+
+  /// [resumeSleepWhenBack], or a test's own choice.
+  final bool resumeSleep;
 
   /// The one guard over the smart alarm, the lucid cues and [scorer]: an exception in the scorer, more than its share
   /// of this isolate's time (the model's own thread and the scaling isolate are not counted: they do not hold the
@@ -785,6 +800,7 @@ class NightRecorder {
     if (rows.isEmpty) return;
     final t = _now();
     final firstOfFile = w.samplesReceived == 0;
+    if (firstOfFile) _resumeSleep(t);
     w.addBatch(t, rows);
     _packets.add(rows);
     final ms = t.millisecondsSinceEpoch;
@@ -1751,11 +1767,41 @@ class NightRecorder {
     _driftUsed = false;
   }
 
+  /// The rest of the night (DECISIONS 1015): the 60-minute rule ended a Sleep stretch, nothing was marked since, and
+  /// the headband's samples are back ([at]: the first of them). A new sleep stretch opens from that sample, with the
+  /// sleep kit (no smart alarm: its window went with the old kit); the hour without data stays a gap between the
+  /// two. It is the app's guess (source `auto_resume`): the owner is told, and Undo takes it away. Work and the
+  /// other activities are not resumed.
+  void _resumeSleep(DateTime at) {
+    if (!resumeSleep || !_begun || _stopping) return;
+    final ended = RecordingLive(id: _night.recording, spans: _spans).undoable;
+    if (!ended.any((s) => s.kind == 'sleep')) return;
+    _attachKit(null);
+    final span = openSpan('sleep', source: 'auto_resume', at: at);
+    _startDrift();
+    _startCues();
+    _logLine('the headband is back: sleep goes on by itself from here in a new stretch ${span.id} (the app\'s guess; Undo takes it away)');
+    onSleepResumed?.call(span);
+  }
+
+  /// Undo of [_resumeSleep]: the stretch the app opened by itself ends where it began (no length: it gives no night
+  /// and no report), `ended_by: undone`, and the sleep kit comes off.
+  List<Span> _undoResume(Span resumed) {
+    final closed = closeSpan(resumed.id, by: 'undone', at: resumed.start);
+    unawaited(_detachKit());
+    _logLine('Undo: the stretch the app opened by itself (${resumed.id}) is taken away');
+    _set(_withAlarm(_withDrift(_status)));
+    return [?closed];
+  }
+
   /// "Still going? Undo": the spans the 60-minute rule ended last are open again, as if it had not ended them
   /// (their own start, no end); a sleep span gets a fresh sleep kit, without its smart alarm (that window has
-  /// passed or was turned off with the kit). Empty when there is nothing to undo.
+  /// passed or was turned off with the kit). Empty when there is nothing to undo. When the app has since opened a
+  /// sleep stretch by itself ([_resumeSleep]), Undo takes that one away instead.
   List<Span> undoHeadbandOff() {
     if (!_begun || _stopping) return const [];
+    final resumed = RecordingLive(id: _night.recording, spans: _spans).resumed;
+    if (resumed != null) return _undoResume(resumed);
     final back = RecordingLive(id: _night.recording, spans: _spans).undoable;
     if (back.isEmpty) return const [];
     final open = <Span>[];

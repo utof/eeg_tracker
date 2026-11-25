@@ -20,7 +20,7 @@ recording of a night: recordings() leaves it out, so it is never chained, scored
 Record first (DECISIONS 880-899, scripts/spans.py): a file set whose header has `recording` belongs to that
 recording and is never chained by the 3-hour rule above. What was sleep in it is said by the spans file of that
 recording (<spans>/<recording id>.spans.jsonl): each closed span of kind `sleep` or `nap` is a time window.
-  - Sleep spans (source owner_button, owner_confirmed or auto_start) are joined into nights by the same rule applied
+  - Sleep spans (source owner_button, owner_confirmed, auto_start or auto_resume) are joined into nights by the same rule applied
     to spans: the next span starts less than 3 hours after the last one's end, or has the same evening date, within 24
     hours of the first. The night is named by the evening date of its first span and reads only the samples inside
     its spans (`Night.windows`, unix seconds). An auto_start span is taken as a night span here: the "10 minutes
@@ -193,7 +193,8 @@ def nights(recs: list[Rec], no_sleep: Collection[str] = (), include_recorded: bo
 
 
 AUTO = None  # spans_dir: the sibling `spans/` of a folder named `recordings`, else none
-SPAN_FROM = {"owner_button": "pressed", "owner_confirmed": "confirmed", "auto_start": "auto"}  # source -> span_from
+# source -> span_from (auto_resume: the app opened the stretch when the headband came back after the 60-minute rule)
+SPAN_FROM = {"owner_button": "pressed", "owner_confirmed": "confirmed", "auto_start": "auto", "auto_resume": "auto"}
 
 
 def spans_folder(folder: Path, spans_dir: Path | None = AUTO) -> Path | None:
