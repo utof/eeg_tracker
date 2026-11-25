@@ -283,7 +283,9 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     before = cat("asks.jsonl")
     pc.start_app()
     pc.wait_main(240)
-    new_card = pc.find_on_tab("Record", f"{hm(a)}-{hm(b)}. The headband thinks you walked", limit=180)
+    # the stretch's words depend on the hour of the run: before about 08:10 it ended before 04:00, the day before in the
+    # app's reckoning, so its card gives the times to the half hour (card_words)
+    new_card = pc.find_on_tab("Record", f"{capital(card_words(a, b, now2))}. The headband thinks you walked", limit=180)
     armed = wait(lambda: cat("armed.json").strip() or None, limit=60)
     time.sleep(45)  # a batch that may go out does so at once: give it time to show that it does not
     title2 = cc.notification_title()
