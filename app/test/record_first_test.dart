@@ -7,6 +7,7 @@ import 'package:eeg_tracker/alarm/rule.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:eeg_tracker/recorder/header.dart';
 import 'package:eeg_tracker/recorder/night_recorder.dart';
+import 'package:eeg_tracker/recorder/recorder_service.dart' show stopAnswerWait;
 import 'package:eeg_tracker/recorder/status.dart';
 import 'package:eeg_tracker/sleep/night_scorer.dart';
 import 'package:eeg_tracker/spans/activities.dart' show undoOffCommand;
@@ -171,6 +172,58 @@ void main() {
     expect({for (final s in sets) header(s).recording}, {id});
     final s = readSpans(spansFileOf(spansDirFor(dir.path), id)).spans.single;
     expect(s.endedBy, 'recording_stopped');
+  });
+
+  test('a restart by Android with no recording to continue begins none (review finding 7)', () async {
+    // the last start was Sleep; that recording has ended (the screen closed it, or Stop did). Android starts the
+    // service again by itself: there is nothing to continue, and no new recording with Sleep marked may begin.
+    store.state = const NightState(active: false, startMs: 1, recording: '2026-11-20-230000');
+    final finder = FakeFinder([FakeBand('a')]);
+    final r = recorder(finder);
+    await r.run(restartedBySystem: true);
+    expect(r.nothingToContinue, isTrue);
+    expect(finder.calls, isEmpty, reason: 'it looked for the headband');
+    expect(stems(), isEmpty, reason: 'a new recording began by itself');
+    expect(store.state.active, isFalse);
+    expect(store.state.recording, '2026-11-20-230000', reason: 'the last recording\'s state (its stop sheet) is kept');
+    expect(statuses.every((s) => s.phase == Phase.idle), isTrue);
+    expect(r.spans, isEmpty);
+  });
+
+  test('a new recording begun over one still marked active closes the old one\'s spans first (review finding 8)', () async {
+    // a Stop that the screen stopped waiting for: the old recording's state stayed active, its span open
+    final first = recorder(FakeFinder([FakeBand('a')]), sleep: false);
+    final running = first.run(restartedBySystem: false);
+    await wait(200);
+    first.openSpan('work');
+    await first.stop(endNight: false);
+    await running;
+    final old = stems().single;
+    expect(store.state.active, isTrue);
+    expect(readSpans(spansFileOf(spansDirFor(dir.path), old)).spans.single.closed, isFalse);
+
+    await wait(1100); // file sets are named by the second
+    final second = recorder(FakeFinder([FakeBand('b')]), sleep: false);
+    final again = second.run(restartedBySystem: false);
+    await wait(200);
+    final left = readSpans(spansFileOf(spansDirFor(dir.path), old)).spans.single;
+    expect((left.closed, left.endedBy), (true, 'phone_restart'), reason: 'the old recording\'s span stayed open for good');
+    expect(statuses.last.rec.id, isNot(old));
+    expect(statuses.last.rec.spans, isEmpty, reason: 'the new recording starts with nothing marked');
+    await second.stop();
+    await again;
+  });
+
+  test('the sleep kit switched on or off keeps when the contact was measured (review finding 11)', () {
+    const s = NightState(active: true, startMs: 1, contactOhms: {'O1': 1e5}, contactAtMs: 1234, sleepKit: false);
+    expect(s.withSleepKit(on: true).contactAtMs, 1234);
+    expect(s.withSleepKit(on: true).withSleepKit(on: false).contactAtMs, 1234);
+  });
+
+  test('the screen waits for Stop at least as long as the recorder may take to close everything (review finding 8)', () {
+    const t = RecorderTiming();
+    // three closes of at most 5 s each (the alarm, the cues, the sleep model), then the run's own end
+    expect(stopAnswerWait, greaterThanOrEqualTo(t.stopTimeout + const Duration(seconds: 15)));
   });
 
   test('a saved state from before Record first reads as a night: the sleep kit on, no recording id', () {

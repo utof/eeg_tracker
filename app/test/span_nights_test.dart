@@ -147,6 +147,11 @@ void main() {
     expect(s.end!.difference(lastSample).inSeconds.abs(), lessThan(2));
     expect(nightsIn(rec).single.windows!.single.$2, s.end);
     expect(endedWithoutStop(fixed, rec), isNull); // done once
+    // an app process that has only just started cannot tell yet: Android may be about to start the service again
+    // (the restart after a wedged SDK comes within seconds, and the data is old exactly then)
+    final startedAt = lastSample.add(const Duration(hours: 2));
+    expect(endedWithoutStop(state, rec, clock: () => startedAt.add(const Duration(seconds: 20)), processStart: startedAt), isNull);
+    expect(endedWithoutStop(state, rec, clock: () => startedAt.add(const Duration(seconds: 90)), processStart: startedAt), isNotNull);
     expect(tryHeader(File('${rec.path}/$id.f32'))!.recording, id);
   });
 

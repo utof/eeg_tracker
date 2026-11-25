@@ -40,6 +40,7 @@ import 'chunk_writer.dart';
 import 'contact.dart';
 import 'header.dart';
 import 'headband.dart';
+import '../spans/after_restart.dart' show endedWithoutStop;
 import '../spans/span.dart';
 import '../spans/span_log.dart';
 import 'live_drift.dart';
@@ -370,7 +371,7 @@ class NightRecorder {
   /// so an active night is continued (new file set) instead of a new night begun.
   Future<void> run({required bool restartedBySystem}) async {
     try {
-      await _begin(restartedBySystem);
+      if (!await _begin(restartedBySystem)) return;
       await _loop();
       if (_stopping && _endNight) {
         _closeSpansAtStop();
@@ -416,13 +417,25 @@ class NightRecorder {
     await _save();
   }
 
-  Future<void> _begin(bool restartedBySystem) async {
+  /// Android started the service by itself and the saved state holds no recording to continue: [run] began none
+  /// (a start by the system never begins a recording: the last start's choice, Sleep for one, is not a new press).
+  bool nothingToContinue = false;
+
+  /// False: nothing to record ([nothingToContinue]).
+  Future<bool> _begin(bool restartedBySystem) async {
     NightState prior;
     try {
       prior = await store.load();
     } catch (_) {
       prior = const NightState(); // nothing to continue: a new night
     }
+    if (restartedBySystem && !prior.active) {
+      _log.info('started by Android with no recording to continue: none begins');
+      nothingToContinue = true;
+      _night = prior;
+      return false;
+    }
+    if (prior.active && !restartedBySystem) _endLeftActive(prior);
     if (restartedBySystem && prior.active) {
       _night = prior;
       _slots.addAll(prior.slots);
@@ -498,6 +511,18 @@ class NightRecorder {
     final early = _earlyLightsOff;
     if (early != null) lightsOff(at: early);
     if (_earlyAlarmOff) alarmOff();
+    return true;
+  }
+
+  /// A new recording begins while the saved state still holds an active one (its Stop was not finished, or its
+  /// service went and never came back): that one's open spans are closed at its last sample before its state is
+  /// replaced, or they would stay open for good.
+  void _endLeftActive(NightState prior) {
+    if (spanLog == null) return;
+    try {
+      final ended = endedWithoutStop(prior, dir, clock: _now, grace: Duration.zero);
+      if (ended != null) _log.info('a recording left active was ended before the new one', {'recording': ended.recording});
+    } catch (_) {}
   }
 
   Future<void> _loop() async {

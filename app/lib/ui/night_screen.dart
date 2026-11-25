@@ -1002,7 +1002,12 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   /// Ends the recording now, with no question: Stop once it was confirmed, and "Stop everything" after an activity
   /// that started the recording (spans/activities.dart).
   Future<void> _stopNow() async {
-    if (!mounted || _busy) return;
+    // the tab is in the middle of another tap (Sleep, a start): the Stop waits for it instead of doing nothing
+    for (var i = 0; i < 100 && mounted && _busy; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    if (!mounted) return;
+    if (_busy) return _say('The recording is still running: the app was busy. Tap Stop on the Record tab.');
     setState(() => _busy = true);
     try {
       _stopped = Completer<void>();
@@ -1010,7 +1015,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       Activities.shared?.recordingStops(); // an activity that is alive ends by this Stop; the rest was left open
       FlutterForegroundTask.sendDataToTask(stopCommand);
       // The recorder closes its files and the headband first; then the service goes.
-      await _stopped!.future.timeout(const Duration(seconds: 25), onTimeout: () {});
+      await _stopped!.future.timeout(stopAnswerWait, onTimeout: () {});
       await FlutterForegroundTask.stopService();
       await _share.afterStop(); // 15 more minutes, so the laptop gets the end of the night
       if (mounted) unawaited(_stopSheet(afterStop: true)); // the files are closed: what was this recording?

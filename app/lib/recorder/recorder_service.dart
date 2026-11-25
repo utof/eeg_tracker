@@ -132,6 +132,11 @@ const Map<String, Object?> stopSleepCommand = {'kind': 'sleep', 'op': 'stop'};
 /// Sent by the recorder when it stopped by itself after hours without the headband (DECISIONS 899).
 const Map<String, Object> gaveUpMessage = {'kind': 'gaveUp'};
 
+/// How long the screen waits for [stoppedMessage] before it stops the service: the recorder's own worst case (three
+/// closes of at most 5 s each, then [RecorderTiming.stopTimeout], 20 s) and a little more. A service stopped before
+/// the recorder has finished leaves the recording marked active with its spans open.
+const Duration stopAnswerWait = Duration(seconds: 40);
+
 /// Sent by the recorder once its files are closed after [stopCommand].
 const Map<String, Object> stoppedMessage = {'kind': 'stopped'};
 
@@ -255,7 +260,7 @@ Future<(NightState, bool)> loadEndedNight(String? recordingsDir) async {
   final s = await store.load();
   if (recordingsDir == null) return (s, false);
   try {
-    final fixed = endedWithoutStop(s, Directory(recordingsDir));
+    final fixed = endedWithoutStop(s, Directory(recordingsDir), processStart: appProcessStart);
     if (fixed == null) return (s, false);
     await store.save(fixed);
     return (fixed, true);
@@ -447,7 +452,14 @@ class RecorderTaskHandler extends TaskHandler {
       _wifiDiy = true;
       unawaited(_wifi());
     }
-    unawaited(recorder.run(restartedBySystem: starter == TaskStarter.system));
+    unawaited(
+      recorder.run(restartedBySystem: starter == TaskStarter.system).then((_) {
+        // Android started the service by itself and there is no recording to continue: none begins, the service goes
+        if (!recorder.nothingToContinue || _stopping) return;
+        debugPrint('eeg_tracker recorder: started by Android with no recording to continue; stopping the service');
+        unawaited(FlutterForegroundTask.stopService());
+      }),
+    );
     unawaited(_sharing(() async => _applyShare(await loadShareConfig())));
   }
 

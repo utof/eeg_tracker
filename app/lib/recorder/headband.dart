@@ -258,6 +258,7 @@ class NightState {
     runs: runs,
     contactTried: contactTried,
     contactOhms: contactOhms,
+    contactAtMs: contactAtMs,
     slots: slots,
     band: band,
     directPending: directPending,

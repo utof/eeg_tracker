@@ -13,11 +13,29 @@ import 'span_log.dart';
 
 const Duration restartGrace = Duration(minutes: 10);
 
-/// [state] as it should be saved now, or null when nothing is to be done (not active, or its data is too fresh to
-/// tell a restarted phone from a restarting process). Call only while the recorder's service does not run.
-NightState? endedWithoutStop(NightState state, Directory recordingsDir, {DateTime Function()? clock}) {
+/// An app process younger than this does not end a recording: when Android (or the app's own restart after a wedged
+/// SDK) is bringing the recorder's service back, it comes within seconds of the process's start, and the data is
+/// old exactly then (the headband was away). [restartGrace] counts from the last data, not from the process's end.
+const Duration processGrace = Duration(seconds: 60);
+
+/// When this app process first asked (it stands for the process's start).
+final DateTime appProcessStart = DateTime.now();
+
+/// [state] as it should be saved now, or null when nothing is to be done (not active, its data is too fresh to
+/// tell a restarted phone from a restarting process, or the process itself has only just started: [processStart]).
+/// Call only while the recorder's service does not run. [grace] and [by]: the recorder ends a recording that was
+/// left active when a new one begins over it, at once.
+NightState? endedWithoutStop(
+  NightState state,
+  Directory recordingsDir, {
+  DateTime Function()? clock,
+  DateTime? processStart,
+  Duration grace = restartGrace,
+  String by = 'phone_restart',
+}) {
   if (!state.active) return null;
   final now = (clock ?? DateTime.now)();
+  if (processStart != null && now.difference(processStart) < processGrace) return null;
   var id = state.recording;
   var last = DateTime.fromMillisecondsSinceEpoch(state.startMs);
   if (id != null && recordingsDir.existsSync()) {
@@ -29,7 +47,7 @@ NightState? endedWithoutStop(NightState state, Directory recordingsDir, {DateTim
       if (end != null && end.isAfter(last)) last = end;
     }
   }
-  if (now.difference(last) < restartGrace) return null;
+  if (now.difference(last) < grace) return null;
   var spans = [for (final l in state.spans) ?Span.fromLine(l)];
   if (spans.isNotEmpty) {
     id ??= fileStem(DateTime.fromMillisecondsSinceEpoch(state.startMs));
@@ -37,7 +55,7 @@ NightState? endedWithoutStop(NightState state, Directory recordingsDir, {DateTim
     final fixed = <Span>[];
     for (var k = 0; k < spans.length; k++) {
       var s = spans[k].id.startsWith('?') ? spans[k].withId('$id-${k + 1}') : spans[k];
-      if (!s.closed) s = s.closedAt(last, 'phone_restart');
+      if (!s.closed) s = s.closedAt(last, by);
       if (!identical(s, spans[k])) log.write(s);
       fixed.add(s);
     }
