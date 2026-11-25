@@ -273,7 +273,12 @@ def lent_night() -> list[pc.Result]:
     """L1-L3: a night on the lent connection, the app swiped away, the process ended, the app opened again."""
     n1 = "L1 Signal, Sleep, the app swiped from Recents: the recording goes on"
     before = set(pc.sh(f"ls {REC}/*.log 2>/dev/null", check=False).split())
-    if not pc.open_tab("Signal"):
+    for _ in range(3):  # a session's page of the steps before (Work's "Saved") may still be in front
+        if pc.open_tab("Signal"):
+            break
+        pc.sh("input keyevent 4", check=False)
+        time.sleep(2)
+    else:
         return [pc.Result(n1, "FAIL", "the Signal tab was not found", pc.screen_words("l-tab"))]
 
     def live() -> bool:
