@@ -1706,7 +1706,7 @@ class NightRecorder {
   Future<void> _pause(Duration d) => Future.any([Future<void>.delayed(d), _stopSignal.future]);
 
   void _set(RecorderStatus s) {
-    _status = s.copyWith(rec: RecordingLive(id: _night.recording, sleep: _night.sleepKit, spans: _spans));
+    _status = s.copyWith(rec: RecordingLive(id: _night.recording, sleep: _night.sleepKit, spans: _spans, band: _night.band?.name));
     onStatus(_status);
   }
 

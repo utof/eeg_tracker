@@ -369,9 +369,13 @@ double? _double(Object? v) => v is num ? v.toDouble() : null;
 /// The running recording as the screen needs it (Record first, DECISIONS 880-899): its id (null until its first file
 /// set opens), whether the sleep kit is attached, and its spans in order.
 class RecordingLive {
-  const RecordingLive({this.id, this.sleep = true, this.spans = const []});
+  const RecordingLive({this.id, this.sleep = true, this.spans = const [], this.band});
 
   final String? id;
+
+  /// The headband's name as it gave it (a session that runs on the recording writes it into its own file); null
+  /// until it is found.
+  final String? band;
 
   /// The sleep kit runs: a sleep span is open. A status from a recorder of before reads as true.
   final bool sleep;
@@ -396,6 +400,7 @@ class RecordingLive {
   Map<String, Object?> toMap() => {
     'id': id,
     'sleep': sleep,
+    'band': ?band,
     'spans': [for (final s in spans) s.toLine(s.start)],
   };
 
@@ -405,6 +410,7 @@ class RecordingLive {
     return RecordingLive(
       id: m['id'] is String ? m['id'] as String : null,
       sleep: m['sleep'] != false,
+      band: m['band'] is String ? m['band'] as String : null,
       spans: [
         if (l is List)
           for (final x in l)

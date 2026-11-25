@@ -8,6 +8,7 @@ import 'package:eeg_tracker/share/control.dart';
 import 'package:eeg_tracker/share/isolate.dart';
 import 'package:eeg_tracker/share/link.dart';
 import 'package:eeg_tracker/share/protocol.dart';
+import 'package:eeg_tracker/share/shared_session.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -114,6 +115,15 @@ void main() {
     await settle();
     expect(blocked.status.up, isTrue);
     await blocked.setOn(false);
+  });
+
+  test("a session's summary also goes to the recorder: its server answers the laptop while a recording runs", () async {
+    // Work as an activity of a recording (Record first step 4): the recorder's service serves /state, not the app
+    addTearDown(() => sharedSession.value = null);
+    sharedSession.value = {'kind': 'work', 'level': 'alert'};
+    expect(sent.last, {'kind': 'shareSession', 'session': {'kind': 'work', 'level': 'alert'}});
+    sharedSession.value = null;
+    expect(sent.last, {'kind': 'shareSession', 'session': null});
   });
 
   test('off by default: nothing serves, the line says what it is for', () async {

@@ -206,6 +206,7 @@ void main() {
     final work = await d.session('work');
     await until(() => work.got.length > 5, what: "Work reading the recording's stream");
     expect(d.acts.current.value?.kind, 'work');
+    expect(work.link.name, 'BrainBit A', reason: "the session's file names the recording's headband");
     expect(d.acts.ref?.recording, d.recordingId);
     expect(d.acts.ref?.span, '${d.recordingId}-1');
     expect(d.statuses.last.rec.open('work'), isNotNull);

@@ -29,6 +29,7 @@ import '../phone.dart';
 import '../start_log.dart';
 import '../share/isolate.dart';
 import '../share/protocol.dart';
+import '../share/shared_session.dart' show shareSessionKind;
 import '../signal/live_tap.dart';
 import '../sleep/live_log.dart' show LiveStageLog, liveStagesDirFor;
 import '../sleep/live_stager.dart';
@@ -518,6 +519,10 @@ class RecorderTaskHandler extends TaskHandler {
       } else {
         _alarmOffEarly = true;
       }
+    } else if (data is Map && data['kind'] == shareSessionKind) {
+      // a session that runs on this recording (Work, ...): /state tells the paired laptop about it
+      final s = data['session'];
+      _share?.setSession(s is Map ? {for (final e in s.entries) '${e.key}': e.value} : null);
     } else if (data is Map && data['kind'] == 'sleep') {
       unawaited(_sleepCommand(data));
     } else if (data is Map && data['kind'] == 'span') {

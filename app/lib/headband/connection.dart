@@ -983,8 +983,9 @@ class RecordingBand implements Headband, KnownContact, RidesRecorder {
   @override
   bool get ended => _ended;
 
+  /// The recording's headband by its own name, once the recorder has found it.
   @override
-  String get name => 'The recording';
+  String get name => _owner._night?.rec.band ?? 'The recording';
   @override
   String get address => 'recording';
   @override
