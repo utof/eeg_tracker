@@ -1,0 +1,8 @@
+# the throw-away signing keys and everything a build or a run makes stay out of git
+keys/
+out/
+build/
+.gradle/
+reports/
+*.apk
+__pycache__/

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The reader has to see the source to reach its provider, service and screen (package visibility, Android 11+). -->
+    <queries>
+        <package android:name="io.github.utof.linkprobe.source" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:label="Probe reader">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- The script's way to run routes 1 and 2 while the reader is NOT in front (a stand-in for utof's background job). -->
+        <receiver
+            android:name=".TriggerReceiver"
+            android:exported="true" />
+    </application>
+</manifest>
