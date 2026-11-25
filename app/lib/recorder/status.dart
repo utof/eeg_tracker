@@ -1,4 +1,6 @@
 // What the recorder isolate tells the screen, about once a second. Plain maps cross the isolate port.
+import 'dart:async';
+
 import '../detectors/drift_off.dart' show DriftState;
 import '../spans/span.dart' show Span;
 import 'contact.dart';
@@ -6,6 +8,37 @@ import 'contact.dart';
 enum Phase { idle, searching, connecting, checkingContact, recording, reconnecting, stopping }
 
 const int sampleRateHz = 250;
+
+/// The recorder's heartbeat: while a recorder exists it sends its status this often, whether or not samples arrive
+/// (searching, reconnecting, recording alike). The one source of "a recording is running" for the screen.
+const Duration recorderBeat = Duration(seconds: 2);
+
+/// This long without a beat, the screen asks Android whether the recorder's service is still there (four beats: one
+/// late beat is not an end). A service that is there is a recording that runs, however quiet.
+const Duration recorderQuietAfter = Duration(seconds: 8);
+
+/// The heartbeat itself (the recorder's service runs one): [read] is the recorder's status now, null while there is
+/// no recorder. A status that is idle is not sent: the recorder says idle itself, once, when its run is over, and one
+/// that has not begun yet is idle only because it is newly born.
+class StatusBeat {
+  StatusBeat({required this.read, required this.send, this.every = recorderBeat});
+  final RecorderStatus? Function() read;
+  final void Function(RecorderStatus status) send;
+  final Duration every;
+  Timer? _timer;
+
+  void start() => _timer ??= Timer.periodic(every, (_) => beat());
+
+  void beat() {
+    final s = read();
+    if (s != null && s.phase != Phase.idle) send(s);
+  }
+
+  void stop() {
+    _timer?.cancel();
+    _timer = null;
+  }
+}
 
 /// Length of one cell of the night strip: half an hour of clock time.
 const int slotMs = 30 * 60 * 1000;

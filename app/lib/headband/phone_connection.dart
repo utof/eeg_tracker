@@ -64,6 +64,8 @@ HeadbandConnection startPhoneConnection() {
     },
     sendToNight: FlutterForegroundTask.sendDataToTask,
     sessionRuns: () => PhoneSessionKeeper.heldWithHeadband,
+    // Android's word on the recorder: a recorder that went quiet is gone only when its service is
+    serviceRuns: () => FlutterForegroundTask.isRunningService,
     onStatus: onStatus,
   );
   FlutterForegroundTask.addTaskDataCallback(c.recorderData);

@@ -145,7 +145,7 @@ void initRecorderService() {
     ),
     iosNotificationOptions: const IOSNotificationOptions(showNotification: false),
     foregroundTaskOptions: ForegroundTaskOptions(
-      // The recorder keeps its own 1 s clock; no repeat events needed.
+      // The recorder keeps its own 1 s clock and the service its own heartbeat (StatusBeat); no repeat events needed.
       eventAction: ForegroundTaskEventAction.nothing(),
       autoRunOnBoot: false, // a reboot ends the night; never resume silently
       autoRunOnMyPackageReplaced: false,
@@ -300,6 +300,10 @@ class RecorderTaskHandler extends TaskHandler {
   LostWatch? _lostWatch;
   Map<String, Object?>? _alert;
   Timer? _lostTimer;
+
+  /// The heartbeat: the recorder's status every [recorderBeat] while it searches, reconnects or records, so the screen
+  /// knows a recorder exists also when no sample arrives.
+  late final StatusBeat _beat = StatusBeat(read: () => _recorder?.status, send: _send);
   BandBatteryStore? _bandBattery;
   Phase? _shownPhase;
   int _shownAtMs = 0;
@@ -412,6 +416,7 @@ class RecorderTaskHandler extends TaskHandler {
       bandBattery: bandBattery,
     );
     _recorder = recorder;
+    _beat.start();
     // what this night runs, for the battery samples and the usage log (lib/logs/activity.dart, DECISIONS 715)
     Activity.begin('night');
     if (scorer != null) Activity.begin('live-model');
@@ -664,6 +669,7 @@ class RecorderTaskHandler extends TaskHandler {
       _wifiDiy = false;
       await _wifi();
     }
+    _beat.stop();
     FlutterForegroundTask.sendDataToMain(stoppedMessage);
     Metrics.band = null;
     for (final f in const ['headband', 'cues', 'live-model', 'night']) {

@@ -70,13 +70,21 @@ Future<({BandLink link, List<int> got, Map<String, double?> ohms})> startLink(He
 
 /// The screen's engine and the recorder's, joined as the app joins them (messages both ways).
 class World {
-  World({Duration linger = const Duration(seconds: 30), List<Headband>? nightBands}) {
+  World({
+    Duration linger = const Duration(seconds: 30),
+    List<Headband>? nightBands,
+    Duration quietAfter = recorderQuietAfter,
+    this.timing = _fast,
+  }) {
     nightFinder = CountingFinder(nightBands ?? []);
     owner = HeadbandConnection(
       makeFinder: () => real,
       disposeFinder: (_, {required anyLost}) => real.disposed++,
       linger: linger,
       tickEvery: const Duration(milliseconds: 20),
+      // Android's word on the recorder's service
+      serviceRuns: () async => serviceUp,
+      quietAfter: quietAfter,
       sendToNight: (m) {
         if (screenAlive) lend?.onMessage(m);
       },
@@ -113,6 +121,32 @@ class World {
   LendFinder? lend;
   NightRecorder? recorder;
   bool nightOn = false;
+  final RecorderTiming timing;
+
+  /// The recorder's service exists (it does from the start of a recording until [serviceGone]).
+  bool serviceUp = false;
+
+  /// The service's heartbeat, as recorder_service.dart runs it: [beatOn] false plays a recorder that says nothing.
+  bool beatOn = true;
+  int beats = 0;
+  late final StatusBeat beat = StatusBeat(
+    read: () => beatOn ? recorder?.status : null,
+    send: (s) {
+      beats++;
+      if (screenAlive) owner.recorderData(s.toMap(nowMs: DateTime.now().millisecondsSinceEpoch));
+    },
+    every: const Duration(milliseconds: 20),
+  );
+
+  /// Android took the service away without a word from the recorder.
+  void serviceGone() {
+    serviceUp = false;
+    beatOn = false;
+    sayStatus = false;
+  }
+
+  /// False: the recorder's own statuses do not reach the screen any more (with [serviceGone]).
+  bool sayStatus = true;
 
   /// False plays the screen's engine going away: nothing crosses any more, either way.
   bool screenAlive = true;
@@ -140,6 +174,8 @@ class World {
     // the offer crosses as saved JSON
     final offer = made == null ? null : LendOffer.fromJson(made.toJson());
     nightOn = true;
+    serviceUp = true;
+    beat.start();
     final finder = lend = LendFinder(
       inner: nightFinder,
       toScreen: (m) {
@@ -154,10 +190,10 @@ class World {
       store: store,
       onStatus: (s) {
         statuses.add(s);
-        if (screenAlive) owner.recorderData(s.toMap(nowMs: DateTime.now().millisecondsSinceEpoch));
+        if (screenAlive && sayStatus) owner.recorderData(s.toMap(nowMs: DateTime.now().millisecondsSinceEpoch));
       },
       onStuck: (_) async {},
-      timing: _fast,
+      timing: timing,
       watch: null,
     );
     unawaited(r.run(restartedBySystem: false));
@@ -169,6 +205,7 @@ class World {
   String log() => dir.listSync().whereType<File>().where((f) => f.path.endsWith('.log')).map((f) => f.readAsStringSync()).join();
 
   Future<void> close() async {
+    beat.stop();
     tapTimer.cancel();
     ChunkWriter.onLive = null;
     await recorder?.stop();
@@ -442,9 +479,31 @@ void main() {
     expect(w.statuses.last.phase, Phase.recording, reason: 'the recording goes on');
   }, tags: 'realtime');
 
-  test('the recording headband drops under a session: the session waits, the recorder reconnects, the stream is back', () async {
+  // The recorder's waits in these tests are many times the screen's patience ([quietAfter] 60 ms): a recorder that
+  // searches or reconnects sends no sample for all that time, and the screen must still know it exists.
+  const slow = RecorderTiming(
+    tick: Duration(milliseconds: 10),
+    ticksPerCheck: 5,
+    scanFor: Duration(milliseconds: 20),
+    contactFor: Duration(milliseconds: 20),
+    settle: Duration(milliseconds: 5),
+    retryWait: Duration(milliseconds: 5),
+    sdkTimeout: Duration(milliseconds: 300),
+    connectTimeout: Duration(milliseconds: 300),
+    notFoundWait: Duration(milliseconds: 400),
+    notFoundWaitLong: Duration(milliseconds: 400),
+    stallChecksToGiveUp: 3,
+    stopTimeout: Duration(seconds: 2),
+    reconnectWaits: [Duration(milliseconds: 600)],
+    scanEvery: 3,
+    rescanFor: Duration(milliseconds: 20),
+  );
+  const patience = Duration(milliseconds: 60);
+
+  test('the recording headband drops under a session for longer than the screen waits for a beat: the session waits, '
+      'the recorder reconnects, the stream is back', () async {
     final first = CountingBand(label: 'N'), second = CountingBand(label: 'N2');
-    final w = World(nightBands: [first, second]);
+    final w = World(nightBands: [first, second], quietAfter: patience, timing: slow);
     addTearDown(w.close);
     await w.startNight();
     await until(() => w.recording);
@@ -461,6 +520,14 @@ void main() {
     await until(() => got.isNotEmpty);
     first.goOutOfRange();
     await until(() => link.lost, what: 'the session hearing of the drop');
+    // the recorder waits 600 ms before its try: ten times the screen's patience without one sample
+    await Future<void>.delayed(patience * 5);
+    expect(w.statuses.last.phase, Phase.reconnecting);
+    expect(w.owner.nightRuns, isTrue, reason: 'the screen forgot the recording while the recorder reconnects');
+    expect(w.owner.status.value.link, LinkState.reconnecting, reason: 'the card must not offer Connect');
+    expect(link.recordingEnded, isFalse, reason: 'the session was ended as if the recording had stopped');
+    await w.owner.connectNow();
+    expect(w.real.calls, isEmpty, reason: "Connect made the screen's engine reach for the headband");
     await until(() => !link.lost && second.emitted > 0, what: 'the recorder reconnected');
     final n = got.length;
     await until(() => got.length > n, what: 'samples after the reconnect');
@@ -471,7 +538,72 @@ void main() {
     await link.close();
   });
 
-  test('the recording stops under a session: the session hears it, and the next start connects as before', () async {
+  test('the recorder looks for the headband and has no sample yet: the screen knows a recording runs, Connect and a '
+      'session do not reach for the headband', () async {
+    final w = World(nightBands: [], quietAfter: patience, timing: slow);
+    addTearDown(w.close);
+    await w.startNight();
+    await until(() => w.statuses.isNotEmpty && w.statuses.last.note.contains('not found'), what: 'the first failed search');
+    await Future<void>.delayed(patience * 4);
+    expect(w.owner.nightRuns, isTrue, reason: 'no status for four times the patience, and the recording was forgotten');
+    expect(w.owner.status.value.link, isNot(LinkState.off), reason: 'the card says off and offers Connect');
+    await w.owner.connectNow();
+    final link = BandLink(finder: w.owner.finder, timing: _quick, onBatch: (_, _) {});
+    expect(await link.connect(), isTrue, reason: 'a session rides on the recording, also while it searches');
+    expect(w.real.calls, isEmpty, reason: "the screen's engine reached for the headband under the recorder");
+    expect(w.beats, greaterThan(3));
+    await link.close();
+  });
+
+  test('a recorder that says nothing at all is still a recording while its service exists', () async {
+    final w = World(nightBands: [], quietAfter: patience, timing: slow);
+    addTearDown(w.close);
+    await w.startNight();
+    await until(() => w.owner.nightRuns);
+    w.beatOn = false;
+    w.sayStatus = false;
+    await Future<void>.delayed(patience * 5);
+    expect(w.owner.nightRuns, isTrue);
+    await w.owner.connectNow();
+    expect(w.real.calls, isEmpty);
+  });
+
+  test('a screen that has heard nothing yet (it just opened) does not connect while the recorder\'s service exists', () async {
+    final w = World(nightBands: [], quietAfter: patience, timing: slow);
+    addTearDown(w.close);
+    w.serviceUp = true; // the service runs; its first beat has not reached this screen
+    expect(w.owner.nightRuns, isFalse);
+    await w.owner.connectNow();
+    final band = await w.owner.finder.find(const Duration(milliseconds: 10));
+    expect(band, isA<RecordingBand>());
+    expect(w.real.calls, isEmpty);
+    // and when that service goes without a word, the rider hears the end
+    w.serviceUp = false;
+    await until(() => (band! as RecordingBand).ended, what: 'the rider hearing that the service is gone');
+    await band!.disconnectAndDispose();
+  });
+
+  test('the recorder\'s service goes without a word under a session: the session hears the end, and the next start '
+      'connects as before', () async {
+    final w = World(nightBands: [CountingBand(label: 'N')], quietAfter: patience);
+    addTearDown(w.close);
+    await w.startNight();
+    await until(() => w.recording);
+    final link = BandLink(finder: w.owner.finder, timing: _quick, onBatch: (_, _) {});
+    await link.connect();
+    await link.startSignal();
+    w.serviceGone();
+    await until(() => link.recordingEnded && link.lost, what: 'the session hearing that the recorder is gone');
+    expect(w.owner.nightRuns, isFalse);
+    await link.close();
+    final a = await startLink(w.owner);
+    await until(() => a.got.isNotEmpty);
+    expect(w.real.scans, 1);
+    await a.link.close();
+  });
+
+  test('the recording stops under a session: the session hears it from the recorder\'s own last word, and the next '
+      'start connects as before', () async {
     final w = World(nightBands: [CountingBand(label: 'N')]);
     addTearDown(w.close);
     await w.startNight();
@@ -481,13 +613,34 @@ void main() {
     await link.startSignal();
     expect(link.recordingEnded, isFalse);
     await w.recorder!.stop();
-    w.owner.nightEnded();
+    w.serviceUp = false;
     await until(() => link.recordingEnded && link.lost, what: 'the session hearing the stop');
+    expect(w.owner.nightRuns, isFalse);
     await link.close();
     final a = await startLink(w.owner);
     await until(() => a.got.isNotEmpty);
     expect(w.real.scans, 1, reason: 'between recordings a session connects by itself, as before');
     await a.link.close();
+  });
+
+  test('the heartbeat sends the status whether or not samples come, and never an idle one', () async {
+    var status = const RecorderStatus();
+    RecorderStatus? read() => status;
+    final sent = <Phase>[];
+    final beat = StatusBeat(read: read, send: (s) => sent.add(s.phase), every: const Duration(milliseconds: 10))..start();
+    addTearDown(beat.stop);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(sent, isEmpty, reason: 'a recorder that has not begun is idle: that is not an end to tell');
+    for (final p in [Phase.searching, Phase.reconnecting, Phase.recording, Phase.stopping]) {
+      status = RecorderStatus(phase: p);
+      final n = sent.length;
+      await until(() => sent.length >= n + 2, what: 'two beats while $p');
+      expect(sent.last, p);
+    }
+    beat.stop();
+    final n = sent.length;
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    expect(sent.length, n);
   });
 
   test('a session on a lent recording (Signal, Sleep, then Work): still one connection', () async {
