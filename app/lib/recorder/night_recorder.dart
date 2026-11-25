@@ -1720,6 +1720,10 @@ class NightRecorder {
     final open = _spans.where((s) => !s.closed && s.isSleep).lastOrNull;
     if (open != null) return open;
     final t = _now();
+    // one at a time (DECISIONS 983): an activity still marked (its page was closed) ends where the sleep starts
+    for (final s in [..._spans]) {
+      if (!s.closed) closeSpan(s.id, by: 'other_activity', at: t);
+    }
     _attachKit(plan);
     final span = openSpan(kind, source: source, at: t);
     _startDrift();

@@ -359,6 +359,30 @@ void sleepOnARecording() {
     expect(File('${dir.path}/${back.id}.log').readAsStringSync(), contains('Undo: sleep, work go on'));
   });
 
+  test('Sleep pressed while an activity is still marked ends that activity: one at a time', () async {
+    final r = NightRecorder(
+      finder: FakeFinder([FakeBand('a')]),
+      dir: dir,
+      store: store,
+      onStatus: statuses.add,
+      onStuck: (_) async {},
+      timing: fast,
+      watch: null,
+      clock: clock,
+      spanLog: SpanLog(spansDirFor(dir.path), clock: clock),
+      sleep: false,
+    );
+    final running = r.run(restartedBySystem: false);
+    await wait(200);
+    r.openSpan('work'); // its page was closed: the span stayed open
+    now = now.add(const Duration(minutes: 30));
+    r.startSleep();
+    expect([for (final s in statuses.last.rec.spans) (s.kind, s.closed, s.endedBy)], [('work', true, 'other_activity'), ('sleep', false, null)]);
+    expect(statuses.last.rec.spans.first.end, now);
+    await r.stop();
+    await running;
+  });
+
   test('the notices: what the 60-minute rule ended, and a recording that stopped itself', () {
     final at = DateTime(2026, 11, 25, 14, 5);
     Span off(int n, String kind) => Span(id: 'r-$n', kind: kind, start: at.subtract(const Duration(hours: 1)), end: at, endedBy: 'headband_off', source: 'owner_button');
