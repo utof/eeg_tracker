@@ -25,8 +25,8 @@ recording of anyone is needed. It checks:
   W3. Work pressed with nothing recording (after 5): the recorder starts, the work span says it started the
      recording; Stop work asks, "Stop everything" ends the recording.
   L1. (review finding 6) Signal, then Sleep: the night starts on the Signal tab's live connection (lent by the screen's
-     engine). The app is then swiped from Recents: the recording must go on, or pick up within 90 s, with the gap in
-     its log; the sleep span stays open.
+     engine). The app is then swiped from Recents: the recorder must notice that the lender is gone (its log says
+     so, no stream restart is tried) and have data again within 30 s; the sleep span stays open.
   L2. The app's whole process is then ended (kill -9, as Android does under memory pressure): Android must start the
      recorder again and the same recording must get data again within 150 s.
   L3. The app is opened again: it shows the running recording (Stop is offered, not Record), and "Stop everything"
@@ -52,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import emu  # noqa: E402
 import precheck as pc  # noqa: E402
 
+LENT_BACK_S = 30  # L1: data again this soon after the swipe (it was 52-59 s with three stream restarts)
 REC = f"{pc.FILES}/recordings"
 SPANS = f"{pc.FILES}/spans"
 
@@ -382,11 +383,18 @@ def lent_night() -> list[pc.Result]:
     back, pause, lines = growth(rec, 120)
     logs = "".join(cat(f[: -len(".f32")] + ".log") for f in rec_sets(rec))
     span = next((x for x in spans(rec) if x.get("kind") == "sleep"), {})
-    said = [l for l in logs.splitlines() if "no data" in l or "reconnect" in l or "connected " in l or "gap" in l or "lost" in l]
+    said = [l for l in logs.splitlines() if "no data" in l or "reconnect" in l or "connected " in l or "gap" in l or "lost" in l
+            or "lent the connection" in l or "restarting stream" in l]
+    knew = "the screen that lent the connection is gone" in logs
+    restarts = logs.count("restarting stream")
     details = [f"recording {rec}; lent: {lent}; process {pid} before, {pc.app_pid() or 'none'} after; the task left Recents: {gone} ({how})",
                f"bytes before the swipe {a}, at the end {sum(rec_sets(rec).values())}; longest pause {pause:.0f} s", *lines,
+               f"the recorder knew the lender was gone: {knew}; stream restarts tried: {restarts}",
                f"file sets: {json.dumps(rec_sets(rec))}", f"sleep span: {json.dumps(span)}", *("  log: " + l for l in said[-12:])]
-    ok = lent and gone and back is not None and back <= 90 and span.get("end") is None and bool(span)
+    # the recorder hears nothing of the screen's engine for 4 s and reconnects at once (DECISIONS 1029): no stream
+    # restarts on a connection nobody lends any more, and data again within half a minute
+    ok = (lent and gone and back is not None and back <= LENT_BACK_S and knew and restarts == 0
+          and span.get("end") is None and bool(span))
     words = ("the recording never paused" if back == 0.0 else
              f"the recording paused {pause:.0f} s and went on {back:.0f} s after the swipe" if back is not None else
              "the recording did not come back within 120 s of the swipe")

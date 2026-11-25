@@ -1405,7 +1405,7 @@ class NightRecorder {
       _set(_withAlarm(_withDrift(other == null ? _status : _status.copyWith(board: other.board))));
       if (_stopping) return _End.stopped;
       if (lost()) {
-        w.log('headband out of range; saving');
+        w.log(_lenderGone(band) ? lenderGoneLine : 'headband out of range; saving');
         return _End.lost;
       }
       if (++ticks % timing.ticksPerCheck != 0) continue;
@@ -1417,7 +1417,7 @@ class NightRecorder {
       lastTotal = w.samplesReceived;
       if (got > 0) await _clearDirectPending(); // a direct connection has proved itself
       if (lost() || !await _inRange(band)) {
-        w.log('headband out of range; saving');
+        w.log(_lenderGone(band) ? lenderGoneLine : 'headband out of range; saving');
         return _End.lost;
       }
       if (other == null) {
@@ -1452,6 +1452,12 @@ class NightRecorder {
     }
   }
 
+  /// The run was on a connection lent by the screen's engine, and that engine no longer exists (headband/lend.dart).
+  static bool _lenderGone(Headband band) => band is LentBand && band.lenderGone;
+
+  /// The run's log line for that.
+  static const String lenderGoneLine = 'the screen that lent the connection is gone; saving and reconnecting at once';
+
   Future<void> _restartStream(Headband band, ChunkWriter w, int attempt) async {
     w.log('no data, state inRange; restarting stream (try $attempt)');
     _set(_status.copyWith(note: 'no data; restarting the stream'));
@@ -1479,7 +1485,7 @@ class NightRecorder {
     _status = _status.copyWith(nightSamples: _night.samples);
     _logPackets(w);
     w.log('total samples ${w.samplesWritten}, ${(w.samplesWritten / sampleRateHz / 60).toStringAsFixed(1)} min');
-    if (end != _End.stopped) _logDrop(w, end);
+    if (end != _End.stopped) _logDrop(w, end, lenderGone: _lenderGone(band));
     if (w.samplesWritten > 0) _tries = 0; // a run that recorded something restarts the waits from the shortest
     try {
       if (end == _End.lost || lost() || !await _inRange(band)) {
@@ -1521,8 +1527,9 @@ class NightRecorder {
   }
 
   /// The drop line in the run's own `.log`; the reconnect tries follow it there.
-  void _logDrop(ChunkWriter w, _End end) {
+  void _logDrop(ChunkWriter w, _End end, {bool lenderGone = false}) {
     final why = switch (end) {
+      _End.lost when lenderGone => 'lender gone',
       _End.lost => 'out of range',
       _End.stalled => 'no data',
       _ => 'run failed',

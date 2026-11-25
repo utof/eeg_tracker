@@ -3,11 +3,16 @@
 // so the connection is lent: the owner (connection.dart) keeps it and sends every batch to the recorder, which records
 // it through a [LentBand] exactly as it records a headband of its own. No search, no new connection, no new contact
 // check: the reading already in force comes along with its time.
-// The lend ends at the first trouble: the headband drops ([lendLost]), no batch for the recorder's stall time (the
-// screen's engine is gone), or the run ends for any other reason. Then the recorder takes the headband over on its own
-// proven path (direct to its address, every third try a scan, DECISIONS 49), after telling the owner to let go
-// ([LendMessage.take]) and waiting at most [LendFinder.takeWait] for its answer. A night that is stopped while lent
-// leaves the connection with the owner ([LendMessage.endKeep]).
+// The lend ends at the first trouble: the headband drops ([lendLost]), the lender is gone, no batch for the recorder's
+// stall time while the lender lives, or the run ends for any other reason. Then the recorder takes the headband over
+// on its own proven path (direct to its address, every third try a scan, DECISIONS 49), after telling the owner to
+// let go ([LendMessage.take]) and waiting at most [LendFinder.takeWait] for its answer. A night that is stopped while
+// lent leaves the connection with the owner ([LendMessage.endKeep]).
+// The lender is gone (DECISIONS 1029): while it lends, the owner says [lendAlive] every second, whether or not samples
+// come. A recorder that hears nothing at all for [LendFinder.lenderGoneAfter] knows the screen's engine no longer
+// exists (the app was swiped away; nothing closes a channel then) and reconnects at once, without restarting a
+// stream nobody sends and without waiting for an answer to "let go". A lender that lives and a silent headband is the
+// other case: the recorder restarts the stream as it does on its own connection.
 // Messages are plain maps (`kind: lend`): they cross the isolate port.
 import 'dart:async';
 import 'dart:typed_data';
@@ -76,6 +81,9 @@ Map<String, Object?> lendBatch(List<Sample> batch, {int? gauge}) {
 /// The headband went out of range, or nothing is lent (any more).
 const Map<String, Object> lendLost = {'kind': lendKind, 'lost': true};
 
+/// The lender's sign of life, on every tick of the owner's own clock (a second) while it lends.
+const Map<String, Object> lendAlive = {'kind': lendKind, 'alive': true};
+
 /// The owner has let the headband go: the recorder may reach it.
 const Map<String, Object> lendReleased = {'kind': lendKind, 'released': true};
 
@@ -123,14 +131,25 @@ List<Sample>? _samples(Map<Object?, Object?> m) {
 /// The recorder's finder for a night that may start lent: the first search returns the lent connection when there is an
 /// offer; every later try (and every try without one) goes to [inner], after the owner was told to let go.
 class LendFinder implements HeadbandFinder {
-  LendFinder({required this.inner, required this.toScreen, LendOffer? offer, this.takeWait = const Duration(seconds: 4)})
-    : _offer = offer; // ignore: prefer_initializing_formals
+  LendFinder({
+    required this.inner,
+    required this.toScreen,
+    LendOffer? offer,
+    this.takeWait = const Duration(seconds: 4),
+    this.lenderGoneAfter = const Duration(seconds: 4),
+    this.lenderCheckEvery = const Duration(seconds: 1),
+  }) : _offer = offer; // ignore: prefer_initializing_formals
 
   final HeadbandFinder inner;
   final void Function(Object message) toScreen;
 
   /// How long the recorder waits for the owner's "released" before it reaches the headband anyway.
   final Duration takeWait;
+
+  /// Nothing at all from the lender (no batch, no [lendAlive]) for this long, counted in looks [lenderCheckEvery]
+  /// apart: it is gone. Four missed signs of life; the real phone's 59-second gap was three stream restarts on such
+  /// a connection (2026-11-25).
+  final Duration lenderGoneAfter, lenderCheckEvery;
   LendOffer? _offer;
   LentBand? _lent;
   bool _taken = false;
@@ -149,6 +168,7 @@ class LendFinder implements HeadbandFinder {
     }
     final band = _lent;
     if (band == null || band._ended) return;
+    band._heard();
     if (data['lost'] == true) return band._lost();
     final g = data['gauge'];
     if (g is int) band._gauge = g;
@@ -167,6 +187,7 @@ class LendFinder implements HeadbandFinder {
     } catch (_) {
       return; // no screen: nothing holds the headband there
     }
+    if (_lent?.lenderGone ?? false) return; // nobody is there to answer
     await r.future.timeout(takeWait, onTimeout: () {});
   }
 
@@ -199,6 +220,30 @@ class LentBand implements Headband, KnownContact {
   int? _gauge;
   bool _ended = false;
   bool _isLost = false;
+  Timer? _watch;
+  int _silentLooks = 0;
+  bool _lenderGone = false;
+
+  /// The lender (the screen's engine) no longer exists: nothing came from it for [LendFinder.lenderGoneAfter].
+  bool get lenderGone => _lenderGone;
+
+  /// Something came from the lender: it lives.
+  void _heard() => _silentLooks = 0;
+
+  /// Looks every [LendFinder.lenderCheckEvery] whether the lender was heard since the last look. Counted in looks,
+  /// not by the clock: when the whole process slept, lender and recorder slept together.
+  void _watchLender() => _watch ??= Timer.periodic(_finder.lenderCheckEvery, (_) {
+    if (_ended || _isLost) return _stopWatch();
+    _silentLooks++;
+    if (_finder.lenderCheckEvery * _silentLooks < _finder.lenderGoneAfter) return;
+    _lenderGone = true;
+    _lost();
+  });
+
+  void _stopWatch() {
+    _watch?.cancel();
+    _watch = null;
+  }
 
   @override
   String get name => _offer.band.name;
@@ -231,6 +276,7 @@ class LentBand implements Headband, KnownContact {
   void _lost() {
     if (_isLost || _ended) return;
     _isLost = true;
+    _stopWatch();
     _range.add(false);
   }
 
@@ -243,7 +289,10 @@ class LentBand implements Headband, KnownContact {
   }
 
   @override
-  Future<void> startSignal() async => _say(LendMessage.start);
+  Future<void> startSignal() async {
+    _say(LendMessage.start);
+    if (!_isLost && !_ended) _watchLender();
+  }
 
   /// The owner keeps its stream (other screens read it); the recorder's restart is its next [startSignal].
   @override
@@ -266,6 +315,7 @@ class LentBand implements Headband, KnownContact {
   Future<void> disconnectAndDispose() async {
     if (_ended) return;
     _ended = true;
+    _stopWatch();
     if (!_isLost && !_finder._taken) _say(LendMessage.endKeep);
     unawaited(_signal.close());
     unawaited(_range.close());

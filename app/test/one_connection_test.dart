@@ -50,6 +50,25 @@ const _fast = RecorderTiming(
   rescanFor: Duration(milliseconds: 20),
 );
 
+/// [_fast] with [ticks] ticks of 10 ms between two "no data" checks.
+RecorderTiming _checkEvery(int ticks) => RecorderTiming(
+  tick: const Duration(milliseconds: 10),
+  ticksPerCheck: ticks,
+  scanFor: _fast.scanFor,
+  contactFor: _fast.contactFor,
+  settle: _fast.settle,
+  retryWait: _fast.retryWait,
+  sdkTimeout: _fast.sdkTimeout,
+  connectTimeout: _fast.connectTimeout,
+  notFoundWait: _fast.notFoundWait,
+  notFoundWaitLong: _fast.notFoundWaitLong,
+  stallChecksToGiveUp: _fast.stallChecksToGiveUp,
+  stopTimeout: _fast.stopTimeout,
+  reconnectWaits: _fast.reconnectWaits,
+  scanEvery: _fast.scanEvery,
+  rescanFor: _fast.rescanFor,
+);
+
 Future<void> until(bool Function() done, {Duration limit = const Duration(seconds: 6), String what = 'the state'}) async {
   final sw = Stopwatch()..start();
   while (!done()) {
@@ -183,6 +202,8 @@ class World {
       },
       offer: offer,
       takeWait: takeWait,
+      lenderGoneAfter: const Duration(milliseconds: 300),
+      lenderCheckEvery: const Duration(milliseconds: 20),
     );
     final r = recorder = NightRecorder(
       finder: finder,
@@ -411,18 +432,51 @@ void main() {
     expect(second.count('startResist'), 0);
   });
 
-  test("the screen's engine goes away while lent: the recorder waits out its stall and connects by itself", () async {
+  test("the screen's engine goes away while lent: the recorder hears no more of it and connects by itself at once", () async {
+    // the real phone, 2026-11-25 14:18: the app was swiped away, and the recorder restarted the stream three times,
+    // 10 s apart, on a connection whose lender no longer existed: 59 s without data
     final second = CountingBand(label: 'B');
-    final w = World(nightBands: [second]);
+    // one "no data" check takes 1.2 s here: the lender must be known gone well before the first
+    final w = World(nightBands: [second], timing: _checkEvery(120));
+    addTearDown(w.close);
+    final a = await startLink(w.owner);
+    await until(() => w.owner.live);
+    await a.link.close();
+    // the lender would have 10 s to answer "let go": a recorder that knows it is gone does not wait for that
+    expect(await w.startNight(takeWait: const Duration(seconds: 10)), isNotNull);
+    await until(() => w.recording);
+    final sw = Stopwatch()..start();
+    w.screenAlive = false;
+    await until(() => second.emitted > 0 && w.statuses.last.phase == Phase.recording && w.statuses.last.runs == 2, what: 'the recorder on its own connection');
+    expect(sw.elapsed, lessThan(const Duration(milliseconds: 1100)), reason: 'before the first "no data" check');
+    final log = w.log();
+    expect(log, contains('the screen that lent the connection is gone; saving and reconnecting at once'));
+    expect(log, contains('drop (lender gone)'));
+    expect(log, contains('after a drop (lender gone)'));
+    expect(log, isNot(contains('restarting stream')));
+    expect(log, isNot(contains('still no data')));
+    expect(log, isNot(contains('out of range')));
+  });
+
+  test('the lender is there but the headband sends nothing: the stream is restarted three times, as before', () async {
+    final second = CountingBand(label: 'B');
+    // three "no data" checks take 600 ms: twice as long as a silent lender would be given
+    final w = World(nightBands: [second], timing: _checkEvery(20));
     addTearDown(w.close);
     final a = await startLink(w.owner);
     await until(() => w.owner.live);
     await a.link.close();
     expect(await w.startNight(takeWait: const Duration(milliseconds: 40)), isNotNull);
     await until(() => w.recording);
-    w.screenAlive = false;
+    w.band.sending = false; // connected, in range, silent; the screen's engine lives and says so
     await until(() => second.emitted > 0 && w.statuses.last.phase == Phase.recording && w.statuses.last.runs == 2, what: 'the recorder on its own connection');
-    expect(w.log(), contains('still no data; reconnecting'));
+    final log = w.log();
+    expect(log, contains('restarting stream (try 1)'), reason: log);
+    expect(log, contains('restarting stream (try 2)'));
+    expect(log, contains('still no data; reconnecting'));
+    expect(log, contains('drop (no data)'));
+    expect(log, isNot(contains('lender')));
+    expect(log, isNot(contains('the screen that lent')));
   });
 
   test('Start sleep with nothing live: no offer, and a kept connection is let go so the recorder can find the headband', () async {
