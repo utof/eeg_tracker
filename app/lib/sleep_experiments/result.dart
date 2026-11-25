@@ -393,7 +393,8 @@ String sentence(ExperimentResult res, MeasureResult r) {
     case Stage.verdict:
       final range = r.range;
       if (!r.clear || range == null) {
-        final small = range == null ? null : (range.low.abs() > range.high.abs() ? range.low.abs() : range.high.abs());
+        final widest = range == null ? null : (range.low.abs() > range.high.abs() ? range.low.abs() : range.high.abs());
+        final small = widest == null || amount(m, widest).startsWith('0 ') ? null : widest;
         return 'No difference seen in ${r.nWith} + ${r.nWithout} nights. Either there is none for you'
             '${small == null ? '' : ', or it is smaller than about ${amount(m, small)}, which this many nights cannot show'}.';
       }

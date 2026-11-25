@@ -17,6 +17,7 @@ void main() {
       'dream-catcher',
       'sound-for-states',
       'self-experiments',
+      'sleep-experiments',
       'nap-coach',
       'hands-free',
       'smart-alarm',
