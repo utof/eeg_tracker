@@ -6,7 +6,7 @@ host 10.0.2.2) with no notification; the spare port when 8765 is taken; the lapt
         [--replay REPLAY_BUILD.apk] [--push-port N]
 
 With --replay (needs dart on PATH): first the replay build makes a short recording with a sleep stretch, a Stop and
-a chip on the sheet (tool/record_check.py's five steps), then APK is installed over it; the push must bring the
+a chip on the sheet, and Work on it (tool/record_check.py's steps), then APK is installed over it; the push must bring the
 recording's spans file and its tags to the laptop, where scripts/spans.py reads the sleep stretch (DECISIONS 836).
 The check's receiver listens on a port the OS says is free (--push-port N picks one) and the emulator sends what the
 app addresses to the laptop's port 8772 there instead (a rule inside the emulator only): the laptop's own
@@ -209,16 +209,24 @@ def record_with_sleep(replay: Path) -> list[str]:
 
 def spans_on_laptop(names: list[str]) -> None:
     """The phone's spans files, tags and answers as they landed in the laptop's folders."""
+    # record_check makes two recordings: one with Work and Sleep and the stop sheet's chip, one with Work alone that
+    # "Stop everything" ended (no sheet). Every spans file must arrive as the phone has it; the sleep and the work
+    # stretches must read on the laptop; every tags file the phone has must arrive, the sheet's chip among them.
+    kinds: dict[str, list[str]] = {}
     for n in names:
         f = DEST / "phone" / "spans" / n
         same = f.is_file() and f.read_text() == pc.sh(f"cat {pc.FILES}/spans/{n}", check=False)
         got = laptop_spans.read(f).spans if f.is_file() else []
-        sleep = [s for s in got if s.kind == "sleep" and s.closed]
-        note("the spans file landed on the laptop, the phone's bytes, and its sleep stretch reads there",
-             same and bool(sleep), f"phone/spans/{n}: there {f.is_file()}, same bytes {same}, spans {[s.kind for s in got]}")
-        tags = DEST / "phone" / "archive" / n.replace(".spans.jsonl", ".tags.json")
-        note("the recording's tags (the sheet's chip) landed on the laptop", tags.is_file() and "owner_stop_sheet" in tags.read_text(),
-             str(tags.relative_to(DEST)))
+        kinds[n] = [s.kind for s in got if s.closed]
+        note("the spans file landed on the laptop, the phone's bytes", same,
+             f"phone/spans/{n}: there {f.is_file()}, same bytes {same}, spans {[s.kind for s in got]}")
+    both = [n for n, k in kinds.items() if "sleep" in k and "work" in k]
+    note("a recording's sleep stretch and its Work activity both read on the laptop", bool(both), f"{both or kinds}")
+    on_phone = [t.rsplit("/", 1)[1] for t in pc.sh(f"ls {pc.FILES}/archive/*.tags.json 2>/dev/null", check=False).split()]
+    landed = {t: (DEST / "phone" / "archive" / t) for t in on_phone}
+    chip = [t for t, f in landed.items() if f.is_file() and "owner_stop_sheet" in f.read_text()]
+    note("the recordings' tags landed on the laptop, the stop sheet's chip among them",
+         bool(on_phone) and all(f.is_file() for f in landed.values()) and bool(chip), f"phone {on_phone}; with the chip {chip}")
     asked = pc.sh(f"ls {pc.FILES}/confirm 2>/dev/null", check=False).split()
     here = sorted(p.name for p in (DEST / "phone" / "confirm").glob("*")) if (DEST / "phone" / "confirm").is_dir() else []
     note("the questions' files on the phone are on the laptop too", set(asked) <= set(here), f"phone {sorted(asked)}; laptop {here}")
