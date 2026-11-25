@@ -25,6 +25,8 @@ const Map<String, String> knownScreens = {
   'ExportScreen': 'Export data',
   'SettingsScreen': 'Settings',
   'ExperimentsScreen': 'Self-experiments',
+  'SleepExperimentsScreen': 'Sleep experiments',
+  'SleepExperimentSetup': 'New sleep experiment',
   'SharpHoursScreen': 'Sharp hours',
   'StudyScreen': 'Study reminders',
   'TrainingSettingsScreen': 'Training settings',

@@ -965,6 +965,16 @@ Nothing of this has run on the phone yet, and it has seen only one of your check
    what was different that day (alcohol, a short night, the headband sat differently).
 4. If it asks too often, or you never lend the headband, switch it off in Settings and say so.
 
+## Sleep experiments (late caffeine, a late workout, a few drinks)
+
+Not yet run on a phone. **Trends**, scroll to **Sleep experiments**, **Start an experiment**: choose Late caffeine,
+Late hard workout or Alcohol. Each evening tap one of three answers (on Trends or on the page). The page shows how
+many nights are in, the two averages from 5 nights of each kind, and a verdict only from the nights it needs (never
+under 10 of each). For caffeine and the workout you may switch on **Let the app pick**: on a free evening tap
+**Pick for tonight** and it says with or without by chance; only then can a result say "Tested". Code
+`lib/sleep_experiments/`, `lib/ui/sleep_experiments_*.dart`; DECISIONS rows 1050-1063; the **i** button shows
+`docs/evidence/sleep-experiments.md`.
+
 ## Self-experiments (does this habit change that number, for you?)
 
 Everything on the Trends page is only "seen together". A self-experiment is the one way to test a habit: the app

@@ -484,7 +484,7 @@ folder). It never changes or deletes anything in the app's folder, and never run
 
 - The layout is the app's own: `recordings/` (raw nights, the recorder's format above), `nights/<date>.report.json`,
   `mornings/`, `meditations/`, `alpha-theta/` (sessions and `journal.json`), `replay-check/<kind>/` and
-  `settings.json`, `experiments/<made at>/` (self-experiments, below), `wearer/` ("Was this you?", below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers and their `<stamp>-r<n>.text.json` words, below, `prompts/`), `sound-states/`, `hands-free/` (below), `unusual/` (below), `lucid/` (below), `try-these/` (below), `own-ble/`
+  `settings.json`, `experiments/<made at>/` (self-experiments, below), `sleep-experiments/<made at>/` (below), `wearer/` ("Was this you?", below), `dream-catcher/` (sessions, `<stamp>-r<n>.wav` answers and their `<stamp>-r<n>.text.json` words, below, `prompts/`), `sound-states/`, `hands-free/` (below), `unusual/` (below), `lucid/` (below), `try-these/` (below), `own-ble/`
   (`settings.json`: which headband connection is in use; `probe/<stamp>/`: the probe's result, docs/own-ble-driver.md),
   `recordings-diy/` (the DIY board's nights, the format of "Raw recording (DIY board)"), `archive/` (your tags, below), `walking/` and `steps/` (walk files and the step counter switch, below) and `diy-board/settings.json`
   (`useDiy`: which headband; `names`: 4, 6 or 8 names from CH1), and any folder
@@ -529,6 +529,18 @@ answer: it holds the days ahead.
 
 The tested number of day D is the trends' per-day number of day D+1 (from `nights/` and `mornings/`); the app works
 the answer out again from those files each time, so nothing else is stored.
+
+### Sleep experiments (`sleep-experiments/<made at>/`)
+
+One folder per experiment (DECISIONS rows 1050-1063), named by when it was started (`2026-11-25-210000`).
+
+| File | Content |
+|---|---|
+| `plan.json` | written once: `version` 1, `id`, `kind` (`caffeine_late`, `workout_late`, `alcohol`), `created`, `start` (the first evening that counts, `YYYY-MM-DD`; a day runs 04:00 to 04:00), `picked` (the app picks the test nights) and then `salt` (the secret the picks are drawn from) and `draw`, `with` and `without` (what each means, in words), `watched` (the numbers compared: `efficiency`, `deep`, `awake`, `pulse`, `sleep_start`, `dream`), `day` (which night an answer is judged by) |
+| `log.jsonl` | one line per tap, added at the end: `at`, `day`, `event`. `started`; `answer` with `answer` (`with`, `without`, `neither`, or null when taken back); `odd` with `flag` (`ill`, `away`) and `on`; `pick` with `index` (from 0) and `with`; `ended`. The last line about a day wins |
+
+An evening's answer is judged by the sleep report of the next day; the app works the result out again from the
+reports each time, so no result is stored.
 
 ### Hands-free controls (`hands-free/`)
 
