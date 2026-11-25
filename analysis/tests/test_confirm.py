@@ -239,3 +239,33 @@ def test_a_yes_whose_sleep_stretch_was_taken_away_is_no_truth_row_until_it_is_pu
     assert ids(line, {**line, "removed": True}) == everything - {yes["label_id"]}
     assert ids(line, {**line, "removed": True}, line) == everything
     assert ids(line, {**line, "removed": True, "moved_to": "q-1"}) == everything
+
+
+def test_estimates_names_no_truth_row_for_a_yes_whose_stretch_was_taken_away(tmp_path: Path) -> None:
+    """DECISIONS 1044: estimates.tsv keeps the Yes (it was said), but its `label_id` is empty while the stretch is
+    taken away: there is no truth row for it to name. Put back, or only filed again elsewhere, it names its row."""
+    phone(tmp_path)
+    got = truth.Read()
+    truth.confirm_rows(tmp_path, VOCAB, got)
+    yes = next(r for r in got.rows if r["label"] == "asleep" and r["present"] == "1")
+    est = yes["estimate_id"]
+    line = {"v": 1, "span": "r-1", "kind": "sleep", "label": "in_bed", "start": yes["start"], "end": yes["end"],
+            "source": "owner_confirmed", "estimate": est, "made": yes["end"]}
+    f = tmp_path / "phone" / "spans" / "r.spans.jsonl"
+    f.parent.mkdir(parents=True)
+
+    def row(*lines: dict) -> dict:
+        f.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+        return next(r for r in db.estimate_rows(tmp_path) if r["estimate_id"] == est)
+
+    before = row(line)
+    assert (before["answer"], before["label_id"]) == ("yes", yes["label_id"])
+    taken = row(line, {**line, "removed": True})
+    assert (taken["answer"], taken["label_id"]) == ("yes", None)
+    assert {k: v for k, v in taken.items() if k != "label_id"} == {k: v for k, v in before.items() if k != "label_id"}
+    assert row(line, {**line, "removed": True}, line)["label_id"] == yes["label_id"]
+    assert row(line, {**line, "removed": True, "moved_to": "q-1"})["label_id"] == yes["label_id"]
+    # every other row is as it was
+    others = [r for r in db.estimate_rows(tmp_path) if r["estimate_id"] != est]
+    f.unlink()
+    assert others == [r for r in db.estimate_rows(tmp_path) if r["estimate_id"] != est]

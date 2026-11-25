@@ -492,11 +492,17 @@ def confirm_row(c: Confirmed, vocab: Vocabulary | None = None) -> dict[str, str]
                 times_confirmed="1" if c.times_confirmed else "0")
 
 
+def taken_away(local: Path) -> set[str]:
+    """The estimates whose sleep stretch (made by a Yes) the owner took away afterwards ("Not sleep" in the Archive,
+    DECISIONS 1025) and did not put back. A stretch only filed again under another recording (`moved_to`) is not one."""
+    return {s.estimate for f in spans_mod.all(local).values() for s in f.removed if s.estimate and not s.moved_to}
+
+
 def confirm_rows(local: Path, vocab: Vocabulary, out: Read) -> None:
     """The phone's answered confirmation questions as truth rows (`<local>/phone/confirm/`)."""
     rel = (CONFIRM_FOLDER / "answers.jsonl").as_posix()
     # a Yes whose sleep stretch the owner took away afterwards ("Not sleep" in the Archive) is no truth any more
-    taken = {s.estimate for f in spans_mod.all(local).values() for s in f.removed if s.estimate and not s.moved_to}
+    taken = taken_away(local)
     for c in read_confirm(local, vocab):
         r = confirm_row(c, vocab)
         if r is None or (c.answer == "yes" and c.estimate.get("id") in taken):

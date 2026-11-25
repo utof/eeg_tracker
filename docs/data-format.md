@@ -1358,7 +1358,7 @@ What the phone's detectors thought happened and what you answered when the app a
 | `yes_means` | the confidence a Yes gets as a truth row: `certain`, or `likely` when the detector itself found minutes that do not fit (a night with wake-ups) |
 | `made` | when the estimate was first kept |
 | `answer`, `answered`, `via` | `yes`, `no`, `not_sure` (its own answer, no label), `said` (a blind card), `not_answered` (no answer came: never a Yes or a No) or empty (still waiting); when; `card`, `notification` or `stop_sheet` |
-| `label_id` | the truth row a yes or a no made (`confirm:...` in `truth.tsv`) |
+| `label_id` | the truth row a yes or a no made (`confirm:...` in `truth.tsv`); empty for a Yes whose sleep stretch you took away afterwards ("Not sleep" in the Archive): the Yes stays as what was said, and there is no truth row |
 | `owner_words` | a blind card's own words, and the few words you added |
 | `card` | what the card showed: `normal` (the guess), `blind` (no guess); empty when no card was shown (a stop-sheet chip) |
 | `said`, `agrees` | a blind card: the label you picked, and 1 when it is the detector's `label` (sleep and a nap count as one), 0 when not; empty when your words name no label |
