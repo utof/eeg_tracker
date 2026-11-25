@@ -158,7 +158,7 @@ class AtSetupModel {
     this.checkStatus,
     this.contact = '',
     this.grounding = '',
-    this.nightRunning = false,
+    this.recordingRuns = false,
     this.message = '',
   });
 
@@ -172,7 +172,7 @@ class AtSetupModel {
   final String? checkStatus;
   final String contact;
   final String grounding;
-  final bool nightRunning;
+  final bool recordingRuns;
   final String message;
 }
 
@@ -214,17 +214,12 @@ class AtSetupView extends StatelessWidget {
                 'between them; go on only if it still feels right.',
             Night.inkMuted,
           )
-        : m.nightRunning
-        ? (
-            'Night recording',
-            'A night is being recorded, and the headband connects to one thing at a time.',
-            Night.caution,
-          )
         : (
             'Session ${m.done + 1}',
             m.message.isNotEmpty
                 ? m.message
-                : 'Of ${AtDose.planned} planned. Recline with the back of your head free, eyes closed, wired '
+                : '${m.recordingRuns ? 'A recording is running: the session starts on it, with no new search. ' : ''}'
+                      'Of ${AtDose.planned} planned. Recline with the back of your head free, eyes closed, wired '
                       'headphones in.',
             Night.inkMuted,
           );
@@ -290,7 +285,7 @@ class AtSetupView extends StatelessWidget {
               label: const Text('Go on past 10'),
             )
           : FilledButton.icon(
-              onPressed: m.nightRunning ? null : onCheckIn,
+              onPressed: onCheckIn,
               icon: const Icon(Icons.checklist),
               label: const Text('Check in'),
             ),

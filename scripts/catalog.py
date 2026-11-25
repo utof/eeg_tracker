@@ -50,6 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import night_files as nf  # noqa: E402
 import packed  # noqa: E402
 import recording  # noqa: E402
+import spans  # noqa: E402
 
 FORMAT, VERSION = "eeg-tracker-catalog", 1
 RAW = (".f32", *packed.PACKED_FORMS, ".idx", ".log", ".markers.jsonl", recording.SUFFIX)
@@ -101,7 +102,8 @@ def _numbers(rep: dict | None, by: str) -> dict | None:
 
 def _row(date: str, start: float | None, end: float | None) -> dict:
     return dict(date=date, id=date, source="", recordings=0, start=start, end=end, hours_recorded=0.0, minutes_missing=0.0,
-                raw=False, moved_from_phone=False, report=None, morning=[], paths=[])
+                raw=False, moved_from_phone=False, report=None, morning=[], paths=[], recording="", span_ids="",
+                span_from="")
 
 
 def _add(local: Path, row: dict, rel: str, kind: str) -> None:
@@ -118,12 +120,14 @@ def _recording_nights(local: Path, phone: set[str], folder: str = "recordings", 
     rows: dict[str, dict] = {}
     stems: dict[str, list[str]] = {}
     where = local / folder
-    for n in nf.nights(nf.recordings(where, on_bad=lambda _p, _e: None)):
+    sdir = None if diy else spans.folder(local)  # the phone's spans make the nights of the phone's recordings
+    for n in nf.all_nights(where, sdir, on_bad=lambda _p, _e: None):
         row = _row(n.name, n.start, n.end)
-        samples_s = sum(r.samples / r.fs for r in n.recs)
+        samples_s = n.recorded_s
         source = "diy" if diy else "+".join(sorted({"phone" if r.path.name in phone else "laptop" for r in n.recs}))
         row.update(recordings=len(n.recs), raw=True, hours_recorded=round(samples_s / 3600, 2),
-                   minutes_missing=round(max(0.0, n.end - n.start - samples_s) / 60, 1), source=source)
+                   minutes_missing=round(max(0.0, n.end - n.start - samples_s) / 60, 1), source=source,
+                   recording=" ".join(n.recording_ids), span_ids=" ".join(n.span_ids), span_from=n.span_from)
         key = n.name + "-diy" if diy else n.name
         row["id"] = key
         rows[key], stems[key] = row, [r.path.stem for r in n.recs]
@@ -150,11 +154,14 @@ def _recording_nights(local: Path, phone: set[str], folder: str = "recordings", 
 
 def _add_phone_reports(local: Path, rows: dict[str, dict]) -> None:
     """The phone's sleep reports; a night whose raw signal is not on the laptop gets a row from its report alone."""
+    taken = spans.taken_ids(local)
     for p in sorted((local / "phone" / "nights").glob("*.report.json")):
         date = p.name[:-len(".report.json")]
         if not nf.DATE.match(date):
             continue
         rep = _json(p) or {}
+        if spans.report_all_taken(rep, taken):
+            continue  # every sleep stretch it was made from was taken away since ("Not sleep", DECISIONS 1025)
         if date not in rows:
             row = rows[date] = _row(date, _time(rep.get("data_start")), _time(rep.get("data_end")))
             t = rep.get("total") if isinstance(rep.get("total"), dict) else {}

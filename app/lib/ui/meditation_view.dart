@@ -50,7 +50,7 @@ class MeditationViewModel {
     this.report,
     this.comparison = '',
     this.earlier = const [],
-    this.nightRunning = false,
+    this.recordingRuns = false,
     this.kind = SessionKind.meditation,
     this.checkOn = false,
     this.checkStatus,
@@ -94,7 +94,7 @@ class MeditationViewModel {
   final List<MeditationSummary> earlier;
 
   /// A night is being recorded: the headband is taken, so Start is off.
-  final bool nightRunning;
+  final bool recordingRuns;
 
   /// The report's learning verdict (meditation only).
   final Learning? learning;
@@ -130,7 +130,7 @@ MeditationViewModel meditationModel({
   MeditationSummary? report,
   String comparison = '',
   List<MeditationSummary> earlier = const [],
-  bool nightRunning = false,
+  bool recordingRuns = false,
   SessionKind kind = SessionKind.meditation,
   bool checkOn = false,
   String? checkStatus,
@@ -194,7 +194,7 @@ MeditationViewModel meditationModel({
     report: report,
     comparison: comparison,
     earlier: earlier,
-    nightRunning: nightRunning,
+    recordingRuns: recordingRuns,
     kind: kind,
     checkOn: checkOn,
     checkStatus: checkStatus,
@@ -205,20 +205,12 @@ MeditationViewModel meditationModel({
 
   switch (stage) {
     case Stage.setup:
-      if (nightRunning) {
-        return m(
-          'Night recording',
-          'A night is being recorded, and the headband connects to one thing at a time. Stop the night first.',
-          MarkShape.ringedDot,
-          Night.caution,
-          sentenceColor: Night.caution,
-        );
-      }
       return m(
         'Ready',
         message.isNotEmpty
             ? message
-            : 'Headband on, headphones in. First 1½ minutes in silence: 30 s eyes open, then a low tone and '
+            : '${recordingRuns ? 'A recording is running: the session starts on it, with no new search. ' : ''}'
+                  'Headband on, headphones in. First 1½ minutes in silence: 30 s eyes open, then a low tone and '
                   '60 s eyes closed. Then the sound follows you.'
                   '${silentS > 0 ? ' At the end, ${_minSecWords(silentS)} without sound: go on the same way.' : ''}',
         MarkShape.ring,
@@ -648,7 +640,7 @@ class MeditationView extends StatelessWidget {
     switch (m.stage) {
       case Stage.setup:
         return FilledButton.icon(
-          onPressed: m.nightRunning ? null : onStart,
+          onPressed: onStart,
           icon: const Icon(Icons.self_improvement),
           label: Text(m.kind == SessionKind.alphaTheta ? 'Start session' : 'Start meditation'),
         );

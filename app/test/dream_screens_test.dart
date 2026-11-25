@@ -65,8 +65,8 @@ final Map<String, DreamViewModel> states = {
   'morning': DreamViewModel(stage: DreamStage.setup, theme: _mine, question: const PromptInfo(seconds: 2.1), latest: _last, earlier: _earlier, playing: _last.rounds.first.answerFile),
   'recording_prompt': const DreamViewModel(stage: DreamStage.setup, theme: _mine, recording: PromptKind.question, recordingS: 2),
   'ended': DreamViewModel(stage: DreamStage.done, theme: _mine, question: _mine, latest: _last, justEnded: true, earlier: _earlier, ending: DreamEnding.wake),
-  'night_running': const DreamViewModel(stage: DreamStage.setup, nightRunning: true, ending: DreamEnding.sleep),
-  'failed': const DreamViewModel(stage: DreamStage.failed, message: 'Headband not found. Is it switched on, charged, and free (no night recording)?'),
+  'night_running': const DreamViewModel(stage: DreamStage.setup, recordingRuns: true, ending: DreamEnding.sleep),
+  'failed': const DreamViewModel(stage: DreamStage.failed, message: 'Headband not found. Is it switched on and charged?'),
   'face_connecting': const DreamViewModel(stage: DreamStage.connecting, message: 'Found BrainBit Black. Connecting.'),
   'face_baseline': const DreamViewModel(stage: DreamStage.baseline, contact: _contact),
   'face_drifting': const DreamViewModel(stage: DreamStage.drifting, roundsDone: 1, minutes: 14),
@@ -147,10 +147,12 @@ void main() {
     expect((lightsOff, rounds), (true, 3));
   });
 
-  testWidgets('a night recording disables Lights off; the face shows nothing brighter than its words', (tester) async {
+  testWidgets('a recording that runs leaves Lights off on (the session starts on it); the face shows nothing brighter than its words', (tester) async {
     await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: _view(states['night_running']!)));
     final button = tester.widget<FilledButton>(find.ancestor(of: find.text('Lights off'), matching: find.byWidgetPredicate((w) => w is FilledButton)));
-    expect(button.onPressed, isNull);
+    expect(button.onPressed, isNotNull);
+    expect(find.textContaining('A recording is running: the dream catcher starts on it'), findsOneWidget);
+    expect(find.textContaining('busy'), findsNothing);
     await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: _view(states['face_drifting']!)));
     expect(tester.widget<Scaffold>(find.byType(Scaffold)).backgroundColor, faceGround);
     expect(find.text('Drift off'), findsOneWidget);

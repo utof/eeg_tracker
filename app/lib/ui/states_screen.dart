@@ -23,6 +23,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
 import '../recorder/recorder_service.dart';
+import '../spans/activities.dart' show Activities;
 import '../session_keeper.dart';
 import '../sleep/drift.dart' show DriftResult;
 import '../sleep/report.dart' show NightReportStore, nightsDirFor;
@@ -53,7 +54,7 @@ class StatesScreen extends StatefulWidget {
 }
 
 class _StatesScreenState extends State<StatesScreen> {
-  final BrainBitFinder _finder = BrainBitFinder();
+  final BrainBitFinder _finder = BrainBitFinder(activity: 'sound');
   final SoloudStateSound _preview = SoloudStateSound();
   late final StatesController _c = StatesController(
     finder: _finder,
@@ -69,7 +70,7 @@ class _StatesScreenState extends State<StatesScreen> {
   int _minutes = presets[SoundState.asleep]!.defaultMinutes;
   bool _useHeadband = true;
   bool _thenNight = true;
-  bool _nightRunning = false;
+  bool _recordingRuns = false;
   bool _listening = false;
   Timer? _listenTimer;
   String? _recordings;
@@ -101,6 +102,8 @@ class _StatesScreenState extends State<StatesScreen> {
   void initState() {
     super.initState();
     _c.addListener(_changed);
+    // the recording was stopped under this session (the notification's Stop, the 6-hour rule): it ends too
+    _finder.onRecordingStopped = () => unawaited(_c.stop());
     _c.watchRoute(); // the setup says where the sound goes as soon as it changes
     unawaited(_prepare());
   }
@@ -121,7 +124,7 @@ class _StatesScreenState extends State<StatesScreen> {
     final running = await FlutterForegroundTask.isRunningService;
     if (!mounted) return;
     setState(() {
-      _nightRunning = running;
+      _recordingRuns = running;
       _load();
     });
   }
@@ -241,6 +244,12 @@ class _StatesScreenState extends State<StatesScreen> {
   }
 
   Future<String?> _startNight() async {
+    if (await FlutterForegroundTask.isRunningService) {
+      // the sound ran on a recording: sleep starts on it, with no new search (Record first, DECISIONS 982)
+      Activities.shared?.ask.value = null;
+      FlutterForegroundTask.sendDataToTask(startSleepCommand());
+      return null;
+    }
     _finder.dispose(anyLost: _c.leftLost); // the headband is free: the recorder's own scanner takes over
     final r = await startRecorderService(_recordings);
     return r is ServiceRequestFailure ? 'did not start: ${r.error}' : null;
@@ -371,8 +380,8 @@ class _StatesScreenState extends State<StatesScreen> {
     if (_c.active) return;
     await _stopListening();
     final night = await FlutterForegroundTask.isRunningService;
-    if (mounted) setState(() => _nightRunning = night);
-    final measure = _useHeadband && !night;
+    if (mounted) setState(() => _recordingRuns = night);
+    final measure = _useHeadband;
     final phone = await Phone.snapshot().catchError((Object _) => const PhoneSnapshot({}));
     // the session's own notification carries Stop for the locked phone; the night recorder shows one too
     if (phone.sdkInt >= 33) await FlutterForegroundTask.requestNotificationPermission();
@@ -433,7 +442,7 @@ class _StatesScreenState extends State<StatesScreen> {
       message: c.message,
       useHeadband: _useHeadband,
       thenNight: _thenNight,
-      nightRunning: _nightRunning,
+      recordingRuns: _recordingRuns,
       listening: _listening,
       seconds: c.seconds,
       soundSeconds: c.soundSeconds,

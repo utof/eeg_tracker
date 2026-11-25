@@ -45,7 +45,8 @@ void main() {
     final w = usualNight(const [], const AutoSettings()); // bed 23:00, wake 07:00: 8 h
     // 8 h x 11 % + 15 % is more than a full charge: tonight needs all of it
     expect(nightNeedPct(w), 100);
-    final day = guardBattery(WearKind.work, 80, DateTime(2026, 11, 20, 10, 0), w);
+    // the stopping rule (the guard only warns by default, DECISIONS 1010) shows the drain it counts with
+    final day = guardBattery(WearKind.work, 80, DateTime(2026, 11, 20, 10, 0), w, onlyWarns: false);
     expect(day.limit, Duration(minutes: ((80 - 15) / BandBatteryRule.drainPctPerHour * 60).floor()));
     expect(day.limit, const Duration(hours: 5, minutes: 54));
     final night = guardBattery(WearKind.night, 30, DateTime(2026, 11, 20, 23, 0), w);

@@ -1,6 +1,9 @@
 // A night and whole sessions through our own connection (lib/headband/own/) on the fake headband: the night
 // recorder, a meditation, and the shared headband link of the dream catcher and the sound sessions, all through
 // the same `Headband` interface they use with BrainBit's SDK. Also the switch and its settings file.
+@Tags(['realtime'])
+library;
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';

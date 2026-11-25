@@ -30,6 +30,8 @@ import ble_probe  # noqa: E402
 import recorder_poll  # noqa: E402
 import to_bdf  # noqa: E402
 
+pytestmark = pytest.mark.realtime  # fake headband / board timers: run apart on a loaded machine (conftest.py)
+
 VPC = 2.4 / 6 / 8388608  # volts per count at gain 6, by hand: 2.4 V reference / gain / 2^23
 SVC = "7e400001-b534-f393-68a9-e50e24dcca97"
 REC = struct.Struct("<I4f")

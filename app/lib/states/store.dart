@@ -61,6 +61,7 @@ class SoundSession {
     required this.headband,
     this.contact = const {},
     this.recording,
+    this.span,
     this.soundStartS,
     this.baselineS = 0,
     this.fadeFromS,
@@ -94,6 +95,10 @@ class SoundSession {
 
   /// Stem of the session's EEG in `files/recordings/` (fall asleep with the headband), or null.
   final String? recording;
+
+  /// The span of the day's recording this session ran on as an activity (spans/activities.dart): then [recording]
+  /// is that recording's id and the session's signal is its samples inside the span; null: a session of its own.
+  final String? span;
 
   /// When the sound started (null: it never did).
   final int? soundStartS;
@@ -146,6 +151,7 @@ class SoundSession {
     'headband': headband,
     'contact': contact,
     'recording': recording,
+    'span': ?span,
     'soundStartS': soundStartS,
     'baselineS': baselineS,
     'fadeFromS': fadeFromS,
@@ -194,6 +200,7 @@ class SoundSession {
       headband: headband as String,
       contact: {for (final e in contact.entries) '${e.key}': e.value is num ? (e.value as num).toDouble() : null},
       recording: rec as String?,
+      span: j['span'] is String ? j['span'] as String : null,
       soundStartS: _int(j['soundStartS']),
       baselineS: _int(j['baselineS']) ?? 0,
       fadeFromS: _int(j['fadeFromS']),

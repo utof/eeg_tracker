@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import phone_night_check as pnc  # noqa: E402
-from fake_phone_night import ADDRESS, PhoneRun, stem, write_empty_run, write_report, write_run  # noqa: E402
+from fake_phone_night import (ADDRESS, PhoneRun, span_line, stem, write_empty_run, write_report,  # noqa: E402
+                              write_run, write_spans)
 
 T = datetime(2026, 11, 19, 23, 0, 0)
 NIGHT = "2026-11-19"
@@ -456,6 +457,7 @@ PHONE_LINES = [
     "contact ohms O1=120000 O2=inf T3=none T4=31000",
     "contact check: no resistance data arrived",
     "contact check failed: PlatformException(x)",
+    "no contact reading on the live connection; not measured now",
     "recording started, 250 Hz",
     "samples 2500 (+2500) battery 90%",
     "samples 2500 (+0) battery null%",
@@ -463,6 +465,8 @@ PHONE_LINES = [
     "stream restarted",
     "stream restart failed: Exception: x",
     "still no data; reconnecting",
+    "no data for 60 min: what was marked ends at the last data",
+    "no data for 6 h: the recording stops itself",
     "headband out of range; saving",
     "headband out of range; leaving it without SDK calls",
     "packets: 7200000 samples, missing 3 in 2 gaps, repeated 1, longest gap 2 samples",
@@ -895,3 +899,239 @@ def test_the_phones_cost_leaves_out_the_first_hour_and_the_screen(wifi: bool) ->
     assert st["hours"] == pytest.approx(6.0, abs=0.1)
     assert st["screen"] == ("logged" if wifi else "guessed from the current")
     assert "left out: the first 1.0 h after unplugging, 1 hour with" in pnc.phone_cost_text(st)
+
+
+# ---- the lines the app writes since 2026-11-25 (the owner's night of 2026-11-24 said "382 lines not understood") ------
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "phone_night_check"
+REAL_LOGS = sorted(FIXTURES.glob("*.log"))
+LENDER_LINES = [
+    "the screen that lent the connection is gone; saving and reconnecting at once",
+    "drop (lender gone); last data 2026-11-25T14:18:31.044; reconnecting",
+    "reconnected (direct, try 1) after a drop (lender gone); previous run 2026-11-25-141752, last data "
+    "2026-11-25T14:18:31.044, 11.0 s ago",
+]
+NEW_LINES = LENDER_LINES + [
+    "started on the connection that was already live on the screen: no search, no new contact check",
+    "no contact reading on the live connection; not measured now",
+    "contact ohms O1=inf O2=inf T3=1876694 T4=inf (measured 2026-11-25T14:10:11.123 on the live connection; "
+    "not measured again)",
+    "phone step counter: on", "phone step counter: off", "phone step counter: no sensor", "phone steps 134848",
+    "span: sleep start", "span: sleep end", "span: nap start", "span: dream_catcher end", "span: calibration start",
+    "span: sleep start (again: Undo)", "span: some_new_kind start (again: Undo)",
+    "sleep kit on for 2026-11-25-141752-1",
+    "sleep kit on for 2026-11-25-141752-2; smart alarm set: wake by 07:30, window from 07:00",
+    "sleep kit off after 2026-11-25-141752-1",
+    "the headband is back: sleep goes on by itself from here in a new stretch 2026-11-25-141752-2 "
+    "(the app's guess; Undo takes it away)",
+    "Undo: the stretch the app opened by itself (2026-11-25-141752-2) is taken away",
+    "Undo: sleep goes on", "Undo: work, sound go on",
+    "could not write the span 2026-11-25-141752-1: FileSystemException; the recording goes on",
+    "notice: Low battery. The headband is at 5 %",
+    "no data for 20 min: what was marked ends at the last data",
+    "no data for 6 h: the recording stops itself",
+    # a long recording goes on in a new file set (DECISIONS 1035)
+    "file set full; the recording goes on without a gap in 2026-11-25-130000",
+    "continues 2026-11-25-090000 without a gap (same connection; a new file set every 4.0 h or 128 MB)",
+    "could not start the next file set: FileSystemException: No space left on device; this one goes on",
+    "could not save the newest data: FileSystemException; the next file set waits",
+]
+
+
+@pytest.mark.parametrize("line", NEW_LINES)
+def test_the_new_lines_are_understood(line: str) -> None:
+    assert pnc.parse_line(line) is not None, line
+
+
+@pytest.mark.parametrize("log", REAL_LOGS, ids=lambda p: p.name)
+def test_every_line_of_the_real_logs_is_understood(log: Path) -> None:
+    events, unknown = pnc.parse_log(log.read_text(), log.stem)
+    assert unknown == []
+    assert events
+
+
+def test_the_fixture_logs_are_made_from_real_ones_and_hold_no_identifiers() -> None:
+    assert {p.name for p in REAL_LOGS} >= {"2026-11-25-141752.log", "2026-11-25-141922.log", "2026-11-25-003600.log",
+                                           "2026-11-25-052304.log"}
+    kinds = {e.kind for p in REAL_LOGS for e in pnc.parse_log(p.read_text(), p.stem)[0]}
+    assert {"live_connection", "step_counter", "steps", "span", "contact_not_measured"} <= kinds
+    text = "\n".join(p.read_text() for p in REAL_LOGS)  # the repository is public: no address, serial, IP or name
+    assert set(re.findall(r"the laptop (\S+) did not answer", text)) <= {"LAPTOP"}
+    assert set(pnc.MAC.findall(text)) <= {"AA:BB:CC:DD:EE:FF"}
+    assert set(re.findall(r"serial (\S*)", text)) <= {"000000"}
+    assert set(re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", text)) <= {"0.0.0.0"}
+
+
+def test_a_run_on_the_live_connection_has_no_contact_reading_and_that_is_no_fault(tmp_path: Path) -> None:
+    run = PhoneRun(T, seconds=600, night_end=True, hum_t3=False, flat_t4=False, contact=None,
+                   head=["started on the connection that was already live on the screen: no search, no new "
+                         "contact check"],
+                   extra=[(7.0, "no contact reading on the live connection; not measured now")])
+    write_run(tmp_path / "recordings", run)
+    s = pnc.check(tmp_path, NIGHT, signal=False)
+    assert s["unknown"] == []
+    assert s["contact"]["not_measured"] == 1
+    assert not any("contact" in f.lower() for f in s["fixes"]), s["fixes"]
+    assert "no reading: the recording started on the connection the app's screen already had" in pnc.render(s)
+
+
+def test_no_reading_without_a_live_connection_is_still_a_fault(tmp_path: Path) -> None:
+    write_run(tmp_path / "recordings", PhoneRun(T, seconds=600, night_end=True, contact=None, hum_t3=False,
+                                                flat_t4=False))
+    s = pnc.check(tmp_path, NIGHT, signal=False)
+    assert any(f.startswith("No contact reading at the start") for f in s["fixes"]), s["fixes"]
+
+
+def test_a_gap_after_the_screen_that_lent_the_connection_was_closed(tmp_path: Path) -> None:
+    a = PhoneRun(T, seconds=600, end="lender", contact=None)
+    b = PhoneRun(a.last + timedelta(seconds=11), seconds=600, night_end=True, contact=None, hum_t3=False,
+                 flat_t4=False, band_battery=(88, 87), phone_battery=(99, 98),
+                 head=[f"reconnected (direct, try 1) after a drop (lender gone); previous run {stem(T)}, last data "
+                       f"{a.last:%Y-%m-%dT%H:%M:%S}.044, 11.0 s ago"])
+    for r in (a, b):
+        write_run(tmp_path / "recordings", r)
+    s = pnc.check(tmp_path, NIGHT, signal=False)
+    assert s["unknown"] == []
+    gaps = [x for x in s["breaks"] if x.cat != "late"]
+    assert len(gaps) == 1 and gaps[0].cat == "drop"
+    assert gaps[0].text == ("drop (lender gone); the app's screen was closed while it held the connection, the "
+                            "recorder took the headband over; back by direct, try 1")
+    assert len(s["drops"]) == 1
+
+
+def test_a_stall_on_a_lent_connection_is_explained_like_any_no_data_drop(tmp_path: Path) -> None:
+    a = PhoneRun(T, seconds=600, end="stall", contact=None,
+                 head=["started on the connection that was already live on the screen: no search, no new contact "
+                       "check"])
+    b = PhoneRun(a.last + timedelta(seconds=51), seconds=300, night_end=True, hum_t3=False, flat_t4=False,
+                 band_battery=(88, 87), phone_battery=(99, 98),
+                 head=[f"reconnected (direct, try 1) after a drop (no data); previous run {stem(T)}, last data "
+                       f"{a.last:%Y-%m-%dT%H:%M:%S}.044, 51.0 s ago"])
+    for r in (a, b):
+        write_run(tmp_path / "recordings", r)
+    s = pnc.check(tmp_path, NIGHT, signal=False)
+    assert s["unknown"] == []
+    gaps = [x for x in s["breaks"] if x.cat != "late"]
+    assert [g.text.split(";")[0] for g in gaps] == ["drop (no data)"]
+
+
+# ---- a night said by its spans file (Record first) ------------------------------------------------------------------
+def at(h: int, m: int, s: int = 0) -> datetime:
+    return datetime(2026, 11, 19, h, m, s)
+
+
+def day_recording(root: Path, *, sleep: tuple[datetime, datetime] | None, source: str = "owner_button",
+                  ended_by: str = "owner") -> str:
+    """One recording of three file sets from 22:00: lost packets and a drop while awake (before the sleep), a drop
+    and lost packets inside the sleep, awake again after it. Returns the recording id."""
+    rid = stem(at(22, 0))
+    a = PhoneRun(at(22, 0), seconds=300, lost=[(100, 4)], end="drop", recording=rid, contact=None)  # awake
+    b = PhoneRun(a.last + timedelta(seconds=82), seconds=600, lost=[(400, 6)], end="drop", recording=rid,
+                 contact=None, head=[f"reconnected (direct, try 1) after a drop (out of range); previous run "
+                                     f"{rid}, last data {a.last:%Y-%m-%dT%H:%M:%S}.000, 82.0 s ago"])
+    c = PhoneRun(b.last + timedelta(seconds=82), seconds=480, recording=rid, contact=None, night_end=True,
+                 head=[f"reconnected (direct, try 1) after a drop (out of range); previous run {stem(b.start)}, "
+                       f"last data {b.last:%Y-%m-%dT%H:%M:%S}.000, 82.0 s ago"])
+    for k, r in enumerate((a, b, c)):
+        write_run(root / "recordings", r, seed=k)
+    lines = [] if sleep is None else [span_line(rid, 1, "sleep", sleep[0], sleep[1], source, ended_by)]
+    write_spans(root / "spans", rid, *lines, span_line(rid, 2, "work", at(22, 26), at(22, 27)))
+    return rid
+
+
+def test_a_night_with_spans_is_reported_by_its_sleep_stretches(tmp_path: Path) -> None:
+    root = tmp_path / "eeg-export"
+    rid = day_recording(root, sleep=(at(22, 10), at(22, 25)))
+    s = pnc.check(root, "2026-11-19", signal=False)
+    assert (s["source"], s["name"]) == ("phone", "2026-11-19")
+    assert [(x["start"], x["end"], x["who"], x["how"]) for x in s["stretches"]] == [
+        (at(22, 10).timestamp(), at(22, 25).timestamp(), "you pressed Sleep", "you ended it")]
+    # the numbers are about the 15 minutes of sleep, not the 26 minutes of the recording
+    assert s["span_s"] == pytest.approx(900, abs=1)
+    assert len(s["drops"]) == 1 and s["drops"][0].length == pytest.approx(90, abs=2)  # the awake drop is not counted
+    assert s["packets"].lost == 6  # nor the 4 lost packets before the sleep
+    assert s["signal_s"] == pytest.approx(900 - 90, abs=3)
+    assert s["whole"]["recorded_s"] == pytest.approx(1380, abs=1) and 0 < s["whole"]["outside_s"] < s["whole"]["recorded_s"]
+    text = pnc.render(s)
+    assert "Sleep stretches (what you marked)" in text
+    assert "22:10 to 22:25, 15.0 min: you pressed Sleep; you ended it" in text
+    assert "whole recording" in text and "outside the sleep" in text
+    assert "1 drop;" in text.splitlines()[2]
+    assert rid in text  # the recording named
+
+
+def test_the_words_for_who_marked_a_stretch_and_how_it_ended() -> None:
+    assert pnc.who_marked("owner_button") == "you pressed Sleep"
+    assert pnc.who_marked("owner_confirmed") == "you said yes afterwards"
+    assert pnc.who_marked("auto_start") == "the app marked it by itself"
+    assert pnc.who_marked("auto_resume") == "the app marked it by itself (the headband came back)"
+    assert pnc.who_marked("something_new") == "something_new"
+    assert pnc.ended_how("headband_off") == "the headband was off for an hour"
+    assert pnc.ended_how("recording_stopped") == "you stopped the recording"
+    assert pnc.ended_how("undone") == "you took it away with Undo"
+    assert pnc.ended_how(None) == "still open"
+
+
+def test_stretches_you_said_yes_to_and_stretches_the_app_marked_say_so(tmp_path: Path) -> None:
+    root = tmp_path / "eeg-export"
+    day_recording(root, sleep=(at(22, 10), at(22, 25)), source="owner_confirmed", ended_by="headband_off")
+    text = pnc.render(pnc.check(root, "2026-11-19", signal=False))
+    assert "22:10 to 22:25, 15.0 min: you said yes afterwards; the headband was off for an hour" in text
+
+
+def test_a_recording_with_an_id_and_no_sleep_stretch_is_not_a_night(tmp_path: Path) -> None:
+    root = tmp_path / "eeg-export"
+    day_recording(root, sleep=None)
+    s = pnc.check(root, None, signal=False)
+    assert s["not_night"] is True
+    text = pnc.render(s)
+    assert "nothing in it was marked as sleep" in text
+    assert "22:00 to 22:2" in text  # when it was recorded
+    assert "Verdict" not in text and "Fix first" not in text
+    s2 = pnc.check(root, "2026-11-19", signal=False)  # named by its evening date: the same words
+    assert s2["not_night"] is True
+
+
+def test_a_later_recording_with_no_sleep_is_said_and_the_night_stays_reachable(tmp_path: Path) -> None:
+    root = tmp_path / "eeg-export"
+    day_recording(root, sleep=(at(22, 10), at(22, 25)))
+    t2 = datetime(2026, 11, 20, 14, 25, 0)
+    rid = stem(t2)
+    write_run(root / "recordings", PhoneRun(t2, seconds=100, recording=rid, night_end=True, contact=None))
+    write_spans(root / "spans", rid, span_line(rid, 1, "work", t2, None))
+    s = pnc.check(root, None, signal=False)
+    assert s["not_night"] is True and "2026-11-19" in pnc.render(s)  # says where the newest night is
+    assert pnc.check(root, "2026-11-19", signal=False)["name"] == "2026-11-19"
+
+
+def test_a_recording_id_with_no_spans_file_is_judged_as_before(tmp_path: Path) -> None:
+    root = tmp_path / "eeg-export"
+    write_run(root / "recordings", PhoneRun(T, seconds=600, night_end=True, recording=stem(T), hum_t3=False,
+                                            flat_t4=False))
+    s = pnc.check(root, NIGHT, signal=False)
+    assert not s.get("not_night") and s["data_runs"] == 1 and not s.get("stretches")
+
+
+def test_spans_are_found_where_the_laptop_keeps_them(tmp_path: Path) -> None:
+    """On the laptop the recordings are in `<local>/recordings` and the spans in `<local>/phone/spans`."""
+    root = tmp_path / "local"
+    day_recording(root, sleep=(at(22, 10), at(22, 25)))
+    (root / "phone").mkdir()
+    (root / "spans").rename(root / "phone" / "spans")
+    assert len(pnc.check(root, "2026-11-19", signal=False)["stretches"]) == 1
+
+
+def test_stretches_taken_away_by_the_owner_are_mentioned_only_when_the_reader_lists_them() -> None:
+    from types import SimpleNamespace
+
+    import spans
+    gone = spans.Span("x-3", "sleep", None, at(22, 17).timestamp(), at(22, 21).timestamp(), "auto_start")
+    assert pnc.removed_words(spans.SpansFile()) == ""  # a reader without `removed` says nothing
+    assert pnc.removed_words(SimpleNamespace(removed=[])) == ""
+    assert pnc.removed_words(SimpleNamespace(removed=[gone])) == "1 stretch was taken away by you: 22:17-22:21"
+
+
+def test_the_signal_numbers_count_only_the_sleep(tmp_path: Path) -> None:
+    root = tmp_path / "eeg-export"
+    day_recording(root, sleep=(at(22, 10), at(22, 25)))
+    s = pnc.check(root, "2026-11-19")
+    assert s["signal"]["seconds"] == pytest.approx(900 - 90, abs=4)

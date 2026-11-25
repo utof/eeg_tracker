@@ -1,10 +1,44 @@
 // What the recorder isolate tells the screen, about once a second. Plain maps cross the isolate port.
+import 'dart:async';
+
 import '../detectors/drift_off.dart' show DriftState;
+import '../spans/span.dart' show Span;
 import 'contact.dart';
 
 enum Phase { idle, searching, connecting, checkingContact, recording, reconnecting, stopping }
 
 const int sampleRateHz = 250;
+
+/// The recorder's heartbeat: while a recorder exists it sends its status this often, whether or not samples arrive
+/// (searching, reconnecting, recording alike). The one source of "a recording is running" for the screen.
+const Duration recorderBeat = Duration(seconds: 2);
+
+/// This long without a beat, the screen asks Android whether the recorder's service is still there (four beats: one
+/// late beat is not an end). A service that is there is a recording that runs, however quiet.
+const Duration recorderQuietAfter = Duration(seconds: 8);
+
+/// The heartbeat itself (the recorder's service runs one): [read] is the recorder's status now, null while there is
+/// no recorder. A status that is idle is not sent: the recorder says idle itself, once, when its run is over, and one
+/// that has not begun yet is idle only because it is newly born.
+class StatusBeat {
+  StatusBeat({required this.read, required this.send, this.every = recorderBeat});
+  final RecorderStatus? Function() read;
+  final void Function(RecorderStatus status) send;
+  final Duration every;
+  Timer? _timer;
+
+  void start() => _timer ??= Timer.periodic(every, (_) => beat());
+
+  void beat() {
+    final s = read();
+    if (s != null && s.phase != Phase.idle) send(s);
+  }
+
+  void stop() {
+    _timer?.cancel();
+    _timer = null;
+  }
+}
 
 /// Length of one cell of the night strip: half an hour of clock time.
 const int slotMs = 30 * 60 * 1000;
@@ -27,9 +61,13 @@ class RecorderStatus {
     this.driftOnsetMs,
     this.alarm,
     this.board,
+    this.rec = const RecordingLive(),
     this.quality,
     this.contactAtMs,
   });
+
+  /// The recording's id, whether a sleep span runs, and its spans (Record first).
+  final RecordingLive rec;
 
   final Phase phase;
 
@@ -101,6 +139,7 @@ class RecorderStatus {
     String? note,
     Map<int, int>? slots,
     BoardLive? board,
+    RecordingLive? rec,
     QualityVerdict? quality,
     int? contactAtMs,
   }) => RecorderStatus(
@@ -120,6 +159,7 @@ class RecorderStatus {
     driftOnsetMs: driftOnsetMs,
     alarm: alarm,
     board: board ?? this.board,
+    rec: rec ?? this.rec,
     quality: quality ?? this.quality,
     contactAtMs: contactAtMs ?? this.contactAtMs,
   );
@@ -142,6 +182,7 @@ class RecorderStatus {
     driftOnsetMs: driftOnsetMs,
     alarm: alarm,
     board: board,
+    rec: rec,
     quality: quality,
     contactAtMs: contactAtMs,
   );
@@ -164,6 +205,7 @@ class RecorderStatus {
     driftOnsetMs: onsetMs,
     alarm: alarm,
     board: board,
+    rec: rec,
     quality: quality,
     contactAtMs: contactAtMs,
   );
@@ -189,6 +231,7 @@ class RecorderStatus {
     'driftOnsetMs': driftOnsetMs,
     'alarm': alarm?.toMap(),
     'board': board?.toMap(),
+    'rec': rec.toMap(),
     'quality': quality?.toMap(),
     'contactAtMs': contactAtMs,
   };
@@ -224,6 +267,7 @@ class RecorderStatus {
       driftOnsetMs: _int(data['driftOnsetMs']),
       alarm: AlarmStatus.fromMap(data['alarm']),
       board: BoardLive.fromMap(data['board']),
+      rec: RecordingLive.fromMap(data['rec']),
       quality: QualityVerdict.fromMap(data['quality']),
       contactAtMs: _int(data['contactAtMs']),
     );
@@ -354,3 +398,61 @@ class AlarmStatus {
 double? _finite(double? v) => v == null || v.isNaN || v.isInfinite ? null : v;
 int? _int(Object? v) => v is num ? v.toInt() : null;
 double? _double(Object? v) => v is num ? v.toDouble() : null;
+
+/// The running recording as the screen needs it (Record first, DECISIONS 880-899): its id (null until its first file
+/// set opens), whether the sleep kit is attached, and its spans in order.
+class RecordingLive {
+  const RecordingLive({this.id, this.sleep = true, this.spans = const [], this.band});
+
+  final String? id;
+
+  /// The headband's name as it gave it (a session that runs on the recording writes it into its own file); null
+  /// until it is found.
+  final String? band;
+
+  /// The sleep kit runs: a sleep span is open. A status from a recorder of before reads as true.
+  final bool sleep;
+  final List<Span> spans;
+
+  /// The open span of [kind], or of any kind.
+  Span? open([String? kind]) => spans.where((s) => !s.closed && (kind == null || s.kind == kind)).lastOrNull;
+
+  /// What the 60-minute rule ended last (the headband was off or lost that long; `ended_by: headband_off`), offered
+  /// as "Still going? Undo" until something else is marked after it (DECISIONS 899, 986). Empty: nothing to undo.
+  List<Span> get undoable {
+    final off = [for (final s in spans) if (s.closed && s.endedBy == 'headband_off') s];
+    if (off.isEmpty) return const [];
+    final last = off.map((s) => s.end!).reduce((a, b) => a.isAfter(b) ? a : b);
+    if (spans.any((s) => !s.closed || s.start.isAfter(last))) return const [];
+    return [for (final s in off) if (s.end == last) s];
+  }
+
+  /// The open sleep stretch the app opened by itself when the headband came back after the 60-minute rule (source
+  /// `auto_resume`, DECISIONS 1015): shown as the app's guess, with Undo. Null: none.
+  Span? get resumed => spans.where((s) => !s.closed && s.source == 'auto_resume').lastOrNull;
+
+  /// The open sleep span (kind `sleep` or `nap`).
+  Span? get openSleep => spans.where((s) => !s.closed && s.isSleep).lastOrNull;
+
+  Map<String, Object?> toMap() => {
+    'id': id,
+    'sleep': sleep,
+    'band': ?band,
+    'spans': [for (final s in spans) s.toLine(s.start)],
+  };
+
+  static RecordingLive fromMap(Object? m) {
+    if (m is! Map) return const RecordingLive();
+    final l = m['spans'];
+    return RecordingLive(
+      id: m['id'] is String ? m['id'] as String : null,
+      sleep: m['sleep'] != false,
+      band: m['band'] is String ? m['band'] as String : null,
+      spans: [
+        if (l is List)
+          for (final x in l)
+            if (x is Map) ?Span.fromLine(x),
+      ],
+    );
+  }
+}

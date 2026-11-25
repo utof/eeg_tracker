@@ -1,0 +1,35 @@
+{
+ "spans": [
+  {
+   "span": "2026-11-21-110200-1",
+   "kind": "work",
+   "label": "working",
+   "start_unix": 1795248300,
+   "end_unix": null,
+   "source": "owner_button",
+   "started_recording": false,
+   "ended_by": null,
+   "session": "work-sessions/2026-11-21-110500.work.json",
+   "paused": [],
+   "estimate": null
+  },
+  {
+   "span": "2026-11-21-110200-2",
+   "kind": "nap",
+   "label": "in_bed",
+   "start_unix": 1795255200,
+   "end_unix": null,
+   "source": "owner_button",
+   "started_recording": false,
+   "ended_by": null,
+   "session": null,
+   "paused": [],
+   "estimate": null
+  }
+ ],
+ "removed": [],
+ "reviewed": null,
+ "sets": [],
+ "hides": [],
+ "skipped": 1
+}

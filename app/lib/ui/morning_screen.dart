@@ -81,7 +81,7 @@ class MorningScreen extends StatefulWidget {
 }
 
 class _MorningScreenState extends State<MorningScreen> {
-  final BrainBitFinder _finder = BrainBitFinder();
+  final BrainBitFinder _finder = BrainBitFinder(activity: 'check_in');
   late final MorningController _c = MorningController(
     finder: _finder,
     sound: SoloudCheckInSound.new,
@@ -89,7 +89,7 @@ class _MorningScreenState extends State<MorningScreen> {
   );
   String? _recordings;
   String? _doneAt, _experiment;
-  bool _nightRunning = false;
+  bool _recordingRuns = false;
   bool _screenOn = false;
   MorningStage _lastStage = MorningStage.intro;
   MorningOutcome? _outcome;
@@ -102,6 +102,8 @@ class _MorningScreenState extends State<MorningScreen> {
   void initState() {
     super.initState();
     _c.addListener(_changed);
+    // the recording was stopped under this session (the notification's Stop, the 6-hour rule): it ends too
+    _finder.onRecordingStopped = () => unawaited(_c.stop());
     unawaited(_prepare());
   }
 
@@ -119,7 +121,7 @@ class _MorningScreenState extends State<MorningScreen> {
       // without the folder the check-in still runs; it is just not saved
     }
     final running = await FlutterForegroundTask.isRunningService;
-    if (mounted) setState(() => _nightRunning = running);
+    if (mounted) setState(() => _recordingRuns = running);
   }
 
   void _changed() {
@@ -196,10 +198,6 @@ class _MorningScreenState extends State<MorningScreen> {
   }
 
   Future<void> _start() async {
-    if (await FlutterForegroundTask.isRunningService) {
-      setState(() => _nightRunning = true);
-      return;
-    }
     final phone = await Phone.snapshot().catchError((Object _) => const PhoneSnapshot({}));
     if (!await nearbyAllowed(phone.sdkInt) && !await requestNearby(phone.sdkInt)) {
       _say('Allow Nearby devices first: without it the headband cannot be found.');
@@ -269,7 +267,7 @@ class _MorningScreenState extends State<MorningScreen> {
       rechecking: c.rechecking,
       noSignal: c.noSignal,
       secondsLeft: c.secondsLeft,
-      nightRunning: _nightRunning,
+      recordingRuns: _recordingRuns,
       doneTodayAt: _doneAt,
       outcome: _outcome,
       wearer: c.stage == MorningStage.result ? _wearer : null,

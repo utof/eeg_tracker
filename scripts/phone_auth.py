@@ -7,6 +7,9 @@ app/lib/share/auth.dart; both are checked against app/test/fixtures/phone_link.j
   query, a time, a nonce used once, whether this laptop is on the network where it paired, and the body's SHA-256. The
   phone's token never leaves this laptop. The phone answers with `reply_proof` over the same nonce, so the laptop knows
   it reached the phone that holds the key, not whatever device took its old address.
+- When the phone sends its files by itself (scripts/push_receiver.py) the roles swap: the phone signs each request
+  (`push_headers`), and the laptop's answer proves the key over the request's nonce and its own answer's bytes
+  (`push_reply`), so an answer cannot be changed on the way or used for another request.
 - Before the phone deletes a raw recording by itself it asks for `recheck_mac`: an HMAC over random byte ranges of the
   laptop's own copy and a fresh nonce, which only a laptop holding those bytes can make.
 
@@ -23,6 +26,8 @@ KEY_TAG = "eeg-tracker key v2"
 REQUEST_TAG = "eeg-tracker request v2"
 REPLY_TAG = "eeg-tracker reply v2"
 RECHECK_TAG = "eeg-tracker recheck v1"
+PUSH_TAG = "eeg-tracker push v1"
+PUSH_REPLY_TAG = "eeg-tracker push reply v1"
 NONCE = re.compile(r"[A-Za-z0-9_-]{16,64}")
 KEY = re.compile(r"[0-9a-f]{64}")
 
@@ -88,6 +93,32 @@ def reply_proof(key: str, nonce: str) -> str:
 
 def reply_ok(key: str, nonce: str, given: str | None) -> bool:
     return given is not None and hmac.compare_digest(reply_proof(key, nonce).encode(), given.encode())
+
+
+def push_sign(key: str, method: str, target: str, time_ms: int, nonce: str, body: bytes = b"") -> str:
+    """HMAC-SHA256(key, `eeg-tracker push v1|METHOD|time|nonce|sha256(body)|sha256(path)|sha256(query)`): the phone's
+    signature of a request to the laptop's receiver (no home flag: the laptop knows where it is)."""
+    path, query = target_parts(target)
+    msg = "|".join((PUSH_TAG, method.upper(), str(time_ms), nonce, _sha(body), _sha(path.encode("utf-8")),
+                    _sha(query.encode("utf-8"))))
+    return _hmac(key, msg.encode("utf-8"))
+
+
+def push_headers(key: str, method: str, target: str, body: bytes = b"", *, now_ms: int | None = None,
+                 nonce: str | None = None) -> dict[str, str]:
+    t = int(time.time() * 1000) if now_ms is None else now_ms
+    n = nonce or new_nonce()
+    return {TIME_H: str(t), NONCE_H: n, SIGN_H: push_sign(key, method, target, t, n, body)}
+
+
+def push_reply(key: str, nonce: str, reply_body: bytes) -> str:
+    """The laptop's answer to a signed push request carries HMAC-SHA256(key, `eeg-tracker push reply v1|<the
+    request's nonce>|sha256(the answer's body)`)."""
+    return _hmac(key, f"{PUSH_REPLY_TAG}|{nonce}|{_sha(reply_body)}".encode("utf-8"))
+
+
+def push_reply_ok(key: str, nonce: str, reply_body: bytes, given: str | None) -> bool:
+    return given is not None and hmac.compare_digest(push_reply(key, nonce, reply_body).encode(), given.encode())
 
 
 def ranges_text(ranges: Iterable[tuple[int, int]]) -> str:

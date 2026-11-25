@@ -6,6 +6,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../walking/detector.dart' show walkDetector;
 import '../wearer/check.dart' show nightSignal, wearerAnswerIn;
 import 'drift.dart';
 import 'extras.dart';
@@ -16,6 +17,7 @@ import 'rem_check.dart';
 /// 2026-11-19 also `drift_off` (drift.dart) and `wearer_signal` ("Was this you?", wearer/check.dart), added without a
 /// new version; and `wearer`, the owner's answer, which a rebuilt report keeps. Since 2026-11-20 also `probs` (the
 /// model's per-epoch probabilities) and `rem_check` (the dream sleep check, rem_check.dart), without a new version.
+/// Since 2026-11-24 also `walking` (the epochs the walking detector calls walking, scored awake; DECISIONS 920).
 /// On the phone a report of an older version is kept as it is and offers "Score again" (DECISIONS row 580; the
 /// laptop rebuilds it).
 const int reportVersion = 2;
@@ -73,6 +75,10 @@ class SleepReport {
 
   String get nightOf => json['night_of'] as String;
   bool get scored => json['scored'] == true;
+
+  /// A sleep stretch the app started by itself in which under [noSleepFoundBelowMin] minutes of sleep were found
+  /// ([markNoSleepFound]): listed as "no sleep found", counted for nothing.
+  bool get noSleepFound => json['no_sleep_found'] == true;
   DateTime get dataStart => DateTime.parse(json['data_start'] as String).toLocal();
   DateTime get dataEnd => DateTime.parse(json['data_end'] as String).toLocal();
   Map<String, dynamic> get total => (json['total'] as Map).cast<String, dynamic>();
@@ -130,6 +136,13 @@ class SleepReport {
   /// The model's per-epoch probabilities in permille (W N1 N2 N3 R), or null in a report from before 2026-11-20.
   List<List<int>>? get probabilities => decodeProbs(json['probs']);
 
+  /// Minutes the walking veto turned from asleep to awake (0 when none), or null in a report from before it or when
+  /// the walking detector did not look.
+  double? get walkingChangedMin => switch (json['walking']) {
+    {'changed_min': final num m} => m.toDouble(),
+    _ => null,
+  };
+
   /// The owner's answer to "Was this you?" (`me` or `someone else`), or null (wearer/wearer.dart).
   String? get wearerAnswer => wearerAnswerIn(json);
 
@@ -162,7 +175,28 @@ class SleepReport {
 /// joined night (gaps and padding included); [inputs] the `.f32` names and sizes read. [probabilities]: the model's
 /// mean probabilities, epochs x 5 (W N1 N2 N3 R), for `probs` and the dream sleep check. [seen]: what the detectors
 /// saw over the same samples, for `extras`, `drift_off` and the check's eye movements; [extrasError]: why that pass
-/// failed.
+/// failed. [stages] come with the walking veto already on ([walking]: the walking detector's answer per epoch, null
+/// when it did not look; [walkingChanged]: how many asleep epochs it turned awake), for `walking`.
+/// Under this many minutes asleep a sleep stretch nobody pressed is "no sleep found" (the noise limit of
+/// sleep/periods.dart; spec section 6, DECISIONS 886 and 987). A planning value.
+const double noSleepFoundBelowMin = 10;
+
+/// Marks [rep] `no_sleep_found` when its sleep stretch was started by the app itself (`span.from` `auto` or
+/// `migrated`) and its scoring found under [noSleepFoundBelowMin] minutes asleep; takes the mark away otherwise.
+/// A stretch you pressed or confirmed is never marked: a night with no sleep is worth seeing.
+Map<String, dynamic> markNoSleepFound(Map<String, dynamic> rep) {
+  final span = rep['span'], total = rep['total'];
+  final from = span is Map ? span['from'] : null;
+  final asleep = total is Map && total['asleep_min'] is num ? (total['asleep_min'] as num).toDouble() : null;
+  final none = rep['scored'] == true && (from == 'auto' || from == 'migrated') && asleep != null && asleep < noSleepFoundBelowMin;
+  if (none) {
+    rep['no_sleep_found'] = true;
+  } else {
+    rep.remove('no_sleep_found');
+  }
+  return rep;
+}
+
 Map<String, dynamic> buildReport({
   required String nightOf,
   required DateTime built,
@@ -176,6 +210,8 @@ Map<String, dynamic> buildReport({
   List<double>? probabilities,
   NightSeen? seen,
   String? extrasError,
+  List<bool>? walking,
+  int walkingChanged = 0,
 }) {
   final rep = <String, dynamic>{
     'version': reportVersion,
@@ -220,6 +256,7 @@ Map<String, dynamic> buildReport({
         'wearer_signal': null,
         'probs': null,
         'rem_check': null,
+        'walking': null,
       });
   }
   // the laptop takes the confidence from probabilities rounded to 3 decimals (sleep.json)
@@ -319,8 +356,22 @@ Map<String, dynamic> buildReport({
       'wearer_signal': wearer,
       'probs': probs,
       'rem_check': check,
+      'walking': walking == null ? null : walkingReport(walking, walkingChanged),
     });
 }
+
+/// The rule of the report's `walking`, in words (the laptop's report says the same).
+const String walkingRule = 'an asleep epoch with half or more of it in a walking stretch is scored awake';
+
+/// The report's `walking` object: the walking detector's answer per epoch ([walking], one character each: 1
+/// walking), the minutes walking, and the minutes its veto turned from asleep to awake ([changed] epochs).
+Map<String, Object?> walkingReport(List<bool> walking, int changed) => {
+  'detector': walkDetector,
+  'rule': walkingRule,
+  'epochs': walking.map((w) => w ? '1' : '0').join(),
+  'walking_min': walking.where((w) => w).length * epochMinutes,
+  'changed_min': changed * epochMinutes,
+};
 
 /// `files/nights/`: one report per night, replaced whole (written to a temporary file, then renamed).
 class NightReportStore {
@@ -365,9 +416,10 @@ class NightReportStore {
     return r;
   }
 
-  void write(Map<String, dynamic> report) {
-    dir.createSync(recursive: true);
-    final name = report['night_of'] as String;
+  /// [name]: where it goes when that is not its `night_of` (a nap's `naps/<stamp>`, Record first).
+  void write(Map<String, dynamic> report, {String? name}) {
+    name ??= report['night_of'] as String;
+    fileFor(name).parent.createSync(recursive: true);
     final tmp = File('${dir.path}/$name.report.tmp');
     tmp.writeAsStringSync(const JsonEncoder.withIndent(' ').convert(report), flush: true);
     tmp.renameSync(fileFor(name).path);
@@ -404,9 +456,11 @@ bool isStale(Map<String, int> files, SleepReport? report, {int newDataMinutes = 
 }
 
 /// Whether [report] came from an older scorer than [model] (the phone's): another report version, made before
-/// `drift_off` or the dream sleep check (`rem_check`) existed, or a scored night by another model.
+/// `drift_off`, the dream sleep check (`rem_check`) or the walking veto (`walking`) existed, or a scored night by
+/// another model.
 bool scoredByOlder(SleepReport report, {required String model}) =>
     report.json['version'] != reportVersion ||
     !report.json.containsKey('drift_off') ||
     !report.json.containsKey('rem_check') ||
+    !report.json.containsKey('walking') ||
     (report.scored && report.json['model'] != model);

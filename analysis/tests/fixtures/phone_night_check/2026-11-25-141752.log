@@ -1,0 +1,37 @@
+2026-11-25T14:17:52.019 started on the connection that was already live on the screen: no search, no new contact check
+2026-11-25T14:17:52.019 drift-off detector on; lights off counts from the first sample until Lights off
+2026-11-25T14:17:52.020 wifi connected, 144 Mbps, -53 dBm, 2.4 GHz; default route vpn over wifi; screen on; idle no; lock not held
+2026-11-25T14:17:52.040 sharing on Wi-Fi: not shared on this Wi-Fi until the paired laptop says it is home
+2026-11-25T14:17:52.040 sharing on Wi-Fi on: port 8765, 1 Wi-Fi address
+2026-11-25T14:17:52.054 connected BB Black AA:BB:CC:DD:EE:FF serial 000000 battery 5% signal unknown (no scan)
+2026-11-25T14:17:52.080 phone android 34, battery-opt exempt yes, background restricted no, power save no, standby bucket 5, notifications yes, xiaomi OS1.0, wifi sleep policy 2, vpn yes
+2026-11-25T14:17:52.083 phone battery 53% charge 1811000 uAh current -1176000 uA plugged ac temp 31.0 C
+2026-11-25T14:17:52.099 phone step counter: on
+2026-11-25T14:17:52.100 no contact reading on the live connection; not measured now
+2026-11-25T14:17:52.100 recording started, 250 Hz
+2026-11-25T14:17:52.100 span: sleep start
+2026-11-25T14:18:02.044 wifi connected, 144 Mbps, -53 dBm, 2.4 GHz; default route vpn over wifi; screen on; idle no; lock held
+2026-11-25T14:18:02.169 samples 2504 (+2512) battery 5%
+2026-11-25T14:18:02.198 phone steps 134890
+2026-11-25T14:18:07.421 sharing on Wi-Fi: the paired laptop says this is the home Wi-Fi
+2026-11-25T14:18:12.263 samples 5040 (+2528) battery 5%
+2026-11-25T14:18:22.313 samples 7560 (+2520) battery 5%
+2026-11-25T14:18:32.361 samples 9752 (+2192) battery 5%
+2026-11-25T14:18:42.400 samples 9752 (+0) battery 5%
+2026-11-25T14:18:42.401 no data, state inRange; restarting stream (try 1)
+2026-11-25T14:18:43.408 stream restarted
+2026-11-25T14:18:53.459 samples 9752 (+0) battery 5%
+2026-11-25T14:18:53.473 phone battery 54% charge 1832000 uAh current -1176000 uA plugged ac temp 31.1 C
+2026-11-25T14:18:53.473 no data, state inRange; restarting stream (try 2)
+2026-11-25T14:18:54.481 stream restarted
+2026-11-25T14:19:04.534 samples 9752 (+0) battery 5%
+2026-11-25T14:19:04.536 phone steps 134890
+2026-11-25T14:19:04.536 no data, state inRange; restarting stream (try 3)
+2026-11-25T14:19:05.542 stream restarted
+2026-11-25T14:19:15.589 samples 9752 (+0) battery 5%
+2026-11-25T14:19:15.589 still no data; reconnecting
+2026-11-25T14:19:15.591 packets: 9751 samples, missing 0 in 0 gaps, repeated 0, longest gap 0 samples
+2026-11-25T14:19:15.591 total samples 9752, 0.7 min
+2026-11-25T14:19:15.591 drop (no data); last data 2026-11-25T14:18:31.044; reconnecting
+2026-11-25T14:19:15.594 stopped, battery 5%
+2026-11-25T14:19:22.055 reconnect try 1 (direct to AA:BB:CC:DD:EE:FF): connected after 4.5 s

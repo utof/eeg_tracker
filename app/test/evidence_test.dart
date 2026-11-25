@@ -17,6 +17,7 @@ void main() {
       'dream-catcher',
       'sound-for-states',
       'self-experiments',
+      'sleep-experiments',
       'nap-coach',
       'hands-free',
       'smart-alarm',
@@ -29,9 +30,12 @@ void main() {
       'memory-cues',
       'auto-start',
       'signal-quality',
+      'confirm-questions',
+      'asking',
       'share-on-wifi',
       'walking',
       'pulse',
+      'record-first',
     ]) {
       final md = await rootBundle.loadString('assets/evidence/$name.md');
       expect(md, startsWith('# '), reason: name);

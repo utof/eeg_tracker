@@ -63,8 +63,8 @@ Directory makeFolder(Directory tmp, DateTime now) {
   ]);
   _write(File('${logs.path}/usage-$day-screen.jsonl'), [
     {'t': at(const Duration(hours: 3)), 'ev': 'app', 'state': 'front'},
-    {'t': at(const Duration(hours: 3)), 'ev': 'view', 'screen': 'tab:Night'},
-    {'t': at(const Duration(minutes: 178)), 'ev': 'tap', 'screen': 'tab:Night', 'control': 'FilledButton', 'label': 'Start night'},
+    {'t': at(const Duration(hours: 3)), 'ev': 'view', 'screen': 'tab:Record'},
+    {'t': at(const Duration(minutes: 178)), 'ev': 'tap', 'screen': 'tab:Record', 'control': 'FilledButton', 'label': 'Start night'},
     {'t': at(const Duration(minutes: 175)), 'ev': 'view', 'screen': 'tab:Signal'},
     {'t': at(const Duration(minutes: 175)), 'ev': 'feature', 'name': 'signal', 'on': true},
     {'t': at(const Duration(minutes: 160)), 'ev': 'scroll', 'screen': 'tab:Signal', 'axis': 'v', 'dir': 'down', 'px': 800, 'ms': 400, 'reach': 1.0},

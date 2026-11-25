@@ -1,0 +1,32 @@
+2026-11-25T14:19:22.069 reconnected (direct, try 1) after a drop (no data); previous run 2026-11-25-141752, last data 2026-11-25T14:18:31.044, 51.0 s ago
+2026-11-25T14:19:22.085 connected BB Black AA:BB:CC:DD:EE:FF serial 000000 battery 100% signal unknown (no scan)
+2026-11-25T14:19:22.121 phone android 34, battery-opt exempt yes, background restricted no, power save no, standby bucket 5, notifications yes, xiaomi OS1.0, wifi sleep policy 2, vpn yes
+2026-11-25T14:19:22.130 phone battery 54% charge 1843000 uAh current -1191000 uA plugged ac temp 31.1 C
+2026-11-25T14:19:22.148 phone step counter: on
+2026-11-25T14:19:28.846 contact ohms O1=inf O2=inf T3=1876694 T4=inf
+2026-11-25T14:19:30.449 recording started, 250 Hz
+2026-11-25T14:19:40.527 samples 2504 (+2520) battery 4%
+2026-11-25T14:19:40.530 phone steps 134890
+2026-11-25T14:19:50.588 samples 5032 (+2520) battery 4%
+2026-11-25T14:20:00.652 samples 7552 (+2512) battery 4%
+2026-11-25T14:20:00.654 phone steps 134890
+2026-11-25T14:20:10.707 samples 10064 (+2512) battery 4%
+2026-11-25T14:20:20.749 samples 12584 (+2520) battery 4%
+2026-11-25T14:20:30.802 samples 15096 (+2512) battery 4%
+2026-11-25T14:20:30.816 phone battery 55% charge 1867000 uAh current -1162000 uA plugged ac temp 31.2 C
+2026-11-25T14:20:40.869 samples 17608 (+2528) battery 4%
+2026-11-25T14:20:50.920 samples 20128 (+2504) battery 4%
+2026-11-25T14:21:00.979 samples 22648 (+2528) battery 4%
+2026-11-25T14:21:00.981 phone steps 134890
+2026-11-25T14:21:11.087 samples 25168 (+2520) battery 4%
+2026-11-25T14:21:21.113 samples 27688 (+2512) battery 4%
+2026-11-25T14:21:29.209 packets: 39462 samples, missing 0 in 0 gaps, repeated 0, longest gap 0 samples
+2026-11-25T14:21:29.209 total samples 29712, 2.0 min
+2026-11-25T14:21:29.209 sharing on Wi-Fi: the laptop fetched 18 files or parts of files, 0.5 MB
+2026-11-25T14:21:29.210 sharing on Wi-Fi off
+2026-11-25T14:21:29.446 stopped, battery 4%
+2026-11-25T14:21:29.499 span: sleep end
+2026-11-25T14:21:29.513 phone battery 55% charge 1886000 uAh current -893000 uA plugged ac temp 31.3 C
+2026-11-25T14:21:29.514 end of night, packets: 39462 samples, missing 0 in 0 gaps, repeated 0, longest gap 0 samples
+2026-11-25T14:21:29.514 phone battery summary: only 4 min between readings, too short for a rate
+2026-11-25T14:21:29.515 drift-off detector: 1.22 s of work for 0.06 h of signal (20.14 s an hour)

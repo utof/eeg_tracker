@@ -4,6 +4,7 @@
 // Shown by one widget, ui/device_status.dart.
 import '../recorder/status.dart';
 import '../signal/quality.dart';
+import '../spans/span.dart' show spanWord;
 import 'battery_estimate.dart';
 
 enum LinkState {
@@ -33,7 +34,11 @@ class DeviceStatus {
     this.problem,
     this.lastData,
     this.lingering = false,
+    this.doing,
   });
+
+  /// What is marked on the running recording now, in a word ("Work", "Sleep"); null: nothing, or no recording.
+  final String? doing;
 
   final LinkState link;
   final BandUse use;
@@ -62,7 +67,7 @@ class DeviceStatus {
     LinkState.connecting => 'Connecting',
     LinkState.checkingContact => 'Checking contact',
     LinkState.waiting => 'Connected, no signal yet',
-    LinkState.live => use == BandUse.night ? 'Recording' : 'Connected',
+    LinkState.live => use == BandUse.night ? (doing == null ? 'Recording' : 'Recording · $doing') : 'Connected',
     LinkState.reconnecting => 'Headband lost, reconnecting',
   };
 
@@ -86,6 +91,7 @@ class DeviceStatus {
     problem: identical(problem, _keep) ? this.problem : problem as String?,
     lastData: lastData ?? this.lastData,
     lingering: lingering ?? this.lingering,
+    doing: doing,
   );
 
   static const Object _keep = Object();
@@ -125,6 +131,7 @@ class DeviceStatus {
       battery: battery,
       measuresContact: board == null,
       lastData: last == null ? null : DateTime.fromMillisecondsSinceEpoch(last),
+      doing: s.rec.open() == null ? null : spanWord(s.rec.open()!.kind),
     );
   }
 }

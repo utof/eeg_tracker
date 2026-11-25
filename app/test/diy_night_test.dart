@@ -4,6 +4,9 @@
 // and a new mode each start a new file set; damage and losses are counted, never filled; the contact check, the
 // drift-off detector, the smart alarm's model, the lucid cues and the live sleep model they share are never given the
 // board's samples.
+@Tags(['realtime'])
+library;
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';

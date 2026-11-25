@@ -7,7 +7,7 @@
 //   _log.error('scoring failed', error: e, stack: st, data: {'night': night});
 //   await _log.timed('score ${n.name}', () => scorer.score(n));   // "took 41.2 s", or the error with its time
 //
-// Subsystems in use: app, recorder, ble, share, scoring, packing, sessions, auto, sound, export, signal, usage, perf,
+// Subsystems in use: app, recorder, ble, headband, share, scoring, packing, sessions, auto, sound, export, signal, usage, perf,
 // print (every debugPrint), and the libraries' own loggers under their names. Each Flutter engine starts its records
 // once ([Logs.start]: `screen` in main(), `recorder` in the night's service, `auto` in the headband watcher); before
 // that, and in tests, a line goes nowhere and costs a check.

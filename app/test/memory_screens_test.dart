@@ -337,7 +337,7 @@ void main() {
       await tester.pumpWidget(
         _app(
           SettingsView(
-            model: const SettingsViewModel(on: false, nightRunning: false),
+            model: const SettingsViewModel(on: false, recordingRuns: false),
             onToggle: (_) {},
             onCalibrate: () {},
             onInfo: () {},
@@ -378,7 +378,7 @@ void main() {
       expect(model(DateTime(2026, 11, 25, 21)).due, MemoryDue.evening);
       expect(
         memoryNightLine('${dir.path}/recordings', now: DateTime(2026, 11, 25, 21)),
-        'On: learn the board before Start night.',
+        'On: learn the board before Sleep.',
       );
       expect(model(DateTime(2026, 11, 25, 21), lucidOn: true).due, MemoryDue.waiting);
     });

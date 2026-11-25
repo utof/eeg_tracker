@@ -24,6 +24,7 @@ import '../dream/text_runner.dart';
 import '../phone.dart';
 import '../recorder/brainbit.dart';
 import '../recorder/remove.dart' show fileGoneText;
+import '../spans/activities.dart' show Activities;
 import '../recorder/recorder_service.dart';
 import '../session_keeper.dart';
 import '../sleep/onnx_runs.dart' show modelsDirFor;
@@ -48,7 +49,7 @@ class DreamScreen extends StatefulWidget {
 }
 
 class _DreamScreenState extends State<DreamScreen> {
-  final BrainBitFinder _finder = BrainBitFinder();
+  final BrainBitFinder _finder = BrainBitFinder(activity: 'dream_catcher');
   final SoloudDreamSound _audio = SoloudDreamSound();
   final RecordMic _mic = RecordMic();
   late final DreamController _c = DreamController(
@@ -61,7 +62,7 @@ class _DreamScreenState extends State<DreamScreen> {
   String? _recordings;
   int _rounds = 4;
   DreamEnding _ending = DreamEnding.wake;
-  bool _nightRunning = false;
+  bool _recordingRuns = false;
   bool _face = false;
   final SessionKeeper _keeper = PhoneSessionKeeper();
   DreamStage _lastStage = DreamStage.setup;
@@ -89,6 +90,8 @@ class _DreamScreenState extends State<DreamScreen> {
   void initState() {
     super.initState();
     _c.addListener(_changed);
+    // the recording was stopped under this session (the notification's Stop, the 6-hour rule): it ends too
+    _finder.onRecordingStopped = () => unawaited(_c.stop());
     unawaited(_prepare());
   }
 
@@ -102,7 +105,7 @@ class _DreamScreenState extends State<DreamScreen> {
         final model = _model = SpeechModelStore(modelsDirFor(rec), parakeetV3);
         _modelReady = model.ready;
         _downloaded = model.bytesHere; // a download stopped earlier goes on from here
-        _texts = DreamTexts(store: st, open: () => _openSpeech(model), blocked: () => _c.active || _nightRunning)
+        _texts = DreamTexts(store: st, open: () => _openSpeech(model), blocked: () => _c.active || _recordingRuns)
           ..addListener(_changed);
       }
     } catch (_) {
@@ -111,7 +114,7 @@ class _DreamScreenState extends State<DreamScreen> {
     final running = await FlutterForegroundTask.isRunningService;
     if (!mounted) return;
     setState(() {
-      _nightRunning = running;
+      _recordingRuns = running;
       _load();
     });
     _writeOut();
@@ -125,7 +128,7 @@ class _DreamScreenState extends State<DreamScreen> {
   /// Writes out the answers waiting for it, unless a session or a night recording runs (never during one).
   void _writeOut() {
     final t = _texts;
-    if (t == null || !_modelReady || _c.active || _nightRunning) return;
+    if (t == null || !_modelReady || _c.active || _recordingRuns) return;
     unawaited(t.run(_sessions));
   }
 
@@ -255,6 +258,12 @@ class _DreamScreenState extends State<DreamScreen> {
   }
 
   Future<String?> _startNight() async {
+    if (await FlutterForegroundTask.isRunningService) {
+      // the session ran on a recording: sleep starts on it, with no new search (Record first, DECISIONS 982)
+      Activities.shared?.ask.value = null;
+      FlutterForegroundTask.sendDataToTask(startSleepCommand());
+      return null;
+    }
     _finder.dispose(anyLost: _c.leftLost); // the headband is free: the recorder's own scanner takes over
     final r = await startRecorderService(_recordings);
     return r is ServiceRequestFailure ? 'did not start: ${r.error}' : null;
@@ -280,10 +289,6 @@ class _DreamScreenState extends State<DreamScreen> {
   // ---- lights off ----
 
   Future<void> _lightsOff() async {
-    if (await FlutterForegroundTask.isRunningService) {
-      setState(() => _nightRunning = true);
-      return;
-    }
     await _stopClip();
     final phone = await Phone.snapshot().catchError((Object _) => const PhoneSnapshot({}));
     if (!await nearbyAllowed(phone.sdkInt) && !await requestNearby(phone.sdkInt)) {
@@ -475,7 +480,7 @@ class _DreamScreenState extends State<DreamScreen> {
       noData: c.noData,
       contact: c.contact,
       notes: [?c.saveNote, ?c.micNote],
-      nightRunning: _nightRunning,
+      recordingRuns: _recordingRuns,
       keepUnlocked: active && _keepUnlocked,
       theme: PromptInfo(seconds: _promptS[PromptKind.theme]),
       question: PromptInfo(seconds: _promptS[PromptKind.question]),

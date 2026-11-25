@@ -3,7 +3,7 @@
 "Pre-install check"; DECISIONS 733).
 
     python3 app/tool/precheck.py --old LAST_ON_PHONE.apk --new CANDIDATE.apk \\
-        [--replay REPLAY_BUILD.apk] [--nights DIR] [--reports DIR] [--out DIR] [--adb-port N] [--keep]
+        [--replay REPLAY_BUILD.apk] [--nights DIR] [--reports DIR] [--out DIR] [--adb-port N] [--adb-connect HOST:PORT] [--stage-only] [--keep]
 
 It makes a new AVD under /var/tmp with 2 cores (the phone's arm64 APK runs there through Android's ARM translation,
 which crashes ONNX Runtime with 4 cores), boots it headless, and checks what reached the owner's phone on 2026-11-19/20:
@@ -18,7 +18,7 @@ which crashes ONNX Runtime with 4 cores), boots it headless, and checks what rea
   (c) a replayed noisy work session (the made-up "talking" recording through the replay build's headband, at real
       speed for 6.5 minutes): no break may start by itself. Runs when --replay is given (DECISIONS 735; the
       work-day fix it waited for is in main since integration 17).
-  (e) only with `--only ...e` and --replay: the Signal tab reaches the replayed headband, then Start night must record
+  (e) only with `--only ...e` and --replay: the Signal tab reaches the replayed headband, then Sleep (on the Record tab) must record
       that live connection (no search, no contact check; DECISIONS 855-856).
   (d) logcat, ANRs and Android's exit reasons are collected; a crash or an ANR of the app fails, and the app's own
       files/app-starts.log must have recorded its starts with the exit reasons.
@@ -28,6 +28,13 @@ Prints a plain PASS / FAIL / SKIP list; exit status 1 when anything failed. Abou
 Only its own things: a private adb server on port 5041 (--adb-port; ADB_LIBUSB=0 ADB_USB=0) and the emulator's own serial on
 every adb call, never another device or the default adb server; the emulator and that server are stopped by PID
 and the AVD deleted at the end (--keep leaves the AVD and the seed copies). Run it in the heavy build slot.
+
+--adb-connect HOST:PORT: do not make or start an emulator here; use the one already reachable at that adb address (a
+tunnel to an emulator on another machine, started and stopped by whoever owns it: a fresh one, with 2 cores and the
+Europe/Moscow time zone as above). The private adb server connects to it and is stopped at the end; the emulator is not.
+
+The seed files go through a content-addressed cache on the device (SEED_CACHE, named by SHA-256) and are hard-linked into the app's
+folder; --stage-only fills the cache and stops, so an emulator snapshot saved after it already holds the nights (DECISIONS 873).
 """
 
 from __future__ import annotations
@@ -137,16 +144,31 @@ def free_port_pair() -> int:
     raise SystemExit("no free emulator port between 5556 and 5585")
 
 
+def sync_clock() -> None:
+    """An emulator restored from a saved snapshot keeps the clock of the moment it was saved: set the device's wall clock from
+    this machine's when they differ by more than 5 s (adbd runs as root here)."""
+    dev = sh("date +%s", check=False).strip()
+    now = time.time()
+    if dev.isdigit() and abs(int(dev) - now) <= 5:
+        return
+    sh(f"cmd alarm set-time {int(now * 1000)} || date -u -s @{int(now)}", check=False)
+    after = sh("date +%s", check=False).strip()
+    say(f"  device clock was {int(dev) - int(now) if dev.isdigit() else '?'} s off; now {int(after) - int(time.time()) if after.isdigit() else '?'} s")
+
+
 class Emulator:
-    def __init__(self, work: Path, keep: bool):
+    def __init__(self, work: Path, keep: bool, connect: str | None = None):
         self.work = work
         self.keep = keep
+        self.connect = connect  # HOST:PORT of an emulator somebody else runs (--adb-connect)
         self.avd_home = work / "avd"
         self.name = "eeg_precheck"
         self.proc: subprocess.Popen[bytes] | None = None
         self.server: subprocess.Popen[bytes] | None = None
 
     def create(self) -> None:
+        if self.connect:
+            return
         self.avd_home.mkdir(parents=True, exist_ok=True)
         env = {**ENV, "ANDROID_AVD_HOME": str(self.avd_home)}
         subprocess.run(
@@ -174,6 +196,9 @@ class Emulator:
             if time.time() - t0 > 30 or self.server.poll() is not None:
                 raise RuntimeError(f"our adb server did not start on port {ADB_PORT} (see adb-server.log)")
             time.sleep(1)
+        if self.connect:
+            self._attach()
+            return
         port = free_port_pair()
         SERIAL = f"emulator-{port}"
         env = {**ENV, "ANDROID_AVD_HOME": str(self.avd_home)}
@@ -213,7 +238,41 @@ class Emulator:
         sh("logcat -G 16M; logcat -c", check=False)
         say(f"booted in {time.time() - t0:.0f} s")
 
+    def _attach(self) -> None:
+        """The emulator at [connect]: connect our server to it, wait for the boot, root, the same settings as a local one."""
+        global SERIAL
+        SERIAL = str(self.connect)
+        t0 = time.time()
+        while run([ADB, *SERVER, "-s", SERIAL, "get-state"], timeout=20, check=False).stdout.strip() != "device":
+            run([ADB, *SERVER, "connect", SERIAL], timeout=30, check=False)
+            if time.time() - t0 > 120:
+                raise RuntimeError(f"adb could not connect to {SERIAL}")
+            time.sleep(2)
+        say(f"emulator {SERIAL} (somebody else's, over adb TCP)")
+        run([ADB, *SERVER, "-s", SERIAL, "wait-for-device"], timeout=600)
+        while sh("getprop sys.boot_completed", check=False).strip() != "1":
+            if time.time() - t0 > 600:
+                raise RuntimeError("the emulator did not boot")
+            time.sleep(3)
+        adb("root", check=False)  # adbd restarts as root: the TCP link goes with it
+        time.sleep(3)
+        for _ in range(30):
+            run([ADB, *SERVER, "connect", SERIAL], timeout=30, check=False)
+            if run([ADB, *SERVER, "-s", SERIAL, "shell", "echo up"], timeout=30, check=False).stdout.strip() == "up":
+                break
+            time.sleep(2)
+        while sh("getprop sys.boot_completed", check=False).strip() != "1":
+            time.sleep(2)
+        sync_clock()
+        for k in ("window_animation_scale", "transition_animation_scale", "animator_duration_scale"):
+            sh(f"settings put global {k} 0", check=False)
+        sh("svc power stayon true; input keyevent KEYCODE_WAKEUP; wm dismiss-keyguard", check=False)
+        sh("logcat -G 16M; logcat -c", check=False)
+        say(f"attached in {time.time() - t0:.0f} s")
+
     def stop(self) -> None:
+        if self.connect:
+            run([ADB, *SERVER, "disconnect", str(self.connect)], timeout=15, check=False)
         if self.proc is not None and self.proc.poll() is None:
             if SERIAL and self.server is not None and self.server.poll() is None:
                 run([ADB, *SERVER, "-s", SERIAL, "emu", "kill"], timeout=30, check=False)
@@ -231,7 +290,7 @@ class Emulator:
                 self.server.wait(timeout=15)
             except subprocess.TimeoutExpired:
                 self.server.kill()
-        if not self.keep:
+        if not self.keep and not self.connect:
             shutil.rmtree(self.avd_home, ignore_errors=True)
 
 
@@ -271,19 +330,49 @@ def device_time() -> str:
     return sh("date '+%m-%d %H:%M:%S.000'").strip()
 
 
+SEED_CACHE = "/data/local/tmp/seedcache"  # content-addressed: a file here is named by the SHA-256 of its bytes
+
+
+def file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def stage_files(pairs: list[tuple[Path, str]]) -> list[tuple[str, str]]:
+    """Puts the files into the device's cache SEED_CACHE unless a file with the same bytes is already there (a saved emulator
+    snapshot can hold them, which saves pushing 0.5 GB over a slow link); returns (sha256, path relative to files/)."""
+    sh(f"mkdir -p {SEED_CACHE} && rm -f {SEED_CACHE}/*.part")
+    have = set(sh(f"ls {SEED_CACHE}").split())
+    staged = []
+    for local, rel in pairs:
+        digest = file_sha256(local)
+        staged.append((digest, rel))
+        if digest in have:
+            continue
+        adb("push", str(local), f"{SEED_CACHE}/{digest}.part", timeout=600)
+        # only a complete file gets its final name
+        sh(f"[ $(stat -c %s {SEED_CACHE}/{digest}.part) = {local.stat().st_size} ] && mv {SEED_CACHE}/{digest}.part {SEED_CACHE}/{digest}")
+        have.add(digest)
+    return staged
+
+
 def seed(pairs: list[tuple[Path, str]], stage: Path) -> None:
     """Copies local files into the app's files/ (paths relative to it), owned by the app, with its SELinux label."""
     stop_app()
-    sh("rm -rf /data/local/tmp/seed && mkdir -p /data/local/tmp/seed")
     stage.mkdir(parents=True, exist_ok=True)
-    for local, rel in pairs:
-        sh(f"mkdir -p /data/local/tmp/seed/{Path(rel).parent}")
-        adb("push", str(local), f"/data/local/tmp/seed/{rel}", timeout=600)
+    staged = stage_files(pairs)
     sh(f"mkdir -p {FILES}")
     uid = sh(f"stat -c %u /data/data/{PKG}").strip()
     ctx = sh(f"ls -Zd /data/data/{PKG}").split()[0]
-    sh(f"cp -r /data/local/tmp/seed/. {FILES}/ && chown -R {uid}:{uid} {FILES} && chcon -R {ctx} {FILES}"
-       f" && rm -rf /data/local/tmp/seed")
+    dirs = sorted({str(Path(rel).parent) for _, rel in staged})
+    # a hard link, not a copy (a copy of 0.5 GB took over 2 minutes on a slow emulator disk); the app only reads these files, and
+    # a link that cannot be made falls back to a copy
+    steps = [f"mkdir -p {FILES}/{d}" for d in dirs] + [
+        f"(ln -f {SEED_CACHE}/{digest} {FILES}/{rel} || cp {SEED_CACHE}/{digest} {FILES}/{rel})" for digest, rel in staged]
+    sh(" && ".join(steps) + f" && chown -R {uid}:{uid} {FILES} && chcon -R {ctx} {FILES}", timeout=900)
 
 
 OUT: Path | None = None  # the run's log folder (screenshots of a screen a step could not use)
@@ -308,7 +397,8 @@ def wait_main(limit: float = 120) -> bool:
             labels = emu.nodes()
         except Exception:
             labels = []
-        if any(l.startswith("Night | Tab") for l, _, _ in labels):
+        # the first tab is Record since Record first (DECISIONS 902); Night in the builds before it
+        if any(l.startswith(("Record | Tab", "Night | Tab")) for l, _, _ in labels):
             return True
         for l, x, y in labels:
             if l.strip() == "Wait":
@@ -317,11 +407,21 @@ def wait_main(limit: float = 120) -> bool:
     return False
 
 
-def open_tab(name: str) -> bool:
-    """Taps the bottom bar's tab [name] (Night, Sessions, Signal, Trends, More)."""
+def bar_button(word: str) -> tuple[str, int, int] | None:
+    """The pinned bar's button [word] above the tabs (Record, Sleep, Stop): the lowest exact match that is not a tab.
+    A section heading of the same word higher up is not it."""
     _, h = emu.screen_size()
+    hits = [(l, x, y) for l, x, y in emu.nodes() if l.split(" | ")[0].strip() == word and h * 0.5 < y < h * 0.9]
+    return max(hits, key=lambda n: n[2]) if hits else None
+
+
+def open_tab(name: str) -> bool:
+    """Taps the bottom bar's tab [name] (Record, Sessions, Signal, Trends, More; "Night" is the first tab under either
+    of its names)."""
+    _, h = emu.screen_size()
+    names = ("Record", "Night") if name in ("Night", "Record") else (name,)
     for label, x, y in emu.nodes():
-        if y > h * 0.85 and label.split(" | ")[0].split("\n")[0].strip().startswith(name):
+        if y > h * 0.85 and label.split(" | ")[0].split("\n")[0].strip().startswith(names):
             sh(f"input tap {x} {y}")
             time.sleep(2)
             return True
@@ -663,10 +763,29 @@ def check_talking(replay: Path, stage: Path, also: list[Result]) -> Result:
     if hit:
         sh(f"input tap {hit[1]} {hit[2]}")
         time.sleep(2)
-        confirm = emu.match("Stop", exact=True)
+        # Sleep started this recording: "Stop everything" ends it (DECISIONS 904); "Stop" in the builds before
+        confirm = emu.match("Stop everything", exact=True) or emu.match("Stop", exact=True)
         if confirm:
             sh(f"input tap {confirm[1]} {confirm[2]}")
         time.sleep(5)
+        # Work started the recording (Record first step 4, DECISIONS 984): once it has ended the app asks; "Stop
+        # everything" ends the recording too, and its sheet "What was this recording?" is skipped
+        t1 = time.time()
+        while time.time() - t1 < 40:
+            ask = emu.match("Stop everything", exact=True)
+            if ask:
+                sh(f"input tap {ask[1]} {ask[2]}")
+                time.sleep(3)
+                continue
+            skip = emu.match("Skip", exact=True) if emu.match("What was this recording?", exact=True) else None
+            if skip:
+                sh(f"input tap {skip[1]} {skip[2]}")
+                details.append("Work had started the recording: Stop everything, then the sheet skipped")
+                time.sleep(2)
+                break
+            if emu.match("Done", exact=True) and time.time() - t1 > 15:
+                break  # the work page's own end, no question: an app of before step 4
+            time.sleep(2)
     newest = sh(f"ls -t {FILES}/work-sessions/*.work.json 2>/dev/null | head -1", check=False).strip()
     if not newest:
         return Result(name, "FAIL", "no work session was saved", details)
@@ -674,6 +793,8 @@ def check_talking(replay: Path, stage: Path, also: list[Result]) -> Result:
     breaks = j.get("breaks") if isinstance(j.get("breaks"), list) else []
     count = len(breaks)
     details.append(f"saved: headband {j.get('headband')!r}, breaks {count}, ended {j.get('ended')!r}")
+    if j.get("span"):
+        details.append(f"the session ran on recording {j.get('recording')!r}, span {j.get('span')!r}; raw {j.get('raw')!r}")
     if "Replay" not in str(j.get("headband")):
         return Result(name, "FAIL", f"the session did not use the replay (headband {j.get('headband')!r})", details)
     if count or broke:
@@ -681,7 +802,7 @@ def check_talking(replay: Path, stage: Path, also: list[Result]) -> Result:
     return Result(name, "PASS", f"{TALK_MIN} minutes of replayed talking: no break started", details)
 
 
-# ---- (e) Signal, then Start night: one connection ------------------------------------------------------------------
+# ---- (e) Signal, then Sleep: one connection ---------------------------------------------------------------------------
 
 
 def make_quiet(stage: Path) -> Path:
@@ -695,10 +816,10 @@ def make_quiet(stage: Path) -> Path:
 
 
 def check_one_connection(replay: Path, stage: Path) -> Result:
-    """(e) The Signal tab reaches the (replayed) headband; Start night must then record that live connection: the
+    """(e) The Signal tab reaches the (replayed) headband; Sleep on the Record tab ("Start night" before Record first) must then record that live connection: the
     night's log says it started on the live connection and did not measure contact again, and names one connection
     (DECISIONS 855-856)."""
-    name = "(e) Signal, then Start night: one connection"
+    name = "(e) Signal, then Sleep: one connection"
     f32 = make_quiet(stage)
     stem = f32.name[: -len(".f32")]
     install(replay)
@@ -710,12 +831,17 @@ def check_one_connection(replay: Path, stage: Path) -> Result:
         pairs.append((f32.with_name(stem + ext), f"replay/quiet/{stem}{ext}"))
     seed(pairs, stage / "push-quiet")
     sh("cmd bluetooth_manager enable", check=False)
-    sh(f"dumpsys deviceidle whitelist +{PKG}", check=False)  # Start night would open the battery settings page
+    sh(f"dumpsys deviceidle whitelist +{PKG}", check=False)  # Sleep would open the battery settings page
     before = set(sh(f"ls {FILES}/recordings/*.log 2>/dev/null", check=False).split())
     time.sleep(3)
     start_app()
     if not wait_main():
-        return Result(name, "FAIL", "the app's main screen did not come up within 2 minutes", screen_words("e-start"))
+        try:  # why: a crash at start, or an emulator too slow to draw it
+            (OUT / "e-no-main-logcat.txt").write_text(logcat())
+        except Exception:
+            pass
+        return Result(name, "FAIL", "the app's main screen did not come up within 2 minutes",
+                      screen_words("e-start") + ["app process: " + (app_pid() or "none")])
     details: list[str] = []
     if not open_tab("Signal"):
         return Result(name, "FAIL", "the Signal tab was not found", screen_words("e-tab"))
@@ -732,12 +858,12 @@ def check_one_connection(replay: Path, stage: Path) -> Result:
         return Result(name, "FAIL", "the Signal tab did not get a live signal from the replay within 2 minutes", details)
     battery = [w for w in words if "about" in w and "%" in w]
     details.append(f"battery on the Signal tab: {battery[:1]}")
-    if not open_tab("Night"):
-        return Result(name, "FAIL", "the Night tab was not found", details)
+    if not open_tab("Record"):
+        return Result(name, "FAIL", "the Record tab was not found", details)
     t_start = time.time()
-    hit = find("Start night", exact=False, scrolls=2)
+    hit = bar_button("Sleep") or find("Start night", exact=False, scrolls=2)
     if hit is None:
-        return Result(name, "FAIL", "Start night was not found", details + screen_words("e-night"))
+        return Result(name, "FAIL", "the Sleep button was not found on the Record tab", details + screen_words("e-night"))
     sh(f"input tap {hit[1]} {hit[2]}")
     log = ""
     newest = ""
@@ -760,22 +886,29 @@ def check_one_connection(replay: Path, stage: Path) -> Result:
     if hit:
         sh(f"input tap {hit[1]} {hit[2]}")
         time.sleep(2)
-        confirm = emu.match("Stop", exact=True)
+        # Sleep started this recording: "Stop everything" ends it (DECISIONS 904); "Stop" in the builds before
+        confirm = emu.match("Stop everything", exact=True) or emu.match("Stop", exact=True)
         if confirm:
             sh(f"input tap {confirm[1]} {confirm[2]}")
         time.sleep(6)
     if recording_after is None:
-        return Result(name, "FAIL", "the night did not start recording within 90 s of Start night", details)
+        return Result(name, "FAIL", "the night did not start recording within 90 s of Sleep", details)
     lent = "started on the connection that was already live" in log
     no_check = "not measured again" in log
     samples = [int(m.group(1)) for m in re.finditer(r"samples (\d+) \(\+", log)]
     connects = log.count(" connected ")
     details.append(f"lent {lent}, contact not measured again {no_check}, connections in the log {connects}, samples {samples[-1:]}")
+    if not lent or not no_check or connects != 1 or "reconnect try" in log:
+        # what the recorder and the screen's connection owner said, whole: a handover that broke is told here
+        details += ["  night log: " + l for l in log.splitlines()[14:60]]
+    # the screen's side of the handover, in the app's own log (a pass and a fail read differently here)
+    said = sh(f"cat {FILES}/logs/app-*.jsonl 2>/dev/null | grep -F '\"msg\":\"lend:' | sort | tail -12", check=False)
+    details += ["  app log: " + l[:240] for l in said.splitlines()]
     if not lent or not no_check:
         return Result(name, "FAIL", "the night did not start on the Signal tab's live connection (it searched or checked contact again)", details)
     if connects != 1 or "reconnect try" in log:
         return Result(name, "FAIL", f"the night's log names {connects} connections or a reconnect try", details)
-    return Result(name, "PASS", f"recording {round(recording_after)} s after Start night, on the Signal tab's connection: no search, no contact check", details)
+    return Result(name, "PASS", f"recording {round(recording_after)} s after Sleep, on the Signal tab's connection: no search, no contact check", details)
 
 
 # ---- (d) what the run left -----------------------------------------------------------------------------------------
@@ -845,8 +978,8 @@ def collect(out: Path, started_ms: int) -> Result:
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--old", type=Path, required=True, help="the APK on the phone now (the last one installed there)")
-    p.add_argument("--new", type=Path, required=True, help="the candidate APK")
+    p.add_argument("--old", type=Path, help="the APK on the phone now (the last one installed there)")
+    p.add_argument("--new", type=Path, help="the candidate APK")
     p.add_argument("--replay", type=Path, help="the replay build of the candidate (--dart-define=EEG_REPLAY=true)")
     p.add_argument("--talking", action="store_true", help="kept for old commands: (c) runs whenever --replay is given")
     p.add_argument("--nights", type=Path, default=MAIN / "_local" / "recordings", help="recordings to seed (read-only)")
@@ -854,23 +987,33 @@ def main() -> int:
     p.add_argument("--out", type=Path, help="where the logs go (default: the run's folder under /var/tmp)")
     p.add_argument("--only", default="abcd", help="which checks, e.g. 'bd'")
     p.add_argument("--keep", action="store_true", help="keep the AVD and the copies (the emulator still stops)")
+    p.add_argument("--work", type=Path, default=Path("/var/tmp"),
+                   help="where the run's own folder (AVD, unpacked nights) is made; default /var/tmp")
     p.add_argument("--adb-port", type=int, default=ADB_PORT, help="our private adb server's port (default 5041)")
+    p.add_argument("--stage-only", action="store_true", help="only put the seed nights into the emulator's cache "
+                   f"({SEED_CACHE}), then stop: for saving an emulator snapshot that already holds them")
+    p.add_argument("--adb-connect", metavar="HOST:PORT", help="use the emulator already reachable at this adb address "
+                   "(a tunnel to another machine's) instead of making one here")
     a = p.parse_args()
     use_adb_port(a.adb_port)
+    if not a.stage_only and not (a.old and a.new):
+        p.error("--old and --new are required (except with --stage-only)")
     for apk in (a.old, a.new, *([a.replay] if a.replay else [])):
-        if not apk.is_file():
+        if apk is not None and not apk.is_file():
             p.error(f"{apk} is not there")
     stamp = time.strftime("%Y-%m-%d-%H%M%S")
-    work = Path(f"/var/tmp/eeg-precheck-{stamp}")
+    work = a.work / f"eeg-precheck-{stamp}"
     out = a.out or work / "out"
+    work.mkdir(parents=True, exist_ok=True)  # (with --out and --adb-connect nothing else makes it before the adb server's log)
     out.mkdir(parents=True, exist_ok=True)
     global OUT
     OUT = out
     stage = work / "stage"
+    stage.mkdir(parents=True, exist_ok=True)  # the .f32.xz nights are unpacked into it before (c) would make it
     t0 = time.time()
     started_ms = int(t0 * 1000)
     results: list[Result] = []
-    em = Emulator(work, a.keep)
+    em = Emulator(work, a.keep, a.adb_connect)
     talking_job = None
     if "c" in a.only and a.replay and not list((stage / "scenarios" / "talking-work").glob("*.f32")):
         stage.mkdir(parents=True, exist_ok=True)  # made while the emulator boots
@@ -879,6 +1022,11 @@ def main() -> int:
     try:
         em.create()
         em.start()
+        if a.stage_only:
+            stage.mkdir(parents=True, exist_ok=True)
+            staged = stage_files(night_files(a.reports, a.nights, stage))
+            say(f"staged {len(staged)} files in {SEED_CACHE} on the emulator ({time.time() - t0:.0f} s)")
+            return 0
         if "a" in a.only:
             say("(a) update over yesterday")
             results.append(check_update(a.old, a.new, a.reports, a.nights, stage))
@@ -900,9 +1048,9 @@ def main() -> int:
                 results += also
         if "e" in a.only:
             if not a.replay:
-                results.append(Result("(e) Signal, then Start night: one connection", "SKIP", "needs --replay <replay build>"))
+                results.append(Result("(e) Signal, then Sleep: one connection", "SKIP", "needs --replay <replay build>"))
             else:
-                say("(e) Signal, then Start night: one connection")
+                say("(e) Signal, then Sleep: one connection")
                 results.append(check_one_connection(a.replay, stage))
         if "d" in a.only:
             say("(d) crashes, ANRs, exit reasons")
@@ -925,7 +1073,7 @@ def main() -> int:
         for r in results:
             f.write(f"{r.verdict} {r.name}: {r.words}\n" + "".join(f"    {d}\n" for d in r.details))
     print()
-    print(f"Pre-install check of {a.new.name} (over {a.old.name}), {(time.time() - t0) / 60:.1f} min")
+    print(f"Pre-install check of {a.new.name if a.new else '-'} (over {a.old.name if a.old else '-'}), {(time.time() - t0) / 60:.1f} min")
     for r in results:
         print(f"{r.verdict:4} {r.name}: {r.words}")
     print(f"Logs and details: {out}")

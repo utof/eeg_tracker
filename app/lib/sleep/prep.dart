@@ -60,8 +60,13 @@ class ModelInput {
 
 /// Builds the input from the night's `.f32` files (oldest first; each with its `.idx`). [progress] gets a short
 /// line per step. Null when the night has fewer than [atLeast] epochs (5 minutes, as on the laptop).
-ModelInput? prepareNight(List<File> f32Files, {void Function(String step)? progress, int atLeast = minEpochs}) {
-  final layout = joinLayout(f32Files);
+ModelInput? prepareNight(
+  List<File> f32Files, {
+  void Function(String step)? progress,
+  int atLeast = minEpochs,
+  List<(double, double)>? windows,
+}) {
+  final layout = joinLayout(f32Files, windows: windows);
   final epochs = layout.samples ~/ (sampleRate * epochSeconds);
   if (epochs < atLeast || epochs == 0) return null;
   final taps = mneHighPassTaps(highPassHz, sampleRate.toDouble());

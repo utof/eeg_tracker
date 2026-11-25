@@ -109,18 +109,44 @@ void main() {
   }
 
   group('what this phone allows, in words', () {
-    test('a Xiaomi, not paired, no battery exemption: says so, and how to fix it', () {
+    test('a Xiaomi, Android not watching, no battery exemption: says so, and how to fix it', () {
       final lines = [for (final (l, _) in watchLines(_xiaomiUnpaired)) l];
-      expect(lines.join('\n'), contains('Not paired yet'));
+      expect(
+        lines.join('\n'),
+        contains('Android is not watching for the headband yet. Let Android watch for it once: then it tells the app when the headband is near.'),
+      );
       expect(lines.join('\n'), contains('checks only when you open it'));
       expect(lines.join('\n'), contains('Autostart'));
       expect(lines.join('\n'), contains('not known yet'));
     });
 
-    test('paired and watched: the good news, in green', () {
+    test('Android watching: the good news, in green', () {
       final (line, color) = watchLines(_paired).first;
-      expect(line, startsWith('Paired with BB Black: Android watches for the headband'));
+      expect(line, startsWith('Android watches for the headband (BB Black) and tells the app when it is near'));
       expect(color, Night.live);
+    });
+
+    test('two things are called paired in this app, the laptop and nothing else: this page never says the word', () {
+      for (final sdk in [0, 30, 34]) {
+        for (final companion in [true, false]) {
+          for (final presence in [true, false]) {
+            for (final paired in [true, false]) {
+              for (final observing in [true, false]) {
+                for (final exempt in [true, false]) {
+                  final status = WatchStatus({
+                    'sdkInt': sdk, 'companion': companion, 'presence': presence, 'paired': paired, 'observing': observing,
+                    'name': 'BB Black', 'batteryExempt': exempt, 'notifications': true, 'xiaomi': 'OS1.0.6.0',
+                    'refused_at': DateTime(2026, 11, 20, 23, 10).millisecondsSinceEpoch,
+                  });
+                  for (final (line, _) in watchLines(status)) {
+                    expect(line, isNot(matches(RegExp('pair', caseSensitive: false))), reason: '$status');
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     });
 
     test('Android 11 and lower: no presence events; a refused background start is reported first', () {
@@ -155,13 +181,19 @@ void main() {
     late Directory tmp;
     late String rec;
     final armed = <List<Object?>>[];
+    String? pairFails;
+    final calls = <String>[];
     setUp(() {
       armed.clear();
+      calls.clear();
+      pairFails = null;
       // the phone's side answers at once (an unanswered channel would leave the page's reload pending)
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
         const MethodChannel('eeg_tracker/auto'),
         (call) async {
+          calls.add(call.method);
           if (call.method == 'armBedtime') armed.add((call.arguments as Map)['at'] as List<Object?>);
+          if (call.method == 'pair' && pairFails != null) throw PlatformException(code: 'pair', message: pairFails);
           return null;
         },
       );
@@ -177,15 +209,46 @@ void main() {
       tmp.deleteSync(recursive: true);
     });
 
-    Future<void> open(WidgetTester tester) async {
-      tester.view.physicalSize = const Size(1080, 4000);
+    Future<void> open(WidgetTester tester, {WatchStatus status = _xiaomiUnpaired, double height = 4000}) async {
+      tester.view.physicalSize = Size(1080, height);
       tester.view.devicePixelRatio = 1080 / 393;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(
-        MaterialApp(theme: nightTheme(), home: AutoStartScreen(recordings: rec, watch: () async => _xiaomiUnpaired)),
+        MaterialApp(theme: nightTheme(), home: AutoStartScreen(recordings: rec, watch: () async => status)),
       );
       await tester.pumpAndSettle();
     }
+
+    Finder saysPair() => find.byWidgetPredicate(
+      (w) => w is Text && RegExp('pair', caseSensitive: false).hasMatch(w.data ?? w.textSpan?.toPlainText() ?? ''),
+    );
+
+    testWidgets('Android watching for the headband is never called pairing: the buttons and what they answer', (tester) async {
+      await open(tester, height: 9000); // the whole page is built: the button is far down
+      expect(find.text('Let Android watch for the headband'), findsOneWidget);
+      expect(saysPair(), findsNothing, reason: 'the page when Android is not watching');
+      await tester.tap(find.text('Let Android watch for the headband'));
+      await tester.pumpAndSettle();
+      expect(calls, contains('pair'));
+      expect(find.text('Android now watches for the headband and tells the app when it is near.'), findsOneWidget);
+      expect(saysPair(), findsNothing);
+      pairFails = 'cancelled';
+      await tester.tap(find.text('Let Android watch for the headband'));
+      await tester.pumpAndSettle();
+      expect(find.text('Android could not start watching for the headband: cancelled'), findsOneWidget);
+      expect(saysPair(), findsNothing);
+    });
+
+    testWidgets('while Android watches, the button says Stop watching and what it did', (tester) async {
+      await open(tester, status: _paired, height: 9000);
+      expect(find.text('Let Android watch for the headband'), findsNothing);
+      expect(saysPair(), findsNothing, reason: 'the page when Android is watching');
+      await tester.tap(find.text('Stop watching'));
+      await tester.pumpAndSettle();
+      expect(calls, contains('forget'));
+      expect(find.text('Android no longer watches for the headband. The app checks when you open it and in the bedtime window.'), findsOneWidget);
+      expect(saysPair(), findsNothing);
+    });
 
     testWidgets('three kinds on "Ask me"; a change is saved; other offers no automatic start', (tester) async {
       await open(tester);

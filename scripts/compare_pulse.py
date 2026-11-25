@@ -446,7 +446,7 @@ def words(r: dict) -> str:
     lines = [f"{r['recording']} from {r['start']}: {r['epochs']} epochs of 30 s, {r['read']} with a pulse reading "
              f"({100 * r['coverage']:.1f} %), median {r['median_bpm']}/min; {r['detector']}",
              "  no reading: " + ", ".join(f"{k} {v}" for k, v in r["why"].items() if k not in pl.READ)
-             + "  (g gap, x no usable channel, m moving, s steps, u unclear, o odd one out)"]
+             + "  (g gap, x no usable channel, m moving, w walking, s steps, u unclear, o odd one out)"]
     for s, v in r.get("by_stage", {}).items():
         if v["epochs"]:
             lines.append(f"  {s:3s} {v['read']:4d} of {v['epochs']:4d} read, median {v['median']}")

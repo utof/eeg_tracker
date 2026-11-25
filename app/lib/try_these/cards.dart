@@ -14,7 +14,7 @@ const Map<TryGroup, String> tryGroupTitles = {
   TryGroup.board: 'When the board is built',
 };
 
-/// The screen a card's button opens. [nightScreen] goes back to the main screen (Start night, Your data).
+/// The screen a card's button opens. [nightScreen] goes back to the main screen (Sleep, Your data).
 enum TryOpen {
   nightScreen,
   sleepReport,
@@ -131,7 +131,7 @@ const List<TryCard> tryCards = [
     what: 'Record the night as usual and tap Lights off as you close your eyes, so the app can tell when you fell asleep.',
     takes: 'A few seconds tonight, 2 minutes in the morning',
     steps: [
-      'Headband on and switched on. Tap Start night.',
+      'Headband on and switched on. Tap Sleep.',
       'Lie down. When you close your eyes to sleep, tap Lights off (bottom left).',
       'Got up in the night? Tap Lights off again when you lie back down.',
       'In the morning tap Stop. Once the night is scored, open Sleep report and scroll to Falling asleep.',
@@ -282,7 +282,7 @@ const List<TryCard> tryCards = [
     steps: [
       'Once, in the phone\'s settings for EEG Tracker: allow Show on lock screen and pop-up windows in the background.',
       'Set the phone\'s alarm volume (not media) to where an alarm wakes you.',
-      'Before the night: Set alarm (above Start night), your usual time, 30 min. Then Start night.',
+      'Before the night: Set alarm (above Sleep), your usual time, 30 min. Then Sleep.',
       'Check that the alarm icon shows at the top of the screen.',
     ],
     tell: [
@@ -304,7 +304,7 @@ const List<TryCard> tryCards = [
     what: 'The headband reads your pulse where your heartbeat shows in its signal; a watch worn the same night checks it.',
     takes: 'A night with a watch on, then 10 minutes',
     steps: [
-      'Wear a watch that records heart rate all night (a friend\'s will do) with the headband, and tap Start night.',
+      'Wear a watch that records heart rate all night (a friend\'s will do) with the headband, and tap Sleep.',
       'In the morning, once the night is scored, open Sleep report: the red Pulse lane under the chart and the line Pulse while asleep.',
       'Open the night in the Archive (More, Open the archive): the same Pulse lane under the timeline.',
       'Export the watch\'s heart rate from its app (Health Connect, Mi Fitness, Samsung Health, Garmin or a CSV) and put the file on the laptop.',
@@ -366,19 +366,19 @@ const List<TryCard> tryCards = [
     what: 'The app notices the headband on your head and asks "Start the night?", or starts it by itself if you choose.',
     takes: '5 minutes, then a few evenings',
     steps: [
-      'Settings, When I put the headband on: tap Pair the headband and choose it in the dialog.',
+      'Settings, When I put the headband on: tap Let Android watch for the headband and choose it in the dialog.',
       'Headband on, tap Check now: a quiet notification should ask within about 20 seconds. Tap Not now.',
       'At bedtime: headband on, phone on the charger, locked. Within 10 minutes "Start the night?" should come.',
       'Tap Start the night, sleep, and Stop in the morning as usual.',
     ],
     tell: [
-      'Did the pairing dialog show the headband, and did the question come with the screen off, how late?',
+      'Did Android\'s dialog show the headband, and did the question come with the screen off, how late?',
       'Did the night start when you put the headband on, not when you tapped?',
       'Did a question ever come at a wrong moment (headband off, in a session, right after Stop)?',
       'The headband\'s battery in the evening and in the morning.',
     ],
     opens: TryOpen.settings,
-    readme: [TryRef('When I put the headband on', 'pair it, then a bedtime with "Ask me"')],
+    readme: [TryRef('When I put the headband on', 'let Android watch for the headband, then a bedtime with "Ask me"')],
     evidence: 'auto-start',
   ),
   TryCard(
@@ -614,7 +614,7 @@ const List<TryCard> tryCards = [
     takes: '2 minutes to set up, then a walk of 15 minutes or more',
     steps: [
       'Open Settings and switch on Count steps with the phone while recording; allow Physical activity.',
-      'Headband on, tap Start night (it records in the day too); the phone in your front trouser pocket.',
+      'Headband on, tap Record; the phone in your front trouser pocket.',
       'Walk as you usually do for 15 minutes or more, with a stop or two; then tap Stop.',
       'Open Trends (Walking, Steps) and the recording in the Archive (the Walking lane).',
     ],
@@ -636,7 +636,7 @@ const List<TryCard> tryCards = [
     takes: '15 minutes an evening, 1 minute a morning',
     steps: [
       'In the evening open Lucid dreams, tap Turn on and do the practice to the end.',
-      'Then Start night and Lights off as usual.',
+      'Then Sleep and Lights off as usual.',
       'Once, awake with the headband on, make the eye signal on purpose (left-right-left-right, twice, wide, eyes closed) and note the time.',
       'Next morning answer the three questions before anything else.',
     ],
@@ -792,7 +792,7 @@ const List<TryCard> tryCards = [
     steps: [
       'Open Settings, then Memory cues, and tap Turn on.',
       'In the evening tap Start the evening task and do it to the end, the loudness lying down with the phone where it stays.',
-      'Then Start night and Lights off as usual, within 3 hours.',
+      'Then Sleep and Lights off as usual, within 3 hours.',
       'Next morning, before anything else, do the morning test.',
     ],
     tell: [
@@ -858,7 +858,7 @@ const List<TryCard> tryCards = [
     steps: [
       'Leave python3 scripts/phone_link.py running on the laptop with Share on Wi-Fi on; it says "told the phone N files are safe here".',
       'Four days later open More, Storage: On the laptop has grown and the oldest nights no longer count on the phone.',
-      'Open last week\'s sleep report on the Night tab and Trends: both still show everything.',
+      'Open last week\'s sleep report on the Record tab and Trends: both still show everything.',
       'On the laptop run python3 scripts/catalog.py: those nights say "moved from phone".',
     ],
     tell: [
@@ -899,7 +899,7 @@ const List<TryCard> tryCards = [
     steps: [
       'Only after the bring-up card\'s bench steps pass. In the firmware: Wi-Fi on, your Wi-Fi, and the phone\'s address.',
       'Open Headband connection, choose DIY board (test). Answer the board\'s prompts on the laptop: R, V, then T.',
-      'Tap Start night. Within a minute: "not EEG" and about 3750 µV on every channel.',
+      'Tap Sleep. Within a minute: "not EEG" and about 3750 µV on every channel.',
       'After 10 minutes: Stop, then Export data.',
       'Choose BrainBit again before any BrainBit night or session.',
     ],

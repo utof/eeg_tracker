@@ -41,6 +41,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 import eeg_detectors as det
+import harmonic as hm
 from walk_minutes import (CHECK_MIN_MINUTES, CHECK_PACE_SHARE, CHECK_RIGHT_SHARE, CHECK_TOTAL_SHARE,  # noqa: F401
                           PHONE_MAX_GAP_S, PHONE_WALK_STEPS, Check, Minute, check, phone_minutes)
 
@@ -50,7 +51,6 @@ WINDOW_S = 10.0
 HOP_S = 5.0
 HIGH_PASS_HZ = 0.7
 LOW_PASS_HZ = 20.0
-BUTTER_Q = (1 / (2 * math.cos(math.pi / 8)), 1 / (2 * math.cos(3 * math.pi / 8)))  # fourth order: two biquads
 BIN_HZ = 250 / 8192  # spectrum bins at most this wide (8192 points at 250 Hz)
 WHITEN_HZ = 41 * BIN_HZ  # the whitening's mean spans this (41 bins at 250 Hz)
 PACE_LO_HZ, PACE_STEP_HZ, PACE_RATES = 1.2, 0.02, 111  # candidate step rates 1.2, 1.22, ... 3.4 Hz
@@ -79,42 +79,21 @@ Bools = NDArray[np.bool_]
 
 def nfft_for(fs: float) -> int:
     """The smallest power of two whose bins are at most BIN_HZ wide (8192 at 250 Hz)."""
-    n = 1
-    while fs / n > BIN_HZ * (1 + 1e-12):
-        n *= 2
-    return n
+    return hm.nfft_for(fs, BIN_HZ)
 
 
 def whiten_bins(fs: float) -> int:
     """The odd number of bins nearest to WHITEN_HZ (41 at 250 Hz)."""
-    return 2 * round((WHITEN_HZ / (fs / nfft_for(fs)) - 1) / 2) + 1
+    return hm.whiten_bins(fs, BIN_HZ, WHITEN_HZ)
 
 
 def pace_rates() -> Floats:
     return PACE_LO_HZ + np.arange(PACE_RATES) * PACE_STEP_HZ
 
 
-def hann(n: int) -> Floats:
-    """The periodic Hann window (scipy's for spectra), written out so Dart computes the same."""
-    return 0.5 - 0.5 * np.cos(2 * math.pi * np.arange(n) / n)
-
-
-def interp(x: float, bin_hz: float, w: Floats) -> float:
-    """Linear interpolation of the spectrum w (bin k at k * bin_hz) at x (np.interp's formula, written out)."""
-    j = int(math.floor(x / bin_hz))
-    if (j + 1) * bin_hz <= x:
-        j += 1
-    elif j * bin_hz > x:
-        j -= 1
-    x0, x1 = j * bin_hz, (j + 1) * bin_hz
-    return float((w[j + 1] - w[j]) / (x1 - x0) * (x - x0) + w[j])
-
-
 def filter_channels(x: Floats, fs: float) -> Floats:
     """Each row of x (channels x samples, µV) band-passed 0.7-20 Hz, forward only from its first value."""
-    lo = min(LOW_PASS_HZ, 0.4 * fs)
-    chain = [det.highpass(HIGH_PASS_HZ, q, fs) for q in BUTTER_Q] + [det.lowpass(lo, q, fs) for q in BUTTER_Q]
-    return np.vstack([det.run_chain(chain, row) for row in x]) if len(x) else np.zeros_like(x)
+    return hm.filter_channels(x, hm.band_pass(fs, HIGH_PASS_HZ, LOW_PASS_HZ))
 
 
 @dataclass
@@ -133,47 +112,48 @@ class Window:
                 and self.amp >= MIN_SHAKE_UV and self.thirds < MAX_THIRDS)
 
 
-def window_score(y: Floats, raw: Floats, fs: float) -> tuple[float, int, float, int, float]:
+def window_score(y: Floats, raw: Floats, fs: float, quick: bool = False) -> tuple[float, int, float, int, float]:
     """(score, best rate's index, median range, usable channels, thirds) of one window: y the band-passed samples and
-    raw the samples as recorded, channels x window. Score nan without a usable channel."""
+    raw the samples as recorded, channels x window. Score nan without a usable channel, and, with `quick`, when the
+    shake is under walking size (the window cannot walk, so its spectrum is not worked out)."""
     win = y.shape[1]
-    nfft = nfft_for(fs)
-    bin_hz = fs / nfft
-    wb = whiten_bins(fs)
-    half = wb // 2
-    rates = pace_rates()
-    lo = max(0, int(math.floor(rates[0] / 3 / bin_hz)))  # the bins whitened: from a third of the slowest rate...
-    hi = int(math.floor(2 * rates[-1] / bin_hz)) + 1  # ... to twice the fastest
-    h = hann(win)
-    tot = np.zeros(PACE_RATES)
-    wsum = np.zeros(hi + 1)
+    usable: list[int] = []
     ranges: list[float] = []
     for c in range(y.shape[0]):
-        seg = y[c]
-        rng = float(seg.max() - seg.min())
+        rng = float(y[c].max() - y[c].min())
         if rng < FLAT_UV or float(np.abs(raw[c]).max()) >= RAIL_UV:
             continue
-        spec = np.fft.rfft((seg - seg.sum() / win) * h, n=nfft)
-        p = spec.real * spec.real + spec.imag * spec.imag
-        w = np.zeros(hi + 1)
-        for k in range(lo, hi + 1):  # each bin over the mean of the wb around it (zeros below bin 0)
-            w[k] = p[k] / (p[max(0, k - half):k + half + 1].sum() / wb)
-        for i, f in enumerate(rates):
-            tot[i] += interp(f, bin_hz, w) + HARMONIC * interp(2 * f, bin_hz, w)
-        wsum += w
+        usable.append(c)
         ranges.append(rng)
     if not ranges:
         return math.nan, -1, math.nan, 0, math.nan
+    if quick and det.median(ranges) < MIN_SHAKE_UV:
+        return math.nan, -1, det.median(ranges), len(ranges), math.nan
+    nfft = nfft_for(fs)
+    bin_hz = fs / nfft
+    wb = whiten_bins(fs)
+    rates = pace_rates()
+    lo = max(0, int(math.floor(rates[0] / 3 / bin_hz)))  # the bins whitened: from a third of the slowest rate...
+    hi = int(math.floor(2 * rates[-1] / bin_hz)) + 1  # ... to twice the fastest
+    h = hm.hann(win)
+    tot = np.zeros(PACE_RATES)
+    wsum = np.zeros(hi + 1)
+    for c in usable:
+        w = hm.whiten(hm.power(y[c], h, nfft), lo, hi, wb)
+        tot += hm.family(rates, bin_hz, w, (1.0, HARMONIC))
+        wsum += w
     tot /= len(ranges)
     k = int(np.argmax(tot))
     f0 = rates[k]
-    thirds = (interp(f0 / 3, bin_hz, wsum) + interp(2 * f0 / 3, bin_hz, wsum)) / 2 / len(ranges)
+    thirds = (hm.at(f0 / 3, bin_hz, wsum) + hm.at(2 * f0 / 3, bin_hz, wsum)) / 2 / len(ranges)
     return float(tot[k] / np.median(tot)), k, det.median(ranges), len(ranges), thirds
 
 
-def windows(x: Floats, fs: float, missing: Bools | None = None) -> list[Window]:
+def windows(x: Floats, fs: float, missing: Bools | None = None, quick: bool = False) -> list[Window]:
     """The 10 s windows every 5 s of x (channels x samples, µV, every channel of the recording), from its first
-    sample; missing marks samples that were filled in (gaps)."""
+    sample; missing marks samples that were filled in (gaps). `quick`: only whether each window walks is wanted (the
+    sleep scorers' and the pulse's veto), so a window under walking size is read without its spectrum (score and pace
+    nan); every window's `walks` is the same either way."""
     n = x.shape[1]
     win, hop = round(WINDOW_S * fs), round(HOP_S * fs)
     y = filter_channels(x, fs)
@@ -186,11 +166,11 @@ def windows(x: Floats, fs: float, missing: Bools | None = None) -> list[Window]:
         if cum[s + win] - cum[s] > MAX_MISSING_S * fs:
             out.append(Window(t, math.nan, math.nan, math.nan, 0, False))
             continue
-        score, k, amp, used, thirds = window_score(y[:, s:s + win], x[:, s:s + win], fs)
+        score, k, amp, used, thirds = window_score(y[:, s:s + win], x[:, s:s + win], fs, quick)
         if used == 0:
             out.append(Window(t, math.nan, math.nan, math.nan, 0, False))
             continue
-        out.append(Window(t, score, float(rates[k] * 60), amp, used, True, thirds))
+        out.append(Window(t, score, float(rates[k] * 60) if k >= 0 else math.nan, amp, used, True, thirds))
     return out
 
 
@@ -322,6 +302,59 @@ def find(ws: list[Window]) -> Found:
         walk.append(s)
     close()
     return found
+
+
+# ------------------------------------------------------------------------------------ walking per 30 s epoch
+
+
+EPOCH_S = 30.0  # the sleep scorers' and the pulse's epoch
+EPOCH_WINDOWS = round(EPOCH_S / HOP_S)  # windows whose middle lies in one epoch (6)
+EPOCH_WALK_WINDOWS = EPOCH_WINDOWS // 2  # an epoch is walking with this many of them in a walking stretch (half)
+WAKE = "W"
+ASLEEP = ("N1", "N2", "N3", "R")
+
+
+def epoch_walks(flags: list[bool], e: int) -> bool:
+    """Whether epoch e (30 s, counted from the recording's first sample) is walking: at least half of the windows
+    whose middle lies in it belong to a walking or running stretch (a run of 30 s or more of the 7-window majority
+    of `flags`, each window's own `walks`). Reads only the windows up to 40 s either side of the epoch, so the live
+    scorer, which knows the signal up to 2 minutes past the epoch, gets what the whole recording gives (DECISIONS 920).
+    Stops inside a walk are not walking."""
+    n = len(flags)
+    a, b = EPOCH_WINDOWS * e - 1, EPOCH_WINDOWS * e + EPOCH_WINDOWS - 2  # middles at 5 i + 5 s in [30 e, 30 e + 30)
+    min_len = math.ceil(MIN_STRETCH_S / HOP_S)
+    lo, hi = max(0, a - min_len + 1), min(n - 1, b + min_len - 1)
+    if hi < lo:
+        return False
+    half = SMOOTH_WINDOWS // 2
+    smooth = []
+    for i in range(lo, hi + 1):
+        w = flags[max(0, i - half):i + half + 1]
+        smooth.append(sum(w) * 2 > len(w))
+    count = 0
+    for r0, r1 in runs(smooth):
+        if r1 - r0 + 1 >= min_len:
+            count += max(0, min(b, lo + r1) - max(a, lo + r0) + 1)
+    return count >= EPOCH_WALK_WINDOWS
+
+
+def epoch_flags(ws: list[Window], n_epochs: int) -> list[bool]:
+    """Walking or not for each of n_epochs 30 s epochs from the recording's first sample (epoch_walks)."""
+    flags = [w.walks for w in ws]
+    return [epoch_walks(flags, e) for e in range(n_epochs)]
+
+
+def veto(stages: list[str], walking: list[bool]) -> tuple[list[str], int]:
+    """The sleep stages with every asleep epoch (N1 N2 N3 R) that is walking scored awake: nobody sleeps while
+    walking, and the step shake reads as slow waves to a sleep model (DECISIONS 920). Gaps and wake stay. Returns
+    the stages and how many epochs changed."""
+    out = list(stages)
+    changed = 0
+    for e in range(min(len(out), len(walking))):
+        if walking[e] and out[e] in ASLEEP:
+            out[e] = WAKE
+            changed += 1
+    return out, changed
 
 
 # ---------------------------------------------------------------------------------------------------- per minute

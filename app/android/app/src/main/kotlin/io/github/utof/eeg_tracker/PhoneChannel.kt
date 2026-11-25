@@ -118,6 +118,14 @@ class PhoneChannel private constructor(private val context: Context) : MethodCha
                     holdWifi(context, call.argument<String>("who") ?: "recorder", call.argument<Boolean>("on") == true)
                     result.success(null)
                 }
+                "pushSchedule" -> {
+                    PushJobService.schedule(context, call.argument<Boolean>("on") == true)
+                    result.success(null)
+                }
+                "pushSoon" -> {
+                    PushJobService.soon(context)
+                    result.success(null)
+                }
                 "wifiState" -> result.success(wifiState())
                 "restartProcess" -> {
                     restartProcess(call.argument<Number>("delayMs")?.toInt() ?: 5000)

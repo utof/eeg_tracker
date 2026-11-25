@@ -33,7 +33,7 @@ class MeditationScreen extends StatefulWidget {
 }
 
 class _MeditationScreenState extends State<MeditationScreen> {
-  final BrainBitFinder _finder = BrainBitFinder();
+  final BrainBitFinder _finder = BrainBitFinder(activity: 'meditate');
   late final MeditationController _c = MeditationController(
     finder: _finder,
     sound: () => SoloudSound(),
@@ -41,7 +41,7 @@ class _MeditationScreenState extends State<MeditationScreen> {
     audioRoute: PhoneAudioRoute(),
   );
   int _minutes = 10;
-  bool _nightRunning = false;
+  bool _recordingRuns = false;
   bool _screenOn = false;
   final SessionKeeper _keeper = PhoneSessionKeeper();
   Stage _lastStage = Stage.setup;
@@ -52,6 +52,8 @@ class _MeditationScreenState extends State<MeditationScreen> {
   void initState() {
     super.initState();
     _c.addListener(_changed);
+    // the recording was stopped under this session (the notification's Stop, the 6-hour rule): it ends too
+    _finder.onRecordingStopped = () => unawaited(_c.stop());
     _c.watchRoute(); // the setup warns as soon as the sound goes to Bluetooth headphones
     unawaited(_prepare());
   }
@@ -68,7 +70,7 @@ class _MeditationScreenState extends State<MeditationScreen> {
       // without the folder the session still runs; it is just not saved
     }
     final running = await FlutterForegroundTask.isRunningService;
-    if (mounted) setState(() => _nightRunning = running);
+    if (mounted) setState(() => _recordingRuns = running);
   }
 
   /// The replay check's toggle as saved, and the words the setup shows while it is on.
@@ -132,10 +134,6 @@ class _MeditationScreenState extends State<MeditationScreen> {
   }
 
   Future<void> _start() async {
-    if (await FlutterForegroundTask.isRunningService) {
-      setState(() => _nightRunning = true);
-      return;
-    }
     final phone = await Phone.snapshot().catchError((Object _) => const PhoneSnapshot({}));
     if (!await nearbyAllowed(phone.sdkInt) && !await requestNearby(phone.sdkInt)) {
       _say('Allow Nearby devices first: without it the headband cannot be found.');
@@ -201,7 +199,7 @@ class _MeditationScreenState extends State<MeditationScreen> {
       report: c.report,
       comparison: c.comparison,
       earlier: c.earlier,
-      nightRunning: _nightRunning,
+      recordingRuns: _recordingRuns,
       checkOn: c.stage == Stage.setup || c.stage == Stage.failed ? c.checkStore != null : c.checkOn,
       checkStatus: c.stage == Stage.setup || c.stage == Stage.failed ? _checkPreview : c.checkStatus,
       silentSeconds: c.active || c.stage == Stage.report ? c.silentLength.inSeconds : c.silentBlock.inSeconds,

@@ -7,7 +7,8 @@
 //   question  kind, text
 //   answer    kind, answer (yes / no / none; for "other": night / work / no / none), after_s
 //   start     kind, how (automatic / yes), preroll_s, stem, limit_min, error
-//   declined  kind, why (the battery guard)
+//   warned    kind, why, battery (the battery guard, which only warns: DECISIONS 1010)
+//   declined  kind, why (the battery guard's stopping rule, off by default)
 //   offer, offer_answer   the "start it automatically?" offer after 10 yes in a row
 //   released  the headband was let go for a start by hand
 import 'dart:convert';

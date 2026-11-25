@@ -134,6 +134,7 @@ void main() {
     openRun: (run) async => FakeRun(run, calls, onCall: onCall),
     plan: (d, since) async => planSoFar(d, since),
     prepare: (l, w0, w1, to) async => prepareWindow(l, w0, w1, to),
+    walking: (l, w0, w1, to) async => walkingOfWindow(l, w0, w1, to),
   );
 
   /// The after-night scorer on [dir], the preparation in this isolate, no detectors' pass.

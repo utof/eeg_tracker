@@ -383,8 +383,9 @@ void main() {
     });
 
     test('the lease message both ways, and damaged batches skipped', () {
-      expect(nightTapLeaseFrom(nightTapLeaseMessage(on: true)), isTrue);
-      expect(nightTapLeaseFrom(nightTapLeaseMessage(on: false)), isFalse);
+      expect(nightTapLeaseFrom(nightTapLeaseMessage(on: true)), (on: true, user: tapPanel));
+      expect(nightTapLeaseFrom(nightTapLeaseMessage(on: false, user: tapRide)), (on: false, user: tapRide));
+      expect(nightTapLeaseFrom({'kind': signalTapKind, 'on': true}), (on: true, user: tapPanel), reason: 'an older screen');
       expect(nightTapLeaseFrom('status'), isNull);
       expect(nightTapBatches({'kind': 'status'}), isNull);
       final got = nightTapBatches({

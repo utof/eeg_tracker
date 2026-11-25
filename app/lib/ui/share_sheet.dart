@@ -176,6 +176,8 @@ class _ShareSheetState extends State<ShareSheet> {
             const SizedBox(height: 14),
             Text(_whereLine(m, laptop.name), style: text.bodyLarge?.copyWith(height: 1.4)),
             if (m.copied.isNotEmpty) ...[const SizedBox(height: 4), Text(m.copied, style: muted)],
+            const SizedBox(height: 4),
+            Text(pushWords(laptop.name), style: muted),
             if (m.here == 'waiting' || m.here == 'here')
               Align(
                 alignment: Alignment.centerRight,
@@ -221,7 +223,7 @@ class _ShareSheetState extends State<ShareSheet> {
           Text(
             'If the laptop cannot reach the phone, nothing is lost: the night stays on the phone and the laptop copies '
             'what it missed once it reaches the phone again. Some phones turn Wi-Fi off with the screen off: the Phone '
-            'section of the Night tab names the settings to check.',
+            'section of the Record tab names the settings to check.',
             style: muted,
           ),
           if (address != null) ...[
@@ -373,3 +375,8 @@ class _QrPainter extends CustomPainter {
   @override
   bool shouldRepaint(_QrPainter old) => old.image != image;
 }
+
+/// What the sheet says about the phone sending by itself (lib/share/push/, DECISIONS 840-849).
+String pushWords(String laptop) =>
+    'At home this phone also sends new files to $laptop by itself, about every 15 minutes and after each recording, '
+    'with the app closed too. No notification.';

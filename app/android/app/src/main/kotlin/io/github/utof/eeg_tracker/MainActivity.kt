@@ -19,6 +19,7 @@ class MainActivity : FlutterActivity() {
     /** The sharp-hours question this Activity was opened from, until the Dart side takes it (SharpPrompts.kt). */
     private var sharpLaunch: Map<String, Any>? = null
     private var sharpChannel: MethodChannel? = null
+    private var confirmChannel: MethodChannel? = null
 
     /** Pairing with a laptop (PairLinkActivity.kt): "take" hands over the link once, "open" says one arrived. */
     private var linkChannel: MethodChannel? = null
@@ -119,6 +120,43 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+        // The confirmation questions (ConfirmPrompts.kt): "arm" keeps the batch and its moment, "answered" takes a
+        // question answered in the app out of the notification, "open" tells the Dart side its notification was tapped.
+        confirmChannel = MethodChannel(messenger, "eeg_tracker/confirm").apply {
+            setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "arm" -> {
+                            ConfirmPrompts.arm(
+                                applicationContext,
+                                call.argument<Number>("at")?.toLong() ?: 0L,
+                                call.argument<List<String>>("ids") ?: emptyList(),
+                                call.argument<List<String>>("texts") ?: emptyList(),
+                                call.argument<List<String>>("cards") ?: emptyList(),
+                            )
+                            result.success(null)
+                        }
+                        "answered" -> {
+                            ConfirmPrompts.answered(applicationContext, call.argument<String>("id") ?: "")
+                            result.success(null)
+                        }
+                        "status" -> result.success(mapOf("notifications" to ConfirmPrompts.notificationsOn(applicationContext)))
+                        "openChannelSettings" -> {
+                            ConfirmPrompts.channel(applicationContext)
+                            startActivity(
+                                Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                                    .putExtra(Settings.EXTRA_CHANNEL_ID, ConfirmPrompts.CHANNEL),
+                            )
+                            result.success(true)
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (e: Exception) {
+                    result.error("confirm", e.message ?: e.javaClass.simpleName, null)
+                }
+            }
+        }
         linkChannel = MethodChannel(messenger, "eeg_tracker/link").apply {
             setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -165,6 +203,7 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (takeSharpIntent(intent)) sharpChannel?.invokeMethod("open", null)
+        if (intent.action == ConfirmPrompts.ACTION_OPEN) confirmChannel?.invokeMethod("open", null)
         if (AutoWatch.takeIntent(applicationContext, intent)) autoChannel?.invokeMethod("launch", null)
     }
 
@@ -186,6 +225,7 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         SharpPrompts.screenHeld = false
         sharpChannel = null
+        confirmChannel = null
         PairLinks.onArrived = null
         linkChannel = null
         autoChannel = null

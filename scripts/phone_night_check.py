@@ -20,6 +20,14 @@ shows) and, when numpy is there (as under `uv run --project analysis`), flat, ra
 report from before the check, the eye movements are then measured from the recordings here. `--compare` puts a
 laptop night's numbers next to it. Standard library only, apart from that optional numpy part. It only reads files.
 
+A recording that has a spans file (`spans/<recording id>.spans.jsonl`, found beside `recordings/` or in `phone/spans/`;
+scripts/spans.py) is a "Record first" recording that runs all day: its sleep stretches say what the night was. The
+report then lists the stretches (who marked each, how it ended) and counts length, gaps, drops, lost samples, rate
+and signal quality only inside them; batteries, Wi-Fi, contact, Android and the app's own packet count still cover
+the whole recording, and one line says how much of it lies outside. A recording with a spans file and no sleep
+stretch is no night: it is said in words, not judged as a short night. Recordings without spans files are reported
+as before.
+
 A recording may hold any number of channels: what each `.f32` holds (channels, rate, what its counter counts) comes
 from its `<stamp>.header.json` (scripts/recording.py), for files from before the header from the `.log`'s format line
 (the DIY board's), else it is the BrainBit's O1 O2 T3 T4 at 250 Hz. The signal table has one column per channel of
@@ -31,13 +39,14 @@ from __future__ import annotations
 
 import argparse, bisect, lzma, re, statistics, struct, sys, zlib
 from array import array
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from operator import sub
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import night_files as nf  # noqa: E402  (standard library only)
+import spans as spans_mod  # noqa: E402  (what you did in a recording: its sleep stretches say what was the night)
 import packed  # noqa: E402  (a recording packed after a day, <stamp>.f32.xz, reads as the plain one)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "analysis"))
 import rem_check as rc  # noqa: E402  (the dream sleep check; standard library only but its detector)
@@ -100,6 +109,8 @@ RULES = [(k, re.compile(p)) for k, p in [
     ("contact", r"contact ohms (?P<ohms>.*)"),  # P L O
     ("contact_none", r"contact check: no resistance data(?: arrived)?|contact re-check: no resistance data arrived"),
     ("contact_failed", r"contact check failed: (?P<err>.*)"),  # P L
+    # a night on the screen's live connection that had no reading in force: not a failed check (2026-11-25)
+    ("contact_not_measured", r"no contact reading on the live connection; not measured now"),  # P
     ("contact_recheck", r"contact re-check asked(?P<rest>.*)"),  # L
     ("live_page", r"live check page on port \d+"),  # L
     ("info", r"(?:sdk library|features|commands|parameters)(?: unavailable:)? .*"),  # L
@@ -109,6 +120,9 @@ RULES = [(k, re.compile(p)) for k, p in [
     ("stream_restarted", r"stream restarted(?:, battery \S+%)?"),  # P L
     ("stream_restart_failed", r"stream restart failed: .*"),  # P L
     ("still_no_data", r"still no data; (?P<what>reconnecting|exiting so record_night\.sh starts a fresh recorder)"),
+    # Record first (DECISIONS 899): the headband gone for long: what was marked ends, then the recording stops itself
+    ("away_spans", r"no data for (?P<min>\d+) min: what was marked ends at the last data"),  # P
+    ("away_stop", r"no data for (?P<h>\d+) h: the recording stops itself"),  # P
     ("mending", r"no data; the headband is mending the link itself \(check \d+\)"),  # P with our own connection
     ("out_of_range", r"headband out of range; (?:saving|leaving it without SDK calls)"),  # P
     ("laptop_drop", r"headband (?P<state>\S+); saving and exiting so record_night\.sh starts a fresh recorder"),  # L
@@ -180,12 +194,30 @@ RULES = [(k, re.compile(p)) for k, p in [
     # smart alarm, 230-236; the lucid cues, 300-309; their one sleep model, 330) and Share on Wi-Fi (220-229). Their
     # problems (a helper stopped, or could not start or ring) are listed under "helpers"; the rest is information.
     ("helper", r"(?P<text>(?:drift-off(?: detector)?|hands-free(?: on)?|smart alarm(?: and lucid cues)?|"
-               r"lucid cues?|live sleep model|sharing on Wi-Fi)[ :,;(].*|lights off)"),
+               r"lucid cues?|live sleep model|sharing on Wi-Fi)[ :,;(].*|lights off|"
+               r"could not write the span .*)"),
+    # P: since 2026-11-25. The screen's live headband connection lent to the recorder (no search, and no contact
+    # check of its own), what the screen did with it, the phone's step counter (once a minute) and the spans.
+    ("live_connection", r"started on the connection that was already live on the screen: no search, no new contact "
+                        r"check"),
+    ("lender_gone", r"the screen that lent the connection is gone; saving and reconnecting at once"),
+    ("step_counter", r"phone step counter: (?P<state>.*)"),
+    ("steps", r"phone steps (?P<n>\d+)"),
+    # what was marked as sleep (or a nap, work ...): "span: sleep start", "span: sleep end", "... (again: Undo)"
+    ("span", r"span: (?P<kind>\S+) (?P<what>start|end)(?: \(again: Undo\))?"),
+    ("span_note", r"sleep kit (?:on for|off after) .*|the headband is back: sleep goes on by itself .*|Undo: .*"),
+    ("notice", r"notice: .*"),  # P: a notification the app showed
+    # P: a long recording goes on in a new file set of the same recording, on the same connection, without a gap
+    # (every 4 hours or 128 MB, DECISIONS 1035): the old set's last line and the new one's first
+    ("rolled", r"file set full; the recording goes on without a gap in (?P<next>\S+)"),
+    ("continues", r"continues (?P<prev>\S+) without a gap \(.*\)"),
+    ("error", r"could not start the next file set: .*; this one goes on"),
 ]]
 HELPER_PROBLEM = re.compile(r"\bstopped(?: by an error)?: |could not")
 PHONE_ONLY = {"phone_settings", "phone_battery", "battery_summary", "try", "reconnected", "ladder", "notice", "service_restart",
               "prev_exit", "direct_off", "drop", "packets", "packets_end", "stuck", "out_of_range", "answered_out",
-              "no_start", "error", "mending", "try_rescan", "lost_own_stopped", "wifi", "wifi_unreadable"}
+              "no_start", "error", "mending", "try_rescan", "lost_own_stopped", "wifi", "wifi_unreadable",
+              "live_connection", "lender_gone", "step_counter", "steps", "span", "span_note", "notice"}
 LAPTOP_ONLY = {"live_page", "info", "laptop_drop", "laptop_stuck", "contact_recheck", "reconnected_old",
                "reconnect_failed_old", "lost_ble"}
 STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?) (.*)$")
@@ -320,8 +352,19 @@ def load_runs(folder: Path) -> list[Run]:
 
 
 # ---- nights ----------------------------------------------------------------------------------------------------------
-def nights_of(runs: list[Run], recs: dict[str, nf.Rec], source: str) -> list[nf.Night]:
-    return nf.nights([recs[r.stem] for r in runs if r.source == source and r.stem in recs])
+def nights_of(runs: list[Run], recs: dict[str, nf.Rec], source: str,
+              files: dict[str, spans_mod.SpansFile] | None = None) -> list[nf.Night]:
+    """The source's nights. A recording whose spans file is here is told by its sleep stretches (Record first: it
+    runs all day, the stretches say what was sleep); every other recording is chained by time, as before."""
+    mine = [recs[r.stem] for r in runs if r.source == source and r.stem in recs]
+    if not files:
+        return nf.nights(mine, include_recorded=True)
+    by_spans = [r for r in mine if r.recording in files]
+    plain = [r for r in mine if r.recording not in files]
+    out = {n.name: n for n in nf.nights(plain, spans_mod.no_sleep_of(files), include_recorded=True)}
+    for n in nf.span_nights(by_spans, files):
+        out[n.name] = nf._merge(out[n.name], n) if n.name in out else n  # the same rule as night_files.all_nights
+    return sorted(out.values(), key=lambda n: (n.start, n.name))
 
 
 def night_runs(runs: list[Run], nights: list[nf.Night], night: nf.Night, source: str) -> list[Run]:
@@ -334,15 +377,54 @@ def night_runs(runs: list[Run], nights: list[nf.Night], night: nf.Night, source:
         r.path.name in names or (r.samples == 0 and night.start - 60 <= r.start < limit))]
 
 
-def pick(runs: list[Run], recs: dict[str, nf.Rec], name: str | None, source: str) -> tuple[str, nf.Night, list[Run]]:
+@dataclass
+class Idle:
+    """A recording whose spans file marks no (closed) sleep: not a night."""
+    id: str
+    start: float
+    end: float
+    open_sleep: bool  # a sleep stretch was begun and has not ended yet
+
+
+class NotANight(LookupError):
+    """What was asked for is a recording with nothing marked as sleep; `result` is what check() hands back."""
+
+    def __init__(self, result: dict) -> None:
+        super().__init__("not a night")
+        self.result = result
+
+
+def idle_recordings(runs: list[Run], recs: dict[str, nf.Rec], source: str, nights: list[nf.Night],
+                    files: dict[str, spans_mod.SpansFile]) -> list[Idle]:
+    """The source's recordings that have a spans file and no sleep stretch in any night, oldest first."""
+    used = {rid for n in nights for rid in n.recording_ids}
+    by_id: dict[str, list[nf.Rec]] = {}
+    for r in runs:
+        rec = recs.get(r.stem)
+        if r.source == source and rec is not None and rec.recording in files and rec.recording not in used:
+            by_id.setdefault(rec.recording, []).append(rec)
+    out = [Idle(rid, min(r.start for r in rs), max(r.end for r in rs),
+                any(x.kind == "sleep" and not x.closed for x in files[rid].spans)) for rid, rs in by_id.items()]
+    return sorted(out, key=lambda i: (i.start, i.id))
+
+
+def pick(runs: list[Run], recs: dict[str, nf.Rec], name: str | None, source: str,
+         files: dict[str, spans_mod.SpansFile] | None = None) -> tuple[str, nf.Night, list[Run]]:
     order = ("phone", "laptop") if source == "auto" else (source,)
     for src in order:
-        ns = nights_of(runs, recs, src)
+        ns = nights_of(runs, recs, src, files)
         hits = [n for n in ns if n.name == name] if name else ns[-1:]
+        idle = idle_recordings(runs, recs, src, ns, files) if files else []
+        # no night of that name (or newer than the newest night) but a recording with nothing marked as sleep
+        asked = [i for i in idle if nf.evening_date(i.start) == name] if name else idle[-1:]
+        newer = not hits or asked[-1].end > hits[0].end if asked else False
+        if asked and (newer if name is None else not hits):
+            raise NotANight(dict(not_night=True, name=name or nf.evening_date(asked[-1].start), source=src,
+                                 recordings=asked, newest_night=ns[-1].name if ns else None))
         if hits:
             return src, hits[0], night_runs(runs, ns, hits[0], src)
     have = [f"{n.name} ({src}, {len(n.recs)} recordings)" for src in ("phone", "laptop")
-            for n in nights_of(runs, recs, src)]
+            for n in nights_of(runs, recs, src, files)]
     what = f"night {name}" if name else "night"
     raise LookupError(f"no {what} from the {' or '.join(order)} here; nights: {', '.join(have) or 'none'}")
 
@@ -359,6 +441,7 @@ class Stretch:
     ia: int = 0
     tb: float = 0.0
     ib: int = 0
+    w: int = 0  # which sleep stretch (window) of the night it lies in; 0 for a night without spans
 
 
 def stretches(run: Run) -> list[Stretch]:
@@ -489,10 +572,11 @@ def burst(run: Run, i0: int) -> bool:
     return end - i0 >= run.fs
 
 
-def scan_packets(run: Run, cuts: set[int], out: Packets) -> None:
+def scan_packets(run: Run, cuts: set[int], out: Packets, inside: list[tuple[int, int]] | None = None) -> None:
     """Counter jumps inside unbroken stretches. A jump at a break belongs to the gap, not to lost packets; a jump
     after the run's first batch is BrainBit's SDK sending the previous connection's last batch again before it
-    counts from the start (seen in every laptop run of 2026-11-18), so it is a restart, not a loss."""
+    counts from the start (seen in every laptop run of 2026-11-18), so it is a restart, not a loss. `inside`: only the
+    jumps within these sample ranges of the run count (a night read by its sleep stretches)."""
     times, firsts = run.idx()
     first_batch = firsts[1] if len(firsts) > 1 and firsts[0] == 0 else None
     prev, base = None, 0
@@ -513,7 +597,7 @@ def scan_packets(run: Run, cuts: set[int], out: Packets) -> None:
                     if d == 1:
                         continue
                     j = start + k + 1
-                    if j in cuts:
+                    if j in cuts or (inside is not None and not any(a < j < b for a, b in inside)):
                         continue
                     kind, n = ("restart", 0) if j == first_batch else jump(seq[k], seq[k + 1], run.counter)
                     if kind == "lost":
@@ -539,6 +623,11 @@ def hour_of(t: float) -> float:
 DROP_CATS = {"drop", "stuck", "android", "killed", "unknown"}
 # lines the app adds to a closed run's log
 NOTES = {"try", "try_rescan", "ladder", "notice", "answered_out", "packets_end", "battery_summary"}
+
+
+# the app's screen holds the headband connection on the screen and lends it to the recorder; closing the screen ends
+# the loan, and the recorder connects by itself
+LENDER_WORDS = "the app's screen was closed while it held the connection, the recorder took the headband over"
 
 
 def _tries(evs: list[Event]) -> str:
@@ -582,6 +671,12 @@ def explain(br: Break, evs: list[Event], empty_runs: int) -> None:
     elif drop:
         cat = cat or "drop"
         parts.append(f"drop ({drop.g['why']})")
+        if drop.g["why"] == "lender gone":
+            parts.append(LENDER_WORDS)
+    elif "lender_gone" in kinds:  # its drop line did not make it into the log
+        cat = cat or "drop"
+        parts.append("drop (lender gone)")
+        parts.append(LENDER_WORDS)
     elif "laptop_drop" in kinds or "out_of_range" in kinds:
         cat = cat or "drop"
         parts.append("drop (out of range)")
@@ -789,10 +884,13 @@ def contact_numbers(evs: list[Event], runs: list[Run]) -> dict:
     recorder, also during tests with the headband off), else the first reading; later = the ones after it."""
     readings = [(e.t, parse_ohms(e.g["ohms"]), e.stem) for e in evs if e.kind == "contact"]
     failed = [e for e in evs if e.kind in ("contact_failed", "contact_none")]
+    # a run on the screen's live connection has no contact check of its own (the screen could not measure it either)
+    live = sum(e.kind == "live_connection" for e in evs)
+    not_measured = sum(e.kind == "contact_not_measured" for e in evs)
     long = {r.stem for r in runs if r.samples >= 10 * 60 * r.fs}
     k = next((i for i, x in enumerate(readings) if x[2] in long), 0)
     return dict(start=readings[k][:2] if readings else None, later=[x[:2] for x in readings[k + 1:]],
-                failed=len(failed))
+                failed=len(failed), live=live, not_measured=not_measured)
 
 
 WIFI_WORD = {"not connected": "not connected", "off": "switched off"}
@@ -879,9 +977,10 @@ def measure_eye(rep: dict, runs: list[Run]) -> tuple[dict | None, str | None]:
     return rc.night_check(stages, rc.periods_of(rep), rc.decode_probs(rep.get("probs")), eye), None
 
 
-def signal_numbers(runs: list[Run]) -> dict | None:
+def signal_numbers(runs: list[Run], inside: dict[str, list[tuple[int, int]]] | None = None) -> dict | None:
     """Flat and railed seconds and the 50 Hz hum per channel of the night's first recording; None without numpy.
-    One minute at a time. Recordings that hold other channels (or another rate) are left out and named in `other`."""
+    One minute at a time. Recordings that hold other channels (or another rate) are left out and named in `other`.
+    `inside`: by run, the sample ranges to read (a night read by its sleep stretches); else all of each run."""
     try:
         import numpy as np
     except ImportError:
@@ -909,20 +1008,21 @@ def signal_numbers(runs: list[Run]) -> dict | None:
         data = unpacked(run)
         mm = (np.frombuffer(data, dtype=dt, count=run.samples) if data is not None
               else np.memmap(run.path, dtype=dt, mode="r", shape=(run.samples,)))
-        for a in range(0, run.samples - fs + 1, 60 * fs):
-            v = np.asarray(mm["v"][a:a + 60 * fs], dtype=np.float64) * 1e6
-            whole = len(v) // fs * fs
-            s = v[:whole].reshape(-1, fs, n_ch)
-            seconds += s.shape[0]
-            flat += (np.ptp(s, axis=1) < FLAT_UV).sum(axis=0)
-            railed += (np.abs(s).max(axis=1) >= RAIL_UV).sum(axis=0)
-            if len(v) >= win:
-                x = v[:win] - v[:win].mean(axis=0)
-                p = np.abs(np.fft.rfft(x * hann[:, None], axis=0)) ** 2
-                for c in range(n_ch):
-                    den = p[ref, c].mean()
-                    if den > 1e-12:
-                        hums[c].append(float(p[mains, c].mean() / den))
+        for r0, r1 in [(0, run.samples)] if inside is None else inside.get(run.stem, []):
+            for a in range(r0, r1 - fs + 1, 60 * fs):
+                v = np.asarray(mm["v"][a:min(a + 60 * fs, r1)], dtype=np.float64) * 1e6
+                whole = len(v) // fs * fs
+                s = v[:whole].reshape(-1, fs, n_ch)
+                seconds += s.shape[0]
+                flat += (np.ptp(s, axis=1) < FLAT_UV).sum(axis=0)
+                railed += (np.abs(s).max(axis=1) >= RAIL_UV).sum(axis=0)
+                if len(v) >= win:
+                    x = v[:win] - v[:win].mean(axis=0)
+                    p = np.abs(np.fft.rfft(x * hann[:, None], axis=0)) ** 2
+                    for c in range(n_ch):
+                        den = p[ref, c].mean()
+                        if den > 1e-12:
+                            hums[c].append(float(p[mains, c].mean() / den))
         del mm
     if not seconds:
         return None
@@ -932,9 +1032,42 @@ def signal_numbers(runs: list[Run]) -> dict | None:
                 other=[f"{what} ({plural(k, 'recording')})" for what, k in other.items()])
 
 
-def analyse(runs: list[Run], source: str, name: str, report_dirs: list[Path], signal: bool = True) -> dict:
+def clip(st: list[Stretch], windows: list[tuple[float, float]]) -> list[Stretch]:
+    """The parts of the stretches of data that lie inside the sleep windows, in time order, each marked with its
+    window. A window edge cuts a stretch at the sample the clock says; the rate is read from the batches inside."""
+    out: list[Stretch] = []
+    for w, (a, b) in enumerate(windows):
+        for x in st:
+            t0, t1 = max(x.t0, a), min(x.t1, b)
+            if t1 <= t0:
+                continue
+            if (t0, t1) == (x.t0, x.t1):
+                out.append(replace(x, w=w))
+                continue
+            fs = x.run.fs
+            i0 = min(x.i1, max(x.i0, x.i0 + round((t0 - x.t0) * fs)))
+            i1 = max(i0, min(x.i1, x.i1 - round((x.t1 - t1) * fs)))
+            if i1 <= i0:
+                continue
+            times, firsts = x.run.idx()
+            k0, k1 = bisect.bisect_left(firsts, i0), bisect.bisect_right(firsts, i1 - 1) - 1
+            if k1 > k0:
+                out.append(Stretch(t0, t1, x.run, i0, i1, times[k0], firsts[k0], times[k1], firsts[k1], w))
+            else:
+                out.append(Stretch(t0, t1, x.run, i0, i1, t0, i0, t1, i1, w))
+    return sorted(out, key=lambda x: (x.w, x.t0))
+
+
+def analyse(runs: list[Run], source: str, name: str, report_dirs: list[Path], signal: bool = True,
+            windows: list[tuple[float, float]] | None = None) -> dict:
+    """`windows` (unix seconds, a night said by its spans): the numbers about the night count only the data inside
+    them; the lines of the logs (battery, Wi-Fi, contact, Android, the app's own packet count) still cover every
+    file set the night's stretches touch."""
     data_runs = [r for r in runs if r.samples > 0]
     st = sorted((s for r in data_runs for s in stretches(r)), key=lambda s: s.t0)
+    whole_start, whole_end = (st[0].t0, st[-1].t1) if st else (0.0, 0.0)
+    if windows:
+        st = clip(st, windows)
     evs = sorted((e for r in runs for e in r.events), key=lambda e: e.t)
     times = [e.t for e in evs]
     s: dict = dict(name=name, source=source, runs=len(runs), data_runs=len(data_runs), lines=sum(
@@ -946,6 +1079,9 @@ def analyse(runs: list[Run], source: str, name: str, report_dirs: list[Path], si
     breaks = []
     segs = [[st[0].ta, st[0].ia, st[0].tb, st[0].ib]]  # for the rate: stretches joined across held-back data
     for a, b in zip(st, st[1:]):
+        if a.w != b.w:  # between two sleep stretches: not part of the night
+            segs.append([b.ta, b.ia, b.tb, b.ib])
+            continue
         br = Break(a.t1, b.t0, a.run, b.run)
         if br.inside:
             p0, p1 = pack_at(a.run, b.i0 - 1), pack_at(a.run, b.i0)
@@ -963,9 +1099,10 @@ def analyse(runs: list[Run], source: str, name: str, report_dirs: list[Path], si
             breaks.append(br)
     # packets
     pk = Packets()
+    inside = {r.stem: [(x.i0, x.i1) for x in st if x.run is r] for r in data_runs}
     for r in data_runs:
         cuts = {x.i0 for x in st if x.run is r and x.i0 > 0}
-        scan_packets(r, cuts, pk)
+        scan_packets(r, cuts, pk, inside[r.stem] if windows else None)
     # rate over unbroken data of a minute or more (data held back and then sent in a burst is unbroken)
     long = [(tb - ta, ib - ia) for ta, ia, tb, ib in segs if tb - ta >= 60 and ib > ia]
     rate = sum(n for _, n in long) / sum(t for t, _ in long) if long else None
@@ -973,6 +1110,10 @@ def analyse(runs: list[Run], source: str, name: str, report_dirs: list[Path], si
     samples = sum(r.samples for r in data_runs)
     signal_s = sum(r.samples / r.fs for r in data_runs)
     span = st[-1].t1 - st[0].t0
+    if windows:  # the night is the sleep stretches: their length, the samples inside them
+        samples = sum(x.i1 - x.i0 for x in st)
+        signal_s = sum((x.i1 - x.i0) / x.run.fs for x in st)
+        span = sum(b - a for a, b in windows)
     # signal minutes per clock hour
     per_hour: dict[float, float] = {}
     for x in st:
@@ -987,7 +1128,8 @@ def analyse(runs: list[Run], source: str, name: str, report_dirs: list[Path], si
     late = [b for b in breaks if b.cat == "late"]
     tries = [e for e in evs if e.kind == "try"]
     s.update(
-        empty=False, start=st[0].t0, end=st[-1].t1, span_s=span, samples=samples, signal_s=signal_s,
+        empty=False, start=windows[0][0] if windows else st[0].t0, end=windows[-1][1] if windows else st[-1].t1,
+        windows=windows, span_s=span, samples=samples, signal_s=signal_s,
         channels=data_runs[0].names, fs=data_runs[0].fs,  # of the night's first recording (the signal table's)
         missing_s=max(0.0, span - signal_s), breaks=breaks, drops=drops, hiccups=hiccups, late=late,
         per_hour={h: v / 60 for h, v in sorted(per_hour.items())}, packets=pk, rate=rate,
@@ -1004,14 +1146,15 @@ def analyse(runs: list[Run], source: str, name: str, report_dirs: list[Path], si
         last_closed=runs[-1].closed,
         last_line=evs[-1].t if evs else st[-1].t1,
         stop=next((e.t for e in reversed(evs) if e.kind == "packets_end"), None),
-        tail=_tail(st[-1], evs),
+        tail=None if windows else _tail(st[-1], evs),
         laptop_stop=next((e.t for e in reversed(evs) if e.kind == "stopped"), None) if source == "laptop" else None,
         app_packets=next((e.g for e in reversed(evs) if e.kind in ("packets_end", "packets")), None),
         settings=next((settings_of(e.g["rest"]) for e in reversed(evs) if e.kind == "phone_settings"), None),
         battery=battery_numbers(evs), contact=contact_numbers(evs, runs), wifi=wifi_numbers(evs),
         rssi=[e.g["signal"] for e in evs if e.kind == "connected" and "signal" in e.g],
         report=report_numbers(find_report(report_dirs, name, source), runs),
-        signal=signal_numbers(data_runs) if signal else None, signal_tried=signal,
+        signal=signal_numbers(data_runs, inside if windows else None) if signal else None, signal_tried=signal,
+        whole_data=(whole_start, whole_end),
     )
     r = s["report"]
     if r is not None and r["rem"] is not None and r["rem"].get("eye") is None:
@@ -1099,7 +1242,7 @@ def judge(s: dict) -> None:
         issues.append((80 if lost > LOST_BAD else 45, f"Bluetooth lost {lost * 100:.2f} % of the samples "
                        f"({s['packets'].jumps} counter jumps): keep the phone closer to the headband.",
                        "bad" if lost > LOST_BAD else "gaps"))
-    if phone and s["stop"] is None:
+    if phone and s["stop"] is None and not s["windows"]:  # a recording read by its sleep stretches may still run
         tail = s["tail"]
         if tail is not None and tail.length > 120:
             issues.append((88, f"The data stopped at {hm(s['end'])}; the app was still trying until "
@@ -1182,7 +1325,9 @@ def band_issue(band: dict | None) -> str | None:
 
 def _setup_issues(s: dict, issues: list) -> None:
     c = s["contact"]
-    if c["start"] is None:
+    if c["start"] is None and (c["live"] or c["not_measured"]):
+        pass  # started on the connection the screen already had: nothing was measured, and nothing was missed
+    elif c["start"] is None:
         issues.append((38, "No contact reading at the start of the night: let the contact check finish before "
                        "lying down.", None))
     else:
@@ -1231,8 +1376,41 @@ def _per_hour(values: dict[float, float], fmt: str) -> list[str]:
     return ["  ".join(cells[i:i + 10]) for i in range(0, len(cells), 10)]
 
 
+def render_not_night(s: dict) -> str:
+    src = "Phone" if s["source"] == "phone" else "Laptop"
+    out = []
+    for i in s["recordings"]:
+        day = f"{datetime.fromtimestamp(i.start):%Y-%m-%d} " if datetime.fromtimestamp(i.start).date() != \
+            datetime.fromtimestamp(i.end).date() else ""
+        out.append(f"{src} recording {i.id}: recorded {day}{hm(i.start)} to {hm(i.end)}, "
+                   + ("its sleep stretch has not ended yet, so it is not a night yet." if i.open_sleep else
+                      "but nothing in it was marked as sleep, so it is not a night."))
+    out.append("If it was sleep, mark it next time with Sleep (or say yes when the app asks).")
+    if s["newest_night"]:
+        out.append(f"The newest night here is {s['newest_night']}: name it to see it "
+                   f"(phone_night_check.py {s['newest_night']}).")
+    return "\n".join(out)
+
+
+def render_stretches(s: dict) -> list[str]:
+    """The sleep stretches a night was read by, and which numbers count only them."""
+    w = s["whole"]
+    out = ["", "Sleep stretches (what you marked)"]
+    out += [f"  {hm(x['start'])} to {hm(x['end'])}, {dur(x['end'] - x['start'])}: {x['who']}; {x['how']}"
+            for x in s["stretches"]]
+    if s["removed"]:
+        out.append(f"  {s['removed']}")
+    out.append(f"  The whole recording ({', '.join(w['ids'])}) ran {hm(w['start'])} to {hm(w['end'])}, "
+               f"{dur(w['recorded_s'])} of signal; {dur(w['outside_s'])} of it lies outside the sleep stretches.")
+    out.append("  Length, gaps, drops, lost samples, rate and signal below count only the sleep stretches. "
+               "Batteries, Wi-Fi, contact, Android and the app's own packet count cover the whole recording.")
+    return out
+
+
 def render(s: dict) -> str:
     src = "Phone" if s["source"] == "phone" else "Laptop"
+    if s.get("not_night"):
+        return render_not_night(s)
     if s.get("empty"):
         return f"{src} night of {s['name']}: {s['runs']} recordings, no samples at all."
     out = [f"{src} night of {s['name']} (evening date): {s['data_runs']} recordings with data, "
@@ -1244,6 +1422,8 @@ def render(s: dict) -> str:
                f"{cover:.0f} %; {plural(len(s['drops']), 'drop')}; {who})")
     out.append("Fix first:" if s["fixes"] else "Nothing to fix from this night.")
     out += [f"  {i}. {t}" for i, t in enumerate(s["fixes"], 1)]
+    if s.get("stretches"):
+        out += render_stretches(s)
     out += ["", "Time"]
     out.append(f"  span          {hms(s['start'])} to {hms(s['end'])}, {dur(s['span_s'])}")
     out.append(f"  signal        {s['signal_s'] / 3600:.2f} h; missing {s['missing_s'] / 60:.1f} min")
@@ -1358,7 +1538,10 @@ def render(s: dict) -> str:
         out.append("  " + "   ".join(f"{ch} {ohms_text(c['start'][1].get(ch))} {contact_word(c['start'][1].get(ch))}"
                                      for ch in s["channels"]))
     else:
-        out.append("  no reading" + (f" ({c['failed']} failed checks)" if c["failed"] else ""))
+        if c["live"] or c["not_measured"]:
+            out.append("  no reading: the recording started on the connection the app's screen already had")
+        else:
+            out.append("  no reading" + (f" ({c['failed']} failed checks)" if c["failed"] else ""))
     if c["later"]:
         t, last = c["later"][-1]
         out.append(f"  later         {len(c['later'])} readings; last at {hm(t)}: "
@@ -1540,12 +1723,73 @@ def folders(data: Path) -> tuple[Path, list[Path]]:
     return rec, [base / "phone" / "nights", base / "nights"]
 
 
+def spans_of(data: Path) -> Path | None:
+    """The folder of the spans files (`<recording id>.spans.jsonl`): `spans/` beside `recordings/` in the phone's
+    export, `phone/spans/` in `_local/` (scripts/import_phone.py puts them there); None when there is none."""
+    rec, _ = folders(data)
+    base = data if rec != data else data.parent
+    return next((c for c in (rec.parent / "spans", base / "phone" / "spans", base / "spans") if c.is_dir()), None)
+
+
+WHO = {"owner_button": "you pressed Sleep", "owner_confirmed": "you said yes afterwards",
+       "auto_start": "the app marked it by itself", "auto_resume": "the app marked it by itself (the headband came back)"}
+HOW = {"owner": "you ended it", "activity": "the activity ended", "other_activity": "you began another activity",
+       "recording_stopped": "you stopped the recording", "left_open": "nobody ended it (closed at Stop)",
+       "headband_off": "the headband was off for an hour", "phone_restart": "the phone restarted",
+       "undone": "you took it away with Undo"}
+
+
+def who_marked(source: str) -> str:
+    return WHO.get(source, source)
+
+
+def ended_how(ended_by: str | None) -> str:
+    return "still open" if ended_by is None else HOW.get(ended_by, ended_by)
+
+
+def removed_words(f: object) -> str:
+    """A line about the stretches you took away ("this was not sleep"), when the spans reader lists them
+    (`SpansFile.removed`); an older reader does not, and then there is nothing to say."""
+    gone = getattr(f, "removed", None) or []
+    if not gone:
+        return ""
+    when = ", ".join(f"{hm(x.start_unix)}-{hm(x.end_unix)}" for x in gone)
+    return f"{plural(len(gone), 'stretch was', 'stretches were')} taken away by you: {when}"
+
+
+def stretch_rows(night: nf.Night, files: dict[str, spans_mod.SpansFile]) -> list[dict]:
+    """The night's sleep stretches in time order, in words."""
+    want = set(night.span_ids)
+    rows = [dict(id=x.span, start=x.start_unix, end=x.end_unix, who=who_marked(x.source), how=ended_how(x.ended_by),
+                 recording=rid) for rid, f in files.items() for x in f.spans if x.span in want and x.end_unix]
+    return sorted(rows, key=lambda r: r["start"])
+
+
+def by_stretches(s: dict, night: nf.Night, files: dict[str, spans_mod.SpansFile], recs: dict[str, nf.Rec]) -> None:
+    """Says on the report that the night was read by its sleep stretches, and how much of the recording that left out."""
+    s["stretches"] = stretch_rows(night, files)
+    s["removed"] = "; ".join(w for rid in night.recording_ids if (w := removed_words(files.get(rid))))
+    mine = [r for r in recs.values() if r.recording in night.recording_ids]
+    whole = sum(r.samples / r.fs for r in mine)
+    s["whole"] = dict(ids=list(night.recording_ids), start=min((r.start for r in mine), default=0.0),
+                      end=max((r.end for r in mine), default=0.0), recorded_s=whole,
+                      outside_s=max(0.0, whole - s["signal_s"]))
+
+
 def check(data: Path, name: str | None, source: str = "auto", signal: bool = True) -> dict:
     rec_dir, report_dirs = folders(data)
     runs = load_runs(rec_dir)
     recs = {r.path.stem: r for r in nf.recordings(rec_dir)}
-    src, night, chosen = pick(runs, recs, name, source)
-    return analyse(chosen, src, night.name, report_dirs, signal)
+    sdir = spans_of(data)
+    files = spans_mod.in_folder(sdir) if sdir is not None else {}
+    try:
+        src, night, chosen = pick(runs, recs, name, source, files)
+    except NotANight as e:
+        return e.result
+    s = analyse(chosen, src, night.name, report_dirs, signal, night.windows if night.span_ids else None)
+    if night.span_ids and not s.get("empty"):
+        by_stretches(s, night, files, recs)
+    return s
 
 
 def main(argv: list[str] | None = None) -> int:

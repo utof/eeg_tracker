@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 
 import 'logs/activity.dart' show Activity;
 import 'logs/log.dart' show AppLog;
+import 'phone.dart' show Phone;
 
 final AppLog _sessionLog = AppLog('sessions');
 final AppLog _soundLog = AppLog('sound');
@@ -199,6 +200,7 @@ class PhoneSessionKeeper implements SessionKeeper {
     return _next(() async {
       if (_holder != null) return; // another session took over meanwhile
       await _release();
+      unawaited(Phone.pushSoon()); // the session's files go to the paired laptop soon (DECISIONS 842)
     });
   }
 }

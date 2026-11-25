@@ -30,7 +30,7 @@ SignalPhone phoneSignal() {
   return SignalPhone(
     nightRunning: () => FlutterForegroundTask.isRunningService,
     leaseNight: (on) {
-      FlutterForegroundTask.sendDataToTask(nightTapLeaseMessage(on: on));
+      FlutterForegroundTask.sendDataToTask(nightTapLeaseMessage(on: on, user: tapSignal));
       if (on) FlutterForegroundTask.sendDataToTask(statusCommand);
     },
     fromRecorder: _recorderMessages,

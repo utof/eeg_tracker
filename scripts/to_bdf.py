@@ -15,7 +15,7 @@ time order. Missing time, inside a file or between files, is filled by holding t
 The start is moved back to a whole second (pyedflib 0.1.42 mishandles sub-second starts) and the end is padded
 to a whole second with the edge value ("BAD_padding"). Review: docs/research/bdf-plus-writing.md section 7.
 """
-import argparse, json, sys
+import argparse, json, math, sys
 from datetime import datetime
 from pathlib import Path
 from typing import Sequence
@@ -56,24 +56,57 @@ def load(path: Path) -> tuple[np.ndarray, np.ndarray]:
 
 def runs(path: Path) -> list[tuple[float, np.ndarray]]:
     """Split one file into runs of unbroken samples: (wall-clock time of the first sample, µV array)."""
+    return [(t, x) for t, x, _ in _runs_ends(path)]
+
+
+def _runs_ends(path: Path) -> list[tuple[float, np.ndarray, float]]:
+    """runs(), each with the arrival time of its last batch (by its length when the file has no index)."""
     path = packed.logical(Path(path))
     fs = recording.read(path).sample_rate
     uv, idx = load(path)
     if not len(uv):
         return []
     if not len(idx):
-        return [(datetime.strptime(path.stem, "%Y-%m-%d-%H%M%S").timestamp(), uv)]
+        t = datetime.strptime(path.stem, "%Y-%m-%d-%H%M%S").timestamp()
+        return [(t, uv, t + len(uv) / fs)]
     first = idx["i"].astype(np.int64)
     dur = (np.append(first[1:], len(uv)) - first) / fs
     t0 = idx["t"] - dur  # a batch arrives just after its last sample
     out = []; start = 0
     for k in range(1, len(idx)):
         if t0[k] - idx["t"][k - 1] > MIN_GAP_S:  # nothing was sampled between these arrivals
-            out.append((t0[start], uv[first[start]:first[k]])); start = k
-    out.append((t0[start], uv[first[start]:]))
+            out.append((t0[start], uv[first[start]:first[k]], float(idx["t"][k - 1]))); start = k
+    out.append((t0[start], uv[first[start]:], float(idx["t"][-1])))
     if first[0] > 0:  # samples before the first index row (should not happen) join the first run
-        out[0] = (out[0][0] - first[0] / fs, np.vstack([uv[:first[0]], out[0][1]]))
+        out[0] = (out[0][0] - first[0] / fs, np.vstack([uv[:first[0]], out[0][1]]), out[0][2])
     return out
+
+
+def chains(paths: Sequence[Path]) -> list[tuple[float, np.ndarray]]:
+    """Every run of the files, sorted by start, with the runs that follow each other without a gap made one. A run
+    is joined to the one before it when it is the first of a file set that goes on from the set before: the same
+    recording (both headers name it) and its first sample within MIN_GAP_S of the arrival of that set's last batch,
+    the rule that says what is unbroken inside one file. That is a roll-over (the phone closes a file set after 4 hours
+    and goes on in a new one on the same connection, DECISIONS 1036): the headband never stopped, so no time is missing
+    and nothing is held between the two. After a drop the next set starts seconds later, never this close. The phone's
+    twin: app/lib/sleep/night_signal.dart `chainsOf`."""
+    found = []
+    for p in paths:
+        p = packed.logical(Path(p))
+        rec = recording.read(p).recording
+        for k, (t, x, end) in enumerate(_runs_ends(p)):
+            found.append((t, x, end, rec, p, k == 0))
+    found.sort(key=lambda r: r[0])
+    groups: list[list[tuple]] = []
+    for r in found:
+        prev = groups[-1][-1] if groups else None
+        goes_on = (prev is not None and prev[4] != r[4] and r[5] and r[3] is not None and r[3] == prev[3]
+                   and abs(r[0] - prev[2]) <= MIN_GAP_S)
+        if goes_on:
+            groups[-1].append(r)
+        else:
+            groups.append([r])
+    return [(g[0][0], g[0][1] if len(g) == 1 else np.vstack([r[1] for r in g])) for g in groups]
 
 
 def night_header(paths: Sequence[Path]) -> recording.Header:
@@ -92,11 +125,29 @@ def night_header(paths: Sequence[Path]) -> recording.Header:
     return h0
 
 
-def join(paths: list[Path]) -> tuple[datetime, np.ndarray, list[tuple[float, float, str]]]:
+def clip_runs(rs: list[tuple[float, np.ndarray]], windows: Sequence[tuple[float, float]], fs: float
+              ) -> list[tuple[float, np.ndarray]]:
+    """The parts of the runs inside any of the windows (unix seconds): samples outside every window are dropped, so a
+    scorer that scales over its whole input never sees the awake hours around a sleep span."""
+    out = []
+    for t, x in rs:
+        for a, b in windows:
+            i0, i1 = max(0, math.ceil((a - t) * fs)), min(len(x), math.floor((b - t) * fs))
+            if i1 > i0:
+                out.append((t + i0 / fs, x[i0:i1]))
+    return out
+
+
+def join(paths: list[Path], windows: Sequence[tuple[float, float]] | None = None
+         ) -> tuple[datetime, np.ndarray, list[tuple[float, float, str]]]:
     """One array from all runs; returns (start, µV n x channels, annotations as (onset s, duration s, text)). The
-    files must hold the same channels at the same rate (night_header, which also names them)."""
+    files must hold the same channels at the same rate (night_header, which also names them). With `windows` (unix
+    seconds: the sleep spans of a night) only the samples inside them are read; the time between two windows is a
+    BAD_gap, as any other gap."""
     fs = night_header(paths).sample_rate
-    rs = sorted((r for p in paths for r in runs(p)), key=lambda r: r[0])
+    rs = chains(paths)  # sorted by start; a roll-over's two sides are one run
+    if windows is not None:
+        rs = sorted(clip_runs(rs, windows, fs), key=lambda r: r[0])
     if not rs:
         raise SystemExit("empty recording")
     start = datetime.fromtimestamp(rs[0][0]).replace(microsecond=0)
@@ -115,6 +166,8 @@ def join(paths: list[Path]) -> tuple[datetime, np.ndarray, list[tuple[float, flo
         for line in (mf.read_text().splitlines() if mf.exists() else []):
             try: m = json.loads(line)
             except json.JSONDecodeError: continue
+            if windows is not None and not any(a <= m["t"] <= b for a, b in windows):
+                continue
             notes.append((max(0.0, round(m["t"] - start.timestamp(), 3)), -1, str(m.get("text", "marker"))))
     pad = (-n) % round(fs)
     if pad:

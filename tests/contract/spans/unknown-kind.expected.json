@@ -1,0 +1,22 @@
+{
+ "spans": [
+  {
+   "span": "2026-11-21-110200-1",
+   "kind": "juggling",
+   "label": null,
+   "start_unix": 1795248300,
+   "end_unix": 1795249200,
+   "source": "owner_button",
+   "started_recording": false,
+   "ended_by": "owner",
+   "session": null,
+   "paused": [],
+   "estimate": null
+  }
+ ],
+ "removed": [],
+ "reviewed": null,
+ "sets": [],
+ "hides": [],
+ "skipped": 4
+}

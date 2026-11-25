@@ -31,7 +31,7 @@ class StatesViewModel {
     this.message = '',
     this.useHeadband = true,
     this.thenNight = true,
-    this.nightRunning = false,
+    this.recordingRuns = false,
     this.listening = false,
     this.seconds = 0,
     this.soundSeconds,
@@ -68,7 +68,7 @@ class StatesViewModel {
   final bool thenNight;
 
   /// The night recording holds the headband: sound only.
-  final bool nightRunning;
+  final bool recordingRuns;
   final bool listening;
 
   /// Seconds after lights off, of sound, and until the sound is silent.
@@ -262,7 +262,7 @@ class StatesView extends StatelessWidget {
   Widget _page(BuildContext context) {
     final m = model, text = Theme.of(context).textTheme, last = m.last;
     final muted = text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4);
-    final quiet = m.useHeadband && !m.nightRunning ? 60.0 : 0.0;
+    final quiet = m.useHeadband ? 60.0 : 0.0;
     return Scaffold(
       appBar: AppBar(
         title: Text('Sound', style: text.titleMedium?.copyWith(color: Night.inkMuted)),
@@ -320,9 +320,11 @@ class StatesView extends StatelessWidget {
           const SectionHeading('Length'),
           soundSegments<int>(context, [for (final v in m.preset.minutes) (v, '$v min')], m.plan.minutes, onMinutes, locked: m.soundLocked),
           const SectionHeading('Headband'),
-          if (m.nightRunning)
-            Text('The headband is recording the night, so the sound plays by its timer alone.', style: muted)
-          else ...[
+          ...[
+            if (m.recordingRuns) ...[
+              Text('A recording is running: with Measure the sound session reads it, with no new search.', style: muted),
+              const SizedBox(height: 12),
+            ],
             _segments<bool>(context, const [(true, 'Measure'), (false, 'Sound only')], m.useHeadband, onHeadband),
             const SizedBox(height: 12),
             Text(
@@ -335,7 +337,14 @@ class StatesView extends StatelessWidget {
               const SizedBox(height: 18),
               Text('When the sound has stopped', style: text.bodyLarge?.copyWith(color: Night.inkMuted)),
               const SizedBox(height: 8),
-              _segments<bool>(context, const [(true, 'Record the night'), (false, 'Let the headband go')], m.thenNight, onThenNight),
+              _segments<bool>(
+                context,
+                m.recordingRuns
+                    ? const [(true, 'Start sleep'), (false, 'Only the sound')]
+                    : const [(true, 'Record the night'), (false, 'Let the headband go')],
+                m.thenNight,
+                onThenNight,
+              ),
             ],
           ],
           const SectionHeading('Screen'),
@@ -401,12 +410,6 @@ class StatesView extends StatelessWidget {
     final (String word, String sentence, MarkShape mark, Color color) = switch (m.stage) {
       SoundStage.failed => ('Could not start', m.message, MarkShape.dash, Night.problem),
       _ when m.justEnded => ('Session over', '${m.last?.plan.preset.name ?? ''}: ${m.last?.plan.line ?? ''}.', MarkShape.ring, Night.inkMuted),
-      _ when m.nightRunning => (
-        'Night recording',
-        'The headband is busy with the night. The sound can still play by its timer.',
-        MarkShape.ringedDot,
-        Night.caution,
-      ),
       _ => ('Ready', 'Pick a state and a sound. A beat is an optional extra.', MarkShape.ring, Night.inkMuted),
     };
     return Semantics(

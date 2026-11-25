@@ -1,0 +1,271 @@
+"""The phone's confirmation questions on the laptop (DECISIONS 860-869): answers become truth rows (`present` 1 for a
+Yes, 0 for a No), the data book lists every estimate, and the detectors are scored against a No as well. The golden
+file `packages/shared_labels/test/fixtures/confirm/` is the one the app's own export is tested with (packages/shared_labels/test, app/test/confirm_test.dart): the
+phone and the laptop must make the same rows from the same two files.
+"""
+from __future__ import annotations
+
+import json
+import re
+import shutil
+import sys
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import data_book as db  # noqa: E402
+import truth  # noqa: E402
+from test_truth import SLEEPY, T0, by_id, iso, output, row, truth_of, vd, write_hand  # noqa: E402
+
+FIXTURE = ROOT / "packages" / "shared_labels" / "test" / "fixtures" / "confirm"
+VOCAB = truth.read_vocabulary()
+
+
+def phone(local: Path) -> Path:
+    """The fixture as the phone link leaves it: <local>/phone/confirm/."""
+    to = local / truth.CONFIRM_FOLDER
+    to.mkdir(parents=True)
+    for name in ("estimates.jsonl", "answers.jsonl"):
+        shutil.copy(FIXTURE / name, to / name)
+    return to
+
+
+def test_the_laptop_makes_the_rows_the_phone_exports(tmp_path: Path) -> None:
+    phone(tmp_path)
+    got = truth.Read()
+    truth.confirm_rows(tmp_path, VOCAB, got)
+    assert got.rejected == []
+    rows = sorted(got.rows, key=lambda r: (truth.parse_time(r["start"]), r["label_id"]))
+    assert truth.to_tsv(rows, truth.COLUMNS) == (FIXTURE / "labels.tsv").read_text(encoding="utf-8")
+
+
+def test_the_laptops_estimates_table_is_the_phones(tmp_path: Path) -> None:
+    phone(tmp_path)
+    assert db.tsv(db.ESTIMATE_COLUMNS, db.estimate_rows(tmp_path)) == (FIXTURE / "estimates.tsv").read_text(
+        encoding="utf-8")
+
+
+def test_the_golden_file_is_a_truth_file_pandas_reads_typed(tmp_path: Path) -> None:
+    assert truth.main(["check", str(FIXTURE / "labels.tsv")], out=lambda _s: None) == 0
+    df = pd.read_csv(FIXTURE / "labels.tsv", sep="\t", parse_dates=["start", "end", "created"], keep_default_na=False)
+    assert list(df.columns) == truth.COLUMNS and str(df["start"].dtype).startswith("datetime64")
+    assert df["present"].tolist() == [1, 1, 0, 1, 0, 1, 1, 1, 1, 0] and df["present"].dtype.kind == "i"
+    assert df["label"].tolist() == ["nap", "walking", "asleep", "asleep", "walking", "walking", "working", "asleep",
+                                    "walking", "walking"]
+    assert set(df["source"]) == {"owner_app_prompt", "owner_stop_sheet"} and set(df["source"]) <= set(VOCAB.sources)
+    # a plain Yes is `likely` (the times are the detector's), a No `certain`
+    assert df["confidence"].tolist() == ["likely", "likely", "certain", "likely", "certain", "likely", "likely",
+                                         "likely", "likely", "certain"]
+    assert df["times_confirmed"].tolist() == [0, 0, 0, 0, 0, 0, 0, 1, 0, 0] and df["times_confirmed"].dtype.kind == "i"
+    assert df.loc[2, "owner_words"] == 'No: I was "walking" then'  # the quotes survive
+    assert (df["estimate_id"].str.replace("est:", "confirm:") == df["label_id"]).all()
+
+
+def test_yes_no_and_not_sure_and_undo_read_as_the_app_reads_them(tmp_path: Path) -> None:
+    phone(tmp_path)
+    got = {c.estimate["label"] + " " + c.estimate["start"][5:16]: c for c in truth.read_confirm(tmp_path)}
+    assert len(got) == 15
+    assert got["nap 11-20T15:59"].answer == "yes" and got["asleep 11-20T19:20"].answer == "no"  # the first answer stands
+    assert got["walking 11-20T19:08"].note == "walked to the shop and back"
+    assert (got["asleep 11-20T23:41"].via, got["walking 11-21T08:10"].answer) == ("notification", "not_sure")
+    undone = got["walking 11-21T09:00"]
+    assert (undone.answer, undone.via, undone.at) == ("no", "stop_sheet", "2026-11-21T09:45:00+03:00")
+    assert got["nap 11-21T13:00"].answer == ""
+    assert truth.confirm_row(got["walking 11-21T08:10"]) is None and truth.confirm_row(got["nap 11-21T13:00"]) is None
+
+
+def test_what_an_answer_means_on_the_laptop(tmp_path: Path) -> None:
+    """DECISIONS 960-963: Not sure is its own answer and no label; no answer is neither; a plain Yes does not confirm
+    the times; a blind card's answer is what the owner said."""
+    phone(tmp_path)
+    got = {c.estimate["label"] + " " + c.estimate["start"][5:16]: c for c in truth.read_confirm(tmp_path)}
+    # Not sure, in the old word and the new: stored, never a truth row
+    for key in ("walking 11-21T08:10", "nap 11-22T13:00"):
+        assert got[key].answer == "not_sure" and truth.confirm_row(got[key]) is None
+    # silence: kept apart with its reason, never a row; a real answer given later stands
+    gone = got["walking 11-22T11:00"]
+    assert (gone.answer, gone.why_not, gone.via) == ("not_answered", "short_and_old", "card")
+    assert truth.confirm_row(gone) is None
+    assert (got["walking 11-22T12:00"].answer, got["walking 11-22T12:00"].why_not) == ("no", "")
+    assert got["nap 11-21T13:00"].answer == "", "a blind answer that says nothing is no answer"
+    # a plain Yes: it happened; the times stay the detector's and are not confirmed
+    plain = got["walking 11-22T10:00"]
+    row = truth.confirm_row(plain)
+    assert (plain.times_confirmed, row["times_confirmed"], row["confidence"], row["start"][11:16]) == (False, "0", "likely",
+                                                                                                    "10:00")
+    # "Yes, but the times are off": the owner's times, confirmed
+    night = got["asleep 11-21T23:55"]
+    row = truth.confirm_row(night)
+    assert night.times_confirmed and (row["times_confirmed"], row["start"][5:16], row["end"][5:16]) == (
+        "1", "11-22T00:20", "11-22T08:05")
+    # blind cards: the label the owner picked; agreement with the guess is worked out, not stored
+    assert (got["walking 11-21T14:05"].said, got["walking 11-21T14:05"].agrees) == ("walking", True)
+    other = got["nap 11-21T15:30"]
+    assert (other.said, other.agrees, other.card) == ("working", False, "blind")
+    assert (truth.confirm_row(other)["label"], truth.confirm_row(other)["kind"]) == ("working", "activity")
+    words = got["walking 11-21T17:00"]
+    assert (words.said, words.words, words.agrees) == ("", "cooking dinner", None) and truth.confirm_row(words) is None
+    # the card itself: guess, confidence, kind, seconds, age, where
+    card = got["walking 11-22T12:00"]
+    assert (card.card, card.seconds, card.age_min, card.via, card.estimate["confidence"]) == ("normal", 3.1, 49, "card", 0.9)
+
+
+def test_not_sure_and_silence_never_reach_what_scores_a_detector(tmp_path: Path) -> None:
+    local = tmp_path / "local"
+    phone(local)
+    rows, rejected, _ = truth.build(local)
+    assert rejected == []
+    ids = {r["estimate_id"] for r in rows}
+    quiet = {c.estimate["id"] for c in truth.read_confirm(local) if c.answer in ("not_sure", "not_answered", "")}
+    assert len(quiet) == 4 and not (ids & quiet)
+    by = {r["estimate_id"]: r for r in rows}
+    assert sum(r["times_confirmed"] == "1" for r in rows) == 1  # only the night whose times the owner set
+    assert by["est:88fde4ecc5c9a3de"]["times_confirmed"] == "0"
+
+
+def test_the_truth_table_takes_the_answers_and_old_files_still_read(tmp_path: Path) -> None:
+    local = tmp_path / "local"
+    phone(local)
+    old = [c for c in truth.COLUMNS if c not in truth.ADDED_LATER]  # the hand file as written before these columns
+    write_hand(local, [row("tl-1", label="awake")], old)
+    rows, rejected, counts = truth.build(local)
+    assert rejected == [] and counts == {"hand": 1, "files": 0, "archive": 0, "confirm": 10, "spans": 0}
+    hand = next(r for r in rows if r["label_id"] == "tl-1")
+    assert (hand["present"], hand["estimate_id"], hand["times_confirmed"]) == ("1", "", "1")
+    no = [r for r in rows if r["present"] == "0"]
+    assert [r["label"] for r in no] == ["asleep", "walking", "walking"] and all(r["active"] == "1" for r in rows)
+    assert all(r["origin"] == "phone/confirm/answers.jsonl" for r in rows if r["label_id"] != "tl-1")
+
+
+def test_present_is_checked(tmp_path: Path) -> None:
+    write_hand(tmp_path, [row("a", present="2"), row("b", present="0"), row("c", label="kss", value="7", unit="1-9",
+                                                                             present="0"),
+                          row("d", estimate_id="not an id")])
+    rows, rejected, _ = truth.build(tmp_path)
+    assert [r["label_id"] for r in rows] == ["b"]
+    why = {r.label_id: r.why for r in rejected}
+    assert "not 1 (it happened) or 0" in why["a"] and "no meaning for a rating" in why["c"] and "estimate_id" in why["d"]
+
+
+def test_the_data_book_lists_estimates_and_labels(tmp_path: Path) -> None:
+    local = tmp_path / "local"
+    phone(local)
+    book = db.build(local, local / "data", datetime.now().astimezone(), say=lambda _s: None)
+    assert book["rows"]["estimates.tsv"] == 15 and book["rows"]["truth.tsv"] == 10
+    assert book["truth_from"]["confirm"] == 10 and book["truth_rejected"] == []
+    est = pd.read_csv(local / "data" / "estimates.tsv", sep="\t", parse_dates=["start", "end"], keep_default_na=False)
+    assert list(est.columns) == db.ESTIMATE_COLUMNS and str(est["start"].dtype).startswith("datetime64")
+    assert est["answer"].tolist() == ["yes", "yes", "no", "yes", "not_sure", "no", "", "said", "said", "said", "yes",
+                                      "yes", "not_answered", "no", "not_sure"]
+    assert est["detector"].tolist()[:3] == ["sleep-periods", "walking", "sleep-periods"]
+    assert est.loc[2, "confidence"] == "0.555" and est.loc[5, "confidence"] == ""
+    assert (est["label_id"] != "").tolist() == [True, True, True, True, False, True, False, True, True, False, True,
+                                                True, False, True, False]
+    tr = pd.read_csv(local / "data" / "truth.tsv", sep="\t", keep_default_na=False)
+    assert set(est.loc[est["label_id"] != "", "label_id"]) == set(tr["label_id"])
+    assert set(tr["estimate_id"]) <= set(est["estimate_id"])
+    labels = pd.read_csv(local / "data" / "labels.tsv", sep="\t", keep_default_na=False)
+    mine = labels[labels["source"] == "confirm"]
+    assert sorted(mine["value"]) == ["asleep", "asleep", "cooking dinner", "nap", "not asleep", "not sure", "not sure",
+                                     "not walking", "not walking", "walking", "walking", "walking", "working"]
+    assert set(mine["how_asked"]) == {"question (card)", "question (notification)", "question (stop_sheet)"}
+    assert "walking walk-v2" in set(mine["detector_version"])
+    # a second run adds nothing: answers are append-only on the phone and the ids are stable
+    again = db.build(local, local / "data", datetime.now().astimezone(), say=lambda _s: None)
+    assert again["labels_added"] == 0 and again["labels_removed"] == 0
+    assert "estimates.tsv" in (local / "data" / "README.md").read_text()
+
+
+def test_a_no_scores_the_detector_that_said_yes() -> None:
+    # 10 minutes of output; the app asked "Did you sleep?" about the first 5 and the owner said No
+    o = output("yyyyyyynnn" + "nnnnnnnnnn")
+    not_asleep = row("confirm:x", T0, 5, "asleep", present="0", source="owner_app_prompt")
+    asleep = row("confirm:y", T0 + timedelta(minutes=5), 5, "asleep", present="1")
+    not_awake = row("z", T0, 5, "awake", present="0")  # says nothing about sleep: not compared
+    got = by_id(vd.binary_rows(SLEEPY, truth_of([not_asleep, asleep, not_awake]), [o]))
+    x, y = got["confirm:x"], got["confirm:y"]
+    assert (x["truth_present"], x["truth_expects"], x["false_pos_min"], x["agreement_pct"]) == ("0", "no", 3.5, 30.0)
+    assert (y["truth_present"], y["truth_expects"], y["false_neg_min"]) == ("1", "yes", 5.0)
+    assert "z" not in got
+    totals = [r for r in vd.binary_rows(SLEEPY, truth_of([not_asleep, asleep]), [o]) if r["scope"] == "all"]
+    assert [(r["label"], r["truth_present"], r["periods"]) for r in totals] == [("asleep", "1", 1), ("asleep", "0", 1)]
+    md = vd.summary(totals, dict(truth=2, uncovered=[], seen={}, problems=[]), iso(T0), None)
+    assert "during not asleep (5 min compared) it falsely said asleep for 3.5 min" in md
+    assert SLEEPY.expects("nap", "0") == "no" and SLEEPY.expects("walking", "0") is None
+
+
+def test_the_shared_package_holds_the_vocabulary_as_it_is_now() -> None:
+    """packages/shared_labels' generated vocabulary is what scripts/truth_vocabulary.tsv gives (run
+    `python3 scripts/gen_shared_labels.py` after changing the TSV), the two sources the app writes exist, and the
+    package's label columns are the truth schema's."""
+    import gen_shared_labels as gen
+    assert gen.OUT.read_text(encoding="utf-8") == gen.source(VOCAB), "run python3 scripts/gen_shared_labels.py"
+    assert gen.main(["--check"]) == 0
+    assert {"owner_app_prompt", "owner_stop_sheet"} <= set(VOCAB.sources)
+    labels_dart = (ROOT / "packages" / "shared_labels" / "lib" / "src" / "labels.dart").read_text(encoding="utf-8")
+    columns = re.findall(r"'(\w+)'", labels_dart.split("labelColumns = [", 1)[1].split("];", 1)[0])
+    assert columns == truth.COLUMNS
+    asked = (ROOT / "packages" / "shared_labels" / "lib" / "src" / "vocabulary.dart").read_text(encoding="utf-8")
+    for word in re.findall(r"^  '(\w+)': '", asked, flags=re.M):  # every label with question words is a label
+        assert word in VOCAB.labels or word == "night_sleep", word
+
+
+def test_a_yes_whose_sleep_stretch_was_taken_away_is_no_truth_row_until_it_is_put_back(tmp_path: Path) -> None:
+    """DECISIONS 1025: the owner said Yes to a sleep estimate, the app made its stretch, and later he took the stretch
+    away in the Archive ("Not sleep"). The Yes is then no truth; putting the stretch back brings the row back. A
+    stretch that was only filed again under another recording (`moved_to`) changes nothing."""
+    phone(tmp_path)
+    got = truth.Read()
+    truth.confirm_rows(tmp_path, VOCAB, got)
+    yes = next(r for r in got.rows if r["label"] == "asleep" and r["present"] == "1")
+    est = yes["estimate_id"]
+    line = {"v": 1, "span": "r-1", "kind": "sleep", "label": "in_bed", "start": yes["start"], "end": yes["end"],
+            "source": "owner_confirmed", "estimate": est, "made": yes["end"]}
+    f = tmp_path / "phone" / "spans" / "r.spans.jsonl"
+    f.parent.mkdir(parents=True)
+
+    def ids(*lines: dict) -> set[str]:
+        f.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+        out = truth.Read()
+        truth.confirm_rows(tmp_path, VOCAB, out)
+        return {r["label_id"] for r in out.rows}
+
+    everything = {r["label_id"] for r in got.rows}
+    assert ids(line) == everything
+    assert ids(line, {**line, "removed": True}) == everything - {yes["label_id"]}
+    assert ids(line, {**line, "removed": True}, line) == everything
+    assert ids(line, {**line, "removed": True, "moved_to": "q-1"}) == everything
+
+
+def test_estimates_names_no_truth_row_for_a_yes_whose_stretch_was_taken_away(tmp_path: Path) -> None:
+    """DECISIONS 1044: estimates.tsv keeps the Yes (it was said), but its `label_id` is empty while the stretch is
+    taken away: there is no truth row for it to name. Put back, or only filed again elsewhere, it names its row."""
+    phone(tmp_path)
+    got = truth.Read()
+    truth.confirm_rows(tmp_path, VOCAB, got)
+    yes = next(r for r in got.rows if r["label"] == "asleep" and r["present"] == "1")
+    est = yes["estimate_id"]
+    line = {"v": 1, "span": "r-1", "kind": "sleep", "label": "in_bed", "start": yes["start"], "end": yes["end"],
+            "source": "owner_confirmed", "estimate": est, "made": yes["end"]}
+    f = tmp_path / "phone" / "spans" / "r.spans.jsonl"
+    f.parent.mkdir(parents=True)
+
+    def row(*lines: dict) -> dict:
+        f.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+        return next(r for r in db.estimate_rows(tmp_path) if r["estimate_id"] == est)
+
+    before = row(line)
+    assert (before["answer"], before["label_id"]) == ("yes", yes["label_id"])
+    taken = row(line, {**line, "removed": True})
+    assert (taken["answer"], taken["label_id"]) == ("yes", None)
+    assert {k: v for k, v in taken.items() if k != "label_id"} == {k: v for k, v in before.items() if k != "label_id"}
+    assert row(line, {**line, "removed": True}, line)["label_id"] == yes["label_id"]
+    assert row(line, {**line, "removed": True, "moved_to": "q-1"})["label_id"] == yes["label_id"]
+    # every other row is as it was
+    others = [r for r in db.estimate_rows(tmp_path) if r["estimate_id"] != est]
+    f.unlink()
+    assert others == [r for r in db.estimate_rows(tmp_path) if r["estimate_id"] != est]

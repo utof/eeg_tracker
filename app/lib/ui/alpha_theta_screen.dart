@@ -40,7 +40,7 @@ class AlphaThetaScreen extends StatefulWidget {
 }
 
 class _AlphaThetaScreenState extends State<AlphaThetaScreen> {
-  final BrainBitFinder _finder = BrainBitFinder();
+  final BrainBitFinder _finder = BrainBitFinder(activity: 'alpha_theta');
   late final MeditationController _c = MeditationController(
     finder: _finder,
     sound: () => SoloudSound(),
@@ -53,7 +53,7 @@ class _AlphaThetaScreenState extends State<AlphaThetaScreen> {
   String? _recordings;
   String? _checkPreview;
   int _minutes = AtDose.shortMin;
-  bool _nightRunning = false;
+  bool _recordingRuns = false;
   bool _screenOn = false;
   final SessionKeeper _keeper = PhoneSessionKeeper();
   String _message = '';
@@ -63,6 +63,8 @@ class _AlphaThetaScreenState extends State<AlphaThetaScreen> {
   void initState() {
     super.initState();
     _c.addListener(_changed);
+    // the recording was stopped under this session (the notification's Stop, the 6-hour rule): it ends too
+    _finder.onRecordingStopped = () => unawaited(_c.stop());
     unawaited(_prepare());
   }
 
@@ -80,7 +82,7 @@ class _AlphaThetaScreenState extends State<AlphaThetaScreen> {
     final running = await FlutterForegroundTask.isRunningService;
     if (!mounted) return;
     setState(() {
-      _nightRunning = running;
+      _recordingRuns = running;
       _page = _journal?.profile.ready == true ? _Page.setup : _Page.firstUse;
       _minutes = lengthChoices(_journal?.done ?? 0).first;
     });
@@ -233,13 +235,6 @@ class _AlphaThetaScreenState extends State<AlphaThetaScreen> {
       setState(() => _page = _Page.setup);
       return;
     }
-    if (await FlutterForegroundTask.isRunningService) {
-      setState(() {
-        _nightRunning = true;
-        _page = _Page.setup;
-      });
-      return;
-    }
     final phone = await Phone.snapshot().catchError((Object _) => const PhoneSnapshot({}));
     if (!await nearbyAllowed(phone.sdkInt) && !await requestNearby(phone.sdkInt)) {
       _say('Allow Nearby devices first: without it the headband cannot be found.');
@@ -321,7 +316,7 @@ class _AlphaThetaScreenState extends State<AlphaThetaScreen> {
             checkStatus: _checkPreview,
             contact: j?.profile.contact ?? '',
             grounding: j?.profile.grounding ?? defaultGrounding,
-            nightRunning: _nightRunning,
+            recordingRuns: _recordingRuns,
             message: _message,
           ),
           onMinutes: (v) => setState(() => _minutes = v),

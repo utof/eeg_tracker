@@ -96,12 +96,14 @@ ExportStatus describeExport(ExportViewModel m) {
     );
   }
   if (o != null && o.complete) {
+    // a recording runs: the file set it writes now is left for the next export (DECISIONS 1040)
+    final open = o.stillWritten.isEmpty ? '' : ' The part of the recording that is being written now comes with the next export.';
     return (
       title: 'Exported',
       sentence: o.files == 0
-          ? 'Nothing new: $folder already has everything. Its list of files was written again.'
+          ? 'Nothing new: $folder already has everything. Its list of files was written again.$open'
           : '${_files(o.files)} (${sizeText(o.bytes)}) copied into $folder, with the list of every file '
-                '(manifest.json) for the laptop to check.',
+                '(manifest.json) for the laptop to check.$open',
       mark: MarkShape.filled,
       color: Night.live,
     );

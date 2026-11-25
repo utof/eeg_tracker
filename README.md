@@ -85,7 +85,7 @@ Each line says what it does. In brackets: how well the research backs it **for t
   electrode's contact, live traces per electrode in µV, and the raw data; it reads the night's or a session's stream,
   never a second connection.
 - **When I put the headband on** (automatic recording, first phase): the app notices the headband on your head (a
-  10-second contact check when you open the app, in your bedtime window, or when the paired headband comes near),
+  10-second contact check when you open the app, in your bedtime window, or when Android says the headband came near),
   guesses night or work, and asks "Start the night?" by default; Automatic and Do nothing per kind in Settings. Not
   now writes nothing; Yes keeps the minutes since the check. Never during a recording or a session.
 
@@ -113,6 +113,17 @@ Each line says what it does. In brackets: how well the research backs it **for t
   `_local/analyses/truth-labels.tsv` (`python3 scripts/truth.py check`) and the Archive's tags marked "This is what I
   was doing", into `_local/data/truth.tsv`; `scripts/validate_detectors.py` writes `validation.tsv` and `validation.md`
   (agreement, false minutes per detector and label). ([docs/data-format.md](docs/data-format.md), "`truth.tsv`")
+- Quick checks (the phone app; DECISIONS 860-869, 960-975): soon after the headband thinks you slept or walked the
+  app asks "19:08-21:14. The headband thinks you walked. Did you?", several at once, with buttons that name the thing
+  ("I walked" / "I did not walk" / "Not sure"), on a card (Night, Archive) and in a notification whose buttons answer
+  without opening the app; 1 card in 5 hides the guess; at most 2 notifications a day, fewer by itself when they go
+  unanswered. Until answered a detector's output is an estimate; a Yes is a truth label that it happened (the times
+  count as yours only after "Yes, but the times are off"), a No a label that it did not happen (`present` 0), Not
+  sure its own answer and no label; never asked twice. `python3 scripts/asking_check.py` is the monthly self-check. The laptop takes the answers
+  into `truth.tsv`, lists every estimate in `estimates.tsv` and scores the detectors against a No too. The reusable
+  parts are the package `packages/shared_labels/` (vocabulary, model, queue, the exports, the question card), for
+  utof_tracker too; eeg_tracker always asks its own questions, and its answers are data another app can read.
+  ([docs/data-format.md](docs/data-format.md), "The confirmation questions"; `docs/evidence/confirm-questions.md`)
 - **Every day's numbers for utof_tracker** (`python3 scripts/export_events.py --daily`): one event per day with what
   the phone's Trends page shows, for the owner's life tracker. ([docs/utof-interface.md](docs/utof-interface.md))
 - **The same scoring and detectors in Python**: the phone's rules were written and checked there first (`analysis/`).
@@ -133,8 +144,10 @@ Each line says what it does. In brackets: how well the research backs it **for t
 - `scripts/phone_night_check.py`: did the phone record the night well? After the import,
   `uv run --project analysis python scripts/phone_night_check.py 2026-11-19 --compare 2026-11-17` (the evening
   dates) prints every gap with its reason, lost packets, restarts by Android, both batteries, contact, the phone's
-  sleep report and a plain verdict with the top three things to fix. Works on a laptop night too; plain `python3`
-  skips only the signal numbers. Reads files only.
+  sleep report and a plain verdict with the top three things to fix. A recording that has a spans file (Record
+  first) is reported by its sleep stretches, and the numbers of the night count only inside them; a recording with
+  nothing marked as sleep is said to be no night. Works on a laptop night too; plain `python3` skips only the
+  signal numbers. Reads files only.
 - `scripts/catalog.py`: one table of every night on the laptop (laptop, phone and DIY-board nights: files, hours, missing
   minutes, the sleep report's numbers, morning check-in) and the SHA-256 of every file, so the next run says what
   grew, changed or went missing; `--check` re-hashes everything. Reads the data only; writes `_local/catalog/`.
@@ -182,7 +195,9 @@ Walking minutes and steps come with each day: from the phone's walk files, and f
 [docs/detectors.md](docs/detectors.md#walking-pace-and-estimated-steps-decisions-800-809)).
 
 Tests (no headband): `uv run --project analysis --with pytest pytest analysis/tests` (add `-m "not slow"` to skip
-the 2.5-minute fake-headband run) and `node --test tests/js/*.test.mjs`.
+the 2.5-minute fake-headband run) and `node --test tests/js/*.test.mjs`. On a busy machine the tests marked
+`realtime` (they wait on the wall clock) go apart: `pytest -n 4 -m "not realtime"` (with `--with pytest-xdist`), then
+`pytest -m realtime` alone.
 
 **One headband, many readers.** The headband allows one Bluetooth connection, so the recorder owns it, always
 records to disk, and shares the data: `GET /stream` (server-sent events: every batch of samples in µV and every
@@ -262,7 +277,7 @@ Bluetooth itself (Python + bleak), so recording needs no closed library, never u
 survives drops without restarting. Not yet tried on the real headband: run the 15-minute probe first
 (`uv run --no-project --python 3.12 --with bleak==3.1.0 python scripts/ble_probe.py`), then record with
 `DRIVER=ble scripts/record_night.sh`. The phone app has the same driver behind a switch ("Headband connection" on
-the night screen: the probe, then "Use our own connection (test)"); BrainBit's SDK stays its default until the probe
+the Record tab: the probe, then "Use our own connection (test)"); BrainBit's SDK stays its default until the probe
 has passed. See [docs/own-ble-driver.md](docs/own-ble-driver.md).
 
 **The DIY ADS1299 board.** `DRIVER=diy scripts/record_night.sh` records the owner's self-built board

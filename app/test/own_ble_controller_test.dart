@@ -1,6 +1,9 @@
 // The "Headband connection" page's logic (lib/headband/own/controller.dart) on the fake headband: the probe run
 // from the page, what it saves, and the rule that our own connection is only offered after a passed probe, or
 // with "try anyway".
+@Tags(['realtime'])
+library;
+
 import 'dart:io';
 
 import 'package:eeg_tracker/export/store.dart' show storedFiles;

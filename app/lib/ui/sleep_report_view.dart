@@ -43,6 +43,7 @@ class SleepReportView extends StatelessWidget {
   const SleepReportView({
     super.key,
     required this.nightOf,
+    this.title,
     this.report,
     this.others = const [],
     this.scoringStep,
@@ -114,13 +115,16 @@ class SleepReportView extends StatelessWidget {
   final bool pulseReading;
   final VoidCallback? onPulseInfo;
 
+  /// The page's title when this is not a night (a nap: "Nap, Sat 21 Nov 13:00"); null: "Night of ...".
+  final String? title;
+
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final r = report;
     return Scaffold(
       appBar: AppBar(
-        title: Text('Night of ${nightTitle(nightOf)}', style: text.titleMedium?.copyWith(color: Night.ink)),
+        title: Text(title ?? 'Night of ${nightTitle(nightOf)}', style: text.titleMedium?.copyWith(color: Night.ink)),
         actions: [
           IconButton(
             onPressed: onInfo,
@@ -230,6 +234,14 @@ class SleepReportView extends StatelessWidget {
         const SizedBox(height: 16),
         Text(
           'Plus ${durationText(r.straySleepMin)} scored asleep outside these periods, too short to count.',
+          style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
+        ),
+      ],
+      if ((r.walkingChangedMin ?? 0) > 0) ...[
+        const SizedBox(height: 16),
+        Text(
+          '${durationText(r.walkingChangedMin!)} that looked like sleep to the sleep model were counted as awake: '
+          'you were walking then.',
           style: text.bodyLarge?.copyWith(color: Night.inkMuted, height: 1.4),
         ),
       ],

@@ -55,7 +55,7 @@ class NotForReplayBoard implements Exception {
 
   @override
   String toString() =>
-      "The replay plays $describe. Sessions read the BrainBit's O1 O2 T3 T4; only Start night records this layout.";
+      "The replay plays $describe. Sessions read the BrainBit's O1 O2 T3 T4; only Record and Sleep record this layout.";
 }
 
 /// One batch as it arrived: [at] seconds after the replay's first batch (long gaps shortened), its samples.
@@ -75,7 +75,13 @@ class ReplayPlan {
     this.maxGapS = 60,
     this.loop = false,
     this.contactOhms,
+    this.rollBytes,
   });
+
+  /// The emulator check's short roll-over (`"roll_bytes"`, tool/record_check.py R1): the night recorder closes a file
+  /// set at this many bytes instead of its 4 hours or 128 MB (recorder/night_recorder.dart, DECISIONS 1035). Only a
+  /// replay build reads a plan, so the owner's app has no such knob. Null: the recorder's own limits.
+  final int? rollBytes;
 
   /// The `.f32` files (plain names; a packed one is read as such), played one after another.
   final List<File> files;
@@ -126,6 +132,8 @@ class ReplayPlan {
     }
     final loop = m['loop'] ?? false;
     if (loop is! bool) bad('loop must be true or false');
+    final roll = m['roll_bytes'];
+    if (roll != null && (roll is! int || roll < 20000)) bad('roll_bytes must be a whole number of bytes, 20000 or more');
     final named = m['files'];
     final files = <File>[];
     if (named == null) {
@@ -151,7 +159,19 @@ class ReplayPlan {
       maxGapS: maxGapS,
       loop: loop,
       contactOhms: ohms == null ? null : contact,
+      rollBytes: roll as int?,
     );
+  }
+}
+
+/// The roll-over size the replay plan of [recordingsDir] asks for, or null: no replay build, no plan, or none asked.
+int? replayRollBytes(String recordingsDir, {bool allowed = replayBuild}) {
+  if (!allowed) return null;
+  try {
+    final dir = replayDirFor(recordingsDir);
+    return File('${dir.path}/plan.json').existsSync() ? ReplayPlan.load(dir).rollBytes : null;
+  } on ReplayError {
+    return null;
   }
 }
 

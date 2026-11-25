@@ -1,0 +1,118 @@
+{
+ "spans": [
+  {
+   "span": "2026-11-25-110200-1",
+   "kind": "work",
+   "label": "working",
+   "start_unix": 1795593900,
+   "end_unix": 1795613400,
+   "source": "owner_button",
+   "started_recording": true,
+   "ended_by": "owner",
+   "session": "work-sessions/2026-11-25-110502.work.json",
+   "paused": [
+    [
+     1795600800,
+     1795602900
+    ]
+   ],
+   "estimate": null
+  },
+  {
+   "span": "2026-11-25-110200-2",
+   "kind": "nap",
+   "label": "in_bed",
+   "start_unix": 1795600800,
+   "end_unix": 1795602900,
+   "source": "owner_button",
+   "started_recording": false,
+   "ended_by": "activity",
+   "session": "naps/2026-11-25-130000.nap.json",
+   "paused": [],
+   "estimate": null
+  },
+  {
+   "span": "2026-11-25-110200-3",
+   "kind": "meditate",
+   "label": "meditating",
+   "start_unix": 1795614000,
+   "end_unix": 1795615200,
+   "source": "owner_button",
+   "started_recording": false,
+   "ended_by": "activity",
+   "session": "meditations/2026-11-25-164000.meditation.json",
+   "paused": [],
+   "estimate": null
+  },
+  {
+   "span": "2026-11-25-110200-4",
+   "kind": "check_in",
+   "label": null,
+   "start_unix": 1795615500,
+   "end_unix": 1795615800,
+   "source": "owner_button",
+   "started_recording": false,
+   "ended_by": "owner",
+   "session": "mornings/2026-11-25-170500.morning.json",
+   "paused": [],
+   "estimate": null
+  },
+  {
+   "span": "2026-11-25-110200-5",
+   "kind": "calibration",
+   "label": null,
+   "start_unix": 1795616100,
+   "end_unix": 1795616400,
+   "source": "owner_button",
+   "started_recording": false,
+   "ended_by": "activity",
+   "session": "calibration/2026-11-25-171500.calibration.json",
+   "paused": [],
+   "estimate": null
+  },
+  {
+   "span": "2026-11-25-110200-6",
+   "kind": "alpha_theta",
+   "label": "neurofeedback",
+   "start_unix": 1795617000,
+   "end_unix": 1795618800,
+   "source": "owner_button",
+   "started_recording": false,
+   "ended_by": "owner",
+   "session": "alpha-theta/2026-11-25-173000.alphatheta.json",
+   "paused": [],
+   "estimate": null
+  },
+  {
+   "span": "2026-11-25-110200-7",
+   "kind": "sound",
+   "label": "sound_session",
+   "start_unix": 1795619400,
+   "end_unix": 1795621200,
+   "source": "owner_button",
+   "started_recording": false,
+   "ended_by": "activity",
+   "session": "sound-states/2026-11-25-181000.sound.json",
+   "paused": [],
+   "estimate": null
+  },
+  {
+   "span": "2026-11-25-110200-8",
+   "kind": "dream_catcher",
+   "label": "resting",
+   "start_unix": 1795636800,
+   "end_unix": 1795639800,
+   "source": "owner_button",
+   "started_recording": false,
+   "ended_by": "recording_stopped",
+   "session": "dream-catcher/2026-11-25-230000.dream.json",
+   "paused": [],
+   "estimate": null
+  }
+ ],
+ "removed": [],
+ "reviewed": null,
+ "sets": [],
+ "hides": [],
+ "skipped": 0
+}

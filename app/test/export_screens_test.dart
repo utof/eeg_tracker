@@ -46,8 +46,8 @@ ExportViewModel _m({
   blocked: blocked,
 );
 
-ExportOutcome _out(int files, int bytes, {bool complete = true, String? error}) =>
-    (files: files, bytes: bytes, complete: complete, error: error, notExported: const [], at: _now);
+ExportOutcome _out(int files, int bytes, {bool complete = true, String? error, List<String> stillWritten = const []}) =>
+    (files: files, bytes: bytes, complete: complete, error: error, notExported: const [], at: _now, stillWritten: stillWritten);
 
 final Map<String, ExportViewModel> _states = {
   'export_first': _m(folder: null, pendingFiles: 412, pendingBytes: _gb),
@@ -68,7 +68,7 @@ final Map<String, ExportViewModel> _states = {
   'export_lost': _m(usable: false, last: DateTime(2026, 11, 18, 8, 10)),
   'export_blocked': _m(
     last: DateTime(2026, 11, 18, 8, 10),
-    blocked: 'A night is recording. Stop it first: nothing is exported while it records.',
+    blocked: 'Sleep is being recorded. Stop sleep first: nothing is exported during it.',
   ),
 };
 
@@ -117,6 +117,10 @@ void main() {
       expect(describeExport(_states['export_done']!).sentence,
           '37 files (210 MB) copied into Download/EEG/eeg-export, with the list of every file (manifest.json) for '
           'the laptop to check.');
+      // beside a recording: the file set it writes now is said to come next time
+      final beside = describeExport(_m(last: _now, pendingFiles: 4, pendingBytes: 100, outcome: _out(37, 210400000, stillWritten: ['recordings/2026-11-25-130000.f32'])));
+      expect(beside.title, 'Exported');
+      expect(beside.sentence, endsWith('to check. The part of the recording that is being written now comes with the next export.'));
       final failed = describeExport(_states['export_failed']!);
       expect(failed.title, 'Export stopped');
       expect(failed.color, Night.problem);

@@ -46,7 +46,7 @@ abstract final class Usage {
   });
 
   /// The home page's tab (`Signal`); the page name when the home page is on top is `tab:<it>`.
-  static String homeTab = 'Night';
+  static String homeTab = 'Record';
 
   /// A tab of the home page was chosen; [current]: the home page is on top (it is, unless a page covers it).
   static void tab(String label, {bool current = true}) {
@@ -96,7 +96,7 @@ abstract final class Usage {
   /// Tests.
   static void reset() {
     _screen = null;
-    homeTab = 'Night';
+    homeTab = 'Record';
     Activity.unlisten(_onActivity);
   }
 }

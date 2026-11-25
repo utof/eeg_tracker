@@ -70,7 +70,7 @@ def test_the_vocabulary_holds_the_owners_labels_and_every_detector_names_known_o
     assert set(VOCAB.kinds) >= {"state", "activity", "event", "rating", "measurement"}
     assert set(VOCAB.sources) >= {"owner_chat", "owner_app_tag", "owner_checkin", "owner_mark_button", "device_watch",
                                   "device_phone", "observer"}
-    assert list(VOCAB.confidences) == ["certain", "likely"]
+    assert list(VOCAB.confidences) == ["certain", "likely", "within"]
     assert VOCAB.labels["pulse"].unit == "bpm" and VOCAB.labels["pulse"].kind == "measurement"
     for d in vd.DETECTORS:
         assert (d.yes | d.no | d.mostly) <= set(VOCAB.labels), d.name
@@ -131,7 +131,7 @@ def test_good_rows_pass_and_numbers_keep_their_units(tmp_path: Path) -> None:
                                                                                      minutes=0, source="observer")]
     write_hand(tmp_path, good)
     rows, rejected, counts = truth.build(tmp_path)
-    assert rejected == [] and counts == {"hand": 5, "files": 0, "archive": 0}
+    assert rejected == [] and counts == {"hand": 5, "files": 0, "archive": 0, "confirm": 0, "spans": 0}
     assert {r["label_id"]: r["kind"] for r in rows} == {"a": "state", "b": "rating", "c": "measurement", "d": "event",
                                                          "e": "device"}
     assert truth.main(["--local", str(tmp_path), "check"], out=lambda _s: None) == 0
@@ -218,7 +218,7 @@ def test_archive_tags_marked_truth_and_watch_rows_join_the_hand_file(tmp_path: P
                                        value=str(60 + i), unit="bpm", source="device_watch") for i in range(3)],
                                   truth.COLUMNS))
     rows, rejected, counts = truth.build(tmp_path)
-    assert counts == {"hand": 1, "files": 3, "archive": 1}
+    assert counts == {"hand": 1, "files": 3, "archive": 1, "confirm": 0, "spans": 0}
     tag = next(r for r in rows if r["source"] == "owner_app_tag")
     assert tag["label"] == "walking" and tag["kind"] == "activity" and tag["owner_words"] == "walk"
     assert tag["recording"] == "2026-11-16-230000" and tag["origin"] == "phone/archive/2026-11-16-230000.tags.json"
@@ -230,7 +230,7 @@ def test_the_data_book_writes_the_truth_table(tmp_path: Path) -> None:
     local = tmp_path / "local"
     write_hand(local, [row("tl-1", label="awake"), row("tl-2", label="dozing")])
     book = db.build(local, local / "data", datetime.now().astimezone(), say=lambda _s: None)
-    assert book["rows"]["truth.tsv"] == 1 and book["truth_from"] == {"hand": 1, "files": 0, "archive": 0}
+    assert book["rows"]["truth.tsv"] == 1 and book["truth_from"] == {"hand": 1, "files": 0, "archive": 0, "confirm": 0, "spans": 0}
     assert len(book["truth_rejected"]) == 1 and "dozing" in book["truth_rejected"][0]
     df = pd.read_csv(local / "data" / "truth.tsv", sep="\t", parse_dates=["start", "end", "created"])
     assert str(df["start"].dtype).startswith("datetime64") and df.loc[0, "label"] == "awake"
@@ -420,6 +420,64 @@ def test_every_detector_on_a_made_up_book(tmp_path: Path) -> None:
     md = (out / "validation.md").read_text()
     assert "anysleep (anysleep-test@1): during awake" in md and "## Totals" in md
     assert any("validation" in x and "rows" in x for x in lines)
+
+
+def test_walking_pulse_and_the_veto_version_in_the_table(tmp_path: Path) -> None:
+    """A walk file's stretches against a walking label (its stop counts as missed) and against sleep (no walking);
+    the pulse file's readings wait for a reference, and the table says so; a report made with the walking veto is
+    its own detector version."""
+    out = made_up_book(tmp_path)
+    walk = tmp_path / "walking"
+    walk.mkdir()
+    a = T0 - timedelta(minutes=30)
+
+    def stretch(kind: str, m0: float, m1: float) -> dict:
+        return dict(kind=kind, start=iso(a + timedelta(minutes=m0)), end=iso(a + timedelta(minutes=m1)))
+    (walk / "2026-11-16-223000.walk.json").write_text(json.dumps(dict(
+        format="eeg-tracker-walking", version=1, detector="walk-v2", recording="2026-11-16-223000", start=iso(a),
+        end=iso(T0 + timedelta(minutes=10)),
+        walks=[dict(stretches=[stretch("walking", 2, 6), stretch("stopped", 6, 8), stretch("running", 8, 10)])])))
+    (walk / "broken.walk.json").write_text(json.dumps(dict(format="eeg-tracker-walking", why="no samples")))
+    pulse = tmp_path / "phone" / "pulse"
+    pulse.mkdir(parents=True)
+    (pulse / "2026-11-16-223000.pulse.json").write_text(json.dumps(dict(
+        format="eeg-tracker-pulse", version=1, detector="pulse-v2", start_ms=int(a.timestamp() * 1000), epoch_s=30,
+        bpm=[None, 61.0, 62.5, None, 60.0])))
+    rep_path = tmp_path / "nights" / "2026-11-16.report.json"
+    rep = json.loads(rep_path.read_text())
+    rep["walking"] = dict(detector="walk-v2", changed_min=0.0)
+    rep_path.write_text(json.dumps(rep))
+    rows = [row("tl-walk", a + timedelta(minutes=2), 8, "walking"),
+            row("tl-sleep", T0 + timedelta(minutes=5), 5, "asleep"), row("tl-awake", T0, 5, "awake")]
+    write_hand(tmp_path, rows)
+    trows, _, _ = truth.build(tmp_path)
+    truth.write_table(out / "truth.tsv", trows)
+    lines: list[str] = []
+    assert vd.main(["--local", str(tmp_path), "--book", str(out)], say=lines.append) == 0
+    df = pd.read_csv(out / "validation.tsv", sep="\t", keep_default_na=False, dtype=str)
+    one = df[df.scope == "label"].set_index(["detector", "label_id"])
+    w = one.loc[("walking", "tl-walk")]
+    assert (w["detector_version"], w["epochs"], w["yes_min"], w["false_neg_min"], w["agreement_pct"]) == (
+        "walk-v2", "16", "6", "2", "75")  # the 2-minute stop is the miss
+    assert one.loc[("walking", "tl-sleep"), "false_pos_min"] == "0"
+    assert one.loc[("walking", "tl-walk"), "sources"] == "walking/2026-11-16-223000.walk.json"
+    assert one.loc[("anysleep", "tl-awake"), "detector_version"] == "anysleep-test@1, walking veto walk-v2"
+    assert one.loc[("yasa", "tl-awake"), "detector_version"] == "yasa-test O1-T3, walking veto walk-v2"
+    assert "pulse" not in set(df.detector)
+    md = (out / "validation.md").read_text()
+    assert "pulse: no reference yet. It has 3 readings" in md
+    assert "| pulse | pulse-v2 | pulse | value | 0 |  | no reference yet (3 readings wait) |" in md
+    assert any("pulse: no reference yet" in x for x in lines)
+    # with a watch's reading in its time the pulse is compared like any measurer
+    write_hand(tmp_path, rows + [row("tl-watch", a + timedelta(seconds=45), 0, "pulse", value="60", unit="bpm",
+                                     source="device_watch")])
+    trows, _, _ = truth.build(tmp_path)
+    truth.write_table(out / "truth.tsv", trows)
+    assert vd.main(["--local", str(tmp_path), "--book", str(out), "--quiet"], say=lambda _s: None) == 0
+    df = pd.read_csv(out / "validation.tsv", sep="\t", keep_default_na=False, dtype=str)
+    p = df[(df.detector == "pulse") & (df.scope == "label")].iloc[0]
+    assert (p["detector_version"], p["values"], p["mean_error"], p["unit"]) == ("pulse-v2", "2", "1.75", "bpm")
+    assert "no reference yet" not in (out / "validation.md").read_text()
 
 
 def test_no_truth_table_is_said_plainly(tmp_path: Path) -> None:

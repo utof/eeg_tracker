@@ -16,18 +16,37 @@ A recording's record size and rate are its own (scripts/recording.py: its <stamp
 format line, else the BrainBit's 20 bytes at 250 Hz), so minutes are right for any number of channels. A recording
 whose header names a session that is not sleep (the phone's work session, `session: work`, DECISIONS 683) is no
 recording of a night: recordings() leaves it out, so it is never chained, scored or reported as sleep.
+
+Record first (DECISIONS 880-899, scripts/spans.py): a file set whose header has `recording` belongs to that
+recording and is never chained by the 3-hour rule above. What was sleep in it is said by the spans file of that
+recording (<spans>/<recording id>.spans.jsonl): each closed span of kind `sleep` or `nap` is a time window.
+  - Sleep spans (source owner_button, owner_confirmed, auto_start or auto_resume) are joined into nights by the same rule applied
+    to spans: the next span starts less than 3 hours after the last one's end, or has the same evening date, within 24
+    hours of the first. The night is named by the evening date of its first span and reads only the samples inside
+    its spans (`Night.windows`, unix seconds). An auto_start span is taken as a night span here: the "10 minutes
+    asleep" rule is applied by whoever scores it. Open spans (no end) and spans of other sources give nothing yet.
+  - `nap` spans never join a night; naps() lists them, each named by its start stamp YYYY-MM-DD-HHMMSS.
+  - A recording whose headers have `recording` and that has no sleep span (or no spans file) gives no night.
+  - An old file set (no `recording`) chains exactly as before, except the sets a spans file lists as "Not sleep"
+    (spans.no_sleep_sets): those join no night.
+  - An old chain and a span night with the same evening date are one night: the files of both, the windows of the
+    span night plus each old file as a whole, and the span night's span ids and `span_from`.
+  - `span_from`: `pressed` (an owner_button span among them), else `confirmed`, else `auto`; `migrated` for an old chain.
+Where the spans are: `spans_dir`; by default (AUTO) the sibling `spans/` of the recordings folder when that folder is
+named `recordings` (the phone's layout copied to <local>/phone/recordings), else none.
 """
 from __future__ import annotations
 
 import json, os, re, shutil, struct, subprocess, sys, threading, time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Collection
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import packed  # noqa: E402  (a raw file packed after a day, <stamp>.f32.xz, reads as the plain one)
 import recording  # noqa: E402  (what a .f32 holds: its header, or what files from before the header held)
+import spans as spans_mod  # noqa: E402  (what you did in a recording: the sleep spans make the nights)
 
 VERSION = 2  # of <night>.report.json; a report of another version is rebuilt (2: adds `extras`)
 FS = 250  # the BrainBit's; a recording's own rate is Rec.fs
@@ -35,6 +54,10 @@ REC_BYTES = 20  # one <I4f record in a BrainBit .f32; a recording's own record s
 IDX = struct.Struct("<dQ")
 CHAIN_GAP_S = 3 * 3600
 MAX_SPAN_S = 24 * 3600
+# Sleep spans of one evening date that lie CHAIN_GAP_S or more apart are one night only when each side is at least
+# this long: a shorter stray one (Sleep pressed by mistake, a 4-minute test) is left out of the night. Alone on its
+# evening date it is still that night. The phone's twin: `strayUnder` in app/lib/recorder/nights.dart (DECISIONS 1026).
+STRAY_UNDER_S = 20 * 60
 NEW_DATA_MIN = 10  # a report is out of date once this many minutes of new samples exist
 WINDOW_H = 20  # the hub looks at nights with data in the last 20 hours
 LOCK, STATUS, LOG = "sleep-report.lock", "sleep-report.status.json", "sleep-report.log"  # the sleep job's
@@ -51,6 +74,11 @@ class Rec:
     size: int  # bytes of the .f32 (unpacked)
     rec_bytes: int = REC_BYTES  # bytes of one record: 4 + 4 per channel (recording.read)
     fs: float = FS  # samples a second
+    recording: str | None = None  # the header's `recording`: the id of the recording this set belongs to; None: old
+
+    @property
+    def stem(self) -> str:
+        return self.path.stem
 
     @property
     def samples(self) -> int:
@@ -63,16 +91,28 @@ class Rec:
 
 @dataclass
 class Night:
-    name: str  # evening date, YYYY-MM-DD
+    name: str  # evening date, YYYY-MM-DD (a nap: its start stamp, YYYY-MM-DD-HHMMSS)
     recs: list[Rec]
+    windows: list[tuple[float, float]] | None = None  # unix seconds read from the files; None = the whole files
+    recording_ids: list[str] = field(default_factory=list)  # the recordings the spans belong to (empty: old chain)
+    span_ids: list[str] = field(default_factory=list)
+    span_from: str = "migrated"  # pressed | confirmed | auto | migrated (an old chain)
 
     @property
     def start(self) -> float:
-        return self.recs[0].start
+        return self.windows[0][0] if self.windows else self.recs[0].start
 
     @property
     def end(self) -> float:
-        return max(r.end for r in self.recs)
+        return max(b for _, b in self.windows) if self.windows else max(r.end for r in self.recs)
+
+    @property
+    def recorded_s(self) -> float:
+        """Seconds of samples the night reads: all of its files, or those inside its windows."""
+        if self.windows is None:
+            return sum(r.samples / r.fs for r in self.recs)
+        return sum(max(0.0, min(r.start + r.samples / r.fs, b) - max(r.start, a)) for r in self.recs
+                   for a, b in self.windows)
 
 
 def stamp_time(path: Path) -> float | None:
@@ -134,13 +174,18 @@ def recordings(folder: Path, on_bad: Callable[[Path, Exception], None] | None = 
             continue
         if size >= h.record_bytes:
             out.append(Rec(p, start, _end(p, start, size, h.record_bytes, h.sample_rate), size, h.record_bytes,
-                           h.sample_rate))
+                           h.sample_rate, h.recording))
     return sorted(out, key=lambda r: (r.start, r.path.name))
 
 
-def nights(recs: list[Rec]) -> list[Night]:
+def nights(recs: list[Rec], no_sleep: Collection[str] = (), include_recorded: bool = False) -> list[Night]:
+    """The old chain over the sets without a `recording` field, minus the sets in `no_sleep` (stems that "Not sleep"
+    named). A set with `recording` is never chained here (span_nights() makes its nights) unless `include_recorded`
+    (phone_night_check, which reads the recorders' logs, not spans)."""
     out: list[Night] = []
     for r in recs:
+        if (r.recording is not None and not include_recorded) or r.stem in no_sleep:
+            continue
         if out:
             n = out[-1]
             near = r.start - n.end < CHAIN_GAP_S or evening_date(r.start) == n.name
@@ -151,9 +196,120 @@ def nights(recs: list[Rec]) -> list[Night]:
     return out
 
 
-def recent_nights(folder: Path, now: float, hours: float = WINDOW_H) -> list[Night]:
+AUTO = None  # spans_dir: the sibling `spans/` of a folder named `recordings`, else none
+# source -> span_from (auto_resume: the app opened the stretch when the headband came back after the 60-minute rule)
+SPAN_FROM = {"owner_button": "pressed", "owner_confirmed": "confirmed", "auto_start": "auto", "auto_resume": "auto"}
+
+
+def spans_folder(folder: Path, spans_dir: Path | None = AUTO) -> Path | None:
+    """Where the spans files of the recordings in `folder` are (None: nowhere)."""
+    if spans_dir is not None:
+        return Path(spans_dir)
+    folder = Path(folder)
+    return folder.parent / "spans" if folder.name == "recordings" else None
+
+
+def _usable(files: dict[str, spans_mod.SpansFile], nap: bool) -> list[tuple[str, spans_mod.Span]]:
+    """(recording id, span) of every closed sleep (or nap) span a report may come from, oldest first."""
+    want = "nap" if nap else "sleep"
+    out = [(rid, s) for rid, f in files.items() for s in f.spans
+           if s.kind == want and s.source in SPAN_FROM and s.end_unix is not None and s.end_unix > s.start_unix]
+    return sorted(out, key=lambda x: (x[1].start_unix, x[1].span))
+
+
+def _overlapping(recs: list[Rec], rid: str, a: float, b: float) -> list[Rec]:
+    return [r for r in recs if r.recording == rid and r.start < b and r.end > a]
+
+
+def _from_word(sources: list[str]) -> str:
+    words = [SPAN_FROM[x] for x in sources]
+    return next((w for w in ("pressed", "confirmed", "auto") if w in words), "auto")
+
+
+def span_nights(recs: list[Rec], files: dict[str, spans_mod.SpansFile]) -> list[Night]:
+    """Nights from closed sleep spans (module docstring); a span with no file set under it gives nothing."""
+    out: list[tuple[Night, list[str]]] = []
+    for rid, s in _usable(files, nap=False):
+        under = _overlapping(recs, rid, s.start_unix, s.end_unix)
+        if not under:
+            continue
+        if out:
+            n, sources = out[-1]
+            in_time = s.start_unix - n.start < MAX_SPAN_S
+            by_gap = s.start_unix - n.end < CHAIN_GAP_S
+            by_date = evening_date(s.start_unix) == n.name
+            stray = ""
+            if in_time and by_date and not by_gap:
+                # joined by the evening date alone, hours apart: a short stray stretch is no part of the night
+                if sum(b - a for a, b in n.windows or []) < STRAY_UNDER_S:
+                    stray = "before"
+                elif s.end_unix - s.start_unix < STRAY_UNDER_S:
+                    stray = "this"
+            if stray == "this":
+                continue
+            if stray == "before":
+                out.pop()
+            elif in_time and (by_gap or by_date):
+                n.windows.append((s.start_unix, s.end_unix))  # type: ignore[union-attr]
+                n.recs.extend(r for r in under if r not in n.recs)
+                n.span_ids.append(s.span)
+                if rid not in n.recording_ids:
+                    n.recording_ids.append(rid)
+                sources.append(s.source)
+                continue
+        out.append((Night(evening_date(s.start_unix), list(under), [(s.start_unix, s.end_unix)], [rid], [s.span]),
+                    [s.source]))
+    for n, sources in out:
+        n.recs.sort(key=lambda r: (r.start, r.path.name))
+        n.span_from = _from_word(sources)
+    return [n for n, _ in out]
+
+
+def naps(folder: Path, spans_dir: Path | None = AUTO, on_bad: Callable[[Path, Exception], None] | None = None
+         ) -> list[Night]:
+    """Nap spans, one Night each (never joined), named by the span's start stamp YYYY-MM-DD-HHMMSS."""
+    sdir = spans_folder(folder, spans_dir)
+    if sdir is None:
+        return []
+    recs, files = recordings(folder, on_bad), spans_mod.in_folder(sdir)
+    out = []
+    for rid, s in _usable(files, nap=True):
+        under = _overlapping(recs, rid, s.start_unix, s.end_unix)
+        if under:
+            name = datetime.fromtimestamp(s.start_unix).strftime("%Y-%m-%d-%H%M%S")
+            out.append(Night(name, under, [(s.start_unix, s.end_unix)], [rid], [s.span], _from_word([s.source])))
+    return out
+
+
+def _merge(old: Night, new: Night) -> Night:
+    """An old chain and a span night of one evening date: one night (module docstring)."""
+    wins = sorted([(r.start, r.end) for r in old.recs] + list(new.windows or []))
+    merged: list[tuple[float, float]] = []
+    for a, b in wins:
+        if merged and a <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+        else:
+            merged.append((a, b))
+    recs = sorted({r.path: r for r in old.recs + new.recs}.values(), key=lambda r: (r.start, r.path.name))
+    return Night(new.name, recs, merged, new.recording_ids, new.span_ids, new.span_from)
+
+
+def all_nights(folder: Path, spans_dir: Path | None = AUTO,
+               on_bad: Callable[[Path, Exception], None] | None = None) -> list[Night]:
+    """Every night in `folder`, oldest first: the old chain of the sets without a `recording` field (minus the sets
+    "Not sleep" named) and the nights of the closed sleep spans."""
+    recs = recordings(folder, on_bad)
+    sdir = spans_folder(folder, spans_dir)
+    files = spans_mod.in_folder(sdir) if sdir is not None else {}
+    by_name = {n.name: n for n in nights(recs, spans_mod.no_sleep_of(files))}
+    for n in span_nights(recs, files):
+        by_name[n.name] = _merge(by_name[n.name], n) if n.name in by_name else n
+    return sorted(by_name.values(), key=lambda n: (n.start, n.name))
+
+
+def recent_nights(folder: Path, now: float, hours: float = WINDOW_H, spans_dir: Path | None = AUTO) -> list[Night]:
     """Nights with data in the last `hours` hours, oldest first."""
-    return [n for n in nights(recordings(folder)) if n.end >= now - hours * 3600 and n.start <= now]
+    return [n for n in all_nights(folder, spans_dir) if n.end >= now - hours * 3600 and n.start <= now]
 
 
 def read_json(path: Path) -> dict | None:
@@ -170,9 +326,15 @@ def read_report(nights_dir: Path, name: str) -> dict | None:
 
 def is_stale(night: Night, report: dict | None) -> bool:
     """True when the night has no report, an older kind of report (another version, or version 2 from before
-    `drift_off` or the dream sleep check `rem_check`), or 10+ minutes of samples the report lacks."""
-    if report is None or report.get("version") != VERSION or "drift_off" not in report or "rem_check" not in report:
+    `drift_off`, the dream sleep check `rem_check` or the walking veto `walking`), or 10+ minutes of samples the
+    report lacks."""
+    if (report is None or report.get("version") != VERSION or "drift_off" not in report or "rem_check" not in report
+            or "walking" not in report):
         return True
+    if night.windows is not None:  # the sleep spans fix what is read: a growing file around them changes nothing
+        sp = report.get("span")
+        return not isinstance(sp, dict) or sp.get("spans") != night.span_ids or \
+            sp.get("windows") != [list(w) for w in night.windows]
     done = {i.get("file"): int(i.get("bytes", 0)) for i in report.get("inputs", []) if isinstance(i, dict)}
     now = {r.path.name: r.size for r in night.recs}
     if set(done) - set(now) or any(now[f] < b for f, b in done.items()):
@@ -238,8 +400,9 @@ def drift_check_line(agree: int, nights: int) -> str:
     return f"{head} (the newest 5): {'trusted' if agree >= CHECK_NEEDED else 'not yet trusted (needs 4 of 5)'}"
 
 
-def stale_nights(rec_dir: Path, nights_dir: Path, now: float, hours: float = WINDOW_H) -> list[Night]:
-    return [n for n in recent_nights(rec_dir, now, hours) if is_stale(n, read_report(nights_dir, n.name))]
+def stale_nights(rec_dir: Path, nights_dir: Path, now: float, hours: float = WINDOW_H,
+                 spans_dir: Path | None = AUTO) -> list[Night]:
+    return [n for n in recent_nights(rec_dir, now, hours, spans_dir) if is_stale(n, read_report(nights_dir, n.name))]
 
 
 def reports(nights_dir: Path) -> list[Path]:

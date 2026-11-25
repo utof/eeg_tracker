@@ -87,25 +87,30 @@ void appendLogLine(File log, String message, DateTime at) =>
 /// Buffers samples in memory; [append] adds them to the files (call it about once a second) and
 /// [sync] also flushes them to disk with fsync (about every 10 s). Add-only: nothing is ever rewritten.
 class ChunkWriter {
-  ChunkWriter._(this.stem, this.header, this._data, this._index, this._log) : _recordBytes = header.recordBytes;
+  ChunkWriter._(this.stem, this.header, this.opened, this._data, this._index, this._log) : _recordBytes = header.recordBytes;
 
   /// Opens a new file set in [dir] named after [start], its [header] (the BrainBit's unless said) written first. If
   /// that stem is taken (two runs in the same second), the next free second is used, so two runs never share one
   /// `.idx` numbering.
-  static ChunkWriter open(Directory dir, DateTime start, {RecordingHeader? header}) {
-    final h = header ?? brainBitHeader;
+  static ChunkWriter open(Directory dir, DateTime start, {RecordingHeader? header, bool inRecording = false, String? recording}) {
+    var h = header ?? brainBitHeader;
     dir.createSync(recursive: true);
     var t = start;
     while (File('${dir.path}/${fileStem(t)}.f32').existsSync()) {
       t = t.add(const Duration(seconds: 1));
     }
     final stem = fileStem(t);
+    if (inRecording) h = h.inRecording(recording ?? stem);
     writeHeader(File('${dir.path}/$stem.f32'), h);
     RandomAccessFile f(String ext) => File('${dir.path}/$stem.$ext').openSync(mode: FileMode.append);
-    return ChunkWriter._(stem, h, f('f32'), f('idx'), f('log'));
+    return ChunkWriter._(stem, h, start, f('f32'), f('idx'), f('log'));
   }
 
   final String stem;
+
+  /// When the set was opened (the caller's clock): a long recording goes on in a new set after a while
+  /// (night_recorder.dart, DECISIONS 1035).
+  final DateTime opened;
 
   /// What each record holds; every sample must have [RecordingHeader.count] channels.
   final RecordingHeader header;
@@ -131,6 +136,9 @@ class ChunkWriter {
 
   int get samplesReceived => _received;
   int get samplesWritten => _written;
+
+  /// Bytes of samples in the `.f32` so far.
+  int get bytesWritten => _written * _recordBytes;
   bool get isClosed => _closed;
 
   /// Buffers one batch as it arrived from the headband: one `.idx` row, then one `.f32` row per sample. A sample whose

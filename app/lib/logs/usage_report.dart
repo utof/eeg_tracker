@@ -5,7 +5,7 @@ import 'activity.dart' show featureLabel;
 
 /// The app's screens the owner can open, with their words: a screen not seen in the period is "not opened".
 const Map<String, String> knownScreens = {
-  'tab:Night': 'Night tab',
+  'tab:Record': 'Record tab',
   'tab:Sessions': 'Sessions tab',
   'tab:Signal': 'Signal tab',
   'tab:Trends': 'Trends tab',
@@ -25,6 +25,8 @@ const Map<String, String> knownScreens = {
   'ExportScreen': 'Export data',
   'SettingsScreen': 'Settings',
   'ExperimentsScreen': 'Self-experiments',
+  'SleepExperimentsScreen': 'Sleep experiments',
+  'SleepExperimentSetup': 'New sleep experiment',
   'SharpHoursScreen': 'Sharp hours',
   'StudyScreen': 'Study reminders',
   'TrainingSettingsScreen': 'Training settings',
@@ -35,8 +37,18 @@ const Map<String, String> knownScreens = {
   'BatteryScreen': 'Battery',
 };
 
+/// Screens an older build wrote under another name: the first tab was `Night` before Record first (DECISIONS 880).
+const Map<String, String> renamedScreens = {'tab:Night': 'tab:Record'};
+
+/// [e] as the current names say it: an old log's `tab:Night` is `tab:Record`, in `screen` of any line.
+Map<String, Object?> _current(Map<String, Object?> e) {
+  final now = renamedScreens[e['screen']];
+  return now == null ? e : {...e, 'screen': now};
+}
+
 /// A screen's words: the known ones by name, any other page's widget name split into words.
-String screenLabel(String screen) {
+String screenLabel(String name) {
+  final screen = renamedScreens[name] ?? name;
   final known = knownScreens[screen];
   if (known != null) return known;
   if (screen.startsWith('tab:')) return '${screen.substring(4)} tab';
@@ -115,9 +127,10 @@ UsageSummary usageSummary(
   required DateTime now,
   List<Map<String, Object?>> auto = const [],
 }) {
+  metrics = [for (final m in metrics) _current(m)];
   final ev = [
     for (final e in usage)
-      if (_t(e) case final t? when !t.isBefore(since) && !t.isAfter(now)) (t, e),
+      if (_t(e) case final t? when !t.isBefore(since) && !t.isAfter(now)) (t, _current(e)),
   ]..sort((a, b) => a.$1.compareTo(b.$1));
   final screens = _screens(ev, now);
   final perDay = <String, Duration>{};

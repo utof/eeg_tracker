@@ -94,7 +94,7 @@ void main() {
       expect(n.kind, ArchiveKind.night);
       expect(n.kind.tag, 'sleep');
       expect(n.started.how, StartedHow.hand);
-      expect(n.started.words, 'You: Start night');
+      expect(n.started.words, 'You: Record or Sleep');
       expect(n.started.byYou, isTrue);
       expect(n.start, at(23, 0));
       expect(n.end.isAfter(at(23, 41)), isTrue);
@@ -150,6 +150,24 @@ void main() {
       // newest first, one day
       expect([for (final i in l.items) i.id], ['2026-11-18-160000', nap, '2026-11-18-090000']);
       expect(l.days.single.$1, '2026-11-18');
+    });
+
+    test('a work session that ran as an activity of a recording is listed inside it and does not rename it', () {
+      // Record at 10:00, Work on it from 10:05 (Record first step 4): the work file names the recording and its span
+      final day = writeSet(rec, at(10, 0), seconds: 120, log: ['connected BB Black serial 1 battery 90% signal -60 dBm']);
+      writeJson(File('${files.path}/work-sessions/2026-11-18-100500.work.json'), {
+        'start': at(10, 5).toIso8601String(),
+        'end': at(10, 40).toIso8601String(),
+        'raw': day,
+        'recording': day,
+        'span': '$day-1',
+      });
+      final l = listArchive(files);
+      expect(l.items, hasLength(1), reason: 'the session is part of the recording, not an item of its own');
+      final item = only(l, day);
+      expect(item.kind, isNot(ArchiveKind.work), reason: 'the recording was started by Record, not by Work');
+      expect(item.sessions.single.path, 'work-sessions/2026-11-18-100500.work.json');
+      expect(item.sessions.single.rides, isTrue);
     });
 
     test('a meditation\'s whole log is its raw signal', () {
@@ -210,7 +228,7 @@ void main() {
       final b = only(l, board);
       expect(b.kind, ArchiveKind.board);
       expect(b.sets.single.names, hasLength(8));
-      expect(b.started.words, 'You: Start night (DIY board)');
+      expect(b.started.words, 'You: Record or Sleep (DIY board)');
       expect(only(l, old).sets.single.names, ['O1', 'O2', 'T3', 'T4']);
       final p = only(l, packed).sets.single;
       expect(p.files, contains('$packed.f32.gz'));

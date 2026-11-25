@@ -20,9 +20,9 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import '../detectors/filters.dart' show Chain, highPass, lowPass;
+import '../detectors/filters.dart' show Chain;
+import '../detectors/harmonic.dart';
 import '../feedback/features.dart' show median;
-import '../sleep/dsp.dart' show Fft;
 
 /// The detector's version: a walk file of another one is made again.
 const String walkDetector = 'walk-v2';
@@ -31,7 +31,6 @@ const String walkDetector = 'walk-v2';
 abstract final class WalkRule {
   static const double windowS = 10, hopS = 5;
   static const double highPassHz = 0.7, lowPassHz = 20;
-  static final List<double> butterQ = [1 / (2 * math.cos(math.pi / 8)), 1 / (2 * math.cos(3 * math.pi / 8))];
   static const double binHz = 250 / 8192;
   static const double whitenHz = 41 * binHz;
   static const double paceLoHz = 1.2, paceStepHz = 0.02;
@@ -52,41 +51,17 @@ abstract final class WalkRule {
 }
 
 /// The smallest power of two whose bins are at most [WalkRule.binHz] wide (8192 at 250 a second).
-int walkNfft(num rate) {
-  var n = 1;
-  while (rate / n > WalkRule.binHz * (1 + 1e-12)) {
-    n *= 2;
-  }
-  return n;
-}
-
-/// Python's round(): halves go to the even neighbour.
-int _roundEven(double v) {
-  final f = v.floorToDouble(), d = v - f;
-  if (d > 0.5) return f.toInt() + 1;
-  if (d < 0.5) return f.toInt();
-  return f.toInt().isEven ? f.toInt() : f.toInt() + 1;
-}
+int walkNfft(num rate) => harmonicNfft(rate, WalkRule.binHz);
 
 /// The odd number of bins nearest to [WalkRule.whitenHz] (41 at 250 a second).
-int walkWhitenBins(num rate) => 2 * _roundEven((WalkRule.whitenHz / (rate / walkNfft(rate)) - 1) / 2) + 1;
+int walkWhitenBins(num rate) => harmonicWhitenBins(rate, WalkRule.binHz, WalkRule.whitenHz);
 
 /// The candidate step rates (Hz).
 final Float64List walkRates = Float64List.fromList([
   for (var k = 0; k < WalkRule.paceRates; k++) WalkRule.paceLoHz + k * WalkRule.paceStepHz,
 ]);
 
-/// Linear interpolation of [w] (bin k at k * [bin]) at [x]: np.interp's formula.
-double _interp(double x, double bin, Float64List w) {
-  var j = (x / bin).floor();
-  if ((j + 1) * bin <= x) {
-    j++;
-  } else if (j * bin > x) {
-    j--;
-  }
-  final x0 = j * bin, x1 = (j + 1) * bin;
-  return (w[j + 1] - w[j]) / (x1 - x0) * (x - x0) + w[j];
-}
+const List<double> _family = [1, WalkRule.harmonic];
 
 /// One 10 s window.
 class WalkWindow {
@@ -117,19 +92,18 @@ class WalkWindow {
 }
 
 /// The windows of a recording, sample by sample (every channel of its rows, µV): [push] each row, then [windows].
+/// With [quick] only whether each window walks is wanted (the sleep scorers' and the pulse's veto): a window whose
+/// shake is under walking size is read without its spectrum (score and pace NaN); every window's
+/// [WalkWindow.walks] is the same either way.
 class WalkWindows {
-  WalkWindows(this.channels, this.rate)
-    : win = _roundEven(WalkRule.windowS * rate),
-      hop = _roundEven(WalkRule.hopS * rate),
+  WalkWindows(this.channels, this.rate, {this.quick = false})
+    : win = roundEven(WalkRule.windowS * rate),
+      hop = roundEven(WalkRule.hopS * rate),
       nfft = walkNfft(rate),
       wb = walkWhitenBins(rate) {
-    final lo = math.min(WalkRule.lowPassHz, 0.4 * rate);
     _chains = [
       for (var c = 0; c < channels; c++)
-        Chain([
-          for (final q in WalkRule.butterQ) highPass(WalkRule.highPassHz, q: q, sampleRate: rate),
-          for (final q in WalkRule.butterQ) lowPass(lo, q: q, sampleRate: rate),
-        ]),
+        bandPass(rate, highPassHz: WalkRule.highPassHz, lowPassHz: WalkRule.lowPassHz),
     ];
     _y = [for (var c = 0; c < channels; c++) Float64List(win)];
     _x = [for (var c = 0; c < channels; c++) Float64List(win)];
@@ -137,24 +111,24 @@ class WalkWindows {
     _bin = rate / nfft;
     _lo = math.max(0, (walkRates.first / 3 / _bin).floor());
     _hi = (2 * walkRates.last / _bin).floor() + 1;
-    _hann = Float64List.fromList([for (var i = 0; i < win; i++) 0.5 - 0.5 * math.cos(2 * math.pi * i / win)]);
-    _fft = Fft(nfft);
-    _re = Float64List(nfft);
-    _im = Float64List(nfft);
+    _hann = hannWindow(win);
+    _p = Float64List(_hi + wb ~/ 2 + 1);
+    _w = Float64List(_hi + 1);
   }
 
   final int channels;
   final int rate;
+  final bool quick;
   final int win, hop, nfft, wb;
   late final List<Chain> _chains;
   late final List<Float64List> _y, _x;
   late final Uint8List _miss;
   late final double _bin;
+
   /// The bins whitened: from a third of the slowest rate to twice the fastest.
   late final int _lo, _hi;
-  late final Float64List _hann;
-  late final Fft _fft;
-  late final Float64List _re, _im;
+  late final Float64List _hann, _p, _w;
+  PairSpectrum? _pair; // made at the first window that needs a spectrum (a quick pass over sleep never does)
   var _n = 0, _missing = 0;
   final List<WalkWindow> windows = [];
 
@@ -192,28 +166,19 @@ class WalkWindows {
       ranges.add(rng);
     }
     if (used.isEmpty) return WalkWindow(t, double.nan, double.nan, double.nan, 0, false);
+    final amp = median(ranges);
+    if (quick && amp < WalkRule.minShakeUv) return WalkWindow(t, double.nan, double.nan, amp, used.length, true);
     final tot = Float64List(WalkRule.paceRates);
     final wsum = Float64List(_hi + 1);
-    // two channels in one complex transform: the first in the real part, the second in the imaginary part
+    final pair = _pair ??= PairSpectrum(nfft);
     for (var u = 0; u < used.length; u += 2) {
       final a = used[u], b = u + 1 < used.length ? used[u + 1] : -1;
-      _re.fillRange(0, nfft, 0);
-      _im.fillRange(0, nfft, 0);
-      _load(_y[a], from, _re);
-      if (b >= 0) _load(_y[b], from, _im);
-      _fft.transform(_re, _im);
-      _score(tot, wsum, (k) {
-        final j = k == 0 ? 0 : nfft - k;
-        final xr = (_re[k] + _re[j]) / 2, xi = (_im[k] - _im[j]) / 2;
-        return xr * xr + xi * xi;
-      });
-      if (b >= 0) {
-        _score(tot, wsum, (k) {
-          final j = k == 0 ? 0 : nfft - k;
-          final yr = (_im[k] + _im[j]) / 2, yi = -(_re[k] - _re[j]) / 2;
-          return yr * yr + yi * yi;
-        });
-      }
+      pair.clear();
+      pair.load(_y[a], from, _hann, ring: true);
+      if (b >= 0) pair.load(_y[b], from, _hann, second: true, ring: true);
+      pair.transform();
+      _score(tot, wsum, pair.first);
+      if (b >= 0) _score(tot, wsum, pair.second);
     }
     var best = 0;
     for (var k = 0; k < tot.length; k++) {
@@ -224,42 +189,25 @@ class WalkWindows {
     }
     final score = tot[best] / median(tot);
     final f0 = walkRates[best];
-    final thirds = (_interp(f0 / 3, _bin, wsum) + _interp(2 * f0 / 3, _bin, wsum)) / 2 / used.length;
-    return WalkWindow(t, score, walkRates[best] * 60, median(ranges), used.length, true, thirds);
-  }
-
-  /// The ring's window from [from], its mean removed and the Hann window on, into [out] (zero-padded).
-  void _load(Float64List ring, int from, Float64List out) {
-    var sum = 0.0;
-    for (var i = 0; i < win; i++) {
-      sum += ring[(from + i) % win];
-    }
-    final mean = sum / win;
-    for (var i = 0; i < win; i++) {
-      out[i] = (ring[(from + i) % win] - mean) * _hann[i];
-    }
+    final thirds = (interpAt(f0 / 3, _bin, wsum) + interpAt(2 * f0 / 3, _bin, wsum)) / 2 / used.length;
+    return WalkWindow(t, score, walkRates[best] * 60, amp, used.length, true, thirds);
   }
 
   /// Adds one channel's harmonic score to [tot] and its whitened spectrum to [wsum], its power at bin k from [power].
   void _score(Float64List tot, Float64List wsum, double Function(int k) power) {
-    final half = wb ~/ 2;
-    final p = Float64List(_hi + half + 1);
-    for (var k = 0; k <= _hi + half && k <= nfft ~/ 2; k++) {
+    final p = _p, w = _w;
+    final top = math.min(p.length - 1, nfft ~/ 2);
+    p.fillRange(0, p.length, 0);
+    for (var k = 0; k <= top; k++) {
       p[k] = power(k);
     }
-    final w = Float64List(_hi + 1);
+    w.fillRange(0, w.length, 0);
+    whitenInto(p, _lo, _hi, wb, w);
     for (var k = _lo; k <= _hi; k++) {
-      // each bin over the mean of the wb around it (zeros below bin 0)
-      var s = 0.0;
-      for (var j = math.max(0, k - half); j <= k + half; j++) {
-        s += p[j];
-      }
-      w[k] = p[k] / (s / wb);
       wsum[k] += w[k];
     }
     for (var i = 0; i < WalkRule.paceRates; i++) {
-      final f = walkRates[i];
-      tot[i] += _interp(f, _bin, w) + WalkRule.harmonic * _interp(2 * f, _bin, w);
+      tot[i] += familyAt(walkRates[i], _bin, w, _family);
     }
   }
 }
@@ -408,6 +356,78 @@ WalkFound findWalks(List<WalkWindow> ws) {
   return WalkFound(ws, smoothed, moving, walks);
 }
 
+/// Walking per 30 s epoch (the sleep scorers' and the pulse's epoch), DECISIONS 920.
+abstract final class WalkEpoch {
+  static const double epochS = 30;
+
+  /// Windows whose middle lies in one epoch (6).
+  static final int windows = (epochS / WalkRule.hopS).round();
+
+  /// An epoch is walking with this many of them in a walking stretch (half).
+  static final int walkWindows = windows ~/ 2;
+}
+
+/// Whether epoch [e] (30 s, counted from the recording's first sample) is walking: at least half of the windows whose
+/// middle lies in it belong to a walking or running stretch (a run of 30 s or more of the 7-window majority of
+/// [flags], each window's own [WalkWindow.walks]). Reads only the windows up to 40 s either side of the epoch, so the
+/// live scorer, which knows the signal up to 2 minutes past the epoch, gets what the whole recording gives. Stops
+/// inside a walk are not walking. analysis/walking.py `epoch_walks`.
+bool walkEpochWalks(List<bool> flags, int e) {
+  final n = flags.length;
+  final per = WalkEpoch.windows;
+  final a = per * e - 1, b = per * e + per - 2; // middles at 5 i + 5 s in [30 e, 30 e + 30)
+  final minLen = (WalkRule.minStretchS / WalkRule.hopS).ceil();
+  final lo = math.max(0, a - minLen + 1), hi = math.min(n - 1, b + minLen - 1);
+  if (hi < lo) return false;
+  const half = WalkRule.smoothWindows ~/ 2;
+  var count = 0, run = -1; // run: where the current run of the majority began (index), -1 outside one
+  void close(int last) {
+    if (run >= 0 && last - run + 1 >= minLen) {
+      final int from = a > run ? a : run, to = b < last ? b : last;
+      if (to >= from) count += to - from + 1;
+    }
+    run = -1;
+  }
+
+  for (var i = lo; i <= hi; i++) {
+    var yes = 0, all = 0;
+    for (var j = math.max(0, i - half); j <= i + half && j < n; j++) {
+      all++;
+      if (flags[j]) yes++;
+    }
+    if (yes * 2 > all) {
+      if (run < 0) run = i;
+    } else {
+      close(i - 1);
+    }
+  }
+  close(hi);
+  return count >= WalkEpoch.walkWindows;
+}
+
+/// Walking or not for each of [epochs] 30 s epochs from the recording's first sample ([walkEpochWalks]).
+List<bool> walkingEpochs(List<WalkWindow> ws, int epochs) {
+  final flags = [for (final w in ws) w.walks];
+  return [for (var e = 0; e < epochs; e++) walkEpochWalks(flags, e)];
+}
+
+/// The stages that the veto turns awake.
+const Set<String> walkVetoStages = {'N1', 'N2', 'N3', 'R'};
+
+/// [stages] with every asleep epoch (N1 N2 N3 R) that is [walking] scored awake: nobody sleeps while walking, and
+/// the step shake reads as slow waves to a sleep model. Gaps and wake stay. The stages and how many changed.
+(List<String>, int) walkingVeto(List<String> stages, List<bool> walking) {
+  final out = List<String>.of(stages);
+  var changed = 0;
+  for (var e = 0; e < out.length && e < walking.length; e++) {
+    if (walking[e] && walkVetoStages.contains(out[e])) {
+      out[e] = 'W';
+      changed++;
+    }
+  }
+  return (out, changed);
+}
+
 /// The phone's steps per clock minute (key: unix seconds of the minute's start) from its step counter's readings
 /// (unix seconds, steps since the phone started): the steps between two readings at most [WalkRule.phoneMaxGapS]
 /// apart go to the minute holding the middle of that time (a longer time in minute-long parts); a counter that went
@@ -419,7 +439,7 @@ Map<int, double> phoneMinutes(List<(double, int)> readings) {
     final (t0, c0) = rs[i];
     final (t1, c1) = rs[i + 1];
     if (t1 <= t0 || t1 - t0 > WalkRule.phoneMaxGapS || c1 < c0) continue;
-    final parts = math.max(1, _roundEven((t1 - t0) / 60));
+    final parts = math.max(1, roundEven((t1 - t0) / 60));
     for (var j = 0; j < parts; j++) {
       final mid = t0 + (j + 0.5) * (t1 - t0) / parts;
       final m = (mid / 60).floor() * 60;

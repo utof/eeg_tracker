@@ -28,7 +28,7 @@ ICONS = HERE.parent / "tray-icons"
 POLL_S = 60          # ActivityWatch is read this often
 RENDER_S = 20        # the menu's clock lines are redrawn this often
 N_LINES = 5
-N_PHONE = 3          # the phone's lines: the phone, the headband, a break from the phone
+N_PHONE = 4          # the phone's lines: the phone, when it sent its files by itself, the headband, a break
 ICON_WORDS = {"working": "Working", "break": "On a break", "idle": "Not in a work session",
               "attention": "Waiting for an answer"}
 RING_WORDS = {"none": "", "dashed": "; phone not reachable", "amber": "; headband not recording",

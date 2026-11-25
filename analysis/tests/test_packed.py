@@ -274,7 +274,7 @@ def test_the_nights_and_their_samples_read_the_same_packed(tmp_path: Path) -> No
     again = to_bdf.join([a, b])
     assert again[0] == joined[0] and np.array_equal(again[1], joined[1]) and again[2] == joined[2]
     night = nf.nights(nf.recordings(rec))[0]
-    report = dict(version=nf.VERSION, drift_off=None, rem_check=None,
+    report = dict(version=nf.VERSION, drift_off=None, rem_check=None, walking=None,
                   inputs=[dict(file=r.path.name, bytes=r.size) for r in plain_recs])
     assert not nf.is_stale(night, report)  # a report made before packing stays up to date
 

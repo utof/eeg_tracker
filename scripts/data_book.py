@@ -15,8 +15,11 @@ is in docs/data-format.md ("The data book"). It reads `_local/` and writes only 
                  and movement (analysis/epoch_signal.py)
   labels.tsv     append-only, one row per label from eeg_tracker's own stores (Archive tags, auto-start answers,
                  work-session hints and taps, markers, the tray's answers, check-in answers)
+  estimates.tsv  what the phone's detectors thought happened, and the owner's Yes / No / Not sure to each (DECISIONS
+                 860-869); a Yes or a No is also a row of truth.tsv
   truth.tsv      what really happened, typed (scripts/truth.py): the hand file, <local>/truth/*.tsv and the Archive
                  tags marked "This is what I was doing"; scripts/validate_detectors.py scores the detectors against it
+  spans.tsv      one row per span of every recording: what you were doing in it (scripts/spans.py)
   README.md, book.json   what is there, how it was built (versions, row counts, time)
 
 Built from the files alone, so it can always be built again (delete the folder and run this); nothing reads it back
@@ -50,6 +53,7 @@ import packed  # noqa: E402
 import phone_night_check as pnc  # noqa: E402  (the recorders' log lines, batteries, contact)
 import recording  # noqa: E402
 import rem_check as rc  # noqa: E402  (the dream sleep check; standard library part)
+import spans  # noqa: E402  (what you were doing in a recording, Record first)
 import truth  # noqa: E402  (the truth labels' schema and sources, DECISIONS 820-829)
 
 FORMAT, VERSION = "eeg-tracker-data-book", 1  # VERSION: of the tables' columns (docs/data-format.md)
@@ -59,7 +63,8 @@ STAGE = {"W": "W", "1": "N1", "2": "N2", "3": "N3", "R": "R", "-": "gap"}
 PROB_KEYS = ("p_W", "p_N1", "p_N2", "p_N3", "p_R")
 QUALITY_WORD = {"g": "good", "d": "degraded", "m": "missing"}
 DEFAULT_LOCAL = ROOT / "_local"
-TABLES = ("nights.tsv", "sessions.tsv", "days.tsv", "epochs.tsv.gz", "labels.tsv", "truth.tsv")
+TABLES = ("nights.tsv", "sessions.tsv", "days.tsv", "epochs.tsv.gz", "labels.tsv", "truth.tsv", "spans.tsv",
+          "estimates.tsv")
 
 
 # ---- cells and files ------------------------------------------------------------------------------------------------
@@ -503,7 +508,7 @@ def write_epochs(out: Path, groups: list[Group], metas: dict[str, dict], store: 
 # ---- nights.tsv -----------------------------------------------------------------------------------------------------
 
 NIGHT_COLUMNS = [
-    "night", "kind", "source", "counts", "scored", "wearer", "start", "end", "sleep_start", "sleep_end",
+    "night", "kind", "source", "recording", "span_ids", "span_from", "counts", "scored", "wearer", "start", "end", "sleep_start", "sleep_end",
     "recorded_min", "missing_min", "in_bed_min", "asleep_min", "light_min", "deep_min", "dream_min",
     "awake_in_sleep_min", "wake_ups", "periods", "efficiency_pct", "fall_asleep_min", "lights_off_from",
     "drift_detector_min", "drift_agree",
@@ -642,6 +647,18 @@ def _morning(row: dict | None, local: Path, hashes: Hashes) -> tuple[dict, list[
     return out, pairs
 
 
+def _span_info(nrow: dict, rep: Report | None) -> dict:
+    """`recording`, `span_ids`, `span_from` of a night: from the spans that made it (the catalog's row), else from the
+    report's own `span` field (a phone report), else an old night: empty but `span_from` = migrated."""
+    if nrow.get("span_from") and nrow.get("recording"):
+        return dict(recording=nrow["recording"], span_ids=nrow["span_ids"], span_from=nrow["span_from"])
+    sp = rep.data.get("span") if rep is not None else None
+    if isinstance(sp, dict) and isinstance(sp.get("recording"), list) and isinstance(sp.get("spans"), list):
+        return dict(recording=" ".join(map(str, sp["recording"])), span_ids=" ".join(map(str, sp["spans"])),
+                    span_from=sp.get("from") if isinstance(sp.get("from"), str) else None)
+    return dict(recording=None, span_ids=None, span_from="migrated")
+
+
 def night_rows(local: Path, nights: list[dict], reports: dict[str, list[Report]], groups: list[Group],
                metas: dict[str, dict], hashes: Hashes, cache: Path) -> tuple[list[dict], list[str]]:
     by_id = {g.id: g for g in groups}
@@ -660,6 +677,7 @@ def night_rows(local: Path, nights: list[dict], reports: dict[str, list[Report]]
         wearer = wearer_of(reps)
         for i, rep in enumerate(reps or [None]):
             base: dict = dict(night=nrow["id"], counts=i == 0, wearer=wearer, raw_files=len(g.f32) if g else 0,
+                              **_span_info(nrow, rep),
                               **{k: v for k, v in logs.items() if k != "contact"}, **morning)
             base.update({f"contact_{k}_ohm": v for k, v in (logs.get("contact") or {}).items()})
             pairs = raw + mpairs
@@ -712,8 +730,8 @@ def _report_numbers(rep: Report, stages: list[str] | None, probs: list[list[int]
 SESSION_COLUMNS = [
     "session", "kind", "start", "end", "minutes", "ended", "started_by", "wearer", "worn_min", "usable_min",
     "talking_min", "meeting_min", "drowsy_min", "eyes_closed_min", "active_min", "settled_min", "asleep_min",
-    "breaks", "break_min", "hints", "hints_taken", "sharp_mean", "rating", "plan", "raw", "detector_version",
-    "file", "file_sha256",
+    "breaks", "break_min", "hints", "hints_taken", "sharp_mean", "rating", "plan", "raw", "recording", "span",
+    "detector_version", "file", "file_sha256",
 ]
 READ_LEVELS, DROWSY_LEVELS = {"alert", "getting_drowsy", "drowsy"}, {"getting_drowsy", "drowsy"}
 
@@ -756,7 +774,7 @@ def _phone_work(j: dict) -> dict:
                 talking_min=round(muscle / 60, 1), meeting_min=_num(j.get("meeting_min")),
                 eyes_closed_min=_num(minutes.get("eyes_closed")), active_min=_num(j.get("active_min")),
                 breaks=len(brk), break_min=brk_min, hints=len(hints), hints_taken=sum(h.get("taken") is True for h in hints),
-                sharp_mean=_r(sum(taps) / len(taps), 2) if taps else None, raw=j.get("raw"),
+                sharp_mean=_r(sum(taps) / len(taps), 2) if taps else None,
                 detector_version=f"{j.get('app')} v{j.get('version')}")
 
 
@@ -783,7 +801,10 @@ def session_rows(local: Path, hashes: Hashes) -> list[dict]:
                 continue
             rel = f.relative_to(local).as_posix()
             row = dict(session=f.name[: -len(suffix)], kind=kind, start=iso(j.get("start")), ended=j.get("ended"),
-                       wearer=ds._wearer(j), file=rel, file_sha256=hashes.sha(rel))  # noqa: SLF001
+                       wearer=ds._wearer(j), file=rel, file_sha256=hashes.sha(rel),  # noqa: SLF001
+                       raw=spans.own_raw(j), recording=None, span=None)
+            if spans.rode_on_recording(j):  # the day's recording and the span of it: join to spans.tsv
+                row.update(recording=j.get("recording"), span=j["span"])
             start = ds.parse_time(j["start"])
             if kind == "work" and j.get("kind") == "work_session":
                 row.update(_phone_work(j), end=iso(j.get("end")), minutes=_span_min(j.get("start"), j.get("end")))
@@ -798,7 +819,7 @@ def session_rows(local: Path, hashes: Hashes) -> list[dict]:
             elif kind == "nap_coach" and _num(j.get("endS")) is not None:
                 stages = j.get("stages") if isinstance(j.get("stages"), str) else ""
                 row.update(end=iso(start + timedelta(seconds=_num(j["endS"]) or 0)),
-                           minutes=round((_num(j["endS"]) or 0) / 60, 1), ended=j.get("end"), raw=j.get("recording"),
+                           minutes=round((_num(j["endS"]) or 0) / 60, 1), ended=j.get("end"),
                            asleep_min=sum(stages.count(c) for c in "123R") / 2,
                            detector_version=f"nap coach v{j.get('version')} (live stages)")
             elif kind == "sound":
@@ -806,13 +827,33 @@ def session_rows(local: Path, hashes: Hashes) -> list[dict]:
                 plan = j.get("plan") if isinstance(j.get("plan"), dict) else {}
                 row.update(end=iso(start + timedelta(seconds=end_s)) if end_s is not None else None,
                            minutes=_r(end_s / 60) if end_s is not None else None, ended=j.get("end"),
-                           raw=j.get("recording"), rating=j.get("rating"),
+                           rating=j.get("rating"),
                            plan=" ".join(str(plan.get(k)) for k in ("state", "bed", "beat") if plan.get(k)) or None,
                            detector_version=f"sound for states v{j.get('version')}")
             else:
                 continue
             rows.append(row)
     return sorted(rows, key=lambda r: (r["start"] or "", r["session"]))
+
+
+# ---- spans.tsv ------------------------------------------------------------------------------------------------------
+
+SPAN_COLUMNS = ["span_id", "recording", "kind", "label", "start", "end", "minutes", "source", "started_recording",
+                "ended_by", "session", "paused_minutes", "active_minutes", "estimate"]
+
+
+def span_rows(local: Path) -> list[dict]:
+    """One row per span of every spans file in `<local>/phone/spans/`, oldest recording first, spans in file order."""
+    rows = []
+    for rec_id, f in spans.all(local).items():
+        for s in f.spans:
+            rows.append(dict(span_id=s.span, recording=rec_id, kind=s.kind, label=s.label, start=iso(s.start_unix),
+                             end=iso(s.end_unix), minutes=_r(s.minutes), source=s.source,
+                             started_recording=s.started_recording, ended_by=s.ended_by, session=s.session,
+                             paused_minutes=_r(s.paused_minutes) if s.paused else None,
+                             active_minutes=_r(s.minutes - s.paused_minutes) if s.minutes is not None else None,
+                             estimate=s.estimate))
+    return rows
 
 
 # ---- days.tsv -------------------------------------------------------------------------------------------------------
@@ -1034,7 +1075,60 @@ def labels_now(local: Path) -> tuple[list[dict], set[str]]:
             if isinstance(src.get(key), int) and not isinstance(src.get(key), bool):
                 out.append(_label("check-in", dict(file=m["_file"].name, key=key, value=src[key]), rel, start=at,
                                   end=at, kind=kind, value=src[key], unit=unit, how_asked="check-in", answered=at))
+    answers = local / truth.CONFIRM_FOLDER / "answers.jsonl"
+    if answers.is_file():  # the phone's confirmation questions (DECISIONS 860-869): every answer, Not sure too
+        rel = answers.relative_to(local).as_posix()
+        read.add(rel)
+        for c in truth.read_confirm(local):
+            e = c.estimate
+            if c.answer in ("", "not_answered") or not ds.parse_time(e.get("start")):
+                continue  # silence is not a label
+            lab = e["label"]
+            said = c.said or c.words
+            out.append(_label("confirm", dict(estimate_id=e["id"], answer=c.answer, at=c.at), rel, start=iso(e["start"]),
+                              end=iso(e.get("end")), kind="activity",
+                              value={"yes": lab, "no": f"not {lab}", "said": said}.get(c.answer, "not sure"), unit="word",
+                              how_asked=f"question ({c.via})", app_guess=lab, answered=iso(c.at),
+                              detector_version=f"{e.get('detector')} {e.get('version')}"))
     return out, read
+
+
+ESTIMATE_COLUMNS = ["estimate_id", "start", "end", "recording", "kind", "label", "detector", "detector_version",
+                    "confidence", "yes_means", "made", "answer", "answered", "via", "label_id", "owner_words", "card",
+                    "said", "agrees", "times_confirmed", "confirmed_start", "confirmed_end", "shown",
+                    "seconds_to_answer", "age_min", "why_not"]
+
+
+def estimate_rows(local: Path) -> list[dict]:
+    """estimates.tsv: what the phone's detectors thought happened and what the owner said to each. `answer`: yes, no,
+    not_sure (its own answer, no label), said (a blind card: `said` is the label picked, `agrees` 1 when it is the
+    detector's guess), not_answered (`why_not` says why; never a Yes or a No), or empty: still waiting. An estimate
+    is not a label until it has a truth row (`label_id`; empty too for a Yes whose sleep stretch was taken away later). `times_confirmed` 1 only when the owner set the times
+    (`confirmed_start`, `confirmed_end`); `start` and `end` stay the detector's. Rebuilt whole from
+    `<local>/phone/confirm/` (truth.read_confirm)."""
+    rows = []
+    # a Yes whose sleep stretch was taken away afterwards has no truth row (truth.confirm_rows), so none is named:
+    # the Yes stays as what was said (DECISIONS 1044)
+    taken = truth.taken_away(local)
+    for c in truth.read_confirm(local):
+        e = c.estimate
+        row = None if c.answer == "yes" and e.get("id") in taken else truth.confirm_row(c)
+        conf = e.get("confidence")
+        yes = c.answer == "yes"
+        rows.append(dict(estimate_id=e["id"], start=iso(e.get("start")), end=iso(e.get("end")),
+                         recording=e.get("recording"), kind=e.get("kind"), label=e["label"], detector=e.get("detector"),
+                         detector_version=e.get("version"),
+                         confidence=conf if isinstance(conf, (int, float)) and not isinstance(conf, bool) else None,
+                         yes_means=e.get("yes_means"), made=iso(e.get("made")), answer=c.answer,
+                         answered=iso(c.at) if c.at else None, via=c.via, label_id=row["label_id"] if row else None,
+                         owner_words=": ".join(w for w in (c.words, c.note) if w), card=c.card, said=c.said,
+                         agrees=None if c.agrees is None else int(c.agrees),
+                         times_confirmed=int(c.times_confirmed) if yes else None,
+                         confirmed_start=iso(c.start) if c.times_confirmed else None,
+                         confirmed_end=iso(c.end) if c.times_confirmed else None,
+                         shown=iso(c.shown) if c.shown else None, seconds_to_answer=c.seconds, age_min=c.age_min,
+                         why_not=c.why_not))
+    return sorted(rows, key=lambda r: (r["start"] or "", r["estimate_id"]))
 
 
 def update_labels(path: Path, local: Path, now: datetime) -> tuple[int, int, int]:
@@ -1079,7 +1173,9 @@ Tidy tables of everything eeg_tracker measured on this laptop, made by `scripts/
 | `days.tsv` | day, 04:00 to 04:00 |
 | `epochs.tsv.gz` | 30 s of every recording (gzip; spreadsheets and pandas open it as it is or after `gunzip -k`) |
 | `labels.tsv` | label from the app's own stores (append-only: rows are only ever added) |
-| `truth.tsv` | truth label: what really happened, typed (`active` = 1: not corrected by a later row) |
+| `truth.tsv` | truth label: what really happened, typed (`active` = 1: not corrected by a later row; `present` = 0: it did not happen) |
+| `spans.tsv` | span: what you were doing in a recording (Record first): sleep, nap, work, meditate, ... |
+| `estimates.tsv` | what a detector thought happened and what you answered when the app asked (not a label until Yes or No) |
 | `validation.tsv`, `validation.md` | detector against truth label, and its summary (`scripts/validate_detectors.py`) |
 | `book.json` | how the last build went: versions, row counts, time, problems |
 
@@ -1107,7 +1203,16 @@ def build(local: Path, out: Path, now: datetime, full: bool = False, say: Callab
     problems: list[str] = []
     nights = catalog.nights_on(local)
     reports = read_reports(local, hashes)
+    # a report made from sleep spans that the owner has all taken away since ("Not sleep" on a stretch, DECISIONS
+    # 1025): the phone put its own away, the copies here must not make a night by themselves
+    taken = spans.taken_ids(local)
+    reports = {nid: kept for nid, reps in reports.items()
+               if (kept := [r for r in reps if not spans.report_all_taken(r.data, taken)])}
+    hidden = spans.hidden_nights(local)  # "Not sleep": a night no recording makes any more is left out, report and all
+    nights = [r for r in nights if r["raw"] or r["date"] not in hidden or r["source"] == "diy"]
     for nid, reps in reports.items():  # a report kept by hand whose night's raw files are gone: a row from it alone
+        if nid in hidden and not any(r["id"] == nid for r in nights):
+            continue
         if not any(r["id"] == nid for r in nights):
             nights.append(dict(catalog._row(nid, None, None), source=reps[0].source))  # noqa: SLF001
     nights.sort(key=lambda r: (r["date"], r["id"]))
@@ -1124,15 +1229,20 @@ def build(local: Path, out: Path, now: datetime, full: bool = False, say: Callab
     drows = day_rows(local, nrows, srows, hashes, now)
     _write(out / "days.tsv", tsv(DAY_COLUMNS, drows).encode())
     n_labels, added, removed = update_labels(out / "labels.tsv", local, now)
+    sprows = span_rows(local)
+    _write(out / "spans.tsv", tsv(SPAN_COLUMNS, sprows).encode())
     trows, rejected, from_where = truth.build(local)
     truth.write_table(out / "truth.tsv", trows)
+    erows = estimate_rows(local)
+    _write(out / "estimates.tsv", tsv(ESTIMATE_COLUMNS, erows).encode())
     hashes.save()
     import epoch_signal as es
     book = dict(format=FORMAT, version=VERSION, built=iso(now), seconds=round(time.time() - t0, 1),
                 local=str(local), signal_version=es.VERSION, measures_version=ds.MEASURES_VERSION,
                 models=sorted({r["model"] for r in nrows if r.get("model")}),
                 rows={"nights.tsv": len(nrows), "sessions.tsv": len(srows), "days.tsv": len(drows),
-                      "epochs.tsv.gz": n_epochs, "labels.tsv": n_labels, "truth.tsv": len(trows)},
+                      "epochs.tsv.gz": n_epochs, "labels.tsv": n_labels, "truth.tsv": len(trows),
+                      "spans.tsv": len(sprows), "estimates.tsv": len(erows)},
                 recordings=len(groups), worked_out=worked, labels_added=added, labels_removed=removed,
                 truth_from=from_where, truth_rejected=[r.text() for r in rejected],
                 epoch_columns=len(ep_columns), problems=problems)

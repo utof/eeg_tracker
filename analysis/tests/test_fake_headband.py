@@ -17,6 +17,8 @@ import pytest
 
 import morning_check as mc
 
+pytestmark = pytest.mark.realtime  # fake headband / board timers: run apart on a loaded machine (conftest.py)
+
 ROOT = Path(__file__).resolve().parents[2]
 
 

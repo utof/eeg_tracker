@@ -1,0 +1,22 @@
+{
+ "spans": [
+  {
+   "span": "2026-11-21-110200-1",
+   "kind": "sleep",
+   "label": "in_bed",
+   "start_unix": 1795291800,
+   "end_unix": null,
+   "source": "owner_button",
+   "started_recording": true,
+   "ended_by": null,
+   "session": null,
+   "paused": [],
+   "estimate": null
+  }
+ ],
+ "removed": [],
+ "reviewed": null,
+ "sets": [],
+ "hides": [],
+ "skipped": 0
+}

@@ -178,7 +178,7 @@ class TaskView extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
       children: [
         Text('Learn where ${TaskRule.objects} objects sit', style: text.headlineSmall),
-        Para('About 12 minutes, before Start night. Four steps:', color: Night.inkMuted),
+        Para('About 12 minutes, before Sleep. Four steps:', color: Night.inkMuted),
         const SizedBox(height: 8),
         const _Step(
           1,

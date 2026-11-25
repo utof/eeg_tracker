@@ -77,6 +77,8 @@ void main() {
         _near(d.conf, p[2], 'epoch $e confidence');
         _near(d.best, p[4], 'epoch $e best rate', tol: 1e-12);
       }
+      // the walking detector's epochs beside it: exactly those are `w`
+      expect([for (final e in eps) e.code == PulseCode.walking], (c['walking']! as List).cast<bool>());
       final stages = (c['stages']! as List).cast<String>();
       final a = pulseAsleep([for (final e in eps) e.read ? (e.bpm * 10).round() / 10 : null], stages);
       final pa = c['asleep']! as Map<String, Object?>;

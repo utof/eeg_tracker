@@ -16,7 +16,9 @@ import 'screens_test.dart' show loadFonts;
 
 void _no() {}
 
-NightViewModel _model({required bool running}) => NightViewModel(
+NightViewModel _model({required bool running, bool sleeping = true, String? storageLine}) => NightViewModel(
+  sleeping: sleeping,
+  storageLine: storageLine,
   title: running ? 'Recording' : 'Ready',
   sentence: running ? 'All is well. You can put the phone down.' : 'Last night is saved. Put the headband on to start a new one.',
   tone: running ? Tone.live : Tone.calm,
@@ -28,7 +30,7 @@ NightViewModel _model({required bool running}) => NightViewModel(
   rssi: running ? -64 : null,
   contactOhms: const {'O1': 8e5, 'O2': 9e5, 'T3': 1.8e6, 'T4': null},
   nightsOnPhone: 3,
-  exportLine: running ? null : (text: 'Last export yesterday; 3 new files since.', warn: false),
+  exportLine: running && sleeping ? null : (text: 'Last export yesterday; 3 new files since.', warn: false),
   sleep: running ? null : const SleepSummary(nightOf: '2026-11-19', scored: true, asleepMin: 412, periods: 2),
   dreamLine: 'Last session: 3 answers, Tue 18 Nov 23:10.',
   napLine: 'Last nap: 30 min.',
@@ -128,25 +130,41 @@ void main() {
       if (running) {
         expect(where[HomeTab.night], containsAll(['Lights off', 'Stop', 'Recording', 'Headband']));
         expect(where[HomeTab.sessions], contains('Sound'));
-        expect(where[HomeTab.sessions]!.any((s) => s.startsWith('The headband is busy with the night')), isTrue);
+        // the sessions are there during a recording too: they start on it (Record first step 4, DECISIONS 980, 983)
+        expect(where[HomeTab.sessions], containsAll(['Meditate', 'Dream catcher', 'Nap coach', 'Work session']));
+        expect(where[HomeTab.sessions]!.any((s) => s.startsWith('Sleep is marked on the recording')), isTrue);
+        expect(where[HomeTab.sessions]!.any((s) => s.contains('busy with the night')), isFalse);
         expect(where[HomeTab.more]!.any((s) => s.contains('Shared on Wi-Fi')), isTrue);
       } else {
-        expect(where[HomeTab.night], containsAll(['Start night', 'Sleep report', 'Morning check-in', 'Try these', 'Phone']));
+        expect(where[HomeTab.night], containsAll(['Sleep', 'Sleep report', 'Morning check-in', 'Try these', 'Phone']));
         expect(where[HomeTab.sessions], containsAll(['Meditate', 'Dream catcher', 'Nap coach', 'Lucid dreams', 'Work session', 'Sound']));
         expect(where[HomeTab.more], containsAll(['Export data', 'Export a night', 'Settings', 'Licences']));
         expect(where[HomeTab.night], isNot(contains('Meditate')));
-        expect(where[HomeTab.sessions], isNot(contains('Start night')));
+        expect(where[HomeTab.sessions], isNot(contains('Sleep')));
       }
       expect(where[HomeTab.signal], contains('the Signal page'));
       expect(where[HomeTab.trends], contains('the Trends page'));
     });
   }
 
+  testWidgets('a recording with no sleep stretch open keeps Export and the storage line on More; with Sleep on only sharing', (tester) async {
+    const line = 'Recordings on this phone: 412 MB. 96 MB waits for the laptop to check it.';
+    await _pump(tester, _page(_model(running: true, sleeping: false, storageLine: line), HomeTab.more));
+    expect(_texts(tester), containsAll(['Your data', line, 'Export data', 'Export a night', 'Last export yesterday; 3 new files since.']));
+    expect(_texts(tester).any((s) => s.contains('Shared on Wi-Fi')), isTrue);
+    await _pump(tester, _page(_model(running: true, storageLine: line), HomeTab.more));
+    expect(_texts(tester), isNot(contains('Export data')));
+    expect(_texts(tester), isNot(contains(line)));
+    expect(_texts(tester).any((s) => s.contains('Shared on Wi-Fi')), isTrue);
+    await _pump(tester, _page(_model(running: false, storageLine: line), HomeTab.more));
+    expect(_texts(tester), containsAll([line, 'Export data']));
+  });
+
   testWidgets('the app opens on Night with Start night pinned; the bar has five tabs; Back returns to Night', (tester) async {
     final key = GlobalKey<HomeTabsState>();
     await _pump(tester, _tabs(_model(running: false), key: key), height: 873);
     expect(key.currentState!.tab, HomeTab.night);
-    expect(find.text('Start night'), findsOneWidget);
+    expect(find.ancestor(of: find.text('Sleep'), matching: find.bySubtype<FilledButton>()), findsOneWidget);
     expect(find.byType(NavigationDestination), findsNWidgets(5));
     for (final t in HomeTab.values) {
       expect(find.text(t.label), findsWidgets);
@@ -154,12 +172,12 @@ void main() {
     await tester.tap(find.text('Sessions'));
     await tester.pump(const Duration(milliseconds: 100));
     expect(key.currentState!.tab, HomeTab.sessions);
-    expect(find.text('Start night'), findsNothing); // pinned only on Night
+    expect(find.ancestor(of: find.text('Sleep'), matching: find.bySubtype<FilledButton>()), findsNothing); // pinned only on Night
     expect(find.byIcon(Icons.settings_outlined), findsNothing);
     await tester.binding.handlePopRoute();
     await tester.pump(const Duration(milliseconds: 100));
     expect(key.currentState!.tab, HomeTab.night);
-    expect(find.text('Start night'), findsOneWidget);
+    expect(find.ancestor(of: find.text('Sleep'), matching: find.bySubtype<FilledButton>()), findsOneWidget);
     expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
   });
 

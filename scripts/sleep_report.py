@@ -1,18 +1,20 @@
 """Automatic sleep report: score the nights recorded in the last hours and split them into sleep periods.
 
 usage: sleep_report.py [--recordings _local/recordings] [--nights _local/nights] [--export _local/export]
-                       [--hours 20] [--anysleep _local/vendor/AnySleep] [--device cpu] [--force]
+                       [--hours 20] [--spans DIR] [--anysleep _local/vendor/AnySleep] [--device cpu] [--force]
 Run with the analysis environment:  uv run --project analysis python scripts/sleep_report.py
 The recorder hub starts it from the Sleep page (POST /sleep-report) under systemd-run with MemoryMax=3500M.
 
-For every night with data in the last --hours hours (night_files.py: recordings chained in time, named by the
-evening date) whose report is missing or lacks 10+ minutes of newer samples, it joins the recordings with
+For every night with data in the last --hours hours (night_files.py: recordings chained in time or, for a phone
+recording with spans, its sleep spans joined, reading only the samples inside them; named by the evening date) whose
+report is missing or lacks 10+ minutes of newer samples (a span night: whose spans changed), it joins the recordings with
 to_bdf.py's code into <nights>/<date>.bdf, scores it with score_sleep.py's code (<date>.sleep.json and
 <date>.hypnogram.png), splits the AnySleep stages into sleep periods, runs the shared detectors over the same samples
 for the night extras (analysis/night_extras.py: jaw, movement and signal quality, as on the phone) and the
 drift-off detector from the night's lights off against the model's sleep onset (analysis/night_drift.py) and the
 dream sleep check (analysis/rem_check.py: the model's per-epoch probabilities and side-to-side eye movements on the
-night's eye pair, T3-T4 on the BrainBit; measurement only, as on the phone), writes
+night's eye pair, T3-T4 on the BrainBit; measurement only, as on the phone), scores every epoch the walking detector
+calls walking as awake (analysis/walking.py over every channel of the night; DECISIONS 920), writes
 <date>.report.json
 (docs/data-format.md) and appends the eeg_sleep_night event (export_events.py). Nights already up to date are
 skipped, so running it twice does nothing the second time. A night may hold any number of channels (its files'
@@ -109,9 +111,53 @@ def _extras(seen: tuple | None, stages: list[str], found: list[dict], start: dat
     return x
 
 
+def night_walking(uv, notes: list, sample_rate: float) -> list:
+    """The walking detector's windows over the joined night (every channel, `uv` samples x channels in µV), only as
+    far as the veto needs them (analysis/walking.py, `quick`)."""
+    sys.path.insert(0, str(ROOT / "analysis"))
+    import numpy as np
+    import walking as wk
+    import walks
+    if sample_rate != round(sample_rate) or sample_rate < 50:
+        raise recording.RecordingError(f"walking reads a whole number of samples a second from 50; this night has "
+                                       f"{sample_rate:g}")
+    x = np.ascontiguousarray(uv.T, dtype=np.float64)
+    np.clip(x, -walks.LIMIT_UV, walks.LIMIT_UV, out=x)
+    return wk.windows(x, sample_rate, walks.missing_mask(x.shape[1], sample_rate, notes), quick=True)
+
+
+def walking_veto(scored: dict, windows: list) -> dict:
+    """Scores the walking epochs of score_sleep's result awake, in place: both models' stage of an epoch the walking
+    detector calls walking becomes W (the model's own word stays beside it as `anysleep_model` / `yasa_model`, the
+    epoch gets `walking`), the summary is counted again, and the report's `walking` object is returned."""
+    import numpy as np
+    import score_sleep
+    import walking as wk
+    ep = scored["epochs"]
+    flags = wk.epoch_flags(windows, len(ep))
+    changed = {"anysleep": 0, "yasa": 0}
+    for e, on in zip(ep, flags):
+        if not on:
+            continue
+        e["walking"] = True
+        for k in changed:
+            if e.get(k) in ASLEEP:
+                e[f"{k}_model"], e[k] = e[k], "W"
+                changed[k] += 1
+    gap = np.array([e["anysleep"] == "gap" for e in ep])
+    scored["summary"] = score_sleep.summary([e["anysleep"] for e in ep], gap, [e["yasa"] for e in ep],
+                                            np.array([max(e["p"]) for e in ep]))
+    out = dict(detector=wk.VERSION, rule="an asleep epoch with half or more of it in a walking stretch is scored awake",
+               epochs="".join("1" if f else "0" for f in flags), walking_min=sum(flags) * EPOCH / 60,
+               changed_min=changed["anysleep"] * EPOCH / 60, cross_check_changed_min=changed["yasa"] * EPOCH / 60)
+    scored["walking"] = {k: v for k, v in out.items() if k != "epochs"}
+    return out
+
+
 def make_report(name: str, night: nf.Night, scored: dict | None, seconds: float, data: tuple[datetime, float],
                 seen: tuple | None = None, extras_error: str | None = None, drift: dict | None = None,
-                drift_error: str | None = None, eye: dict | None = None) -> dict:
+                drift_error: str | None = None, eye: dict | None = None, walking: dict | None = None,
+                walking_error: str | None = None) -> dict:
     """<name>.report.json from score_sleep's result (None when there was too little data to score), what the
     detectors saw (`night_extras.events`, None when that pass did not run), the drift-off detector from lights
     off (`night_drift.night`, None when it did not run; drift_error says why) and the eye movements for the dream
@@ -124,13 +170,16 @@ def make_report(name: str, night: nf.Night, scored: dict | None, seconds: float,
                      note=NOTE, validated=False,
                      rules=dict(split_min=SPLIT_MIN, min_period_sleep_min=MIN_PERIOD_SLEEP_MIN,
                                 wake_up_over_min=WAKE_UP_OVER_MIN))
+    if night.windows is not None:  # a night made from sleep spans (night_files.py): what it was made from
+        rep["span"] = dict(recording=night.recording_ids, spans=night.span_ids, kind="night", **{"from": night.span_from},
+                           windows=[list(w) for w in night.windows])
     if scored is None:
         rep.update(periods=[], total=dict(asleep_min=0.0, light_min=0.0, deep_min=0.0, dream_min=0.0, wake_ups=0,
                                           periods=0, recorded_min=round(length_s / 60, 1), missing_min=0.0,
                                           stray_sleep_min=0.0),
                    hypnogram=None, sleep_json=None, bdf=None, model=None, cross_check=None, extras=None,
                    extras_error=extras_error, drift_off=None, drift_off_error=None, stages="", probs=None,
-                   rem_check=None)
+                   rem_check=None, walking=None, walking_error=None)
         return rep
     import export_events
     ep = scored["epochs"]
@@ -172,7 +221,8 @@ def make_report(name: str, night: nf.Night, scored: dict | None, seconds: float,
                cross_check=dict(model=export_events.CROSS, agreement_5_stage=s.get("agreement_5_stage"),
                                 agreement_w_nrem_rem=s.get("agreement_w_nrem_rem")),
                extras=extras, extras_error=extras_error, drift_off=drift_off, drift_off_error=drift_error,
-               stages="".join(STAGE_CHAR.get(x, "-") for x in stages), probs=probs, rem_check=check)
+               stages="".join(STAGE_CHAR.get(x, "-") for x in stages), probs=probs, rem_check=check,
+               walking=walking, walking_error=walking_error)
     return rep
 
 
@@ -219,7 +269,7 @@ def build(night: nf.Night, a: argparse.Namespace, status: nf.Job) -> dict:
     head = to_bdf.night_header(paths)  # the files hold the same channels, else refused here
     four = recording.pick(head, score_sleep.CHANNELS, score_sleep.WHO)  # refused here without O1 O2 T3 T4
     status.step(f"Night of {name}: joining {len(night.recs)} recordings ({hours:.1f} h)")
-    start, uv, notes = to_bdf.join(paths)
+    start, uv, notes = to_bdf.join(paths, night.windows)  # a span night reads only the samples inside its spans
     length_s = len(uv) / head.sample_rate
     if length_s < 10 * EPOCH:
         rep = make_report(name, night, None, time.time() - t_start, (start, length_s))
@@ -246,18 +296,30 @@ def build(night: nf.Night, a: argparse.Namespace, status: nf.Job) -> dict:
         except Exception as e:  # noqa: BLE001 - the night is still scored without the extras
             why = f"{type(e).__name__}: {e}"
         eye = night_eye(head, uv, notes) if why is None else None
+        status.step("Looking for walking")
+        walk_windows, walk_why = None, None
+        try:  # the night is still scored without it; the report says why
+            walk_windows = night_walking(uv, notes, head.sample_rate)
+        except Exception as e:  # noqa: BLE001
+            walk_why = f"{type(e).__name__}: {e}"
         part = folder / f"{name}.part.bdf"
         to_bdf.write(part, start, uv, notes, head.names, head.sample_rate, to_bdf.equipment(head))
         del uv
         scored = score_sleep.score(part, a.anysleep, a.device, progress=status.step)
         scored["source"] = f"{name}.bdf"
+        walked = None
+        if walk_windows is not None:
+            try:
+                walked = walking_veto(scored, walk_windows)
+            except Exception as e:  # noqa: BLE001
+                walk_why = f"{type(e).__name__}: {e}"
         _keep_foreign(folder, name)
         os.replace(part, folder / f"{name}.bdf")
         status.step("Drawing the chart")
         score_sleep.save(scored, folder / name, title=f"Night of {name}")
         status.step("Finding sleep periods")
         rep = make_report(name, night, scored, time.time() - t_start, (start, length_s), seen, why, drift, drift_why,
-                          eye)
+                          eye, walked, walk_why)
     tmp = folder / f"{name}.report.tmp"
     tmp.write_text(json.dumps(rep, indent=1)); os.replace(tmp, folder / f"{name}.report.json")
     if rep["scored"]:
@@ -293,6 +355,8 @@ def _watchdog(status: nf.Job, max_s: float, max_mb: float, done: threading.Event
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--recordings", type=Path, default=Path("_local/recordings"))
+    ap.add_argument("--spans", type=Path, help="the phone's spans folder (default: spans/ beside a folder named "
+                                               "`recordings`, else none)")
     ap.add_argument("--nights", type=Path, default=Path("_local/nights"))
     ap.add_argument("--export", type=Path, default=Path("_local/export"))
     ap.add_argument("--hours", type=float, default=nf.WINDOW_H, help="nights with data in the last N hours")
@@ -314,7 +378,7 @@ def main(argv: list[str] | None = None) -> int:
         threading.Thread(target=_watchdog, args=(status, a.max_minutes * 60, a.max_mb, done), daemon=True).start()
         for p in a.nights.glob("*.part.bdf"):  # left by a run that was stopped
             p.unlink()
-        todo = [n for n in nf.recent_nights(a.recordings, time.time(), a.hours)
+        todo = [n for n in nf.recent_nights(a.recordings, time.time(), a.hours, a.spans)
                 if a.force or nf.is_stale(n, nf.read_report(a.nights, n.name))]
         if not todo:
             print("sleep reports are up to date", flush=True)

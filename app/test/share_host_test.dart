@@ -279,7 +279,7 @@ void main() {
     await r.stop();
     await running;
     expect(f32Records(ext('f32').single), band.emitted); // every sample, sharing or not
-    final marker = jsonDecode(ext('markers.jsonl').single.readAsLinesSync().single) as Map<String, Object?>;
+    final marker = jsonDecode(ext('markers.jsonl').single.readAsLinesSync().where((l) => !l.contains('"span: ')).single) as Map<String, Object?>;
     expect(marker.keys.toList(), ['t', 'i', 'text']); // scripts/recorder_hub.py add_marker
     expect(marker['text'], 'eyes closed start');
     expect(marker['i'], inInclusiveRange(1, band.emitted));

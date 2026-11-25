@@ -41,6 +41,10 @@ sleep, against a usual 20-25 %.
   guess.
 - Light sleep (N1) is missed by every headband. Dry electrodes may record extra slow waves, which can push light
   sleep into "deep", so treat deep-sleep minutes with care.
+- Walking fooled the model: on an awake evening with a 2-hour walk it called 24 minutes sleep, nearly all of them
+  during the walk, because steps shake the headband in slow waves. The app now finds walking by its step rhythm and
+  counts those half minutes as awake (half a minute of false sleep was left; a nap and three nights lost nothing),
+  and the report says how many minutes it changed. Other shaking (a bus, a bike) is not caught this way.
 - When the two models agree, that shows they are consistent, not that they are right.
 - YASA was trained on a top-of-head channel; back and side electrodes are outside its training.
 - AnySleep looks about 7 minutes forward and back, so the night's chart is scored afterwards. Read live, 2 minutes
@@ -63,7 +67,8 @@ sleep, against a usual 20-25 %.
   with 8 minutes on either side, each scored once and kept. AnySleep weighs everything it is given together, so these
   stretches can differ a little from the report after Stop, which scores the whole night at once; the page says so.
   On one recorded night (6 hours, on the laptop's stand-in for a phone) 96 in 100 of the 30-second stretches got the
-  same stage as the report, and the totals were within a minute or two.
+  same stage as the report, and the totals were within a minute or two. In a recording you started with Record, it
+  counts only the sleep you marked, from the moment you pressed Sleep; with none marked it says so and scores nothing.
 - Noise is shown, not hidden: the report says how much of your sleep the model read through a noisy signal
   (movement, jaw muscle or a loose electrode) or with no usable electrode, and a Signal line under the chart marks
   where. Nobody has tested how well the model copes with that noise on this headband, so treat those stretches with

@@ -1,6 +1,6 @@
 // "When I put the headband on" (ROADMAP row 39, DECISIONS 600-609): loads and saves the choices, re-arms the bedtime
-// checks after a change, pairs the headband through Android's companion pairing, and runs a check on request. Layout
-// in auto_start_view.dart.
+// checks after a change, has Android watch for the headband (its companion feature: not the laptop's pairing), and runs
+// a check on request. Layout in auto_start_view.dart.
 import 'dart:async';
 import 'dart:io';
 
@@ -116,7 +116,7 @@ class _AutoStartScreenState extends State<AutoStartScreen> {
 
   Future<void> _pair() async {
     final err = await AutoChannel.pair();
-    await _load(message: err == null ? 'Paired. Android now tells the app when the headband is near.' : null);
+    await _load(message: err == null ? 'Android now watches for the headband and tells the app when it is near.' : null);
     if (err != null && mounted) {
       setState(() => _model = AutoStartModel(
         settings: _model.settings,
@@ -124,14 +124,14 @@ class _AutoStartScreenState extends State<AutoStartScreen> {
         status: _model.status,
         stats: _model.stats,
         offers: _model.offers,
-        error: 'Not paired: $err',
+        error: 'Android could not start watching for the headband: $err',
       ));
     }
   }
 
   Future<void> _forget() async {
     await AutoChannel.forget();
-    await _load(message: 'The pairing is gone. The app checks when you open it and in the bedtime window.');
+    await _load(message: 'Android no longer watches for the headband. The app checks when you open it and in the bedtime window.');
   }
 
   Future<void> _checkNow() async {

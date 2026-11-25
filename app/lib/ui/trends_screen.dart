@@ -30,6 +30,10 @@ import '../study/arm.dart' show readOwnDayNumbers;
 import 'experiments_screen.dart';
 import 'experiments_view.dart' show experimentLine;
 import 'sharp_hours_screen.dart';
+import '../sleep_experiments/result.dart' show nightNumbersFrom, sortNights;
+import '../sleep_experiments/store.dart';
+import 'sleep_experiments_screen.dart';
+import 'sleep_experiments_view.dart';
 import 'trends_view.dart';
 import 'unusual_view.dart';
 
@@ -94,6 +98,8 @@ typedef TrendsPage = ({
   UnusualCard? unusual,
   String? unusualError,
   String? sharp,
+  ExperimentLog? sleepExperiment,
+  String? sleepExperimentLine,
 });
 
 /// Reads the app's folders beside [recordingsDir] and works the page out (the unusual card also gets the back-test
@@ -122,7 +128,20 @@ TrendsPage loadTrendsPage(String recordingsDir, DateTime now) {
   }
   final sharp = SharpStore(sharpDirFor(recordingsDir));
   final sharpLine = sharpTrendsLine(sharp.settings(), sharp.ratings(), sharp.reactions(), now);
-  return (model: m, experiment: line, unusual: unusual, unusualError: unusualError, sharp: sharpLine);
+  // the running sleep experiment and how many nights are in (DECISIONS 1050-1069)
+  final sleepExp = SleepExperimentStore(sleepExperimentsDirFor(recordingsDir)).active();
+  final sleepLine = sleepExp == null
+      ? null
+      : pilesLine(sortNights(sleepExp, nightNumbersFrom(inputs.nights, pulse: dayNumbers['pulse'] ?? const {})));
+  return (
+    model: m,
+    experiment: line,
+    unusual: unusual,
+    unusualError: unusualError,
+    sharp: sharpLine,
+    sleepExperiment: sleepExp,
+    sleepExperimentLine: sleepLine,
+  );
 }
 
 /// [loadTrendsPage] in a background isolate.
@@ -146,6 +165,8 @@ class _TrendsScreenState extends State<TrendsScreen> {
   TrendsModel? _model;
   String? _error, _dir, _experiment, _unusualError, _sharp;
   UnusualCard? _unusual;
+  ExperimentLog? _sleepExp;
+  String? _sleepExpLine;
 
   @override
   void initState() {
@@ -166,6 +187,8 @@ class _TrendsScreenState extends State<TrendsScreen> {
         _unusual = p.unusual;
         _unusualError = p.unusualError;
         _sharp = p.sharp;
+        _sleepExp = p.sleepExperiment;
+        _sleepExpLine = p.sleepExperimentLine;
       });
       if (walk && widget.walkPending) unawaited(_walkPending(dir));
     } catch (e) {
@@ -233,6 +256,26 @@ class _TrendsScreenState extends State<TrendsScreen> {
               .push(MaterialPageRoute<void>(builder: (_) => ExperimentsScreen(recordingsDir: _dir)));
           await _load();
         },
+        sleepExperiments: SleepExperimentSection(
+          log: _sleepExp,
+          today: m.today,
+          line: _sleepExpLine,
+          onAnswer: (a) {
+            final e = _sleepExp, dir = _dir;
+            if (e == null || dir == null) return;
+            try {
+              SleepExperimentStore(sleepExperimentsDirFor(dir)).answer(e.plan.id, m.today, a, DateTime.now());
+            } catch (err) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Not saved: $err')));
+            }
+            unawaited(_load(walk: false));
+          },
+          onOpen: () async {
+            await Navigator.of(context)
+                .push(MaterialPageRoute<void>(builder: (_) => SleepExperimentsScreen(recordingsDir: _dir)));
+            await _load(walk: false);
+          },
+        ),
         sharpLine: _sharp,
         onSharp: () async {
           await Navigator.of(context)

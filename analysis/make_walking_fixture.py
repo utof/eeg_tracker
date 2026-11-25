@@ -195,6 +195,9 @@ def case(name: str, make) -> dict[str, Any]:
         windows=[[num(w.t), w.read, num(w.score), num(w.pace), num(w.amp), w.channels, num(w.thirds), w.walks]
                  for w in found.windows],
         smoothed=found.smoothed,
+        # walking per 30 s epoch (the sleep scorers' and the pulse's veto), and the windows' answers without spectra
+        epochs=wk.epoch_flags(found.windows, int(x.shape[1] / fs // wk.EPOCH_S)),
+        quick=[w.walks for w in wk.windows(xq, fs, miss, quick=True)],
         moving=[stretch(s) for s in found.moving],
         walks=[dict(stretches=[stretch(s) for s in w.stretches], walking_s=num(w.walking_s), stopped_s=num(w.stopped_s),
                     steps=num(w.steps), pace=num(w.pace)) for w in found.walks],

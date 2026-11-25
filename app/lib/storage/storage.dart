@@ -16,6 +16,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../export/store.dart' show sizeText;
 import '../recorder/acks.dart';
 
 /// One kind of file in a category.
@@ -234,4 +235,39 @@ List<({String item, String path, File file, int bytes})> storedByItem(Directory 
     }
   }
   return out;
+}
+
+/// The raw recordings on the phone: the bytes they take, and the bytes of those the laptop holds no checked copy of
+/// as they are now ("waiting": not yet copied, or copied and not yet checked; the one being written is always among
+/// them). Reads sizes, times and the acks; a packed file's header.
+({int bytes, int waiting}) rawOnPhone(Directory filesDir) {
+  final acks = AckStore(filesDir).load();
+  var bytes = 0, waiting = 0;
+  for (final folder in movableFolders) {
+    final dir = Directory('${filesDir.path}/$folder');
+    if (!dir.existsSync()) continue;
+    try {
+      for (final f in dir.listSync().whereType<File>()) {
+        final path = '$folder/${f.uri.pathSegments.last}';
+        if (!isRawPath(path)) continue;
+        final n = f.lengthSync();
+        bytes += n;
+        if (!ackedNow(acks, path, f)) waiting += n;
+      }
+    } on FileSystemException {
+      continue;
+    }
+  }
+  return (bytes: bytes, waiting: waiting);
+}
+
+/// The Record tab's line under "Your data" (DECISIONS 1041): what the recordings take and what waits for the laptop.
+/// Null with no recordings on the phone.
+String? storageLine(({int bytes, int waiting}) s, {required bool paired}) {
+  if (s.bytes <= 0) return null;
+  final all = 'Recordings on this phone: ${sizeText(s.bytes)}.';
+  if (!paired) return '$all No laptop is paired: nothing is cleared by itself.';
+  if (s.waiting <= 0) return '$all The laptop has checked all of it.';
+  if (s.waiting >= s.bytes) return '$all All of it waits for the laptop to check it.';
+  return '$all ${sizeText(s.waiting)} waits for the laptop to check it.';
 }

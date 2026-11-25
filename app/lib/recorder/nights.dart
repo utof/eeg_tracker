@@ -21,12 +21,19 @@ import '../cache/file_summaries.dart' show fileKey;
 import 'chunk_writer.dart';
 import 'header.dart' show RecordingHeader, headerFileOf, legacyHeader, tryHeader;
 import 'packed.dart' show isPackedPath, plainFileOf, rawLength, rawOnDisk;
+import '../spans/span.dart';
 import 'remove.dart' show removedRecordOf, removedSuffix;
 
 final RegExp _stem = RegExp(r'^(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})\.');
 
 const Duration chainGap = Duration(hours: 3);
 const Duration maxSpan = Duration(hours: 24);
+
+/// Sleep stretches of one evening date that lie [chainGap] or more apart are one night only when each side is at
+/// least this long: a shorter one (Sleep pressed by mistake in the afternoon, a 4-minute test) is left out of the
+/// night instead of moving its start by hours. Alone on its evening date it is still that night, too short to score.
+/// A planning value (DECISIONS 1026); the laptop's twin is `STRAY_UNDER_S` in scripts/night_files.py.
+const Duration strayUnder = Duration(minutes: 20);
 
 /// Start of the run that wrote [fileName] (`2026-11-18-231200.f32` and its `.idx`, `.log`), or null for any
 /// other file.
@@ -49,7 +56,37 @@ DateTime nightOf(DateTime t) {
 String dateName(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${_two(d.month)}-${_two(d.day)}';
 
 class NightFiles {
-  NightFiles(this.nightOf, this.files, {this.recordings = const [], this.removed = const [], this.lastData});
+  NightFiles(
+    this.nightOf,
+    this.files, {
+    this.recordings = const [],
+    this.removed = const [],
+    this.lastData,
+    this.windows,
+    this.spanIds = const [],
+    this.recordingIds = const [],
+    this.spanFrom,
+    this.napStamp,
+  });
+
+  /// The stretches of clock time that are this night's sleep, oldest first: its sleep spans (Record first, DECISIONS
+  /// 886-888). Only the samples inside them are scored. Null: the whole files, as every night from before.
+  final List<(DateTime, DateTime)>? windows;
+
+  /// The sleep spans and their recordings, when it comes from spans; `pressed`, `confirmed` or `auto` for the first
+  /// span's source.
+  final List<String> spanIds, recordingIds;
+  final String? spanFrom;
+
+  /// A nap (a span of kind `nap`): the stamp of its start, the name of its report under `nights/naps/`. Null: a night.
+  final String? napStamp;
+  bool get isNap => napStamp != null;
+
+  /// The report's `span` field; null for a night from before.
+  Map<String, Object?>? get spanField => windows == null || spanIds.isEmpty
+      ? null
+      : {'recording': recordingIds, 'spans': spanIds, 'kind': isNap ? 'nap' : 'night', 'from': spanFrom ?? 'pressed'};
+
 
   /// The evening's date.
   final DateTime nightOf;
@@ -68,11 +105,11 @@ class NightFiles {
   /// Arrival of the night's last data; null without recordings.
   final DateTime? lastData;
 
-  /// `2026-11-18`, the name of its report.
-  String get name => dateName(nightOf);
+  /// `2026-11-18`, the name of its report; a nap's is `naps/2026-11-21-130000`.
+  String get name => napStamp == null ? dateName(nightOf) : 'naps/$napStamp';
 
-  /// Start of the first run.
-  DateTime get start => stemTime(files.first.uri.pathSegments.last)!;
+  /// Start of the first run, or of the first sleep span.
+  DateTime get start => windows?.firstOrNull?.$1 ?? stemTime(files.first.uri.pathSegments.last)!;
 
   /// Arrival of the last data (the start when there is none).
   DateTime get end => lastData ?? start;
@@ -87,7 +124,10 @@ class NightFiles {
 }
 
 class _Rec {
-  _Rec(this.stem, this.start, this.end);
+  _Rec(this.stem, this.start, this.end, {this.data = true});
+
+  /// It holds samples.
+  final bool data;
   final String stem;
   final DateTime start;
   DateTime end;
@@ -102,9 +142,22 @@ class _Chain {
   final List<String> dataStems = [];
 }
 
-/// The nights in [dir], newest first.
-List<NightFiles> nightsIn(Directory dir) {
-  if (!dir.existsSync()) return const [];
+/// The nights in [dir], newest first. [spansDir]: the spans files (the sibling `spans/` unless said). A file set
+/// whose header names a recording is never chained by time: its recording's sleep spans of kind `sleep` give the
+/// nights (joined by the chain rule applied to spans, named by the evening date of the first span's start), and a
+/// recording without one gives none. A set that "Not sleep" names joins no night. An old chain and a span night of
+/// the same evening date are one night, whose windows are the spans and the old chain's whole extent (the laptop's
+/// rule, scripts/night_files.py).
+List<NightFiles> nightsIn(Directory dir, {Directory? spansDir}) => _nightsAndNaps(dir, spansDir).nights;
+
+/// The naps in [dir] (spans of kind `nap`), newest first: each is scored by itself and joins no night.
+List<NightFiles> napsIn(Directory dir, {Directory? spansDir}) => _nightsAndNaps(dir, spansDir).naps;
+
+({List<NightFiles> nights, List<NightFiles> naps}) _nightsAndNaps(Directory dir, Directory? spansDir) {
+  if (!dir.existsSync()) return (nights: const [], naps: const []);
+  final spanFiles = spansIn(spansDir ?? spansDirFor(dir.path));
+  final noSleep = {for (final f in spanFiles.values) ...f.sets};
+  final inRecording = <String, List<_Rec>>{};
   final byStem = <String, List<File>>{};
   for (final f in dir.listSync().whereType<File>()) {
     final name = f.uri.pathSegments.last;
@@ -122,7 +175,13 @@ List<NightFiles> nightsIn(Directory dir) {
     if (set == null || key == null || set.key != key) set = _setOf(dir, stem, start, key);
     if (key != null) keep[stem] = set;
     if (!set.sleep) continue; // a work session's raw EEG (also once moved off the phone): not a night
+    if (noSleep.contains(stem)) continue; // the owner said it was not sleep (DECISIONS 889)
     if (set.removed) gone.add(stem);
+    if (set.recording case final id?) {
+      // its recording's spans say what was sleep; a set without samples still belongs to it
+      inRecording.putIfAbsent(id, () => []).add(_Rec(stem, start, set.end ?? start, data: set.end != null));
+      continue;
+    }
     if (set.end case final end?) {
       data.add(_Rec(stem, start, end));
     } else {
@@ -155,7 +214,7 @@ List<NightFiles> nightsIn(Directory dir) {
     }
   }
   int byName(File a, File b) => a.uri.pathSegments.last.compareTo(b.uri.pathSegments.last);
-  return [
+  final old = [
     for (final c in chains)
       NightFiles(
         c.nightOf,
@@ -164,16 +223,150 @@ List<NightFiles> nightsIn(Directory dir) {
         removed: [for (final s in c.dataStems) if (gone.contains(s)) File('${dir.path}/$s.f32')]..sort(byName),
         lastData: c.dataStems.isEmpty ? null : c.end,
       ),
-  ]..sort((a, b) {
+  ];
+  // ---- the recordings with an id: nights and naps from their sleep spans ----
+  NightFiles fromSpans(DateTime nightOf, List<(Span, List<_Rec>, DateTime)> parts, {String? nap}) {
+    final windows = [for (final p in parts) (p.$1.start, p.$3)];
+    final sets = <String, _Rec>{
+      for (final p in parts)
+        for (final r in p.$2) r.stem: r,
+    };
+    bool inside(_Rec r) => r.data && windows.any((w) => r.start.isBefore(w.$2) && r.end.isAfter(w.$1));
+    final first = parts.first.$1.source;
+    return NightFiles(
+      nightOf,
+      [for (final s in sets.keys) ...byStem[s]!]..sort(byName),
+      recordings: [for (final r in sets.values) if (inside(r) && !gone.contains(r.stem)) File('${dir.path}/${r.stem}.f32')]..sort(byName),
+      removed: [for (final r in sets.values) if (inside(r) && gone.contains(r.stem)) File('${dir.path}/${r.stem}.f32')]..sort(byName),
+      lastData: windows.last.$2,
+      windows: windows,
+      spanIds: [for (final p in parts) p.$1.id],
+      recordingIds: {for (final p in parts) p.$1.recording}.toList(),
+      spanFrom: first == 'owner_confirmed' ? 'confirmed' : first == 'auto_start' ? 'auto' : 'pressed',
+      napStamp: nap,
+    );
+  }
+
+  final sleeps = <(Span, List<_Rec>, DateTime)>[];
+  final naps = <NightFiles>[];
+  for (final e in inRecording.entries) {
+    final dataEnd = e.value.map((r) => r.end).reduce((a, b) => a.isAfter(b) ? a : b);
+    for (final s in spanFiles[e.key]?.sleepSpans ?? const <Span>[]) {
+      // a span still open (the recording runs, or it ended without a Stop) ends at the recording's last data
+      final end = s.end ?? dataEnd;
+      if (!end.isAfter(s.start)) continue;
+      if (s.kind == 'nap') {
+        naps.add(fromSpans(nightOf(s.start), [(s, e.value, end)], nap: fileStem(s.start)));
+      } else {
+        sleeps.add((s, e.value, end));
+      }
+    }
+  }
+  sleeps.sort((a, b) => a.$1.start.compareTo(b.$1.start));
+  final groups = <List<(Span, List<_Rec>, DateTime)>>[];
+  Duration lengthOf(List<(Span, List<_Rec>, DateTime)> g) =>
+      g.fold(Duration.zero, (sum, p) => sum + p.$3.difference(p.$1.start));
+  for (final s in sleeps) {
+    final g = groups.isEmpty ? null : groups.last;
+    final inTime = g != null && s.$1.start.difference(g.first.$1.start) < maxSpan;
+    final byGap = g != null && s.$1.start.difference(g.last.$3) < chainGap;
+    final byDate = g != null && nightOf(s.$1.start) == nightOf(g.first.$1.start);
+    if (g != null && inTime && byDate && !byGap) {
+      // joined by the evening date alone, hours apart: a short stray stretch is no part of the night (DECISIONS 1026)
+      if (lengthOf(g) < strayUnder) {
+        groups
+          ..removeLast()
+          ..add([s]);
+        continue;
+      }
+      if (s.$3.difference(s.$1.start) < strayUnder) continue;
+    }
+    if (g == null || !inTime || !(byGap || byDate)) {
+      groups.add([s]);
+    } else {
+      g.add(s);
+    }
+  }
+  final nights = <NightFiles>[];
+  final spanNights = [for (final g in groups) fromSpans(nightOf(g.first.$1.start), g)];
+  for (final o in old) {
+    final same = spanNights.where((n) => n.nightOf == o.nightOf).firstOrNull;
+    if (same == null) {
+      nights.add(o);
+      continue;
+    }
+    spanNights.remove(same);
+    final windows = [...same.windows!, if (o.lastData != null) (o.start, o.lastData!)]..sort((a, b) => a.$1.compareTo(b.$1));
+    nights.add(
+      NightFiles(
+        o.nightOf,
+        [...o.files, ...same.files]..sort(byName),
+        recordings: [...o.recordings, ...same.recordings]..sort(byName),
+        removed: [...o.removed, ...same.removed]..sort(byName),
+        lastData: windows.map((w) => w.$2).reduce((a, b) => a.isAfter(b) ? a : b),
+        windows: windows,
+        spanIds: same.spanIds,
+        recordingIds: same.recordingIds,
+        spanFrom: same.spanFrom,
+      ),
+    );
+  }
+  nights.addAll(spanNights);
+  int newestFirst(NightFiles a, NightFiles b) {
     final c = b.nightOf.compareTo(a.nightOf);
     return c != 0 ? c : b.start.compareTo(a.start);
-  });
+  }
+
+  return (nights: nights..sort(newestFirst), naps: naps..sort((a, b) => b.start.compareTo(a.start)));
+}
+
+/// Which recording holds a moment: for a sleep stretch found afterwards (a Yes to "Did you sleep?"), the recording
+/// its spans file belongs to (DECISIONS 1028). The folder is listed once; a file set is read only when asked about.
+class RecordingsAt {
+  RecordingsAt(this.dir) {
+    if (!dir.existsSync()) return;
+    final stems = <String>{};
+    for (final f in dir.listSync().whereType<File>()) {
+      final name = f.uri.pathSegments.last;
+      if (stemTime(name) != null) stems.add(name.substring(0, 17));
+    }
+    _sets = [for (final s in stems) (s, stemTime('$s.')!)]..sort((a, b) => a.$2.compareTo(b.$2));
+  }
+
+  final Directory dir;
+  List<(String, DateTime)> _sets = const [];
+  final Map<String, _SetEnd> _read = {};
+
+  /// The set's recording id (its header's `recording`; a set from before Record first is its own recording, named
+  /// by its stem) and its data's end; null for a set without samples or one that is not sleep's (a work session's).
+  (String, DateTime)? _of((String, DateTime) set) {
+    final e = _read[set.$1] ??= _setOf(dir, set.$1, set.$2, null);
+    return e.end == null || !e.sleep ? null : (e.recording ?? set.$1, e.end!);
+  }
+
+  /// The id of the recording that holds [start]; when none does (it falls between two file sets), of the first one
+  /// with data between [start] and [end]; null when there is none.
+  String? holding(DateTime start, DateTime end) {
+    for (final set in _sets.reversed) {
+      if (set.$2.isAfter(start)) continue;
+      final got = _of(set);
+      if (got == null) continue;
+      if (!got.$2.isBefore(start)) return got.$1;
+      break; // the newest data before the start ends before it: nothing older reaches it
+    }
+    for (final set in _sets) {
+      if (!set.$2.isAfter(start) || !set.$2.isBefore(end)) continue;
+      final got = _of(set);
+      if (got != null) return got.$1;
+    }
+    return null;
+  }
 }
 
 /// A file set's samples' end ([_lastData]), or null when it holds no whole sample, and whether it is sleep (its
 /// header names no other session), with the key it was worked out for; [removed]: its raw files left the phone, and
 /// the end is its record's (remove.dart).
-typedef _SetEnd = ({String? key, DateTime? end, bool sleep, bool removed});
+typedef _SetEnd = ({String? key, DateTime? end, bool sleep, bool removed, String? recording});
 
 /// What [nightsIn] worked out per folder and file set, for this isolate.
 final Map<String, Map<String, _SetEnd>> _keptSets = {};
@@ -207,9 +400,10 @@ _SetEnd _setOf(Directory dir, String stem, DateTime start, String? key) {
       end: end == null ? null : DateTime.fromMillisecondsSinceEpoch(end),
       sleep: h.isSleep,
       removed: end != null,
+      recording: h.recording,
     );
   }
-  return (key: key, end: _samplesEnd(dir, stem, start, h), sleep: h.isSleep, removed: false);
+  return (key: key, end: _samplesEnd(dir, stem, start, h), sleep: h.isSleep, removed: false, recording: h.recording);
 }
 
 /// The header that describes [f32]'s set: its own (header file, or an old set's `.log`) when it has samples or a

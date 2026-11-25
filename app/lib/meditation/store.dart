@@ -11,6 +11,7 @@ import 'dart:isolate';
 
 import '../feedback/session_log.dart';
 import '../recorder/chunk_writer.dart' show fileStem;
+import '../spans/span.dart' show removedSpanIds;
 import '../training/control.dart' show SessionKind;
 import '../training/replay.dart' show DonorCandidate;
 import 'tracker.dart';
@@ -37,13 +38,15 @@ class MeditationStore {
   /// Writes the session log, then the summary (the summary last, so a listed summary always has its log), each to
   /// a new file renamed over the old one (a cut write never leaves a half file).
   /// The log is encoded off the screen's thread: 20 minutes are about 8 MB of JSON.
-  Future<void> save(MeditationSummary summary, SessionLog log) async {
+  /// [extra]: fields added to the summary (the recording and span of a session that ran as an activity of the day's
+  /// recording, spans/activities.dart).
+  Future<void> save(MeditationSummary summary, SessionLog log, {Map<String, Object?>? extra}) async {
     dir.createSync(recursive: true);
     final logPath = '${dir.path}/${summary.logFile}';
     final summaryPath = '${dir.path}/${stemFor(summary.start)}$suffix';
     final json = log.toJson();
     await Isolate.run(() => _replace(logPath, jsonEncode(json)));
-    _replace(summaryPath, const JsonEncoder.withIndent(' ').convert(summary.toJson()));
+    _replace(summaryPath, const JsonEncoder.withIndent(' ').convert({...summary.toJson(), ...?extra}));
   }
 
   static void _replace(String path, String text) {
@@ -52,13 +55,17 @@ class MeditationStore {
   }
 
   /// Every readable summary, newest first. Damaged or foreign files are skipped.
+  /// A session whose mark on the recording was taken away in the Archive is left out (DECISIONS 1042); its file stays.
   List<MeditationSummary> list() {
     if (!dir.existsSync()) return const [];
     final out = <MeditationSummary>[];
+    final gone = removedSpanIds(Directory('${dir.parent.path}/spans'));
     for (final f in dir.listSync().whereType<File>()) {
       if (!f.path.endsWith(suffix)) continue;
       try {
-        final s = MeditationSummary.fromJson(jsonDecode(f.readAsStringSync()));
+        final j = jsonDecode(f.readAsStringSync());
+        if (j is Map && gone.contains(j['span'])) continue;
+        final s = MeditationSummary.fromJson(j);
         if (s != null && s.kind == kind) out.add(s);
       } on FormatException {
         continue;

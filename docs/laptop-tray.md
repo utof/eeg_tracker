@@ -54,7 +54,8 @@ Clicking it opens the menu:
   752): "Phone: sharing on its home Wi-Fi · copied 14:05" (or "on a Wi-Fi allowed by hand", or "paired, reachable";
   "· copying its files" while the link copies), "Phone: on another Wi-Fi: sharing paused there", "Phone: no longer
   knows this laptop (Pair phone… again)", "Phone: paired the old way: Pair phone… once more (one scan)", or "Phone:
-  not reachable (app asleep, or Share on Wi-Fi off?)"; then the headband: "Headband: recording on the phone
+  not reachable (app asleep, or Share on Wi-Fi off?)"; then "Phone: sent its files by itself 14:05" (the last time
+  the phone sent them without being asked, with the day when it was not today; DECISIONS 847); then the headband: "Headband: recording on the phone
   (work session since 12:26, signal good, alert)", "Headband: connected, not on the head (…)", "Headband: no data
   for 2 min (…)", "Headband: recording a night on the phone, 6h10 so far", "Headband: not recording on the phone",
   or "Headband: —"; and a break line from the phone when there is one: "Break hint on the phone since 12:50

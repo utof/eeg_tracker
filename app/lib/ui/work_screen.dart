@@ -38,7 +38,7 @@ class WorkScreen extends StatefulWidget {
 }
 
 class _WorkScreenState extends State<WorkScreen> {
-  final BrainBitFinder _finder = BrainBitFinder();
+  final BrainBitFinder _finder = BrainBitFinder(activity: 'work');
   late final WorkController _c = WorkController(
     finder: _finder,
     sound: widget.auto?.quiet == true ? QuietWorkSound(SoloudWorkSound()) : SoloudWorkSound(),
@@ -48,7 +48,7 @@ class _WorkScreenState extends State<WorkScreen> {
     laptopMeeting: laptopMeetingNow,
     onShare: (s) => sharedSession.value = s, // the paired laptop's tray sees the session (DECISIONS 671)
   );
-  bool _nightRunning = false, _eyesClosedFirst = false, _screenOn = false;
+  bool _recordingRuns = false, _eyesClosedFirst = false, _screenOn = false;
   List<WorkSummary> _sessions = const [];
   String? _recordings;
   bool _wearerOn = false;
@@ -61,6 +61,8 @@ class _WorkScreenState extends State<WorkScreen> {
   void initState() {
     super.initState();
     _c.addListener(_changed);
+    // the recording was stopped under this session (the notification's Stop, the 6-hour rule): it ends too
+    _finder.onRecordingStopped = () => unawaited(_c.stop());
     unawaited(_prepare());
   }
 
@@ -78,12 +80,12 @@ class _WorkScreenState extends State<WorkScreen> {
     }
     final running = await FlutterForegroundTask.isRunningService;
     if (!mounted) return;
-    setState(() => _nightRunning = running);
+    setState(() => _recordingRuns = running);
     if (widget.auto != null && !running) unawaited(_autoStart());
     await _load();
   }
 
-  /// The watcher's start: at once, and stopping itself at the battery guard's limit.
+  /// The watcher's start: at once. It has an end only under the battery guard's stopping rule (off: DECISIONS 1010).
   Future<void> _autoStart() async {
     await _start();
     final limit = widget.auto?.limit;
@@ -147,10 +149,6 @@ class _WorkScreenState extends State<WorkScreen> {
   }
 
   Future<void> _start() async {
-    if (await FlutterForegroundTask.isRunningService) {
-      setState(() => _nightRunning = true);
-      return;
-    }
     final phone = await Phone.snapshot().catchError((Object _) => const PhoneSnapshot({}));
     if (!await nearbyAllowed(phone.sdkInt) && !await requestNearby(phone.sdkInt)) {
       _say('Allow Nearby devices first: without it the headband cannot be found.');
@@ -231,7 +229,7 @@ class _WorkScreenState extends State<WorkScreen> {
     final model = WorkViewModel(
       stage: c.stage,
       message: c.message,
-      nightRunning: _nightRunning,
+      recordingRuns: _recordingRuns,
       eyesClosedFirst: _eyesClosedFirst,
       level: c.level,
       eyesClosedNow: c.drowsiness?.eyesClosed ?? false,

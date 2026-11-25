@@ -60,8 +60,10 @@ abstract final class LiveTap {
   }
 }
 
-/// The message kind of the night tap, both ways: from the screen `{'kind': 'signalTap', 'on': bool}` (the lease), from
-/// the recorder `{'kind': 'signalTap', 'run': stem, 'batches': [[first, atMs, [packs], [volts 4 a sample]], ...]}`.
+/// The message kind of the night tap, both ways: from the screen `{'kind': 'signalTap', 'on': bool, 'user': word}` (the
+/// lease of one user: the panel, the Signal view, the activities that ride on the recording), from the recorder
+/// `{'kind': 'signalTap', 'run': stem, 'batches': [[first, atMs, [packs], [volts, n a sample], n], ...]}`. While any
+/// lease holds, every sample the recorder saves is sent, in order, with its packet number (Record first, DECISIONS 897).
 const String signalTapKind = 'signalTap';
 
 /// The screen renews its lease this often while the Signal view shows the night.
@@ -73,11 +75,22 @@ const Duration nightTapLease = Duration(seconds: 15);
 /// The recorder gathers batches this long before one message (about 25 samples).
 const Duration nightTapEvery = Duration(milliseconds: 100);
 
-Map<String, Object?> nightTapLeaseMessage({required bool on}) => {'kind': signalTapKind, 'on': on};
+/// The tap's users: each holds a lease of its own, so one letting go never cuts the stream of another.
+const String tapPanel = 'panel', tapSignal = 'signal', tapRide = 'ride';
 
-/// Whether [data] from the screen is the tap's lease, and which way: null when it is something else.
-bool? nightTapLeaseFrom(Object? data) =>
-    data is Map && data['kind'] == signalTapKind && data['on'] is bool ? data['on'] as bool : null;
+Map<String, Object?> nightTapLeaseMessage({required bool on, String user = tapPanel}) => {
+  'kind': signalTapKind,
+  'on': on,
+  'user': user,
+};
+
+/// Whether [data] from the screen is the tap's lease, whose and which way: null when it is something else. A lease
+/// without a user (a screen of before) is the panel's.
+({bool on, String user})? nightTapLeaseFrom(Object? data) {
+  if (data is! Map || data['kind'] != signalTapKind || data['on'] is! bool) return null;
+  final user = data['user'];
+  return (on: data['on'] as bool, user: user is String && user.isNotEmpty ? user : tapPanel);
+}
 
 /// The recorder's side of the night tap: gathers what the recorder saves while the lease holds and hands it to [send]
 /// every [nightTapEvery] ([flush], driven by the recorder's isolate). Never throws into the recording.
@@ -86,26 +99,27 @@ class NightTapSender {
 
   final void Function(Object message) send;
   final DateTime Function() _now;
-  DateTime? _until;
+  final Map<String, DateTime> _until = {};
   String? _run;
   final List<List<Object?>> _held = [];
   int _heldSamples = 0;
 
-  /// The screen asked for the tap ([on]) or let it go.
-  void lease({required bool on}) {
-    _until = on ? _now().add(nightTapLease) : null;
-    if (!on) {
-      _held.clear();
-      _heldSamples = 0;
+  /// [user] asked for the tap ([on]), renewed it, or let it go. What was gathered goes out first when the last one
+  /// lets go: a user never loses samples it held a lease for.
+  void lease({required bool on, String user = tapPanel}) {
+    if (on) {
+      _until[user] = _now().add(nightTapLease);
+    } else if (_until.remove(user) != null && _until.isEmpty) {
+      flush();
     }
   }
 
-  /// Whether the lease holds now.
+  /// Whether any lease holds now.
   bool get on {
-    final u = _until;
-    if (u == null) return false;
-    if (_now().isAfter(u)) {
-      _until = null;
+    if (_until.isEmpty) return false;
+    final now = _now();
+    _until.removeWhere((_, u) => now.isAfter(u));
+    if (_until.isEmpty) {
       _held.clear();
       _heldSamples = 0;
       return false;
@@ -140,7 +154,7 @@ class NightTapSender {
       send(msg);
     } catch (_) {
       // the screen is gone: the tap ends, the recording goes on
-      _until = null;
+      _until.clear();
     }
   }
 }
@@ -171,6 +185,25 @@ List<LiveBatch>? nightTapBatches(Object? data) {
         run: run,
       ),
     );
+  }
+  return out;
+}
+
+/// The screen's side for the activities that ride on the recording: the samples in a night tap message as the
+/// headband gave them (volts, any number of channels), batch by batch in order; null when [data] is something else.
+List<List<Sample>>? nightTapSamples(Object? data) {
+  if (data is! Map || data['kind'] != signalTapKind || data['batches'] is! List) return null;
+  final out = <List<Sample>>[];
+  for (final b in data['batches'] as List) {
+    if (b is! List || b.length != 5) continue;
+    final packs = b[2], volts = b[3], n = b[4];
+    if (packs is! List || volts is! List || n is! int || n < 1) continue;
+    if (volts.length != packs.length * n || packs.isEmpty) continue;
+    if (!packs.every((p) => p is int) || !volts.every((v) => v is num)) continue;
+    out.add([
+      for (var i = 0; i < packs.length; i++)
+        Sample(packs[i] as int, Float64List.fromList([for (var c = 0; c < n; c++) (volts[i * n + c] as num).toDouble()])),
+    ]);
   }
   return out;
 }

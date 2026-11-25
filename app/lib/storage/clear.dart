@@ -10,6 +10,12 @@
 // - a sleep night (`recordings/`) goes whole, and only once its sleep report exists and was made from its recordings
 //   as they are, with no scoring of it under way: the newest night never goes before its report, and the phone's
 //   statistics (Trends, "Was this you?", the summaries) keep reading that report; a night is never half on the phone;
+// - a nap goes like a night; a file set that two of them share (a nap and the night after it in one set) goes only
+//   when every one of them may go, so none is ever half on the phone;
+// - a file set of no night and no nap (the awake hours of a recording made since Record first) goes by itself, like a
+//   work session's (DECISIONS 1038): without that an all-day recording would never leave the phone;
+// - a file set that is being written is never planned ([open]: storage/open_sets.dart, DECISIONS 1039), whatever its
+//   age and acks say;
 // - a DIY board's night (`recordings-diy/`, never scored) goes whole too; a work session's raw EEG (its header says
 //   `session: work`) and a check-in's raw signal (`mornings/`) go set by set;
 // - any other file goes on its own when written over an hour ago; a recorder log stays while its recording's samples
@@ -103,9 +109,26 @@ List<String> _rawStems(Directory dir) {
   return out.toList()..sort();
 }
 
+/// Why a set still being written stays.
+const String whyOpen = 'still being recorded';
+
+/// One group of sets that would go together, before it is known whether it may.
+class _Cand {
+  _Cand(this.item, this.night, this.sets, this.notYet);
+  final String item;
+  final String? night;
+  final List<String> sets;
+
+  /// Why it stays; null: it may go.
+  String? notYet;
+}
+
 class _Planner {
-  _Planner(this.filesDir, this.plan, this.now, this.before)
+  _Planner(this.filesDir, this.plan, this.now, this.before, this.open)
     : acks = AckStore(filesDir).load();
+
+  /// The plain `.f32` paths of the sets being written.
+  final Set<String> open;
   final Directory filesDir;
   final ClearPlan plan;
   final DateTime now;
@@ -126,33 +149,93 @@ class _Planner {
   }
 
   /// Adds one group when it may go in this mode.
-  void group(String item, String? night, List<String> sets, {String? notYet}) {
-    final files = [for (final s in sets) ...rawFilesOf(File(s))];
-    final n = files.fold(0, (m, f) => m + _size(f));
-    if (n == 0) return;
+  void group(String item, String? night, List<String> sets, {String? notYet}) => _add([_Cand(item, night, sets, notYet)]);
+
+  int _bytes(_Cand c) => [for (final s in c.sets) ...rawFilesOf(File(s))].fold(0, (m, f) => m + _size(f));
+
+  /// Whether [c] may go in this mode: 'go', 'skip' (it is another mode's: the phone-only part of a night is the
+  /// Danger zone's, a night all on the laptop is not; or checked, but not long enough ago), or why it stays.
+  String _verdict(_Cand c) {
+    final files = [for (final s in c.sets) ...rawFilesOf(File(s))];
+    if (c.sets.any(open.contains)) return whyOpen;
     final checked = files.every((f) => ackedNow(acks, relativeRaw(f), f));
-    if (phoneOnly ? checked : !checked) {
-      if (!phoneOnly) plan._stay(item, n, 'not checked on the laptop yet');
-      return; // the phone-only part of a night is the Danger zone's; a night all on the laptop is not
-    }
-    if (plan.mode == ClearMode.keepTime && !_onLaptop(files, item)) return; // checked, but not long enough ago
-    final why = notYet ??
-        sets.map((s) => whyNotRemove(File(s), onlyIfOnLaptop: !phoneOnly, acks: acks, now: now)).nonNulls.firstOrNull;
-    if (why != null) return plan._stay(item, n, why);
-    plan.groups.add((item: item, night: night, sets: sets, bytes: n));
-    plan._go(item, n);
+    if (phoneOnly ? checked : !checked) return phoneOnly ? 'skip' : 'not checked on the laptop yet';
+    if (plan.mode == ClearMode.keepTime && !_onLaptop(files, c.item)) return 'skip';
+    return c.notYet ??
+        c.sets.map((s) => whyNotRemove(File(s), onlyIfOnLaptop: !phoneOnly, acks: acks, now: now)).nonNulls.firstOrNull ??
+        'go';
   }
 
-  void nights(Directory dir, String item, {required bool scored, required List<NightFiles> Function(Directory) list}) {
+  /// Adds the groups of [cands] that may go. A set that two groups share goes only when both may: a group that stays
+  /// (or is another mode's) holds its sets, and every group with one of them stays too.
+  void _add(List<_Cand> cands) {
+    final live = [for (final c in cands) if (_bytes(c) > 0) c];
+    final verdict = {for (final c in live) c: _verdict(c)};
+    final held = <String, String>{}; // set -> why its group stays
+    void hold(_Cand c) {
+      for (final s in c.sets) {
+        held.putIfAbsent(s, () => verdict[c] == 'skip' ? 'part of a sleep that stays for now' : verdict[c]!);
+      }
+    }
+
+    // (in the Danger zone a group that is all on the laptop holds nothing: its sets may go with a night that is not)
+    bool holds(_Cand c) => verdict[c] != 'go' && !(phoneOnly && verdict[c] == 'skip');
+    for (final c in live) {
+      if (holds(c)) hold(c);
+    }
+    for (var changed = true; changed;) {
+      changed = false;
+      for (final c in live) {
+        if (verdict[c] != 'go') continue;
+        final why = c.sets.map((s) => held[s]).nonNulls.firstOrNull;
+        if (why == null) continue;
+        verdict[c] = why;
+        hold(c);
+        changed = true;
+      }
+    }
+    final going = <String>{};
+    for (final c in live) {
+      final v = verdict[c]!, n = _bytes(c);
+      if (v == 'skip') continue;
+      if (v != 'go') {
+        plan._stay(c.item, n, v);
+        continue;
+      }
+      plan.groups.add((item: c.item, night: c.night, sets: c.sets, bytes: n));
+      // a set two groups share is counted once
+      final fresh = [for (final s in c.sets) if (going.add(s)) s];
+      plan._go(c.item, [for (final s in fresh) ...rawFilesOf(File(s))].fold(0, (m, f) => m + _size(f)));
+    }
+  }
+
+  /// The nights (and naps) of [dir], each whole, then every set that is part of none, each by itself.
+  void nights(
+    Directory dir,
+    String item, {
+    required bool scored,
+    required List<NightFiles> Function(Directory) list,
+    List<NightFiles> Function(Directory)? naps,
+  }) {
     if (!dir.existsSync()) return;
-    for (final n in list(dir).reversed) {
+    final cands = <_Cand>[];
+    final grouped = <String>{};
+    for (final n in [...list(dir).reversed, ...?naps?.call(dir).reversed]) {
       final sets = [
         for (final f in n.recordings)
           if (!scored || sessionOf(f) != 'work') f.path, // a work session's set is the work item's
       ];
+      // a night whose samples partly left the phone already keeps its place in the nights' list
+      grouped.addAll([for (final f in [...n.recordings, ...n.removed]) f.path]);
       if (sets.isEmpty) continue;
-      group(item, n.name, sets, notYet: scored && !_reported(dir, n) ? 'no sleep report yet' : null);
+      cands.add(_Cand(item, n.name, sets, scored && !_reported(dir, n) ? 'no sleep report yet' : null));
     }
+    for (final stem in _rawStems(dir)) {
+      final f32 = File('${dir.path}/$stem$rawSuffix');
+      if (grouped.contains(f32.path) || (scored && sessionOf(f32) == 'work')) continue;
+      cands.add(_Cand(item, null, [f32.path], null));
+    }
+    _add(cands);
   }
 
   void sets(Directory dir, String item, bool Function(File f32) take) {
@@ -220,15 +303,17 @@ ClearPlan planClear(
   required DateTime now,
   Map<String, DateTime> before = const {},
   List<NightFiles> Function(Directory dir) nights = nightsIn,
+  List<NightFiles> Function(Directory dir) naps = napsIn,
+  Set<String> open = const {},
 }) {
   final plan = ClearPlan(mode);
-  final p = _Planner(filesDir, plan, now, before);
+  final p = _Planner(filesDir, plan, now, before, open);
   Directory folder(String name) => Directory('${filesDir.path}/$name');
   final ok = {
     for (final i in items)
       if (storageItems[i] case final item? when !item.kept && (mode != ClearMode.keepTime || item.auto)) i,
   };
-  if (ok.contains('nights.raw')) p.nights(folder('recordings'), 'nights.raw', scored: true, list: nights);
+  if (ok.contains('nights.raw')) p.nights(folder('recordings'), 'nights.raw', scored: true, list: nights, naps: naps);
   if (ok.contains('diy.raw')) p.nights(folder('recordings-diy'), 'diy.raw', scored: false, list: nights);
   if (ok.contains('work.raw')) p.sets(folder('recordings'), 'work.raw', (f) => sessionOf(f) == 'work');
   if (ok.contains('checkins.raw')) p.sets(folder('mornings'), 'checkins.raw', (_) => true);
@@ -253,6 +338,7 @@ Future<ClearRun> runClear(
   required Future<bool> Function() busy,
   String? laptop,
   DateTime Function() clock = DateTime.now,
+  Future<Set<String>> Function()? open,
 }) async {
   final run = ClearRun();
   final phoneOnly = plan.mode == ClearMode.phoneOnly;
@@ -271,7 +357,10 @@ Future<ClearRun> runClear(
       final now = clock();
       final name = g.night ?? g.sets.first.split('/').last;
       final files = [for (final s in g.sets) File(s)];
-      final whyNot = files.map((f) => whyNotRemove(f, onlyIfOnLaptop: !phoneOnly, acks: acks, now: now)).nonNulls.firstOrNull;
+      final written = await open?.call() ?? const <String>{};
+      final whyNot = g.sets.any(written.contains)
+          ? whyOpen
+          : files.map((f) => whyNotRemove(f, onlyIfOnLaptop: !phoneOnly, acks: acks, now: now)).nonNulls.firstOrNull;
       if (whyNot != null) {
         run.kept[name] = whyNot; // the whole night stays until every set may go
         continue;
@@ -385,22 +474,25 @@ Map<String, DateTime> keepCutoffs(StorageSettings s, DateTime now) => {
 /// category's time goes from the phone; nothing that is only on the phone, ever. And only what the laptop proved again
 /// in the last 15 minutes that it still holds, byte for byte (recheck.dart, DECISIONS 756): every other due file is
 /// asked about now, and goes at a later run once the laptop has answered. [plan] works the plan out (a background
-/// isolate on the phone). Never throws; null when nothing was due or something records.
+/// isolate on the phone). [open]: the file sets being written now (storage/open_sets.dart), asked for the plan and
+/// again before each delete. Never throws; null when nothing was due or [busy] says to wait.
 Future<ClearRun?> autoClear(
   Directory filesDir, {
   required Future<bool> Function() busy,
   required bool paired,
   String? laptop,
   DateTime Function() clock = DateTime.now,
-  Future<ClearPlan> Function(Directory filesDir, Map<String, DateTime> before)? plan,
+  Future<ClearPlan> Function(Directory filesDir, Map<String, DateTime> before, Set<String> open)? plan,
+  Future<Set<String>> Function()? open,
 }) async {
   try {
     if (!paired) return null;
     final before = keepCutoffs(StorageStore(filesDir).load(), clock());
     if (before.isEmpty || await busy()) return null;
+    final written = await open?.call() ?? const <String>{};
     final p = plan == null
-        ? planClear(filesDir, before.keys.toSet(), mode: ClearMode.keepTime, now: clock(), before: before)
-        : await plan(filesDir, before);
+        ? planClear(filesDir, before.keys.toSet(), mode: ClearMode.keepTime, now: clock(), before: before, open: written)
+        : await plan(filesDir, before, written);
     if (p.groups.isEmpty && p.files.isEmpty) return ClearRun();
     final store = RecheckStore(filesDir), now = clock();
     List<String> pathsOf(RawGroup g) => [
@@ -418,7 +510,7 @@ Future<ClearRun?> autoClear(
       if (store.proven(ackPathOf(f.path), now)) proven.files.add(f);
     }
     if (proven.groups.isEmpty && proven.files.isEmpty) return ClearRun(); // asked: the laptop answers at its next look
-    final run = await runClear(filesDir, proven, busy: busy, laptop: laptop, clock: clock);
+    final run = await runClear(filesDir, proven, busy: busy, laptop: laptop, clock: clock, open: open);
     store.forget([
       for (final g in proven.groups)
         if (run.removed.contains(g.night ?? g.sets.first.split('/').last)) ...?groupPaths[g],

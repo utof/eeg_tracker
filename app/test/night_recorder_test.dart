@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:eeg_tracker/alarm/rule.dart';
+import 'package:eeg_tracker/headband/reconnect_ladder.dart' show LadderTiming;
 import 'package:eeg_tracker/recorder/battery.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
@@ -218,6 +219,9 @@ const fast = RecorderTiming(
   reconnectWaits: [Duration(milliseconds: 5), Duration(milliseconds: 10), Duration(milliseconds: 20)],
   scanEvery: 3,
   rescanFor: Duration(milliseconds: 20),
+  // Tests that move a clock of their own by hours (record_first_test) keep the short waits: the ladder's stage C waits
+  // minutes of real time. Stage C has its own tests (reconnect_waiting_test, reconnect_roll_over_test).
+  ladder: LadderTiming.neverWait,
   phoneLogEvery: Duration(minutes: 1),
 );
 
@@ -457,7 +461,7 @@ void main() {
     expect(log, contains('reconnect try 2 (direct to AA:BB): failed'));
     expect(log, contains('reconnect try 3 (scan): connected'));
     expect(files('f32'), hasLength(2));
-  });
+  }, tags: 'realtime');
 
   test('a headband that answers but reports out of range gets only the state read', () async {
     final first = FakeBand('a');

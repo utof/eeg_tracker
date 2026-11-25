@@ -100,7 +100,7 @@ final _earlier = [
 
 final Map<String, MeditationViewModel> states = {
   'setup': meditationModel(stage: Stage.setup, minutes: 10),
-  'setup_night_running': meditationModel(stage: Stage.setup, minutes: 10, nightRunning: true),
+  'setup_night_running': meditationModel(stage: Stage.setup, minutes: 10, recordingRuns: true),
   'connecting': meditationModel(stage: Stage.connecting, minutes: 10, message: 'Found BrainBit Black. Connecting.'),
   'eyes_open': meditationModel(stage: Stage.calibrating, minutes: 10, calPhase: 'open', calSecondsLeft: 21, contact: _contact),
   'eyes_closed': meditationModel(
@@ -188,7 +188,7 @@ final Map<String, MeditationViewModel> states = {
   'failed': meditationModel(
     stage: Stage.failed,
     minutes: 10,
-    message: 'Headband not found. Is it switched on, charged, and free (no night recording)?',
+    message: 'Headband not found. Is it switched on and charged?',
   ),
 };
 

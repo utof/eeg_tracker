@@ -34,6 +34,7 @@ import '../dream/band_link.dart';
 import '../feedback/features.dart' show fs;
 import '../handsfree/live.dart';
 import '../meditation/controller.dart' show gapPauseS, gapSamples;
+import '../spans/activities.dart' show ActivityRef, activityRef;
 import '../recorder/chunk_writer.dart';
 import '../recorder/headband.dart';
 import '../recorder/packets.dart' show maxGapSamples, packetWrap;
@@ -188,6 +189,13 @@ class StatesController extends ChangeNotifier {
   StateSound? _sound;
   ChunkWriter? _writer;
   String? _recording;
+
+  /// The span this session runs on as an activity of the day's recording (then it writes no EEG file of its own).
+  String? _span;
+
+  /// The recording this session rides on, read again when the session is saved: until the headband is found the
+  /// recording has no id yet and the span is numbered `?-1` (spans/activities.dart [ActivityRef]).
+  ActivityRef? _rides;
   Detectors? _seen;
   SpectrumFeed? _feed;
   Readout? _readout;
@@ -256,7 +264,7 @@ class StatesController extends ChangeNotifier {
       final ohms = await link.contact();
       if (!_live(run)) return await link.close();
       contact = ohms;
-      if (plan.state == SoundState.asleep) _openWriter(link.name);
+      if (plan.state == SoundState.asleep || link.ridesRecorder) _openWriter(link.name);
       _seen = Detectors(onSecond: _onSecond);
       _listen(_seen!);
       _feed = SpectrumFeed();
@@ -359,6 +367,8 @@ class StatesController extends ChangeNotifier {
     _sound = null;
     _writer = null;
     _recording = null;
+    _span = null;
+    _rides = null;
     _seen = null;
     _feed = null;
     _readout = null;
@@ -522,6 +532,14 @@ class StatesController extends ChangeNotifier {
   // ---- the EEG file (fall asleep) ----
 
   void _openWriter(String band) {
+    final ref = (_link?.ridesRecorder ?? false) ? activityRef() : null;
+    if (ref != null) {
+      // an activity of the day's recording: its signal is that recording's samples inside the span
+      _rides = ref;
+      _recording = ref.recording;
+      _span = ref.span;
+      return;
+    }
     final dir = recordingsDir;
     if (dir == null) return;
     try {
@@ -708,7 +726,8 @@ class StatesController extends ChangeNotifier {
       plan: plan!,
       headband: lost ? HeadbandUse.lost : headband,
       contact: contact,
-      recording: _recording,
+      recording: _rides?.recording ?? _recording,
+      span: _rides?.span ?? _span,
       soundStartS: _soundStartS,
       baselineS: r?.baselineS ?? 0,
       fadeFromS: _fadeFromS,

@@ -14,9 +14,10 @@ import 'sleep_report_view.dart' show SleepLegend, clock, durationParts, duration
 import 'theme.dart';
 
 /// The section's line: what the last look found, or what the button does; [refusal] when there is no sleep so far
-/// (the DIY board).
-String soFarLine(SoFarResult? r, {String? refusal}) {
+/// (the DIY board); [noSleep]: a recording started with Record, with no sleep marked in it yet.
+String soFarLine(SoFarResult? r, {String? refusal, bool noSleep = false}) {
   if (refusal != null) return refusal;
+  if (noSleep) return 'No sleep marked in this recording yet, so there is no sleep so far.';
   if (r == null || r.stages.isEmpty) {
     return 'The sleep chart and totals of the night so far, scored on this phone when you open it.';
   }
@@ -73,7 +74,15 @@ class SoFarSection extends StatelessWidget {
 
 /// What the page is doing, in the status line.
 class SoFarState {
-  const SoFarState({this.step, this.waiting, this.failed, this.refused, this.ended = false, this.busy = false});
+  const SoFarState({
+    this.step,
+    this.waiting,
+    this.failed,
+    this.refused,
+    this.ended = false,
+    this.busy = false,
+    this.noSleep = false,
+  });
 
   /// The look's current step ("Scoring 01:04 to 02:08 (2 of 4)").
   final String? step;
@@ -90,6 +99,9 @@ class SoFarState {
   /// The night was stopped: its report comes next.
   final bool ended;
   final bool busy;
+
+  /// The recording has no open sleep stretch (it was started with Record and Sleep was not pressed).
+  final bool noSleep;
 }
 
 class SleepSoFarView extends StatelessWidget {
@@ -114,6 +126,7 @@ class SleepSoFarView extends StatelessWidget {
     if (s.ended) return 'The night has ended. Its report is scored after Stop and replaces this.';
     if (s.step != null) return '${s.step}.';
     if (s.refused != null) return s.refused!;
+    if (s.noSleep) return 'No sleep marked in this recording yet. Sleep so far counts only the sleep you mark.';
     if (s.failed != null) return 'Could not score just now: ${s.failed}';
     if (s.waiting != null) {
       return 'Waiting: ${s.waiting}. Its readings fill in until it is done.';

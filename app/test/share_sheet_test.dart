@@ -108,6 +108,7 @@ void main() {
   testWidgets('paired, at home: says so, and when the laptop last copied', (t) async {
     await show(t, paired: laptop, here: 'home', copied: 'Last copied by my-laptop at 14:05.');
     expect(find.textContaining('Your home Wi-Fi: my-laptop said so'), findsOneWidget);
+    expect(find.textContaining('sends new files to my-laptop by itself'), findsOneWidget);
     expect(find.text('Last copied by my-laptop at 14:05.'), findsOneWidget);
     expect(find.text('Share here for 12 hours'), findsNothing);
   });

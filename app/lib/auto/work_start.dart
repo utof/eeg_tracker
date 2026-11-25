@@ -1,6 +1,7 @@
 // A work session the headband watcher starts (DECISIONS 604): the app's work page opens and starts at once. Silent
 // unless "Chime in automatic work sessions" is on (a sound needs your say-so; the hints still show on the screen and
-// the lock-screen card), and it stops itself when the battery guard's limit is reached, so tonight's charge is kept.
+// the lock-screen card). It has an end only under the battery guard's stopping rule, which is off (the guard only
+// warns: BatteryRule.onlyWarns, DECISIONS 1010).
 import '../sound/work_sound.dart';
 
 class AutoWorkStart {

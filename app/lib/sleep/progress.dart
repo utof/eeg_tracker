@@ -92,7 +92,7 @@ class ScoringProgressStore {
   }
 
   void write(String night, NightProgress p) {
-    dir.createSync(recursive: true);
+    fileFor(night).parent.createSync(recursive: true);
     final tmp = File('${dir.path}/$night.progress.tmp');
     tmp.writeAsBytesSync(encodeProgress(p), flush: true);
     tmp.renameSync(fileFor(night).path);

@@ -18,9 +18,15 @@ import 'experiments_view.dart' show experimentLine;
 import '../recorder/headband.dart';
 import '../recorder/nights.dart';
 import '../recorder/packed.dart' show packInBackground, packOldRecordings;
-import '../storage/clear.dart' show ClearMode, autoClear, planClear;
+import '../storage/clear.dart' show ClearMode, ClearPlan, autoClear, planClear;
+import '../storage/storage.dart' show rawOnPhone, storageLine;
 import '../recorder/recorder_service.dart';
 import '../recorder/status.dart';
+import '../confirm/questions.dart';
+import '../spans/activities.dart';
+import '../spans/span.dart' show Span, leftOpen, spanWord, spansLine, undoLine;
+import '../spans/stop_sheet.dart';
+import 'stop_sheet.dart';
 import '../session_keeper.dart' show PhoneSessionKeeper;
 import '../share/control.dart';
 import '../share/isolate.dart' show shareAddress;
@@ -31,6 +37,8 @@ import '../sleep/scorer.dart';
 import '../sleep/so_far.dart' show SoFarScorer;
 import 'alarm_view.dart';
 import 'archive_screen.dart' show ArchiveScreen;
+import '../confirm/phone.dart';
+import 'confirm_screen.dart';
 import '../sharp/prompts.dart' show ChannelSharpPhone;
 import '../study/arm.dart' show rearmInBackground;
 import 'dream_screen.dart';
@@ -43,6 +51,7 @@ import 'meditation_screen.dart';
 import 'lucid_screen.dart';
 import 'memory_cues_screen.dart';
 import 'storage_screen.dart';
+import 'nap_reports_screen.dart';
 import 'nap_screen.dart';
 import 'morning_screen.dart';
 import 'morning_section.dart';
@@ -295,10 +304,14 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   final NightStartGate _gate = NightStartGate();
   String? _dreamLine;
   String? _napLine;
+  String? _napReportsLine;
   String? _lucidLine;
   String? _memoryLine;
   String? _checkedInAt, _experiment, _unusual;
   Pending? _pending;
+
+  /// The raw recordings on the phone and what of them waits for the laptop (storage/storage.dart [rawOnPhone]).
+  ({int bytes, int waiting})? _raw;
   AlarmSetup _alarm = const AlarmSetup();
   AlarmClockState _clockState = const AlarmClockState({});
 
@@ -333,6 +346,19 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     FlutterForegroundTask.addTaskDataCallback(_onData);
+    // an activity pressed while nothing records starts the recorder as this tab does (permissions, the share
+    // server's hand-over, the lend of a live connection); its "Stop everything" is this tab's Stop
+    Activities.shared
+      ?..startRecording = ((kind) => _start(sleep: false, span: kind, quiet: true))
+      ..stopRecording = _stopNow;
+    // a Yes to "Did you sleep 15:59-17:49?", wherever it is answered, makes that stretch a sleep span with a report
+    // (with the times you set, when you set them); one that cannot be written yet waits for [_sweepYeses]
+    ConfirmQuestions.onYes = (e, a) {
+      final files = _filesDir;
+      if (files == null) return;
+      final ok = confirmedSleep(Directory(files), e, answer: a, active: _activeRecording);
+      if (!ok && mounted) _say('Noted. The sleep report for that stretch comes after you stop the recording.');
+    };
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       setState(() {}); // data age and the current half hour move on
@@ -354,7 +380,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
 
   void _onProofs() {
     final dir = _dir;
-    if (dir == null || _running || _packing != null) return;
+    if (dir == null || _packing != null) return;
+    // beside a recording too ([_packingMustWait] says when not)
     _packing = _moveOld(dir).whenComplete(() => _packing = null);
   }
 
@@ -411,9 +438,27 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     });
   }
 
+  /// The id of the recording that runs now (its spans file is the recorder's to write), or null.
+  String? _activeRecording() => _running ? _status?.rec.id : null;
+
+  /// A Yes to "Did you sleep?" that could not become a sleep stretch when it was given (tapped in the notification,
+  /// or while that recording still ran) becomes one now (spans/stop_sheet.dart [sweepConfirmedSleep]).
+  void _sweepYeses(String? recordingsDir, {required bool running}) {
+    if (recordingsDir == null) return;
+    try {
+      // while the service runs but its status has not come yet, the running recording is not known: wait
+      if (running && _status?.rec.id == null) return;
+      sweepConfirmedSleep(Directory(recordingsDir).parent, active: () => running ? _status?.rec.id : null);
+    } catch (_) {}
+  }
+
   /// Why the night's sleep scoring must not run now, or null.
   String? _scoringStop({bool? running}) {
-    if (running ?? _running) return 'a night records';
+    // a recording with no sleep span open runs no live sleep model: a closed sleep span is scored while it goes on
+    // (DECISIONS 887); the status must be fresh, since the headband watcher can start a night from its own engine
+    final at = _statusAtMs;
+    final awake = _status?.rec.sleep == false && at != null && DateTime.now().millisecondsSinceEpoch - at < 15000;
+    if ((running ?? _running) && !awake) return 'a night records';
     if (dreamSessionRunning || soundSessionRunning || napSessionRunning || PhoneSessionKeeper.held) {
       return 'a session runs';
     }
@@ -427,7 +472,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     final now = _scoringStop();
     if (now != null) return now;
     try {
-      if (await FlutterForegroundTask.isRunningService) return 'a night records';
+      if (await FlutterForegroundTask.isRunningService && _scoringStop(running: true) != null) return 'a night records';
     } catch (_) {}
     return null;
   }
@@ -451,6 +496,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     return SleepSummary(
       nightOf: newest.nightOf,
       scored: newest.scored,
+      noSleepFound: newest.noSleepFound,
       asleepMin: newest.asleepMin,
       periods: newest.periods.length,
     );
@@ -480,7 +526,14 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   String? _soFarLine() {
     if (!_running) return null;
     if (_diy.useDiy) return diySoFarRefusal(_diy.names);
-    return soFarLine(_soFar?.cached());
+    return soFarLine(_soFar?.cached(), noSleep: !_sleepMarked());
+  }
+
+  /// The running recording has an open sleep stretch, or is one from before sleep spans (no id: its whole files are
+  /// the night); a recording started with Record has none until Sleep is pressed.
+  bool _sleepMarked() {
+    final r = _status?.rec;
+    return r == null || r.id == null || r.openSleep != null;
   }
 
   Future<void> _refreshRunning() async {
@@ -488,17 +541,21 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     if (mounted && running != _running) setState(() => _running = running);
   }
 
-  /// Packs the raw recordings nothing has written for a day (DECISIONS 540-549), after the sleep scorer: between
-  /// nights, one file at a time off the screen's thread. It stops before the next file as soon as a night or a session
-  /// records, the scorer runs again, the app leaves the screen or another page is in front. One run at a time.
+  /// Packs the raw recordings nothing has written for a day (DECISIONS 540-549), after the sleep scorer, one file at
+  /// a time off the screen's thread. It stops before the next file as soon as a sleep stretch or a session records,
+  /// the scorer runs again, the app leaves the screen or another page is in front. One run at a time. Beside a
+  /// recording with no sleep stretch open it runs too (DECISIONS 1039), and leaves the file set being written alone.
   static Future<void>? _packing;
 
   void _packOld(String dir) {
-    _packing ??= packOldRecordings(Directory(dir).parent, busy: _packingMustWait, pack: packInBackground)
+    final files = Directory(dir).parent;
+    _packing ??= _openSets(files)
+        .then((open) => packOldRecordings(files, busy: _packingMustWait, pack: packInBackground, open: open))
         .then((run) {
           if (run.failed.isNotEmpty) debugPrint('packing: ${run.failed.length} not packed: ${run.failed.first.$2}');
         })
         .then((_) => _moveOld(dir))
+        .catchError((Object _) {}) // the recorder did not say what it writes: nothing is packed this time
         .whenComplete(() => _packing = null);
   }
 
@@ -508,28 +565,40 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   /// run here, where the readers are known.
   Future<void> _moveOld(String dir) async {
     final laptop = _share.config.laptop;
+    final files = Directory(dir).parent;
     final run = await autoClear(
-      Directory(dir).parent,
+      files,
       busy: _packingMustWait,
       paired: laptop != null,
       laptop: laptop?.name,
-      plan: (Directory files, Map<String, DateTime> before) => Isolate.run(
-        () => planClear(files, before.keys.toSet(), mode: ClearMode.keepTime, now: DateTime.now(), before: before),
-        debugName: 'storage-plan',
-      ),
+      plan: _planKeepTime,
+      open: () => _openSets(files),
     );
     if (run != null && run.removed.isNotEmpty) {
       debugPrint('storage: ${run.removed.length} left the phone, the laptop has them (${(run.freedBytes / 1e6).round()} MB)');
     }
   }
 
+  /// The keep-time plan in a background isolate. Static: a closure made in the State would carry the screen along.
+  static Future<ClearPlan> _planKeepTime(Directory files, Map<String, DateTime> before, Set<String> open) => Isolate.run(
+    () => planClear(files, before.keys.toSet(), mode: ClearMode.keepTime, now: DateTime.now(), before: before, open: open),
+    debugName: 'storage-plan',
+  );
+
+  /// The file sets being written now; a failure to ask is "wait" for whoever asked (it throws).
+  static Future<Set<String>> _openSets(Directory files) => openSetsNow(files);
+
+  /// Whether packing and clearing must wait now. Beside a recording they run only while no sleep stretch is open
+  /// (the sleep scoring's own rule, [_scoringStop]: the live sleep model has the phone during a sleep stretch) and
+  /// once the recorder has said which recording runs, so its open file set is known (DECISIONS 1039).
   Future<bool> _packingMustWait() async {
     if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? false)) return true;
     if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) return true;
     if (nightScoringBusy || dreamSessionRunning || soundSessionRunning || napSessionRunning || workSessionRunning) {
       return true;
     }
-    return FlutterForegroundTask.isRunningService;
+    if (!await FlutterForegroundTask.isRunningService) return false;
+    return _scoringStop(running: true) != null || _status?.rec.id == null;
   }
 
   Future<void> _refresh() async {
@@ -537,11 +606,19 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     final phone = await _safe(Phone.snapshot, const PhoneSnapshot({}));
     final nearby = await nearbyAllowed(phone.sdkInt);
     final running = await FlutterForegroundTask.isRunningService;
-    final last = await loadNight();
     final xiaomiDone = await FlutterForegroundTask.getData<bool>(key: _xiaomiDoneKey) ?? false;
     final dir = _dir ?? await _safe<String?>(Phone.recordingsDir, null);
+    // a recording that ended without a Stop (the phone restarted) is closed here: its spans end at its last sample
+    final (last, endedAlone) = running || !_gate.trusts(asked) ? (await loadNight(), false) : await loadEndedNight(dir);
+    // the last recording's stop sheet waits as a card until it is answered or skipped
+    final sheet = running || dir == null || last.active || last.recording == null
+        ? null
+        : await _safe(() async => _waitingSheet(Directory(dir).parent, last), null);
+    if (endedAlone && mounted) _say('The recording stopped when the phone restarted. What was marked ends at its last data.');
+    _sweepYeses(dir, running: running);
     // the nights' chaining opens every recording's index (and a packed one's header): off the screen's thread
-    final nights = dir == null || running ? const <NightFiles>[] : await _listNights(dir);
+    // (beside a recording too: the Archive's list and Export work while it runs, DECISIONS 1040)
+    final nights = dir == null ? const <NightFiles>[] : await _listNights(dir);
     final now = DateTime.now();
     final lines = dir == null ? null : nightLines(dir, now);
     final alarm = dir == null ? const AlarmSetup() : AlarmSetupStore.forRecordings(dir).read();
@@ -575,9 +652,11 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
           log: debugPrint,
         ),
         nightStartMs: () {
-          final ms = _status?.nightStartMs ?? 0;
+          // the sleep so far counts from the sleep span, not from a recording that began hours before it
+          final ms = _status?.rec.openSleep?.start.millisecondsSinceEpoch ?? _status?.nightStartMs ?? 0;
           return ms > 0 ? ms : null;
         },
+        sleepMarked: _sleepMarked,
       )..addListener(_onScoring);
     }
     // a "no night" asked before or during this screen's own Start is not acted on (NightStartGate)
@@ -594,7 +673,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     if (trusted && _scoringStop(running: running) == null) {
       _scoring?.runSoon(then: dir == null ? null : () => _packOld(dir));
     }
-    final pending = dir == null || running ? null : await _pendingExport(dir);
+    final pending = dir == null ? null : await _pendingExport(dir);
+    final rawNow = dir == null ? null : await _rawOnPhone(dir);
     String? experiment;
     try {
       experiment = dir == null ? null : experimentLine(currentExperiment(dir, now));
@@ -616,16 +696,19 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       _nearby = nearby;
       if (!stale) _running = running;
       _last = last;
+      _sheetPlan = sheet;
       _xiaomiDone = xiaomiDone;
       _dir = dir;
       _dreamLine = lines?.dream;
       _napLine = lines?.nap;
+      _napReportsLine = dir == null ? null : _napReports(dir);
       _lucidLine = lines?.lucid;
       _memoryLine = lines?.memory;
       _checkedInAt = lines?.checkedInAt;
       _experiment = experiment;
       _unusual = unusual;
       _pending = pending;
+      _raw = rawNow;
       _alarm = alarm;
       _clockState = clockState;
       _diy = diy;
@@ -738,6 +821,16 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// What the raw recordings take and what waits for the laptop, read off the screen's thread.
+  static Future<({int bytes, int waiting})?> _rawOnPhone(String dir) async {
+    final files = Directory(dir).parent.path;
+    try {
+      return await Isolate.run(() => rawOnPhone(Directory(files)));
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<T> _safe<T>(Future<T> Function() f, T fallback) async {
     try {
       return await f();
@@ -748,27 +841,32 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
 
   Future<bool> _requestNearby() => requestNearby(_phone.sdkInt);
 
-  Future<void> _start() async {
+  /// Starts the recorder: with Sleep, alone (Record), or with [span] as its first span (an activity pressed while
+  /// nothing recorded, DECISIONS 884). Null when it started, else why not (already said on screen unless [quiet]).
+  Future<String?> _start({bool sleep = true, String? span, bool quiet = false}) async {
     setState(() => _busy = true);
     _gate.begin();
+    String? no(String why) {
+      if (!quiet) _say(why);
+      return why;
+    }
+
     try {
       // the DIY board comes over Wi-Fi: no Bluetooth needed, but a Wi-Fi address the board can send to
       final diy = _readDiy(_dir).useDiy;
       if (diy) {
         if (await phoneWifiAddress() == null) {
-          _say('Connect the phone to the Wi-Fi the board sends to, then start the night.');
-          return;
+          return no('Connect the phone to the Wi-Fi the board sends to, then start the night.');
         }
       } else if (!await nearbyAllowed(_phone.sdkInt) && !await _requestNearby()) {
-        _say('Allow Nearby devices first: without it the headband cannot be found.');
-        return;
+        return no('Allow Nearby devices first: without it the headband cannot be found.');
       }
       if (_phone.sdkInt >= 33) await FlutterForegroundTask.requestNotificationPermission();
       final phone = await _safe(Phone.snapshot, _phone);
       if (!diy && !phone.bluetoothOn) {
-        _say('Turn Bluetooth on, then start the night.');
+        final why = no('Turn Bluetooth on, then start.');
         await Phone.openSettings('bluetooth');
-        return;
+        return why;
       }
       if (!phone.ignoringBatteryOptimizations) {
         // The system dialog; recording starts anyway, and the warning stays until it is allowed.
@@ -777,12 +875,13 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       final dir = _dir ?? await _safe<String?>(Phone.recordingsDir, null);
       _scoring?.halt(); // the night comes first: scoring stops at its next model call and goes on after Stop
       _soFar?.reset(); // nothing of an earlier night's so far
-      final plan = await _setAlarmClock(dir);
+      // the smart alarm belongs to Sleep; Record alone sets none
+      final plan = sleep ? await _setAlarmClock(dir) : null;
       await _share.beforeNight(); // the recorder serves during the night: the app lets go of the port
-      final result = await startRecorderService(dir, alarm: plan);
-      if (result is ServiceRequestFailure) _say('The recorder did not start: ${result.error}');
+      final result = await startRecorderService(dir, alarm: plan, sleep: sleep, span: span);
       _status = null;
       _statusAtMs = null;
+      return result is ServiceRequestFailure ? no('The recorder did not start: ${result.error}') : null;
     } finally {
       _gate.end();
       if (mounted) setState(() => _busy = false);
@@ -800,14 +899,126 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     FlutterForegroundTask.sendDataToTask(lightsOffCommand);
   }
 
+  /// The nap reports' line for the Sessions tab (a few small files under `nights/naps/`).
+  static String? _napReports(String dir) {
+    try {
+      return napsLine(napReports(nightsDirFor(dir)));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  StopSheetPlan? _sheetPlan;
+
+  static String _hm(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+  static StopSheetPlan? _waitingSheet(Directory files, NightState last) {
+    final id = last.recording;
+    if (id == null || StopSheetSeen(files).last == id) return null;
+    final plan = stopSheetPlan(files, id, last.startMs);
+    return plan == null || plan.skips(questions: 0) ? null : plan;
+  }
+
+  /// The sheet "What was this recording?" for the recording that just stopped ([afterStop]: skipped by itself when
+  /// what was pressed covers it and no question waits), or from its card.
+  Future<void> _stopSheet({bool afterStop = false}) async {
+    final path = _filesDir;
+    if (path == null || !mounted) return;
+    final files = Directory(path);
+    final night = await loadNight();
+    final id = night.recording;
+    if (id == null || night.active || !mounted || StopSheetSeen(files).last == id) return;
+    final plan = stopSheetPlan(files, id, night.startMs);
+    final confirm = ConfirmQuestions(files, phone: _confirmPhone);
+    var waiting = 0;
+    try {
+      waiting = plan == null ? 0 : confirm.pendingFor(id, plan.start, plan.end).length;
+    } catch (_) {}
+    if (plan == null || (afterStop && plan.skips(questions: waiting))) {
+      StopSheetSeen(files).mark(id, saved: false);
+    } else {
+      await showStopSheet(context, plan, filesDir: files, confirm: confirm);
+    }
+    if (mounted) setState(() => _sheetPlan = null);
+    unawaited(_refresh());
+  }
+
+  /// Sleep on the recording that runs: the alarm is set as for a night, then the recorder opens the sleep span.
+  Future<void> _sleepNow() async {
+    if (!_running || _busy) return;
+    setState(() => _busy = true);
+    try {
+      _soFar?.reset();
+      _scoring?.halt(); // the live sleep model comes first
+      final plan = await _setAlarmClock(_dir);
+      FlutterForegroundTask.sendDataToTask(startSleepCommand(alarm: plan));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Ends the activity marked on the running recording from the bar (its page is closed, or you forgot it): the span
+  /// is closed, the recording goes on.
+  void _endActivity() {
+    final open = _openActivity;
+    if (open == null) return;
+    final run = Activities.shared?.current.value;
+    if (run != null && run.kind == open.kind) {
+      unawaited(Activities.shared!.end(run));
+    } else {
+      // its session is gone: End now does not say when it ended
+      FlutterForegroundTask.sendDataToTask(closeSpanCommand(open.id, by: leftOpen));
+    }
+    FlutterForegroundTask.sendDataToTask(statusCommand);
+  }
+
+  /// The open span of the running recording that is not sleep (Work, Meditate, ...), if any.
+  Span? get _openActivity => !_running ? null : _status?.rec.spans.where((s) => !s.closed && !s.isSleep).lastOrNull;
+
+  /// Stop while a sleep span is open. Sleep started the recording: Stop everything (the default) or Keep recording.
+  /// Record started it: Stop ends the sleep only. True: go on and stop the whole recording.
+  Future<bool> _stopSleep(Span sleep) async {
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Stop sleep?'),
+        content: Text(
+          sleep.startedRecording
+              ? 'Stop everything ends the recording too. Keep recording ends only the sleep: its report is made and '
+                    'the headband goes on recording.'
+              : 'The sleep ends and its report is made. The recording goes on until you stop it.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Not yet')),
+          if (sleep.startedRecording) TextButton(onPressed: () => Navigator.pop(c, 'sleep'), child: const Text('Keep recording')),
+          TextButton(
+            onPressed: () => Navigator.pop(c, sleep.startedRecording ? 'all' : 'sleep'),
+            child: Text(sleep.startedRecording ? 'Stop everything' : 'Stop sleep'),
+          ),
+        ],
+      ),
+    );
+    if (choice == 'sleep' && mounted) {
+      _soFar?.nightEnded();
+      _lightsOffSentMs = null;
+      FlutterForegroundTask.sendDataToTask(stopSleepCommand);
+      unawaited(_refresh());
+    }
+    return choice == 'all';
+  }
+
   Future<void> _stop() async {
+    final sleep = _status?.rec.openSleep;
+    final asked = sleep != null;
+    if (asked && !await _stopSleep(sleep)) return;
+    if (!mounted) return;
     final end = _clockState.endMs;
     final rings = end != null && end > DateTime.now().millisecondsSinceEpoch && _clockState.awakeMs == null;
     final at = rings ? DateTime.fromMillisecondsSinceEpoch(end) : null;
-    final ok = await showDialog<bool>(
+    final ok = asked ? true : await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('Stop the night?'),
+        title: Text(_status?.rec.sleep == false ? 'Stop recording?' : 'Stop the night?'),
         content: Text(
           'Recording ends. The files are kept.${at == null ? '' : ' The alarm still rings at '
               '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}.'}',
@@ -819,15 +1030,29 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       ),
     );
     if (ok != true || !mounted) return;
+    await _stopNow();
+  }
+
+  /// Ends the recording now, with no question: Stop once it was confirmed, and "Stop everything" after an activity
+  /// that started the recording (spans/activities.dart).
+  Future<void> _stopNow() async {
+    // the tab is in the middle of another tap (Sleep, a start): the Stop waits for it instead of doing nothing
+    for (var i = 0; i < 100 && mounted && _busy; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    if (!mounted) return;
+    if (_busy) return _say('The recording is still running: the app was busy. Tap Stop on the Record tab.');
     setState(() => _busy = true);
     try {
       _stopped = Completer<void>();
       _soFar?.nightEnded(); // a look stops at its next model call; the report comes next
+      Activities.shared?.recordingStops(); // an activity that is alive ends by this Stop; the rest was left open
       FlutterForegroundTask.sendDataToTask(stopCommand);
       // The recorder closes its files and the headband first; then the service goes.
-      await _stopped!.future.timeout(const Duration(seconds: 25), onTimeout: () {});
+      await _stopped!.future.timeout(stopAnswerWait, onTimeout: () {});
       await FlutterForegroundTask.stopService();
       await _share.afterStop(); // 15 more minutes, so the laptop gets the end of the night
+      if (mounted) unawaited(_stopSheet(afterStop: true)); // the files are closed: what was this recording?
     } finally {
       _stopped = null;
       _lightsOffSentMs = null;
@@ -852,7 +1077,21 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   /// picker failed on a packed recording's length; DECISIONS 629).
   Future<void> _export() async {
     final dir = _dir;
-    final nights = dir == null ? _nights : await _listNights(dir);
+    var nights = dir == null ? _nights : await _listNights(dir);
+    if (dir != null && _running) {
+      // a night whose last file set is still being written is not offered: its copy would end in the middle
+      final Set<String> open;
+      try {
+        open = await _openSets(Directory(dir).parent);
+      } catch (_) {
+        return _say('Not now: the recorder did not answer. Try again in a moment.');
+      }
+      final whole = [for (final n in nights) if (!n.recordings.any((f) => open.contains(f.path))) n];
+      if (whole.isEmpty && nights.isNotEmpty) {
+        return _say('The newest night is still being written to. It can be exported after Stop, or in a few hours.');
+      }
+      nights = whole;
+    }
     if (nights.isEmpty || !mounted) return;
     final night = await showModalBottomSheet<NightFiles>(
       context: context,
@@ -872,16 +1111,35 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
 
   /// The Archive: every recording and session on the phone, during a night too (deleting refuses what is in use;
   /// DECISIONS 700-709).
-  Future<void> _archive() async {
+  /// The confirmation questions' notification side (ConfirmPrompts.kt).
+  final ConfirmPhone _confirmPhone = ChannelConfirmPhone();
+
+  Future<void> _confirmSettings() async {
+    final files = _filesDir;
+    if (files == null) return;
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => ArchiveScreen(onStorage: _dir == null ? null : () => unawaited(_storage()))),
+      MaterialPageRoute<void>(builder: (_) => ConfirmSettingsScreen(filesPath: files, phone: _confirmPhone)),
     );
     unawaited(_refresh());
   }
 
-  /// Export data: everything new, from its own page, only between nights (DECISIONS rows 150-156).
+  Future<void> _archive() async {
+    final files = _filesDir;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ArchiveScreen(
+          onStorage: _dir == null ? null : () => unawaited(_storage()),
+          // the confirmation questions' card leads the Archive too (DECISIONS 867)
+          confirm: files == null ? null : (changed) => ConfirmCardHost(filesPath: files, phone: _confirmPhone, changed: changed),
+        ),
+      ),
+    );
+    unawaited(_refresh());
+  }
+
+  /// Export data: everything new, from its own page (DECISIONS rows 150-156); beside a recording too, without the
+  /// file set being written (DECISIONS 1040).
   Future<void> _exportData() async {
-    if (_running) return;
     await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ExportScreen()));
     unawaited(_refresh());
   }
@@ -923,28 +1181,24 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
 
   /// Meditation owns the headband while it runs, so it starts only between nights (DECISIONS row 75).
   Future<void> _meditate() async {
-    if (_running) return;
     await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const MeditationScreen()));
     unawaited(_refresh());
   }
 
   /// The dream catcher holds the headband too, so it also starts only between nights (DECISIONS row 110).
   Future<void> _dream() async {
-    if (_running) return;
     await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const DreamScreen()));
     unawaited(_refresh());
   }
 
   /// The nap coach holds the headband too, so it also starts only between nights (DECISIONS row 173).
   Future<void> _nap() async {
-    if (_running) return;
     await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const NapScreen()));
     unawaited(_refresh());
   }
 
   /// The work session holds the headband too, so it also starts only between nights (DECISIONS 447).
   Future<void> _work() async {
-    if (_running) return;
     await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const WorkScreen()));
     unawaited(_refresh());
   }
@@ -1057,6 +1311,14 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       sentence: d.sentence,
       tone: d.tone,
       running: _running,
+      sleeping: s?.rec.sleep ?? true,
+      spansLine: s == null ? null : spansLine(s.rec.spans, sinceMs: s.nightStartMs),
+      activityLine: _openActivity == null ? null : '${spanWord(_openActivity!.kind)} since ${_hm(_openActivity!.start)}',
+      activityWord: _openActivity == null ? null : spanWord(_openActivity!.kind),
+      undoLine: !_running || s == null ? null : undoLine(s.rec.undoable, resumed: s.rec.resumed),
+      stopSheetLine: _running || _sheetPlan == null
+          ? null
+          : '${_hm(_sheetPlan!.start)}-${_hm(_sheetPlan!.end)}',
       busy: _busy,
       minutes: s != null ? s.minutesRecorded : (showLast ? last.samples / sampleRateHz / 60 : null),
       dataAgeSeconds: s?.lastDataMs == null ? null : ((now - s!.lastDataMs!) ~/ 1000).clamp(0, 1 << 30),
@@ -1075,7 +1337,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
         wifi: diy || _share.on,
       ),
       nightsOnPhone: _nights.length,
-      exportLine: _running || _pending == null
+      storageLine: _raw == null ? null : storageLine(_raw!, paired: _share.config.laptop != null),
+      exportLine: _pending == null
           ? null
           : exportLine(
               lastComplete: _pending!.lastComplete,
@@ -1096,6 +1359,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
             ),
       lightsOffTapped: (s?.lightsOffMs ?? _lightsOffSentMs) != null,
       napLine: _napLine,
+      napReportsLine: _napReportsLine,
       share: _dir == null ? null : _share.line(),
       alarmLine: _alarmLine(s, now),
       alarmAction: _alarmAction(s, now),
@@ -1141,6 +1405,19 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       tab: tab,
       model: model,
       onStart: _start,
+      onRecord: () => unawaited(_start(sleep: false)),
+      onSleepNow: () => unawaited(_sleepNow()),
+      onStopSheet: () => unawaited(_stopSheet()),
+      onEndActivity: _endActivity,
+      onUndo: () {
+        FlutterForegroundTask.sendDataToTask(undoOffCommand);
+        FlutterForegroundTask.sendDataToTask(statusCommand);
+      },
+      onNapReports: _dir == null
+          ? null
+          : () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => NapReportsScreen(nightsDir: nightsDirFor(_dir!))),
+            ),
       onStop: _stop,
       onFix: _fix,
       onExport: _export,
@@ -1172,6 +1449,18 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onHeadbandPage: () => unawaited(_refresh()),
       onLicences: () => showLicensePage(context: context, applicationName: 'EEG Tracker'),
       onArchive: _archive,
+      // the confirmation questions (lib/confirm, DECISIONS 860-869): gathered again when a recording stops or the
+      // newest report changes, not on the screen's every rebuild
+      confirm: _filesDir == null
+          ? null
+          : ConfirmCardHost(
+              filesPath: _filesDir!,
+              phone: _confirmPhone,
+              takesOpen: true,
+              passes: recentWalkPasses,
+              changed: (_running, sleep?.nightOf, sleep?.scored, sleep?.scoringStep == null),
+            ),
+      onConfirmSettings: _filesDir == null ? null : _confirmSettings,
     );
     // the bottom bar (DECISIONS 597); the alarm's wake face fills the screen with none
     if (model.ringing != null) return page(null);

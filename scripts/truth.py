@@ -20,7 +20,15 @@ The truth table (`_local/data/truth.tsv`, written by scripts/data_book.py) is bu
   - the hand file `<local>/analyses/truth-labels.tsv` (rows the assistant writes from chat, or the owner by hand);
   - every `<local>/truth/*.tsv` in the same schema (a watch's pulse readings converted to rows, any later importer);
   - the Archive's tags marked "This is what I was doing" on the phone (`<local>/phone/archive/*.tags.json`, `truth`
-    true), their word matched to a label by its id or the vocabulary's `also` words.
+    true), their word matched to a label by its id or the vocabulary's `also` words. A tag may carry `source`,
+    `confidence` and `words` (the stop sheet's: source `owner_stop_sheet`): the row takes them, `words` verbatim;
+  - the phone's spans (`<local>/phone/spans/*.spans.jsonl`, scripts/spans.py): each closed span the owner pressed or
+    confirmed, with a label, is one row (source `owner_activity_button`, confidence `likely`).
+  - the phone's confirmation questions (`<local>/phone/confirm/`, DECISIONS 860-869): a Yes to "Did you walk
+    19:08-21:14?" is a row over the detector's stretch, a No the same row with `present` 0 (it did not happen: the
+    detector was wrong there), both naming the estimate in `estimate_id`; Not sure and a question nobody answered
+    make no row. `times_confirmed` 0 on a row: its start and end are the detector's, not the owner's (a plain Yes says
+    "it happened", not "these times are right"): do not train or score edges on it.
 Rows that break the schema are left out of the table and listed with the reason. Standard library only.
 """
 from __future__ import annotations
@@ -32,11 +40,18 @@ from pathlib import Path
 from typing import Iterable
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import spans as spans_mod  # noqa: E402  (the phone's spans files)
+
 VOCABULARY = HERE / "truth_vocabulary.tsv"
 HAND_FILE = Path("analyses") / "truth-labels.tsv"  # from <local>
 IMPORT_FOLDER = Path("truth")  # from <local>: more truth files in the same schema
 COLUMNS = ["label_id", "start", "end", "recording", "kind", "label", "value", "unit", "source", "confidence", "created",
-           "supersedes", "owner_words", "context"]
+           "supersedes", "owner_words", "context",
+           "present", "estimate_id", "times_confirmed"]
+# a file written before these columns reads with these values (the times of a row written by hand, or of a tag, are the
+# owner's own: confirmed)
+ADDED_LATER = {"present": "1", "estimate_id": "", "times_confirmed": "1"}
 TABLE_COLUMNS = COLUMNS + ["origin", "active", "superseded_by"]  # truth.tsv: where each row came from, and its state
 FREE_TEXT = ("owner_words", "context")
 NUMBERED_KINDS = ("rating", "measurement")  # value and unit required
@@ -44,6 +59,9 @@ ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}")
 RECORDING = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
 SCALE = re.compile(r"(\d+)-(\d+)")
 ARCHIVE_CONTEXT = 'Archive tag marked "This is what I was doing"'
+STOP_SHEET, STOP_SHEET_CONTEXT = "owner_stop_sheet", "stop sheet"
+BUTTON_SOURCE, BUTTON_SPANS = "owner_activity_button", ("owner_button", "owner_confirmed")
+OWNER_ENDS = ("owner", "activity")  # a span's `ended_by` when its end is a time the owner (or their timed session) made
 
 
 # ---- the vocabulary -------------------------------------------------------------------------------------------------
@@ -144,6 +162,15 @@ def row_errors(r: dict[str, str], vocab: Vocabulary) -> list[str]:
     if r["confidence"] not in vocab.confidences:
         errs.append(f"confidence {r['confidence']!r} is not one of {', '.join(vocab.confidences)}")
     errs += _value_errors(r, lab)
+    if r["present"] not in ("1", "0"):
+        errs.append(f"present {r['present']!r} is not 1 (it happened) or 0 (it did not)")
+    if r["estimate_id"] and not ID.fullmatch(r["estimate_id"]):
+        errs.append(f"estimate_id {r['estimate_id']!r} is not an id")
+    if r["times_confirmed"] not in ("1", "0"):
+        errs.append(f"times_confirmed {r['times_confirmed']!r} is not 1 (the owner set or checked the times) or 0 "
+                    "(the times are a detector's)")
+    if r["present"] == "0" and lab is not None and lab.kind in NUMBERED_KINDS + ("correction",):
+        errs.append(f"present 0 has no meaning for a {lab.kind}")
     if r["supersedes"] == r["label_id"]:
         errs.append("a row cannot supersede itself")
     if lab is not None and lab.kind == "correction" and not r["supersedes"]:
@@ -195,7 +222,7 @@ class Read:
 def read_file(path: Path, origin: str, vocab: Vocabulary, out: Read) -> None:
     """One truth file's rows into `out`: the header must hold every column (in any order; others are an error)."""
     try:
-        text = path.read_text(encoding="utf-8-sig")  # a spreadsheet may save a byte-order mark
+        text = path.read_bytes().decode("utf-8-sig")  # a spreadsheet may save a byte-order mark; no newline changes
     except (OSError, UnicodeDecodeError) as e:
         out.rejected.append(Rejected(origin, 0, "", f"cannot be read ({type(e).__name__})"))
         return
@@ -203,8 +230,8 @@ def read_file(path: Path, origin: str, vocab: Vocabulary, out: Read) -> None:
     head = next(reader, None)
     if head is None:
         return
-    if sorted(head) != sorted(COLUMNS):
-        missing, extra = set(COLUMNS) - set(head), set(head) - set(COLUMNS)
+    missing, extra = set(COLUMNS) - set(head) - set(ADDED_LATER), set(head) - set(COLUMNS)
+    if missing or extra or len(set(head)) != len(head):
         out.rejected.append(Rejected(origin, 1, "", f"the header is not the truth schema (missing {sorted(missing)}, "
                                                     f"unknown {sorted(extra)})"))
         return
@@ -216,7 +243,9 @@ def read_file(path: Path, origin: str, vocab: Vocabulary, out: Read) -> None:
             out.rejected.append(Rejected(origin, line, cells[0] if cells else "",
                                          f"{len(cells)} cells, the header has {len(head)}"))
             continue
-        r = dict(zip(head, cells))
+        r = {**ADDED_LATER, **dict(zip(head, cells))}
+        r["present"] = r["present"] or "1"
+        r["times_confirmed"] = r["times_confirmed"] or "1"
         out.ids.add(r["label_id"])
         errs = row_errors(r, vocab)
         if errs:
@@ -250,12 +279,240 @@ def archive_rows(local: Path, vocab: Vocabulary, out: Read) -> None:
             r = dict(label_id=tid, start=_iso(t.get("start")), end=_iso(t.get("end")),
                      recording=str(j.get("id") or ""), kind=lab.kind, label=lab.id, value="", unit="",
                      source="owner_app_tag", confidence="certain", created=_iso(t.get("made")), supersedes="",
-                     owner_words=word, context=ARCHIVE_CONTEXT)
+                     owner_words=word, context=ARCHIVE_CONTEXT, present="1", estimate_id="",
+                     times_confirmed="1")
+            if isinstance(t.get("source"), str):  # the stop sheet's tags: their own source, confidence and words
+                words = t.get("words")
+                r.update(source=t["source"], owner_words=words if isinstance(words, str) else "",
+                         context=STOP_SHEET_CONTEXT if t["source"] == STOP_SHEET else ARCHIVE_CONTEXT)
+                if isinstance(t.get("confidence"), str):
+                    r["confidence"] = t["confidence"]
+                    # "at some point in this recording": the row's times are the recording's, not the label's own
+                    r["times_confirmed"] = "0" if t["confidence"] == "within" else "1"
             errs = row_errors(r, vocab)
             if errs:
                 out.rejected.append(Rejected(rel, 0, tid, "; ".join(errs)))
                 continue
             out.rows.append(dict(r, origin=rel))
+
+
+def span_rows(local: Path, vocab: Vocabulary, out: Read) -> None:
+    """The phone's spans as truth: one row per closed span the owner pressed or confirmed that has a label (its id
+    `span:<span id>`, the `recording` column the recording's id). Open spans and `auto_start` / `auto_resume` spans
+    give no row; a span the owner took away is not in the reader's `spans` at all. Neither does a span made by a Yes to an estimate (`owner_confirmed` with `estimate`): that Yes is the
+    `confirm:` row, which says whether the times were set; the span's times after a plain Yes are the detector's."""
+    for rid, f in spans_mod.all(local).items():
+        rel = (spans_mod.folder(local) / f"{rid}{spans_mod.SUFFIX}").relative_to(local).as_posix()
+        for s in f.spans:
+            if s.source not in BUTTON_SPANS or s.end_unix is None or not s.label or s.estimate:
+                continue
+            if s.end_unix <= s.start_unix:
+                continue  # no length: taken away with Undo, or ended by the 60-minute rule before any data
+            tid = f"span:{s.span}"
+            out.ids.add(tid)
+            lab = vocab.labels.get(s.label)
+            # an end the owner did not make (the app was closed and Stop came hours later, the 60-minute rule, a phone
+            # restart, the next activity) is not a time: "at some point in this stretch". Stop of the recording under
+            # a sleep stretch is the owner's own press.
+            own_end = (s.ended_by in OWNER_ENDS or s.ended_by is None
+                       or (s.ended_by == "recording_stopped" and s.kind in ("sleep", "nap")))
+            r = dict(label_id=tid, start=_unix_iso(s.start_unix), end=_unix_iso(s.end_unix), recording=rid,
+                     kind=lab.kind if lab else "", label=s.label, value="", unit="", source=BUTTON_SOURCE,
+                     confidence="likely" if own_end else "within", created=_unix_iso(s.made_unix if s.made_unix is not None else s.end_unix),
+                     supersedes="", owner_words="", context=f"activity button: {s.kind}", present="1",
+                     estimate_id="", times_confirmed="1" if own_end else "0")
+            errs = row_errors(r, vocab)
+            if errs:
+                out.rejected.append(Rejected(rel, 0, tid, "; ".join(errs)))
+                continue
+            out.rows.append(dict(r, origin=rel))
+
+
+def _unix_iso(t: int | float) -> str:
+    return datetime.fromtimestamp(t).astimezone().isoformat(timespec="seconds")
+
+
+def _jsonl(path: Path) -> list[dict]:
+    """A phone file's lines that are JSON objects (a line cut short by a killed app is left out)."""
+    out = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return out
+    for line in text.splitlines():
+        try:
+            j = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(j, dict):
+            out.append(j)
+    return out
+
+
+CONFIRM_FOLDER = Path("phone") / "confirm"
+# the words kept after "Saved:" (packages/shared_labels/lib/src/store.dart); `skip` is the older word for `not_sure`
+CONFIRM_ANSWERS = {"yes": "Yes", "no": "No", "not_sure": "Not sure", "said": "Said"}
+CONFIRM_WHY_NOT = ("dismissed", "expired", "never_seen", "short_and_old")
+CONFIRM_CLOSES = tuple(w for w in CONFIRM_WHY_NOT if w != "dismissed")  # the question is closed: asked no more
+ONE_QUESTION = {"asleep", "nap", "night_sleep"}  # vocabulary.dart `sameAs`: the clock tells these apart, not the owner
+
+
+@dataclass
+class Confirmed:
+    """One estimate of the phone's confirmation questions and what the owner answered (DECISIONS 860-869, 960-979).
+
+    `answer` is yes, no, not_sure (its own answer: never a label), said (a blind card: `said` is the label picked,
+    `words` the owner's own), not_answered (no answer came, `why_not` says why: never read as a Yes or a No), or ""
+    (still waiting). `times_confirmed` is True only when the owner set the times himself (`start`, `end`): a plain Yes
+    says it happened, not that the detector's times are right."""
+    estimate: dict
+    answer: str = ""
+    at: str = ""
+    via: str = ""
+    note: str = ""
+    card: str = ""  # normal, blind, or "" (no card was shown)
+    said: str = ""
+    words: str = ""
+    times_confirmed: bool = False
+    start: str = ""
+    end: str = ""
+    shown: str = ""
+    seconds: float | None = None
+    age_min: int | None = None
+    why_not: str = ""
+
+    @property
+    def agrees(self) -> bool | None:
+        """A blind card: whether what the owner said is what the detector thought; None when it cannot be told."""
+        if self.answer != "said" or not self.said:
+            return None
+        guess = self.estimate["label"]
+        return self.said == guess or {self.said, guess} <= ONE_QUESTION
+
+
+def clean_note(words: str) -> str:
+    """A note as the app keeps it: one line, single spaces, at most 200 characters."""
+    return re.sub(r"\s+", " ", words).strip()[:200].rstrip()
+
+
+def _not_negative(v: object) -> float | None:
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else None
+
+
+def _answer_line(c: Confirmed, a: dict, labels: set[str]) -> bool:
+    """Fills `c` from one answer line as packages/shared_labels/lib/src/store.dart reads it; False for a line that says
+    nothing (a blind answer with neither a known label nor words)."""
+    answer = "not_sure" if a["answer"] == "skip" else a["answer"]
+    said = a["said"] if answer == "said" and a.get("said") in labels else ""
+    words = clean_note(a["words"]) if answer == "said" and isinstance(a.get("words"), str) else ""
+    if answer == "said" and not said and not words:
+        return False
+    c.answer, c.at, c.said, c.words = answer, a["at"], said, words
+    c.via = a["via"] if isinstance(a.get("via"), str) else "card"
+    c.card = a["card"] if a.get("card") in ("normal", "blind") else ""
+    s, e = parse_time(a.get("start")), parse_time(a.get("end"))
+    c.times_confirmed = bool(answer == "yes" and a.get("times_confirmed") is True and s and e and e > s)
+    c.start, c.end = (a["start"], a["end"]) if c.times_confirmed else ("", "")
+    c.shown = a["shown"] if parse_time(a.get("shown")) else ""
+    c.seconds = _not_negative(a.get("seconds"))
+    age = _not_negative(a.get("age_min"))
+    c.age_min = None if age is None else round(age)
+    return True
+
+
+def read_confirm(local: Path, vocab: Vocabulary | None = None) -> list[Confirmed]:
+    """The phone's estimates (`estimates.jsonl`, the first line of an id counts) with their standing answers
+    (`answers.jsonl`: the first yes, no, not_sure or said stands, `undo` takes it back, a `note` adds the owner's
+    words, `not_answered` is kept apart and gives way to any answer), in the order registered. The same reading as
+    packages/shared_labels/lib/src/store.dart."""
+    labels = set((vocab or read_vocabulary()).labels)
+    got: dict[str, Confirmed] = {}
+    for j in _jsonl(local / CONFIRM_FOLDER / "estimates.jsonl"):
+        if isinstance(j.get("id"), str) and isinstance(j.get("label"), str):
+            got.setdefault(j["id"], Confirmed(j))
+    notes: dict[str, str] = {}
+    answers: dict[str, Confirmed] = {}
+    silent: dict[str, dict] = {}
+    for j in _jsonl(local / CONFIRM_FOLDER / "answers.jsonl"):
+        i = j.get("estimate_id")
+        if not isinstance(i, str):
+            continue
+        if isinstance(j.get("note"), str):
+            notes[i] = clean_note(j["note"])
+        elif j.get("answer") == "undo":
+            answers.pop(i, None)
+            notes.pop(i, None)
+        elif not parse_time(j.get("at")):
+            continue
+        elif j.get("answer") == "not_answered":
+            if j.get("why") in CONFIRM_WHY_NOT:
+                silent[i] = j
+        elif j.get("answer") in (*CONFIRM_ANSWERS, "skip") and i not in answers and i in got:
+            c = Confirmed(got[i].estimate)
+            if _answer_line(c, j, labels):
+                answers[i] = c
+    for i, c in answers.items():
+        c.note = notes.get(i, "")
+        got[i] = c
+    for i, j in silent.items():
+        if i in got and i not in answers:
+            c = got[i]
+            c.answer, c.why_not, c.at = "not_answered", j["why"], j["at"]
+            c.via = j["via"] if isinstance(j.get("via"), str) else "card"
+    return list(got.values())
+
+
+def confirm_row(c: Confirmed, vocab: Vocabulary | None = None) -> dict[str, str] | None:
+    """An answered estimate as a truth row (the columns of COLUMNS); None for Not sure, for no answer, and for a blind
+    card's words that name no label. A Yes says it happened (`present` 1), a No that it did not (`present` 0), a blind
+    card's answer is a row of the label the owner picked. `times_confirmed` 0: the start and end are the detector's (a
+    plain Yes does not confirm them, so the row is `likely`); 1: the owner set them, and the row carries his. The same
+    row packages/shared_labels/lib/src/labels.dart writes into the phone's own `confirm/labels.tsv`; one golden file
+    checks both."""
+    if c.answer not in ("yes", "no") and not (c.answer == "said" and c.said):
+        return None
+    e = c.estimate
+    label, kind = e["label"], str(e.get("kind") or "")
+    if c.answer == "said":
+        label, kind = c.said, (vocab or read_vocabulary()).labels[c.said].kind
+    conf = e.get("confidence")
+    sure = f", confidence {conf:.2f}" if isinstance(conf, (int, float)) and not isinstance(conf, bool) else ""
+    means = e.get("yes_means") if e.get("yes_means") in ("certain", "likely") else "certain"
+    word = (c.words or label) if c.answer == "said" else ("Yes, with my times" if c.times_confirmed
+                                                          else CONFIRM_ANSWERS[c.answer])
+    asked = "the app asked without showing its guess" if c.answer == "said" else "the app asked"
+    return dict(label_id="confirm:" + e["id"][4:], start=_iso(c.start if c.times_confirmed else e.get("start")),
+                end=_iso(c.end if c.times_confirmed else e.get("end")),
+                recording=e.get("recording") or "", kind=kind, label=label, value="", unit="",
+                source="owner_stop_sheet" if c.via == "stop_sheet" else "owner_app_prompt",
+                confidence="certain" if c.answer == "no" else (means if c.times_confirmed else "likely"),
+                created=_iso(c.at), supersedes="", owner_words=f"{word}: {c.note}" if c.note else word,
+                context=f"{asked}; {e.get('detector')} ({e.get('version')}) said {e['label']}{sure}",
+                present="0" if c.answer == "no" else "1", estimate_id=e["id"],
+                times_confirmed="1" if c.times_confirmed else "0")
+
+
+def taken_away(local: Path) -> set[str]:
+    """The estimates whose sleep stretch (made by a Yes) the owner took away afterwards ("Not sleep" in the Archive,
+    DECISIONS 1025) and did not put back. A stretch only filed again under another recording (`moved_to`) is not one."""
+    return {s.estimate for f in spans_mod.all(local).values() for s in f.removed if s.estimate and not s.moved_to}
+
+
+def confirm_rows(local: Path, vocab: Vocabulary, out: Read) -> None:
+    """The phone's answered confirmation questions as truth rows (`<local>/phone/confirm/`)."""
+    rel = (CONFIRM_FOLDER / "answers.jsonl").as_posix()
+    # a Yes whose sleep stretch the owner took away afterwards ("Not sleep" in the Archive) is no truth any more
+    taken = taken_away(local)
+    for c in read_confirm(local, vocab):
+        r = confirm_row(c, vocab)
+        if r is None or (c.answer == "yes" and c.estimate.get("id") in taken):
+            continue
+        out.ids.add(r["label_id"])
+        errs = row_errors(r, vocab)
+        if errs:
+            out.rejected.append(Rejected(rel, 0, r["label_id"], "; ".join(errs)))
+            continue
+        out.rows.append(dict(r, origin=rel))
 
 
 def _iso(v: object) -> str:
@@ -328,17 +585,24 @@ def build(local: Path, vocab: Vocabulary | None = None) -> tuple[list[dict[str, 
     for p, rel in sources_of(local):
         read_file(p, rel, vocab, got)
     archive_rows(local, vocab, got)
+    confirm_rows(local, vocab, got)
+    span_rows(local, vocab, got)
     rows = check_rows(got)
-    counts = {"hand": 0, "files": 0, "archive": 0}
+    counts = {"hand": 0, "files": 0, "archive": 0, "confirm": 0, "spans": 0}
     for r in rows:
         counts[origin_kind(r["origin"])] += 1
     return rows, got.rejected, counts
 
 
 def origin_kind(origin: str) -> str:
-    """`hand` (the hand file), `archive` (a phone tag) or `files` (<local>/truth/)."""
+    """`hand` (the hand file), `archive` (a phone tag), `confirm` (an answer), `spans` (a pressed activity) or `files`
+    (<local>/truth/)."""
     if origin == HAND_FILE.as_posix():
         return "hand"
+    if origin.startswith("phone/confirm/"):
+        return "confirm"
+    if origin.startswith("phone/spans/"):
+        return "spans"
     return "archive" if origin.startswith("phone/archive/") else "files"
 
 
@@ -355,7 +619,8 @@ def to_tsv(rows: Iterable[dict[str, str]], columns: list[str] = TABLE_COLUMNS) -
 
 def write_table(path: Path, rows: list[dict[str, str]]) -> None:
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(to_tsv(rows), encoding="utf-8")
+    with open(tmp, "w", encoding="utf-8", newline="") as f:  # no newline changes: a cell keeps its own line ends
+        f.write(to_tsv(rows))
     os.replace(tmp, path)
 
 

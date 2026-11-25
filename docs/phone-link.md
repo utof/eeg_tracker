@@ -124,6 +124,49 @@ old app with 400 `old app`.
 
 The laptop never deletes anything; `_local/phone/acks.jsonl` has one line per ack (no addresses).
 
+## The phone sends by itself (DECISIONS 840-849)
+
+The copy above needs the laptop to reach the phone, which works while a recording or a session runs and while the app
+is open. For the rest of the day the direction is turned round: the phone opens the connection. No server, no
+notification.
+
+- **When.** Android's own scheduler runs a short job about every 15 minutes while the phone is on Wi-Fi (Android
+  picks the moment; 15 minutes is the shortest it allows), and once more a few seconds after a recording or a session
+  ends. It also runs during a recording, so the laptop's copy grows even if nothing can reach the phone's port. Only
+  with Share on Wi-Fi on and a laptop paired. The job survives a restart of the phone.
+- **Where.** Only on the home Wi-Fi, by the same rule as above asked from the phone's side: the phone talks only to an
+  address inside the Wi-Fi network it is on, the laptop must prove the pairing's key, and the laptop must say it is on
+  the network where it paired (its router). Before that proof the phone says nothing about its files. The phone looks
+  for the laptop where its signed requests last came from, then where it was at pairing, then (at most every 2 hours)
+  around the home network.
+- **How.** Four signed `POST`s to the laptop's receiver (`scripts/push_receiver.py`, inside `phone_link.py --keep`,
+  port 8772):
+  1. `/push/hello`: the laptop proves the key and says `home`.
+  2. `/push/begin`: the phone's file list (the one `GET /files` gives) and its open questions before deleting. The
+     laptop answers which bytes it lacks: `want: [{path, from, have}]`.
+  3. `/push/chunk?s=&p=&at=`: those bytes, at most 4 MB a request, in order.
+  4. `/push/commit`: the laptop files what arrived with the same code and rules as its own copy pass (a temporary
+     name, the SHA-256 check, then the rename; partial copies of growing files; `replaced/`; `pull-state.json`) and
+     answers with its acks and its proofs, which the phone takes exactly as `POST /ack` and `POST /recheck`.
+- **Signatures.** Each request carries `X-Eeg-Time`, `X-Eeg-Nonce` and `X-Eeg-Sign` =
+  `HMAC-SHA256(key, "eeg-tracker push v1|METHOD|time|nonce|sha256(body)|sha256(path)|sha256(query)")`; each answer
+  carries `X-Eeg-Reply` = `HMAC-SHA256(key, "eeg-tracker push reply v1|nonce|sha256(answer)")`, so the phone knows the
+  wishes and the acks are the paired laptop's, unchanged. Another tag than the laptop's own requests, so neither
+  side's requests pass for the other's. Vectors: `app/test/fixtures/phone_link.json` (`push`).
+- **Cut off anywhere, nothing is lost.** Uploaded bytes wait in `_local/phone/push-inbox/` (names made from a hash,
+  never the phone's file names) until a commit; the next push goes on where this one stopped. Nothing half-made
+  appears in the real folders.
+- **Deleting stays as careful.** A file the phone is asking about before deleting is never sent in a push, so the
+  laptop's proof can only come from its own copy.
+- **The two ways cannot clash.** The laptop's own copy pass and a push's commit are the same code under one lock
+  (`flock` on `_local/phone/`), with the same names and the same state file: a file half-copied one way is finished
+  the other way, never twice.
+- **What the receiver refuses** (it is the one laptop port that listens on the home network, and only while the
+  laptop is there): anything but those four `POST`s (no listing, nothing is ever sent out), a missing or too big
+  `Content-Length` before a byte is read, a wrong or reused signature, a time more than 5 minutes off, ten wrong tries
+  a minute from one address, an address outside the local network, a chunk for a file it did not ask for or past the
+  listed size, a wrong `Host`.
+
 ## Who can do what
 
 - **The code** works once and for 5 minutes, and only from the laptop's screen to the phone's camera (it is never
@@ -153,7 +196,13 @@ The laptop never deletes anything; `_local/phone/acks.jsonl` has one line per ac
 - The phone and the laptop must be on the same network. At home the laptop finds a phone with a new address within 10
   minutes; elsewhere (Share here) only at the last address it knew.
 - Between nights the laptop reaches the phone only while the app runs (row 678), so the tray's headband line shows
-  "not reachable" while the app sleeps in the background with no session.
+  "not reachable" while the app sleeps in the background with no session. The files still arrive: the phone sends them
+  by itself (above), and the tray says when.
+- Android decides when a scheduled job runs. With the phone unused for hours (Doze) it may wait longer than 15
+  minutes; the job after a recording usually runs within seconds. If the phone's battery saver or the maker's own
+  limits hold the app back, the files arrive at the next app open instead.
+- When port 8765 on the phone is held by something else, the app serves on 8766, 8767 or 8768; the laptop looks there
+  by itself, and the app's log says what held 8765.
 - A home with two routers on one network, or a laptop on a cable to another router, may not be recognised as home:
   **Share here** covers it for 12 hours at a time.
 - One phone per laptop: a new pairing replaces the old one.

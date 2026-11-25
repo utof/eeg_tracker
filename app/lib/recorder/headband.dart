@@ -121,6 +121,13 @@ RecordingHeader headerOf(Headband band) => band is OtherBoard ? (band as OtherBo
 /// stream (that would start the mending over, every 10 s); its own no-data rule stays the backstop.
 abstract class MendsDrops {}
 
+/// A handle to the recording that runs (headband/connection.dart `RecordingBand`): its samples are the recorder's, and
+/// so is the reconnecting. A session's link on one never searches, restarts the stream or reconnects: it waits for
+/// "in range" again, and [ended] says the recording has stopped (Record first, DECISIONS 897).
+abstract class RidesRecorder {
+  bool get ended;
+}
+
 /// A headband that already has a contact reading in force (a handle to the one live connection, headband/connection.dart;
 /// a connection lent to the night, headband/lend.dart): the reading and when it was measured, or null when a check is
 /// due. With one, no new contact check is made: the stream is not interrupted (DECISIONS 855).
@@ -201,6 +208,9 @@ class NightState {
     this.alarmWindowMin,
     this.alarmScoring = false,
     this.alarmOff = false,
+    this.recording,
+    this.sleepKit = true,
+    this.spans = const [],
   });
 
   final bool active;
@@ -251,6 +261,40 @@ class NightState {
   /// The alarm's live model is done for tonight (it woke you, the window ended, it was switched off, or Alarm off).
   final bool alarmOff;
 
+  /// The recording's id: its first file set's stem (Record first, DECISIONS 882); null until that set opens.
+  final String? recording;
+
+  /// The sleep kit is attached (the drift-off detector, the live sleep model, the smart alarm, the sound cues): a
+  /// sleep span is open. False for a recording started with Record until Sleep is pressed. A state saved by a build
+  /// from before reads as true (every recording was a night).
+  final bool sleepKit;
+
+  /// The recording's spans as their file lines (span.dart `Span.toLine`), in order; before the first file set opens
+  /// their ids start with `?` and nothing is in the spans file yet.
+  final List<Map<String, Object?>> spans;
+
+  /// This state with the sleep kit switched [on] for a new sleep span: Lights off and the alarm start afresh.
+  NightState withSleepKit({required bool on, int? alarmEndMs, int? alarmWindowMin}) => NightState(
+    active: active,
+    startMs: startMs,
+    samples: samples,
+    runs: runs,
+    contactTried: contactTried,
+    contactOhms: contactOhms,
+    contactAtMs: contactAtMs,
+    slots: slots,
+    band: band,
+    directPending: directPending,
+    directOff: directOff,
+    phoneBattery: phoneBattery,
+    packets: packets,
+    alarmEndMs: on ? alarmEndMs : null,
+    alarmWindowMin: on ? alarmWindowMin : null,
+    recording: recording,
+    sleepKit: on,
+    spans: spans,
+  );
+
   NightState copyWith({
     bool? active,
     int? startMs,
@@ -271,6 +315,8 @@ class NightState {
     int? alarmWindowMin,
     bool? alarmScoring,
     bool? alarmOff,
+    String? recording,
+    List<Map<String, Object?>>? spans,
   }) => NightState(
     active: active ?? this.active,
     startMs: startMs ?? this.startMs,
@@ -291,6 +337,9 @@ class NightState {
     alarmWindowMin: alarmWindowMin ?? this.alarmWindowMin,
     alarmScoring: alarmScoring ?? this.alarmScoring,
     alarmOff: alarmOff ?? this.alarmOff,
+    recording: recording ?? this.recording,
+    sleepKit: sleepKit,
+    spans: spans ?? this.spans,
   );
 
   Map<String, Object?> toJson() => {
@@ -317,6 +366,9 @@ class NightState {
     'alarmWindowMin': alarmWindowMin,
     'alarmScoring': alarmScoring,
     'alarmOff': alarmOff,
+    'recording': recording,
+    'sleepKit': sleepKit,
+    'spans': spans,
   };
 
   static NightState fromJson(Object? j) {
@@ -348,6 +400,13 @@ class NightState {
       alarmWindowMin: (j['alarmWindowMin'] as num?)?.toInt(),
       alarmScoring: j['alarmScoring'] == true,
       alarmOff: j['alarmOff'] == true,
+      recording: j['recording'] is String ? j['recording'] as String : null,
+      sleepKit: j['sleepKit'] != false,
+      spans: [
+        if (j['spans'] case final List<Object?> l)
+          for (final x in l)
+            if (x is Map) {for (final e in x.entries) '${e.key}': e.value},
+      ],
     );
   }
 }

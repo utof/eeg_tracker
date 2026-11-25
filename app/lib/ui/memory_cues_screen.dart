@@ -131,7 +131,7 @@ String? memoryNightLine(String recordingsDir, {DateTime? now}) {
       MemoryDue.morning => 'This morning\'s test is waiting: about 2 minutes.',
       MemoryDue.turnOn => 'Off.',
       MemoryDue.waiting => 'On, waiting: lucid cues are on tonight.',
-      MemoryDue.evening => 'On: learn the board before Start night.',
+      MemoryDue.evening => 'On: learn the board before Sleep.',
       MemoryDue.ready || MemoryDue.night => 'Ready: learned at ${_hm(m.readyAt)}.',
     };
   } catch (_) {

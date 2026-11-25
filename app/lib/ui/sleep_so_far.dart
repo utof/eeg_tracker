@@ -15,9 +15,13 @@ import 'sleep_so_far_view.dart';
 const Duration soFarEvery = Duration(minutes: 15);
 
 class SleepSoFar extends ChangeNotifier {
-  SleepSoFar(this.scorer, {required this.nightStartMs, DateTime Function()? clock}) : _now = clock ?? DateTime.now;
+  SleepSoFar(this.scorer, {required this.nightStartMs, this.sleepMarked, DateTime Function()? clock}) : _now = clock ?? DateTime.now;
 
   final SoFarScorer scorer;
+
+  /// Whether the running recording has an open sleep stretch (null: not known, so yes). A recording started with
+  /// Record has none until Sleep is pressed: then there is no sleep so far, and nothing is scored.
+  final bool Function()? sleepMarked;
 
   /// When the night that records now started (unix ms; the recorder's status), null while not known.
   final int? Function() nightStartMs;
@@ -39,11 +43,22 @@ class SleepSoFar extends ChangeNotifier {
 
   bool get busy => _running != null;
 
-  SoFarState get state =>
-      SoFarState(step: step, waiting: waiting, failed: failed, refused: refused, ended: ended, busy: busy);
+  /// The recording has no open sleep stretch: "no sleep marked".
+  bool get noSleep => !(sleepMarked?.call() ?? true);
+
+  SoFarState get state => SoFarState(
+    step: step,
+    waiting: waiting,
+    failed: failed,
+    refused: refused,
+    ended: ended,
+    busy: busy,
+    noSleep: noSleep,
+  );
 
   /// The last look's result for tonight (read once from the cache); never throws.
   SoFarResult? cached() {
+    if (noSleep) return result = null;
     final since = nightStartMs();
     if (since == null) return null;
     if (_forNight != since) {
@@ -82,6 +97,12 @@ class SleepSoFar extends ChangeNotifier {
   }
 
   Future<void> _look() async {
+    if (noSleep) {
+      result = null;
+      step = waiting = failed = refused = null;
+      lookedAt = _now();
+      return;
+    }
     cached();
     step = 'Looking at the recordings';
     waiting = failed = refused = null;

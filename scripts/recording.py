@@ -17,7 +17,8 @@ damaged header. Standard library only: the recorder hub imports this and must ne
 
 `session` (optional) says what kind of session wrote a file set when it is not sleep: `work` for the phone's work
 session (DECISIONS 683). Such a set is never a night (night_files.recordings leaves it out); absent, `night` or `nap`:
-sleep, as every file before it.
+sleep, as every file before it. `recording` (optional, DECISIONS 882) is the id of the recording the set belongs to: such a
+set is never chained by the old 3-hour rule (night_files.py); its spans (spans.py) say what was sleep.
 """
 from __future__ import annotations
 
@@ -92,6 +93,7 @@ class Header:
     ground: Electrode | None = None
     made_by: str | None = None
     session: str | None = None  # `work`: a work session's raw EEG, never a night; None: sleep (DECISIONS 683)
+    recording: str | None = None  # the id of the recording the set belongs to (Record first, DECISIONS 882); None: old
     unit: str = UNIT
     source: str = field(default="header", compare=False)  # "header" | "log" (its format line) | "default" (BrainBit)
 
@@ -186,6 +188,8 @@ def to_json(h: Header) -> dict:
         d["made_by"] = h.made_by
     if h.session is not None:
         d["session"] = h.session
+    if h.recording is not None:
+        d["recording"] = h.recording
     return d
 
 
@@ -280,10 +284,13 @@ def parse(obj: object, where: object = "header") -> Header:
     session = _text(obj, "session", where)
     if session is not None and not (0 < len(session) <= MAX_NAME and session.strip() == session):
         raise _fail(where, f"`session` must be a word of 1 to {MAX_NAME} characters, not {session!r}")
+    recording = _text(obj, "recording", where)
+    if recording is not None and not 0 < len(recording) <= MAX_NAME:
+        raise _fail(where, f"`recording` must be text of 1 to {MAX_NAME} characters, not {recording!r}")
     return Header(channels, _rate(obj.get("sample_rate"), where), str(_text(obj, "counter", where, required=True)),
                   device=_text(obj, "device", where), layout=_text(obj, "layout", where),
                   reference=_electrode(obj, "reference", where), ground=_electrode(obj, "ground", where),
-                  made_by=_text(obj, "made_by", where), session=session)
+                  made_by=_text(obj, "made_by", where), session=session, recording=recording)
 
 
 def checked(h: Header, where: object = "header") -> Header:
