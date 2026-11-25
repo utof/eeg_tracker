@@ -80,7 +80,16 @@ class RecorderTiming {
     this.packetLogEvery = const Duration(minutes: 10),
     this.driftBudget = 0.02,
     this.driftBudgetAfter = const Duration(minutes: 10),
+    this.rollAfter = const Duration(hours: 4),
+    this.rollBytes = 128 * 1024 * 1024,
   });
+
+  /// A file set open this long, or whose `.f32` holds this many bytes, is closed and the recording goes on in a new
+  /// one on the same connection, without a gap (DECISIONS 1035): a recording that never drops would otherwise be one
+  /// file that grows for days, which the laptop can never check and the phone can never clear. Four hours is 18 MB an
+  /// hour x 4 = 72 MB for the BrainBit; the size limit is for a board with more channels or a higher rate.
+  final Duration rollAfter;
+  final int rollBytes;
 
   /// Buffered samples go to the files and a status goes to the screen this often.
   final Duration tick;
@@ -183,13 +192,18 @@ class NightRecorder {
     this.firstSpan,
     this.sleepSource = 'owner_button',
     this.bandBattery,
+    ChunkWriter Function(Directory dir, DateTime start, {RecordingHeader? header, bool inRecording, String? recording})? openSet,
     DateTime Function()? clock,
   }) : _now = clock ?? DateTime.now,
+       _openSet = openSet ?? ChunkWriter.open,
        _steps = stepProbe == null ? null : StepLog(stepProbe, clock ?? DateTime.now);
 
   /// The headband's battery track shared with the screens (headband/battery_estimate.dart): every gauge reading goes
   /// in. Null: none kept.
   final BandBatteryStore? bandBattery;
+
+  /// Opens a file set ([ChunkWriter.open]; tests: storage that is full, a kill at that moment).
+  final ChunkWriter Function(Directory dir, DateTime start, {RecordingHeader? header, bool inRecording, String? recording}) _openSet;
 
   /// The one judge of electrode quality (signal/quality.dart) over this run's signal, for the screens' status.
   QualityJudge? _judge;
@@ -284,6 +298,10 @@ class NightRecorder {
   final Completer<void> _done = Completer<void>();
   bool _endNight = true;
   ChunkWriter? _writer;
+
+  /// The open set when it goes on from the one before on the same connection ([_rollOver]): its first batch is no new
+  /// file to anything that listens (no gap came before it).
+  ChunkWriter? _continues;
 
   /// The run whose samples are already in the night's count ([_count]); a save does not add them again.
   ChunkWriter? _counted;
@@ -548,7 +566,7 @@ class NightRecorder {
       }
       final ChunkWriter w;
       try {
-        w = ChunkWriter.open(dir, _now(), header: headerOf(band), inRecording: true, recording: _night.recording);
+        w = _openSet(dir, _now(), header: headerOf(band), inRecording: true, recording: _night.recording);
         if (_night.recording == null) _bindRecording(w.stem);
       } catch (e) {
         _set(_status.copyWith(note: 'cannot write files: ${_short(e)}'));
@@ -560,7 +578,7 @@ class NightRecorder {
       try {
         end = await _session(band, w);
       } catch (e) {
-        await _runFailed(w, e);
+        await _runFailed(_writer ?? w, e);
         continue;
       }
       if (end == _End.stuck) return;
@@ -693,7 +711,9 @@ class NightRecorder {
     return first as Headband?;
   }
 
-  Future<_End> _session(Headband band, ChunkWriter w) async {
+  Future<_End> _session(Headband band, ChunkWriter first) async {
+    // the open file set: another one after a roll-over ([_rollOver]); everything below writes into the one open now
+    var w = first;
     _writer = w;
     _night = _night.copyWith(runs: _night.runs + 1, band: band.id);
     _packets.startRun();
@@ -769,7 +789,7 @@ class NightRecorder {
           }
         }
         _set(_status.copyWith(phase: Phase.recording, note: 'recording'));
-        end = await _record(band, w, isLost);
+        end = await _record(band, w, isLost, (next) => w = next);
       } else {
         end = lost ? _End.lost : _End.failed;
       }
@@ -824,7 +844,7 @@ class NightRecorder {
   void _onRows(ChunkWriter w, List<Sample> rows) {
     if (rows.isEmpty) return;
     final t = _now();
-    final firstOfFile = w.samplesReceived == 0;
+    final firstOfFile = w.samplesReceived == 0 && !identical(w, _continues);
     if (firstOfFile) _resumeSleep(t);
     w.addBatch(t, rows);
     _packets.add(rows);
@@ -1394,7 +1414,7 @@ class NightRecorder {
     return false;
   }
 
-  Future<_End> _record(Headband band, ChunkWriter w, bool Function() lost) async {
+  Future<_End> _record(Headband band, ChunkWriter w, bool Function() lost, void Function(ChunkWriter next) rolled) async {
     var ticks = 0;
     var lastTotal = w.samplesReceived;
     var stalled = 0;
@@ -1427,6 +1447,15 @@ class NightRecorder {
       } else {
         w.log('samples ${w.samplesWritten} (+$got)');
       }
+      if (_rollDue(w)) {
+        final next = _rollOver(w);
+        if (next != null) {
+          w = next;
+          rolled(next);
+          lastTotal = 0;
+          await _save();
+        }
+      }
       if (_now().millisecondsSinceEpoch - _batteryLoggedMs >= timing.phoneLogEvery.inMilliseconds) {
         await _logBattery(w);
       }
@@ -1450,6 +1479,47 @@ class NightRecorder {
         await _restartStream(band, w, stalled);
       }
     }
+  }
+
+  /// The open set has reached its time or size ([RecorderTiming.rollAfter], [RecorderTiming.rollBytes]).
+  bool _rollDue(ChunkWriter w) =>
+      !_stopping &&
+      w.samplesWritten > 0 &&
+      (_now().difference(w.opened) >= timing.rollAfter || w.bytesWritten >= timing.rollBytes);
+
+  /// The recording goes on in a new file set of the same recording, on the same connection (DECISIONS 1035-1036): the
+  /// way a new set follows a drop, without the drop. Nothing waits in here, so no batch can arrive between the steps:
+  /// every sample is in the old set or in the new one, never in both and never in neither.
+  /// 1. the old set's samples go to disk (a failure, storage full: no roll-over, it stays open and is tried again);
+  /// 2. the new set's files are made (a failure: the same);
+  /// 3. the old set is closed, with nothing left in memory to lose, and the new one takes over.
+  /// A kill after step 2 leaves the old set whole and an empty new one; the restarted service opens a third.
+  /// Returns the new set, or null when the old one goes on.
+  ChunkWriter? _rollOver(ChunkWriter old) {
+    try {
+      old.sync();
+    } catch (e) {
+      old.log('could not save the newest data: ${_short(e)}; the next file set waits');
+      return null;
+    }
+    final ChunkWriter next;
+    try {
+      next = _openSet(dir, _now(), header: old.header, inRecording: true, recording: _night.recording);
+    } catch (e) {
+      old.log('could not start the next file set: ${_short(e)}; this one goes on');
+      return null;
+    }
+    _logPackets(old);
+    old.log('total samples ${old.samplesWritten}, ${(old.samplesWritten / sampleRateHz / 60).toStringAsFixed(1)} min');
+    old.log('file set full; the recording goes on without a gap in ${next.stem}');
+    old.close();
+    _count(old);
+    next.log('continues ${old.stem} without a gap (same connection; a new file set every '
+        '${(timing.rollAfter.inMinutes / 60).toStringAsFixed(1)} h or ${timing.rollBytes ~/ (1024 * 1024)} MB)');
+    _writer = next;
+    _continues = next;
+    _log.info('the recording goes on in a new file set', {'from': old.stem, 'to': next.stem, 'samples': old.samplesWritten});
+    return next;
   }
 
   /// The run was on a connection lent by the screen's engine, and that engine no longer exists (headband/lend.dart).

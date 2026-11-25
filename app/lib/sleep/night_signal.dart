@@ -29,8 +29,24 @@ const double limitMicrovolts = 400000;
 
 /// One stretch of unbroken samples inside a file.
 class Run {
-  const Run(this.file, this.first, this.count, this.t0, {this.recordBytes = 20, this.columns = const [0, 1, 2, 3]});
+  const Run(
+    this.file,
+    this.first,
+    this.count,
+    this.t0, {
+    this.recordBytes = 20,
+    this.columns = const [0, 1, 2, 3],
+    double? end,
+    this.recording,
+  }) : _end = end;
   final File file;
+
+  /// Arrival of its last batch (unix time); by its length when it has no index.
+  double get end => _end ?? t0 + count / sampleRate;
+  final double? _end;
+
+  /// The recording its file set belongs to (the header's `recording`); null: a set from before Record first.
+  final String? recording;
 
   /// Bytes per record in its file (its header's), and where in a record the layout's channels are, in the layout's
   /// order (column k = float k after the counter).
@@ -284,7 +300,8 @@ List<Run> runsOf(File f32, {List<String> names = channelNames, String who = 'The
   final records = rawLength(f32) ~/ recordBytes;
   if (records == 0) return const [];
   final columns = List<int>.unmodifiable(header.pick(names, who: who));
-  Run run(int first, int count, double t0) => Run(f32, first, count, t0, recordBytes: recordBytes, columns: columns);
+  Run run(int first, int count, double t0, [double? end]) =>
+      Run(f32, first, count, t0, recordBytes: recordBytes, columns: columns, end: end, recording: header.recording);
   final idxFile = File('${f32.path.substring(0, f32.path.length - 4)}.idx');
   final rows = <(double, int)>[];
   if (idxFile.existsSync()) {
@@ -296,7 +313,8 @@ List<Run> runsOf(File f32, {List<String> names = channelNames, String who = 'The
   }
   if (rows.isEmpty) {
     final t = stemTime(f32.uri.pathSegments.last);
-    return t == null ? const [] : [run(0, records, t.millisecondsSinceEpoch / 1000)];
+    final at = t == null ? 0.0 : t.millisecondsSinceEpoch / 1000;
+    return t == null ? const [] : [run(0, records, at, at + records / rate)];
   }
   final t0 = [
     for (var k = 0; k < rows.length; k++)
@@ -306,16 +324,16 @@ List<Run> runsOf(File f32, {List<String> names = channelNames, String who = 'The
   var start = 0;
   for (var k = 1; k < rows.length; k++) {
     if (t0[k] - rows[k - 1].$1 > minGapSeconds) {
-      out.add(run(rows[start].$2, rows[k].$2 - rows[start].$2, t0[start]));
+      out.add(run(rows[start].$2, rows[k].$2 - rows[start].$2, t0[start], rows[k - 1].$1));
       start = k;
     }
   }
-  out.add(run(rows[start].$2, records - rows[start].$2, t0[start]));
+  out.add(run(rows[start].$2, records - rows[start].$2, t0[start], rows.last.$1));
   final before = rows.first.$2;
   if (before > 0) {
     // samples before the first index row (should not happen) join the first run
     final r = out.first;
-    out[0] = run(0, r.count + before, r.t0 - before / rate);
+    out[0] = run(0, r.count + before, r.t0 - before / rate, r.end);
   }
   return out;
 }
@@ -344,28 +362,104 @@ NightLayout joinLayout(
   int rate = sampleRate,
   List<(double, double)>? windows,
 }) {
-  var runs = [for (final f in f32Files) ...runsOf(f, names: names, who: who, rate: rate)];
-  if (windows != null) runs = clipRuns(runs, windows, rate);
-  if (runs.isEmpty) return NightLayout(0, 0, const [], const [], names: names);
+  final runs = [for (final f in f32Files) ...runsOf(f, names: names, who: who, rate: rate)];
   _stableSortByT0(runs);
-  final start = _wholeSecond(runs.first.t0);
+  var chains = chainsOf(runs);
+  if (windows != null) chains = _clipChains(chains, windows, rate);
+  if (chains.isEmpty) return NightLayout(0, 0, const [], const [], names: names);
+  _stableSortChains(chains);
+  final start = _wholeSecond(chains.first.first.t0);
   final parts = <Part>[];
   final bad = <Bad>[];
   var n = 0;
-  for (final r in runs) {
-    final want = roundHalfEven((r.t0 - start) * rate);
+  for (final chain in chains) {
+    // only a chain's first run is placed by the clock; the rest follow it sample to sample
+    final want = roundHalfEven((chain.first.t0 - start) * rate);
     if (want > n) {
       parts.add(Part.hold(n, want - n));
       bad.add((at: n, samples: want - n, text: 'BAD_gap'));
       n = want;
     }
     // A run more than a second early (clocks disagree) is kept after the one before, as on the laptop.
-    parts.add(Part.run(r, n));
-    n += r.count;
+    for (final r in chain) {
+      parts.add(Part.run(r, n));
+      n += r.count;
+    }
   }
   final pad = (rate - n % rate) % rate;
   if (pad > 0) bad.add((at: n, samples: pad, text: 'BAD_padding'));
   return NightLayout(start, n + pad, parts, bad, names: names);
+}
+
+/// to_bdf.py `chains`: [runs] (sorted by their start) as chains of runs that follow each other without a gap. A run
+/// begins a chain unless it is the first of a file set that goes on from the set before it: the same recording (both
+/// headers name it) and its first sample within [minGapSeconds] of the arrival of that set's last batch, the rule that
+/// says what is unbroken inside one file. That is a roll-over (recorder/night_recorder.dart, DECISIONS 1036): the
+/// headband never stopped, so no time is missing and nothing is held between the two. After a drop the next set
+/// starts seconds later, never this close.
+List<List<Run>> chainsOf(List<Run> runs) {
+  final out = <List<Run>>[];
+  for (final r in runs) {
+    final p = out.isEmpty ? null : out.last.last;
+    final goesOn = p != null &&
+        p.file.path != r.file.path &&
+        r.first == 0 &&
+        r.recording != null &&
+        r.recording == p.recording &&
+        (r.t0 - p.end).abs() <= minGapSeconds;
+    if (goesOn) {
+      out.last.add(r);
+    } else {
+      out.add([r]);
+    }
+  }
+  return out;
+}
+
+/// [clipRuns] for chains: a chain is clipped as the one stretch of samples it is, so a window across a roll-over
+/// keeps both sides together, placed by the chain's start.
+List<List<Run>> _clipChains(List<List<Run>> chains, List<(double, double)> windows, int rate) {
+  final out = <List<Run>>[];
+  for (final chain in chains) {
+    final t0 = chain.first.t0;
+    final total = chain.fold(0, (n, r) => n + r.count);
+    for (final (a, b) in windows) {
+      final i0 = math.max(0, ((a - t0) * rate).ceil()), i1 = math.min(total, ((b - t0) * rate).floor());
+      if (i1 <= i0) continue;
+      final piece = <Run>[];
+      var off = 0;
+      for (final r in chain) {
+        final lo = math.max(i0, off), hi = math.min(i1, off + r.count);
+        if (hi > lo) {
+          piece.add(
+            Run(
+              r.file,
+              r.first + lo - off,
+              hi - lo,
+              t0 + lo / rate,
+              recordBytes: r.recordBytes,
+              columns: r.columns,
+              recording: r.recording,
+            ),
+          );
+        }
+        off += r.count;
+      }
+      out.add(piece);
+    }
+  }
+  return out;
+}
+
+void _stableSortChains(List<List<Run>> chains) {
+  final indexed = [for (var i = 0; i < chains.length; i++) (i, chains[i])];
+  indexed.sort((a, b) {
+    final c = a.$2.first.t0.compareTo(b.$2.first.t0);
+    return c != 0 ? c : a.$1.compareTo(b.$1);
+  });
+  for (var i = 0; i < chains.length; i++) {
+    chains[i] = indexed[i].$2;
+  }
 }
 
 void _stableSortByT0(List<Run> runs) {
