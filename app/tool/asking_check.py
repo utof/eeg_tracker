@@ -365,6 +365,7 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     pc.OUT = out
     results: list[pc.Result] = []
+    work.mkdir(parents=True, exist_ok=True)  # with --adb-connect nothing else makes it before the adb server's log
     em = pc.Emulator(work, a.keep, connect=a.adb_connect)
     t0 = time.time()
     try:
