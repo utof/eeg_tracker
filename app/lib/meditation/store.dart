@@ -11,6 +11,7 @@ import 'dart:isolate';
 
 import '../feedback/session_log.dart';
 import '../recorder/chunk_writer.dart' show fileStem;
+import '../spans/span.dart' show removedSpanIds;
 import '../training/control.dart' show SessionKind;
 import '../training/replay.dart' show DonorCandidate;
 import 'tracker.dart';
@@ -54,13 +55,17 @@ class MeditationStore {
   }
 
   /// Every readable summary, newest first. Damaged or foreign files are skipped.
+  /// A session whose mark on the recording was taken away in the Archive is left out (DECISIONS 1042); its file stays.
   List<MeditationSummary> list() {
     if (!dir.existsSync()) return const [];
     final out = <MeditationSummary>[];
+    final gone = removedSpanIds(Directory('${dir.parent.path}/spans'));
     for (final f in dir.listSync().whereType<File>()) {
       if (!f.path.endsWith(suffix)) continue;
       try {
-        final s = MeditationSummary.fromJson(jsonDecode(f.readAsStringSync()));
+        final j = jsonDecode(f.readAsStringSync());
+        if (j is Map && gone.contains(j['span'])) continue;
+        final s = MeditationSummary.fromJson(j);
         if (s != null && s.kind == kind) out.add(s);
       } on FormatException {
         continue;

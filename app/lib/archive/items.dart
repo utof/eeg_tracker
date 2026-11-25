@@ -30,6 +30,7 @@ import '../export/store.dart' show ExportStore;
 import '../recorder/header.dart' show headerFileOf, tryHeader;
 import '../recorder/nights.dart' show stemTime;
 import '../recorder/packed.dart' show isPackedPath, packedInfo, rawLength, rawOnDisk;
+import '../spans/span.dart' show removedSpanIds;
 import '../trends/days.dart' show dayKey;
 import 'raw_remover.dart';
 import 'tags.dart';
@@ -54,7 +55,7 @@ const Duration maxRecording = Duration(hours: 24);
 
 /// Version of the kept summaries (a change drops them).
 const int _setsVersion = 4;
-const int _sessionsVersion = 3;
+const int _sessionsVersion = 4;
 
 enum ArchiveKind {
   night('Night', 'sleep'),
@@ -257,12 +258,15 @@ class SessionFile {
     this.companions = const [],
     this.rawCompanions = const [],
     this.rawBytes = 0,
-    this.rides = false,
+    this.span,
   });
 
   /// The session ran as an activity of the recording it names (its file has a `span`; Record first step 4): it is
   /// listed inside that recording and never says what the recording was.
-  final bool rides;
+  bool get rides => span != null;
+
+  /// That mark's id; null: a session with a signal of its own.
+  final String? span;
 
   final ArchiveKind kind;
 
@@ -298,7 +302,7 @@ class SessionFile {
     'companions': companions,
     'raw_companions': rawCompanions,
     'raw_bytes': rawBytes,
-    if (rides) 'rides': true,
+    'span': ?span,
   };
 
   static SessionFile? fromJson(Object? j) {
@@ -316,7 +320,7 @@ class SessionFile {
       companions: [for (final x in c) if (x is String) x],
       rawCompanions: [for (final x in rc) if (x is String) x],
       rawBytes: j['raw_bytes'] is int ? j['raw_bytes'] as int : 0,
-      rides: j['rides'] == true,
+      span: j['span'] is String ? j['span'] as String : null,
     );
   }
 }
@@ -790,13 +794,15 @@ Object? _summarizeSession(File f, SessionSpec spec, Directory filesDir) {
     companions: companions..sort(),
     rawCompanions: raw,
     rawBytes: rawBytes,
-    rides: j['span'] is String,
+    span: j['span'] is String ? j['span'] as String : null,
   ).toJson();
 }
 
 /// Every session file the list knows, by its spec.
 List<SessionFile> sessionFilesIn(Directory filesDir) {
   final out = <SessionFile>[];
+  // a session whose mark was taken away ("Remove this mark") is in no list (DECISIONS 1042); its file stays
+  final gone = removedSpanIds(Directory('${filesDir.path}/spans'));
   for (final spec in sessionSpecs) {
     final dir = Directory('${filesDir.path}/${spec.folder}');
     // a dream catcher's answers are files of their own: the index is keyed by the session file, so a new answer file
@@ -804,7 +810,7 @@ List<SessionFile> sessionFilesIn(Directory filesDir) {
     final index = SummaryIndex(File('${filesDir.path}/cache/archive-${spec.folder}.json'), version: _sessionsVersion);
     final sums = index.summaries(dir, spec.suffix, (f) => _summarizeSession(f, spec, filesDir));
     for (final v in sums.values) {
-      if (SessionFile.fromJson(v) case final s?) out.add(s);
+      if (SessionFile.fromJson(v) case final s? when !gone.contains(s.span)) out.add(s);
     }
   }
   return out;

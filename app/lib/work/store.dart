@@ -11,6 +11,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import '../recorder/chunk_writer.dart' show fileStem;
+import '../spans/span.dart' show removedSpanIds;
 import '../wearer/check.dart' show wearerAnswerIn;
 import 'breaks.dart';
 
@@ -32,7 +33,12 @@ class WorkSummary {
     required this.hintList,
     this.wearerAnswer,
     this.stretchMin,
+    this.span,
   });
+
+  /// The mark of the recording it ran on (its file's `span`, spans/activities.dart); null: a session with a file set
+  /// of its own. Read only: [WorkStore] leaves a session out of its lists while that mark is taken away.
+  final String? span;
 
   final DateTime start, end;
   final double wornMin;
@@ -81,6 +87,7 @@ class WorkSummary {
       hintList: hints,
       wearerAnswer: wearerAnswerIn(Map<String, Object?>.from(j)),
       stretchMin: j['stretch_min'] is num ? (j['stretch_min'] as num).toDouble() : null,
+      span: j['span'] is String ? j['span'] as String : null,
     );
   }
 }
@@ -165,10 +172,16 @@ class WorkStore {
     for (var i = 0; i < stale.length; i++) {
       _cache[stale[i].$1] = (modified: stale[i].$2, length: stale[i].$3, summary: read[i]);
     }
+    // a session whose mark was taken away in the Archive counts nowhere (DECISIONS 1042); its file stays
+    final gone = files.isEmpty ? const <String>{} : removedSpanIds(_spansDirOf(files.first.$1));
     return [
-      for (final f in files) ?_cache[f.$1]?.summary,
+      for (final f in files)
+        if (_cache[f.$1]?.summary case final s? when !gone.contains(s.span)) s,
     ]..sort((a, b) => b.start.compareTo(a.start));
   }
+
+  /// `files/spans/` for a session file in `files/work-sessions/`.
+  static Directory _spansDirOf(String sessionPath) => Directory('${File(sessionPath).parent.parent.path}/spans');
 
   /// Every readable session, newest first; damaged or foreign files are skipped.
   List<WorkSummary> list() => _summaries(_files(), _decode);
