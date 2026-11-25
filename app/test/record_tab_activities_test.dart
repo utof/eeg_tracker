@@ -141,4 +141,79 @@ void main() {
     expect(acts.ask.value, isNull);
     expect(find.text('Meditate has ended'), findsNothing);
   });
+
+  // DECISIONS 1011: no answer means keep recording. Only the Stop everything button stops the recording.
+  group('nobody answers "Stop everything / Keep recording"', () {
+    late HeadbandConnection owner;
+    late Activities acts;
+    late GlobalKey<NavigatorState> nav;
+    var stopped = 0;
+
+    Future<ActivityStopAsker> app(WidgetTester tester, {bool withPage = true}) async {
+      stopped = 0;
+      owner = HeadbandConnection(makeFinder: _NoFinder.new);
+      addTearDown(owner.dispose);
+      acts = Activities(owner: owner, send: (_) {}, serviceRuns: () async => false)..stopRecording = () async => stopped++;
+      nav = GlobalKey<NavigatorState>();
+      final asker = ActivityStopAsker(acts, nav)..install();
+      if (withPage) {
+        await tester.pumpWidget(MaterialApp(theme: nightTheme(), navigatorKey: nav, home: const Scaffold(body: Text('a page'))));
+      }
+      return asker;
+    }
+
+    testWidgets('the sheet dismissed with Back: the recording goes on, the question is gone', (tester) async {
+      final asker = await app(tester);
+      addTearDown(asker.dispose);
+      acts.ask.value = ActivityRun('nap', startedRecording: true); // a nap's wake ended it by its own timer
+      await tester.pumpAndSettle();
+      expect(find.text('Nap has ended'), findsOneWidget);
+      await tester.binding.handlePopRoute(); // Android's Back
+      await tester.pumpAndSettle();
+      expect(find.text('Nap has ended'), findsNothing);
+      expect(stopped, 0, reason: 'no answer must mean keep recording');
+      expect(acts.ask.value, isNull);
+    });
+
+    testWidgets('a tap beside the sheet does not close it and stops nothing', (tester) async {
+      final asker = await app(tester);
+      addTearDown(asker.dispose);
+      acts.ask.value = ActivityRun('work', startedRecording: true);
+      await tester.pumpAndSettle();
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+      expect(find.text('Work has ended'), findsOneWidget);
+      expect(stopped, 0);
+    });
+
+    testWidgets('the question left unanswered for hours (the screen off), then the app closed: nothing is stopped', (tester) async {
+      final asker = await app(tester);
+      acts.ask.value = ActivityRun('meditate', startedRecording: true); // the meditation's own end
+      await tester.pumpAndSettle();
+      expect(find.text('Meditate has ended'), findsOneWidget);
+      await tester.pump(const Duration(hours: 8));
+      expect(stopped, 0);
+      asker.dispose(); // the app's screen goes away; the recorder is a service of its own
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(hours: 1));
+      expect(stopped, 0, reason: 'closing the app is not an answer');
+    });
+
+    testWidgets('no page to show the question on (the app is not on the screen): nothing is stopped', (tester) async {
+      final asker = await app(tester, withPage: false);
+      addTearDown(asker.dispose);
+      acts.ask.value = ActivityRun('work', startedRecording: true);
+      await tester.pump(const Duration(minutes: 30));
+      expect(stopped, 0);
+    });
+
+    testWidgets('an answer that comes without a choice counts as Keep recording', (tester) async {
+      final asker = await app(tester);
+      addTearDown(asker.dispose);
+      acts.ask.value = ActivityRun('work', startedRecording: true);
+      await acts.answer(stopEverything: false);
+      expect(stopped, 0);
+      expect(acts.ask.value, isNull);
+    });
+  });
 }

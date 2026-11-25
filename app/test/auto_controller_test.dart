@@ -375,14 +375,14 @@ void main() {
       expect(recordingsWritten(), isFalse, reason: 'the recorder writes; the watcher keeps nothing');
     });
 
-    test('a work session: the laptop says work; silent unless the chime was switched on; the battery sets its end', () async {
+    test('a work session: the laptop says work; silent unless the chime was switched on; the battery sets no end', () async {
       store.saveSettings(const AutoSettings().withChoice(WearKind.work, AutoChoice.start));
       now = DateTime(2026, 11, 20, 10, 0);
       LaptopStore(store.dir).save(LaptopWork(working: true, at: now.subtract(const Duration(minutes: 2))));
       check.result = wornBand.withBattery(80);
       await w.handle(const AutoTrigger('laptop'));
       expect(starter.works.single.quiet, isTrue);
-      expect(starter.works.single.limit, const Duration(hours: 6, minutes: 30));
+      expect(starter.works.single.limit, isNull, reason: 'the battery guard only warns (BatteryRule.onlyWarns)');
       store.saveSettings(store.settings().withChime(true));
       now = now.add(const Duration(hours: 2));
       check.result = offHead;
@@ -405,14 +405,19 @@ void main() {
   });
 
   group('the battery guard', () {
-    test('daytime, too little for tonight: no question, no start; one "charge" line a day', () async {
+    test('daytime, too little for tonight: one "charge the headband" notice a day, and the question is still asked', () async {
       now = DateTime(2026, 11, 20, 20, 0);
       store.saveSettings(const AutoSettings(bedMin: 0, wakeMin: 8 * 60)); // window from 22:00
       check.result = wornBand.withBattery(60);
-      await w.handle(const AutoTrigger('opened'));
-      expect(phone.asked, isEmpty);
-      expect(last('declined')['why'], 'Charge the headband for tonight.');
+      await answered(const AutoTrigger('opened'), 'no');
+      expect(phone.asked, hasLength(1), reason: 'the guard only warns: nothing is refused');
+      expect(phone.asked.single.text, contains('Charge the headband for tonight.'));
+      expect(phone.asked.single.text, isNot(contains('..')));
+      expect(phone.asked.single.workLimit, isNull);
+      expect(AutoLog(store.dir).events().where((e) => e['event'] == 'declined'), isEmpty);
+      expect(last('warned')['why'], 'Charge the headband for tonight.');
       expect(phone.notices.single.$1, 'Charge the headband for tonight');
+      expect(phone.notices.single.$2, isNot(contains('Nothing is recorded')));
       check.result = offHead;
       now = now.add(const Duration(minutes: 5));
       await w.handle(const AutoTrigger('opened'));
@@ -420,6 +425,16 @@ void main() {
       now = now.add(const Duration(minutes: 5));
       await w.handle(const AutoTrigger('opened'));
       expect(phone.notices, hasLength(1), reason: 'once a day');
+    });
+
+    test('a work session the watcher starts by itself with a low headband: it starts, with the notice and no end', () async {
+      store.saveSettings(const AutoSettings().withChoice(WearKind.work, AutoChoice.start));
+      now = DateTime(2026, 11, 20, 10, 0);
+      LaptopStore(store.dir).save(LaptopWork(working: true, at: now.subtract(const Duration(minutes: 2))));
+      check.result = wornBand.withBattery(18);
+      await w.handle(const AutoTrigger('laptop'));
+      expect(starter.works.single.limit, isNull);
+      expect(phone.notices.single.$1, 'Charge the headband for tonight');
     });
 
     test('a night is never refused for the battery; the question says how long it lasts', () async {

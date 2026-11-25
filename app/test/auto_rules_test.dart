@@ -132,25 +132,44 @@ void main() {
       expect(guardBattery(WearKind.night, 70, DateTime(2026, 11, 20, 23, 0), w).note, isNotNull);
     });
 
-    test('daytime, bedtime 4 hours away or more: down to 15 %, ending 4 hours before bed', () {
-      final g = guardBattery(WearKind.work, 80, DateTime(2026, 11, 20, 10, 0), w);
+    test('the chosen default only warns: a daytime session is never refused and never given an end', () {
+      expect(BatteryRule.onlyWarns, isTrue);
+      final plenty = guardBattery(WearKind.work, 80, DateTime(2026, 11, 20, 10, 0), w);
+      expect(plenty.allowed, isTrue);
+      expect(plenty.limit, isNull, reason: 'no session is stopped because of the estimate');
+      expect(plenty.charge, isFalse);
+      expect(plenty.note, isNull);
+      for (final low in [
+        guardBattery(WearKind.work, 90, DateTime(2026, 11, 20, 20, 0), w), // bedtime 3 h away, tonight needs 95 %
+        guardBattery(WearKind.other, 100, DateTime(2026, 11, 20, 20, 0), w),
+        guardBattery(WearKind.work, 20, DateTime(2026, 11, 20, 10, 0), w),
+      ]) {
+        expect(low.allowed, isTrue);
+        expect(low.limit, isNull);
+        expect(low.charge, isTrue);
+        expect(low.note, 'Charge the headband for tonight.');
+      }
+    });
+
+    test('the stopping rule (onlyWarns off): daytime, bedtime 4 hours away or more: down to 15 %, ending 4 hours before bed', () {
+      final g = guardBattery(WearKind.work, 80, DateTime(2026, 11, 20, 10, 0), w, onlyWarns: false);
       expect(g.allowed, isTrue);
       expect(g.limit, const Duration(hours: 6, minutes: 30), reason: '(80 - 15) / 10 = 6.5 h; bed - 4 h is 9 h away');
-      final late = guardBattery(WearKind.work, 80, DateTime(2026, 11, 20, 17, 0), w);
+      final late = guardBattery(WearKind.work, 80, DateTime(2026, 11, 20, 17, 0), w, onlyWarns: false);
       expect(late.limit, const Duration(hours: 2), reason: 'ends at 19:00, 4 hours before 23:00');
     });
 
-    test('daytime, bedtime under 4 hours away: only above what tonight needs', () {
-      final refused = guardBattery(WearKind.work, 90, DateTime(2026, 11, 20, 20, 0), w);
+    test('the stopping rule (onlyWarns off): daytime, bedtime under 4 hours away: only above what tonight needs', () {
+      final refused = guardBattery(WearKind.work, 90, DateTime(2026, 11, 20, 20, 0), w, onlyWarns: false);
       expect(refused.allowed, isFalse);
       expect(refused.note, 'Charge the headband for tonight.');
-      final full = guardBattery(WearKind.other, 100, DateTime(2026, 11, 20, 20, 0), w);
+      final full = guardBattery(WearKind.other, 100, DateTime(2026, 11, 20, 20, 0), w, onlyWarns: false);
       expect(full.allowed, isFalse, reason: '100 - 95 = 5 % = 30 min, under the 40-minute minimum');
     });
 
-    test('too little to bother: under 40 minutes is refused', () {
-      expect(guardBattery(WearKind.work, 20, DateTime(2026, 11, 20, 10, 0), w).allowed, isFalse);
-      expect(guardBattery(WearKind.work, 22, DateTime(2026, 11, 20, 10, 0), w).allowed, isTrue);
+    test('the stopping rule (onlyWarns off): too little to bother: under 40 minutes is refused', () {
+      expect(guardBattery(WearKind.work, 20, DateTime(2026, 11, 20, 10, 0), w, onlyWarns: false).allowed, isFalse);
+      expect(guardBattery(WearKind.work, 22, DateTime(2026, 11, 20, 10, 0), w, onlyWarns: false).allowed, isTrue);
     });
 
     test('battery not known: allowed, said so', () {

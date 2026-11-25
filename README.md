@@ -275,7 +275,7 @@ Bluetooth itself (Python + bleak), so recording needs no closed library, never u
 survives drops without restarting. Not yet tried on the real headband: run the 15-minute probe first
 (`uv run --no-project --python 3.12 --with bleak==3.1.0 python scripts/ble_probe.py`), then record with
 `DRIVER=ble scripts/record_night.sh`. The phone app has the same driver behind a switch ("Headband connection" on
-the night screen: the probe, then "Use our own connection (test)"); BrainBit's SDK stays its default until the probe
+the Record tab: the probe, then "Use our own connection (test)"); BrainBit's SDK stays its default until the probe
 has passed. See [docs/own-ble-driver.md](docs/own-ble-driver.md).
 
 **The DIY ADS1299 board.** `DRIVER=diy scripts/record_night.sh` records the owner's self-built board

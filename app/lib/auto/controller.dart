@@ -258,19 +258,24 @@ class AutoWatch {
       return _skip(now, t, 'asked this wearing (${kind.wire})');
     }
     final guard = guardBattery(kind, result.battery, now, w);
-    if (!guard.allowed) {
-      await probe.release();
-      log.add(now, 'declined', {'kind': kind.wire, 'why': guard.note, 'battery': result.battery});
+    if (guard.charge) {
+      // too little for tonight by the estimate: one notice a day. Only the stopping rule (BatteryRule.onlyWarns
+      // off) also refuses the session.
+      if (!guard.allowed) await probe.release();
+      log.add(now, guard.allowed ? 'warned' : 'declined', {'kind': kind.wire, 'why': guard.note, 'battery': result.battery});
       final day = dateName(now);
       if (st.chargeNoticeDay != day) {
         await phone.notice(
           'Charge the headband for tonight',
-          'It is at ${result.battery} %; tonight needs about ${nightNeedPct(w)} %. Nothing is recorded now.',
+          'It is at ${result.battery} %; tonight needs about ${nightNeedPct(w)} %. '
+              '${guard.allowed ? 'Charge it when you can.' : 'Nothing is recorded now.'}',
         );
         st = st.copyWith(chargeNoticeDay: day);
       }
-      store.saveState(st);
-      return;
+      if (!guard.allowed) {
+        store.saveState(st);
+        return;
+      }
     }
     store.saveState(st.copyWith(askedThisWearing: {...st.askedThisWearing, kind}));
     if (choice == AutoChoice.start) {
@@ -312,7 +317,8 @@ class AutoWatch {
   }
 
   AutoQuestion _question(WearKind kind, String id, DateTime found, BatteryVerdict guard, AutoSettings s) {
-    final note = guard.note == null ? '' : ' ${guard.note![0].toUpperCase()}${guard.note!.substring(1)}.';
+    final said = guard.note?.replaceFirst(RegExp(r'\.$'), '');
+    final note = said == null ? '' : ' ${said[0].toUpperCase()}${said.substring(1)}.';
     final quiet = !s.workChime;
     return switch (kind) {
       WearKind.night => AutoQuestion(

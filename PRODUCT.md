@@ -32,7 +32,7 @@ the data supports (no unvalidated stress or focus scores, sleep stages labelled 
 
 ## Operating Context
 
-- Start: headband on, open the app, Start night, glance at contact quality, put the phone down.
+- Start: headband on, open the app, press Sleep (or Record for a recording without sleep), glance at contact quality, put the phone down.
 - During the night: the screen is normally off; a foreground notification shows the recorder is alive.
 - Morning: Stop, then "Export a night" copies the night out of the app's private folder into a folder the
   user picks (e.g. Download/EEG or a Syncthing folder); from there `adb pull`, USB or Syncthing take it to the PC.

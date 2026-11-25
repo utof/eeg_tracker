@@ -1698,10 +1698,11 @@ shows `docs/evidence/auto-start.md`).
   report after Stop; no smart alarm, no lucid or memory cues, no sound), or the work page with a session whose hints
   show on the screen and the lock-screen card; its chime only with **Chime in automatic work sessions** on. After 10
   yes in a row for the night or for work, the page (and a notification) offers to switch it to Automatic.
-- **The night comes first**: a work session starts by itself or is offered only while the headband keeps enough for
-  tonight (planning: 10 % an hour, plus 15 %; down to 15 % while bedtime is 4 hours or more away, ending 4 hours
-  before bed), and it stops itself in time. Otherwise: "Charge the headband for tonight" (once a day). A night is never
-  refused, only warned about in the question.
+- **The headband's battery only warns** (DECISIONS 1010): when the app's estimate says too little is left for tonight
+  (planning: 10 % an hour, plus 15 %; down to 15 % while bedtime is 4 hours or more away), it says "Charge the
+  headband for tonight" once a day, and the question says it too. Nothing is refused and no session or recording is
+  stopped because of the estimate (it has not been measured on this headband). One constant flips it back to the
+  stopping rule: `BatteryRule.onlyWarns` in `lib/auto/battery_guard.dart`.
 - A night started this way says so in its log ("started automatically" or "started after Yes"). Stop it in the
   morning as usual. Starting anything by hand (Record, Sleep, a session) makes the watcher let go of the headband at
   once; its question goes away and nothing is kept.

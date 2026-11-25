@@ -70,9 +70,9 @@ so the app asks instead.
   and the sleep report after Stop, or a work session whose hints show on the screen (the chime only if you switched it
   on for automatic sessions). Never sounds, alarms, lucid or memory cues, neurofeedback, the dream catcher or the
   microphone.
-- The night comes first: a daytime session starts only while the headband keeps enough for tonight (your usual night
-  times 10 % an hour plus 15 %, or down to 15 % when bedtime is 4 hours or more away) and stops itself in time; else
-  the app says "Charge the headband for tonight". A night is never refused, only warned about.
+- The battery only warns: when the app's estimate (your usual night times 10 % an hour plus 15 %, or down to 15 %
+  when bedtime is 4 hours or more away) says too little is left for tonight, the app says "Charge the headband for
+  tonight", once a day. It refuses nothing and stops nothing: the estimate is a planning number, not measured.
 - Every check, guess, question, answer and outcome is kept on the phone (Export data takes it), so the settings page
   can say how often the guess was right, and a personal model can learn from your answers later.
 

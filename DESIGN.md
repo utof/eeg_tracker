@@ -90,10 +90,10 @@ headings titleMedium 500; everything else bodyLarge. No monospace, no display fa
 
 ## Layout
 
-A Material 3 navigation bar at the bottom of the main screen (DECISIONS 597-598): Night, Sessions, Signal, Trends, More,
+A Material 3 navigation bar at the bottom of the main screen (DECISIONS 597-598): Record, Sessions, Signal, Trends, More,
 on the ground under a hairline, the chosen tab's pill one step lighter (`rule`) with ink icon and label, the others
-ink-muted, labels always shown, no animation between tabs. The app opens on Night; the night screen's sections are
-split among Night, Sessions and More in their old order, and Night keeps its pinned bar above the tab bar.
+ink-muted, labels always shown, no animation between tabs. The app opens on Record; the old night screen's sections are
+split among Record, Sessions and More in their old order, and Record keeps its pinned bar (Record and Sleep) above the tab bar.
 One scrolling column, 24 dp page margins, sections separated by a hairline and 32 dp above the heading.
 Order: status, readouts, watch strip, then Headband and Phone (Phone first before a night, Headband first
 during one). Between nights the Sleep section (last night's asleep total and a Sleep report button) comes
@@ -107,7 +107,7 @@ at the top; trends is a day log (today's entry, sleep pressure, the last 14 days
 Between nights a "Your data" section (after Headband) says what the app keeps and when it last left the phone, with
 Export data and Export a night. Export data is its own page: status word, what is new as two readouts, the copy
 strip, the route (this phone, the folder, the laptop) as numbered log rows, Export everything, and Export new pinned.
-Settings (a gear in the night screen's app bar) holds the hands-free switch, its calibration with Calibrate right under
+Settings (a gear in the Record tab's app bar) holds the hands-free switch, its calibration with Calibrate right under
 it, what each gesture does where (two label-over-value columns per session), and how often it is wrong, then the
 "Was this you?" section (heading row with its "i" and switch, status, whose idea, what it does, how often wrong); the
 hands-free calibration is a page of its own with the six tries on top, the instruction at display size, the two live
@@ -130,7 +130,7 @@ lane and log rows), The test (the night cells and the sealed answer, later the t
 not use it and the switch; the due action pinned (Start practice, Save answers, Turn on). The evening practice is its
 own page: the loudness on the ground with I hear it and Stop pinned (3 : 2), then the words and the eyes-closed cues on
 a true-black face with one dim counter.
-Memory cues (from Settings, the row under Study reminders; the assistant's proposal; a section on the night screen
+Memory cues (from Settings, the row under Study reminders; the assistant's proposal; a section on the Record tab
 between nights once switched on) is one page: a muted sentence saying whose idea it is and how weak the evidence, the
 status word, the switch row, Tonight / This morning / Night of the test / Bell and Knock loudness as label-left /
 value-right rows, Last night (the drift map, then its log rows), The test (the night cells, sealed until night 12, later the tested
@@ -139,7 +139,7 @@ test; nothing when tonight is ready). The evening task and the morning test are 
 the top, the object to place and one instruction line beside it, the board under them, Stop outlined and pinned; the
 intro as numbered log rows with Start pinned; the loudness on the ground with I hear it and Stop pinned (3 : 2); the
 morning's question as the choice column, then the result: an Evening / Morning table and the drift map, Done pinned.
-Try these (from its section on the night screen) is one page in the order of a first week: the tally ("4 of 20 tried",
+Try these (from its section on the Record tab) is one page in the order of a first week: the tally ("4 of 20 tried",
 "1 skipped" muted at the right) over the try ledger, one muted sentence, then the stops under hairline headings by when
 (Tonight, then the morning; Another night; Sessions, when you have time; Over the next weeks; When the headband is
 charged). A stop is a log row: its number cell, the title, how long in muted body, "The assistant's idea." for a
@@ -219,7 +219,7 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   compare your nights, not a test for teeth grinding". "Hour by hour" is a table of log rows: the hour in
   tabular figures, the Signal lane's marks as a bar whose full width is 60 recorded minutes, then Jaw and Moves
   right-aligned; the swatches and one muted sentence under it. Past nights add "jaw N an hour".
-- **Lights off bar** (night screen, while a night records): a hairline sets it apart from the page scrolling under
+- **Lights off bar** (Record tab, while a night records): a hairline sets it apart from the page scrolling under
   it; above the buttons one muted bodyMedium line in words, tabular figures ("Tap Lights off as you close your eyes
   to sleep." / "Lights off 23:42. Asleep since 23:51, by the detector."), no colour for the detector's states; Lights
   off is the night's one filled button (`live-fill`, a moon icon) until tapped, then an outlined "Lights off again"
@@ -228,29 +228,29 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   23:45. From then until asleep:"), two label-left / value-right lines in the periods' form (The detector, The sleep
   model; half minutes as ½), then plain sentences: agree or not, where lights off came from when it was not a tap,
   the check toward 4 of 5 nights, and "Both are guesses" in muted ink. No ring, no score.
-- **Alarm line** (night screen, pinned bar): the smart alarm in one muted bodyMedium line with a small sunrise icon and
-  one text button at its right. Before a night it sits above Start night under a hairline ("Smart alarm off." / "Wakes
+- **Alarm line** (Record tab, pinned bar): the smart alarm in one muted bodyMedium line with a small sunrise icon and
+  one text button at its right. Before a night it sits above Record and Sleep under a hairline ("Smart alarm off." / "Wakes
   you by 07:30 tomorrow, from 07:00 at a light moment.", **Set alarm** / **Change**); while a night records it is a
   second line under the Lights off line ("Alarm 07:00-07:30. Watching your sleep: deep sleep 2 min ago.", **Alarm off**,
   which asks). Words only for the stages, no colour. Its sheet (`surface-high`): the wake-by time as a tabular
   displayMedium figure that opens the system's 24-hour time picker, the window as the app's segmented choice row
   (selected one step lighter, `rule`), two muted sentences of the rule and the safety net, then Alarm off (outlined)
   and Set alarm (filled) side by side.
-- **Wake face** (night screen while the alarm rings, and the native page over the lock screen): the nap coach's wake:
+- **Wake face** (Record tab while the alarm rings, and the native page over the lock screen): the nap coach's wake:
   "Time to wake up" at display size, why it rang and "the night is still recording" in muted body, and one `live-fill`
-  **I'm awake** filling the rest of the screen. The only time the night screen is lit and loud on purpose.
+  **I'm awake** filling the rest of the screen. The only time the Record tab is lit and loud on purpose.
 - **Waking up** (sleep report, after Falling asleep): a heading with an "i", a muted lead ("Smart alarm 07:00-07:30."),
   label-left / value-right lines (Woke you as a tabular titleLarge time, Why, Full-night scoring, I'm awake after),
   then plain sentences: how early and that the live model read it 2 minutes behind, whether the full-night scoring
   agrees ("not deep sleep" / "the live reading was wrong this time"), and in muted ink that both are guesses.
-- **DIY board (test)** (Headband connection page and night screen; DECISIONS 360-369): the device choice is the app's
+- **DIY board (test)** (Headband connection page and Record tab; DECISIONS 360-369): the device choice is the app's
   segmented row (BrainBit | DIY board (test), selected one step lighter) under a "Headband" heading, with one muted
   sentence; with the board chosen the status mark is a ringed dot in `caution` with the words "DIY board (test)", and
   the page has no pinned action. Its sections: Safety (ink body text: the app only listens; nothing makes the board
   safe for a body or power, nothing changes its gates), Where the board sends (This phone / Port as label-left /
   value-right rows in tabular titleLarge, an amber Wi-Fi-off row with its icon when there is no address, the
   firmware settings in muted body), Channels (CH1-CH4 as muted label over titleLarge name, the names field, Save
-  names), With the board (what goes where and what is off, in sentences). On the night screen while it records,
+  names), With the board (what goes where and what is off, in sentences). On the Record tab while it records,
   the Headband block replaces battery, signal and contact: "DIY board (test)", the mode as a `caution` ringed dot
   with "Test signal, not EEG" in titleLarge words, then "Swing over the last second, µV" over four name-over-value
   cells in the contact cells' place (tabular titleLarge, no colour), then one muted line with the link and the lost
@@ -362,7 +362,7 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   how much, the passes still to run). Each day a hairline and its name (Today, Yesterday, `Wed 18 Nov`) with the count
   and size right in muted tabular figures and a menu (Remove what the laptop holds; Delete this day…, in `problem`
   red). Each recording a ruled log row: its clock span left and length right in tabular titleMedium, then "Night · You:
-  Start night" in body ink, "Tags: sleep · walk" in ink, "Found: asleep 6 h 12 · talking 9 min" muted, and where it
+  Record or Sleep" in body ink, "Tags: sleep · walk" in ink, "Found: asleep 6 h 12 · talking 9 min" muted, and where it
   is muted ("410 MB · only on this phone", "· checked copy on the laptop"), a chevron at the right. No card, no
   colour for who started it: the words say it.
 - **A recording** (from the Archive): the length as a readout with its clock span and day under it, then label-left /
@@ -384,7 +384,7 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
   the file, 5, 10 or 30 s as a segmented row, earlier and later outlined. Under the lanes, when the recording's pulse
   was read, the Pulse lane as in the sleep chart (two lanes tall, its scale following what is shown), and under the
   muted pass line one muted line on the pulse with its **i**.
-- **Buttons:** one filled button per screen: Start night on the night screen (Lights off while a night records), Start on the meditation screen, and on
+- **Buttons:** one filled button per screen: Sleep on the Record tab, with Record outlined beside it (Lights off while a sleep records), Start on the meditation screen, and on
   each training page its one step forward (Check in, Save, Agree and continue); Stop is outlined and asks once before
   stopping, except in alpha-theta, where stopping must be instant. Session faces (dream catcher, sound for states)
   are true black with words only.
@@ -414,6 +414,6 @@ Cells 6 dp radius, buttons 16 dp. State marks are circles: filled (good / live),
 - Do word every state ("Recording", "No data for 52 s") next to its colour.
 - Don't add bright fills, animation beyond the slow breathing live mark, or sounds. Exceptions: the meditation
   mode, whose feedback is sound (rain, drone, bells; DECISIONS 72-77), and the practices built the same way
-  (alpha-theta, the dream catcher, sound for states, whose product is sound); the night screen stays silent until
+  (alpha-theta, the dream catcher, sound for states, whose product is sound); the Record tab stays silent until
   the smart alarm you set rings (DECISIONS 235).
 - Don't show a number that was not measured; label planning thresholds as such.

@@ -85,7 +85,7 @@ class _WorkScreenState extends State<WorkScreen> {
     await _load();
   }
 
-  /// The watcher's start: at once, and stopping itself at the battery guard's limit.
+  /// The watcher's start: at once. It has an end only under the battery guard's stopping rule (off: DECISIONS 1010).
   Future<void> _autoStart() async {
     await _start();
     final limit = widget.auto?.limit;

@@ -19,8 +19,8 @@ FLUTTER_FILES = [
     "own_ble_sessions_test.dart", "diy_night_test.dart",
 ]
 FLUTTER_TESTS = {
-    "one_connection_test.dart": "Start sleep with nothing live",
-    "night_recorder_test.dart": "failed direct tries back off",
+    "one_connection_test.dart": ["Start sleep with nothing live", "during a recording a session gets the recorder"],
+    "night_recorder_test.dart": ["failed direct tries back off"],
 }
 
 
@@ -45,8 +45,9 @@ def test_the_flutter_tag_is_declared_and_the_real_time_files_carry_it() -> None:
 
 
 def test_the_single_flutter_tests_carry_it() -> None:
-    for name, start in FLUTTER_TESTS.items():
+    for name, starts in FLUTTER_TESTS.items():
         text = (APP_TEST / name).read_text()
-        at = text.index(start)
-        after = text.find("\n  test(", at + 1)
-        assert "tags: 'realtime'" in text[at : after if after > 0 else len(text)], name
+        for start in starts:
+            at = text.index(start)
+            after = text.find("\n  test(", at + 1)
+            assert "tags: 'realtime'" in text[at : after if after > 0 else len(text)], (name, start)

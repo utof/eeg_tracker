@@ -440,7 +440,7 @@ void main() {
     expect(w.leases.where((l) => l.$2 == tapRide && l.$1), isNotEmpty);
     expect(w.leases.last, (false, tapRide), reason: 'the session let its lease go');
     expect(w.statuses.last.phase, Phase.recording, reason: 'the recording goes on');
-  });
+  }, tags: 'realtime');
 
   test('the recording headband drops under a session: the session waits, the recorder reconnects, the stream is back', () async {
     final first = CountingBand(label: 'N'), second = CountingBand(label: 'N2');
