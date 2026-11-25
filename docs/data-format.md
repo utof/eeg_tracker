@@ -372,7 +372,8 @@ the start of the quiet minute with the headband, the start of the sound without 
 | `plan` | `state` (`asleep relax focus pause wake`; `pause` is Break), `bed` (`rain pink brown ocean none`), `beat` (`none pulsed isochronic binaural`), `minutes` of sound, the beat's `fromHz` `toHz` and `rampS` (exponential slide, then held), `carrierHz`, pulse `depth` (gain swings between 1 - depth and 1), `fadeInS` `fadeOutS`, `beatShare` (of the loudness power; the bed has the rest), `targetLufs` |
 | `headband` | `headband` (measured), `sound only`, `night recording` (the night held it), `not found`, `lost` (no signal came) |
 | `contact` | ohms per channel at the start, `null` = none |
-| `recording` | stem of the session's EEG in `files/recordings/` (fall asleep with the headband only), else `null` |
+| `recording` | stem of the session's EEG in `files/recordings/` (fall asleep with the headband only), else `null`. With `span`: the id of the day's recording instead (below) |
+| `span` | only when the session ran as a span of a recording: the span's id. It means: no raw EEG of its own; take the recording's samples between the span's `start` and `end` ("What you were doing in a recording") |
 | `soundStartS` `fadeFromS` `offAtS` `endS` | the sound started, began to fade, was silent; the session ended (`null`: never reached) |
 | `end` | `time`, `cap` (45 min after lights off), `asleep`, `stopped`, `failed`, `running` |
 | `baselineS` | clean seconds in the quiet minute (a comparison needs 20) |
@@ -433,6 +434,9 @@ the `eeg_morning_check` event itself.
 
 ## The phone's `files/mornings/`
 
+A check-in that ran as a span of a recording writes no `<stamp>.f32` of its own: its `<stamp>.morning.json` has
+`recording` and `span` ("What you were doing in a recording").
+
 The phone app runs the morning check-in itself (DECISIONS rows 120 and 125) and keeps each one in its private
 `files/mornings/` folder (not `files/recordings/`: a check-in there would join the night before it):
 
@@ -455,6 +459,8 @@ The phone app runs the morning check-in itself (DECISIONS rows 120 and 125) and 
 A stopped check-in, or one whose headband dropped out, leaves no files. Export data copies them out (below).
 
 ## Dream catcher answers as text (`files/dream-catcher/<stamp>-r<n>.text.json`)
+
+The dream catcher's session file (`dream-catcher/*.dream.json`) has `recording` and `span` when it ran as a span of a recording; `recording` then names the day's recording, not raw files of its own ("What you were doing in a recording").
 
 One small JSON beside each answer's WAV, written by the phone's speech to text after the session (DECISIONS rows
 250-256) and whenever you change the words. App-private, no backup; Export data copies it with the WAVs. Missing
@@ -645,7 +651,9 @@ One file per work session (ROADMAP row 35, DECISIONS 440-449): `<stamp>.work.jso
 `yyyy-MM-dd-HHmmss` local time. Written whole (a temporary name, then a rename) every 5 minutes while the session runs
 and at Stop, so a crash loses at most the last minutes; `ended` says which. Times are local ISO times. The per-30-s
 numbers are enough to score a session again with other weights or lines; since 2026-11-20 the session's raw EEG is
-kept too, as a recording marked `session: work` (above, "Raw recording"; `raw` names it). Compact JSON (one line);
+kept too, as a recording marked `session: work` (above, "Raw recording"; `raw` names it). A session that ran as a span
+of a recording has `recording` and `span` and writes no raw EEG: `raw` holds the recording id (see "What you were doing
+in a recording"). Compact JSON (one line);
 older files are indented, and read the same.
 
 | Field | Content |
@@ -859,6 +867,23 @@ the middle of a write leaves a half last line: skipped too).
 | `made` | when this line was written |
 
 A span needs `span`, `kind`, a `start` that parses and a `source`; `end` must be `null`, absent or a time.
+
+**An activity on a recording.** Work, Meditate, alpha-theta, Sound, Dream catcher, the Nap coach, the check-in and
+the hands-free calibration run as a span on the recording (`source` `owner_button`), with `started_recording` `true`
+when their button started the recorder. They write no raw EEG of their own. Their own file (`work-sessions/*.work.json`,
+`meditations/*.meditation.json`, `alpha-theta/*.alphatheta.json`, `naps/*.nap.json`, `dream-catcher/*.dream.json`,
+`sound-states/*.sound.json`, `mornings/*.morning.json`, the calibration file) gets two fields:
+
+| Field | Content |
+|---|---|
+| `recording` | the id of the recording it rode on; `null` when the headband was never found |
+| `span` | the id of its span in that recording's spans file |
+
+**The rule:** a file with `span` rode on a recording, and its `recording` names the day's recording (in the older nap,
+dream catcher and sound files `recording` named their own raw files; the work file's `raw` now holds the recording id
+too). Its signal is the recording's samples from the span's `start` to its `end`. A file with no `span` is an old one:
+it reads as it always did, with its own raw files. The laptop reads this with `spans.span_of` and `spans.window`
+(`scripts/spans.py`).
 
 **Sleep spans** are those of kind `sleep` or `nap`: sleep reports come only from them (DECISIONS 886). A recording
 with `recording` in its headers and no sleep span is never a night.
@@ -1208,6 +1233,8 @@ states (`phone/sound-states/`). A column that does not apply to a kind is empty.
 | `start`, `end`, `minutes` | the session's span (from `runS` or `endS` where the file counts seconds) |
 | `ended`, `started_by` | how it ended (the file's word: `stopped`, `away`, `time`, ...); the laptop's `manual`, `asked`, `auto` |
 | `wearer` | `me` or `someone else`, when answered |
+| `raw` | the stem of the session's own raw files; empty for an old file without one and for a session that rode on a recording |
+| `recording`, `span` | for a session that rode on a recording: the recording's id and the span's id (a row of `spans.tsv`); empty for old files |
 | `worn_min` | the phone's minutes with the headband on the head outside breaks |
 | `usable_min`, `drowsy_min` | half minutes read as alert, getting drowsy or drowsy outside breaks and closed eyes (the Trends' work time), and those at getting drowsy or drowsy |
 | `talking_min` | the detectors' muscle seconds (talking, chewing) outside breaks, in minutes |
@@ -1472,6 +1499,7 @@ in a recording"). The last line of a span is the span; open spans have no `end`.
 | `ended_by` | `owner`, `activity`, `other_activity`, `recording_stopped`, `headband_off`, `phone_restart` |
 | `session` | the activity's own file, relative to the phone's `files/` |
 | `paused_minutes` | minutes the activity was paused while the span stayed open (Work during a nap); empty when never paused |
+| `active_minutes` | `minutes` minus `paused_minutes`; empty while the span is open |
 | `estimate` | the confirm-questions estimate a confirmed span answers |
 
 ### After each copy from the phone (`scripts/after_pull.py`)
