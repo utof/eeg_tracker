@@ -108,7 +108,7 @@ void main() {
       expect([for (final e in openEstimates(s, at(13, 15), recording: 'rec')) e.id], hasLength(3), reason: 'its own stop sheet still may');
     });
 
-    test('more than 4 waiting: the newest and the ones the detector is least sure of stay', () {
+    test('more than 4 waiting: a notification takes the newest and the ones the detector is least sure of; every one stays on the card', () {
       final e = [
         est(Labels.walking, at(8), 30, confidence: 0.9),
         est(Labels.walking, at(9), 30, confidence: 0.4),
@@ -120,14 +120,30 @@ void main() {
       store.register(e);
       final s = store.read();
       const settings = ConfirmSettings();
-      final kept = cardBatch(s, settings, at(14));
-      expect([for (final p in kept) p.estimate.id], [e[1].id, e[3].id, e[4].id, e[5].id]);
-      expect({for (final p in kept) p.estimate.start.hour: p.why}, {9: 'unsure', 11: 'unsure', 12: 'newest', 13: 'newest'});
-      expect([for (final x in overflow(s, settings, at(14))) x.id], [e[0].id, e[2].id]);
-      // with four or fewer nothing is dropped
+      final pushed = notificationBatch(s, settings, at(14));
+      expect([for (final p in pushed) p.estimate.id], [e[1].id, e[3].id, e[4].id, e[5].id]);
+      expect({for (final p in pushed) p.estimate.start.hour: p.why}, {9: 'unsure', 11: 'unsure', 12: 'newest', 13: 'newest'});
+      final card = cardBatch(s, settings, at(14));
+      expect([for (final p in card) p.estimate.id], [for (final x in e) x.id], reason: 'all six, in time order');
+      expect({for (final p in card) p.estimate.start.hour: p.why}, containsPair(9, 'unsure'));
+      // the two the notification had no room for are not closed: they are open, and they are not pushed later either
+      expect([for (final x in e) closedWhy(x, s, at(14))], everyElement(isNull));
+      push(at(14), [for (final p in pushed) p.estimate.id]);
+      final after = store.read();
+      expect(notificationBatch(after, settings, at(16)), isEmpty, reason: 'the extras are not pushed in a batch of their own');
+      expect(cardBatch(after, settings, at(16)), hasLength(6));
+      // they age out by the usual rules: 48 hours after the stretch ended (the 08:00 one ended 08:30)
+      expect([for (final p in cardBatch(after, settings, at(24 * 2 + 8, 31))) p.estimate.id], [for (final x in e.skip(1)) x.id]);
+      // answering one takes it off the card and a waiting one is still there
       store.answer(e[0].id, Answer.yes, at: at(14));
-      store.answer(e[1].id, Answer.yes, at: at(14));
-      expect(overflow(store.read(), settings, at(14)), isEmpty);
+      expect(cardBatch(store.read(), settings, at(14)), hasLength(5));
+    });
+
+    test('switched off: nothing on the card, nothing pushed', () {
+      store.register([est(Labels.walking, at(8), 30), est(Labels.walking, at(9), 30)]);
+      const off = ConfirmSettings(on: false);
+      expect(cardBatch(store.read(), off, at(14)), isEmpty);
+      expect(notificationBatch(store.read(), off, at(14)), isEmpty);
     });
   });
 

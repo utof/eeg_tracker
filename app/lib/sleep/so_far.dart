@@ -143,14 +143,30 @@ class SoFarPlan {
   int get tailWindowFrom => math.max(0, epochs - soFarWindow);
 }
 
+/// The stretches of clock time "so far" counts, unix seconds, or null for the whole files: a night made from sleep
+/// spans (a recording started with Record, DECISIONS 886) counts only its sleep stretches, and from [sinceMs] on when
+/// that is given (the open stretch's start: an earlier, closed one is not "so far"). A night from before spans is
+/// its whole files.
+List<(double, double)>? soFarWindows(NightFiles n, int? sinceMs) {
+  final w = n.windows;
+  if (w == null) return null;
+  final since = sinceMs == null ? null : DateTime.fromMillisecondsSinceEpoch(sinceMs);
+  return [
+    for (final (a, b) in w)
+      if (since == null || b.isAfter(since))
+        ((since != null && a.isBefore(since) ? since : a).microsecondsSinceEpoch / 1e6, b.microsecondsSinceEpoch / 1e6),
+  ];
+}
+
 /// The newest night in [recordingsDir], if it has data that arrived at or after [sinceMs] (the night that records now;
-/// null: any). The `.idx` files are read, not the samples.
+/// null: any). The `.idx` files are read, not the samples. A night from sleep spans is cut to its sleep ([soFarWindows]).
 SoFarPlan? planSoFar(String recordingsDir, int? sinceMs) {
   final nights = nightsIn(Directory(recordingsDir));
   if (nights.isEmpty) return null;
   final n = nights.first;
   if (n.recordings.isEmpty || (sinceMs != null && n.end.millisecondsSinceEpoch < sinceMs)) return null;
-  final layout = joinLayout(n.recordings, who: 'Sleep so far'); // O1 O2 T3 T4 by name or site, or MissingSites
+  final windows = soFarWindows(n, sinceMs);
+  final layout = joinLayout(n.recordings, who: 'Sleep so far', windows: windows); // O1 O2 T3 T4 by name or site, or MissingSites
   final epochs = layout.samples ~/ epochInputSamples;
   final complete = completeStretches(epochs);
   // the walking detector reads every channel, as the night's report does (extras.dart): the model's four first
@@ -161,7 +177,9 @@ SoFarPlan? planSoFar(String recordingsDir, int? sinceMs) {
     if (have.add(h.indexOf(name))) names.add(name);
   }
   return SoFarPlan(
-    walkLayout: names.length == layout.names.length ? layout : joinLayout(n.recordings, names: names, who: 'Sleep so far'),
+    walkLayout: names.length == layout.names.length
+        ? layout
+        : joinLayout(n.recordings, names: names, who: 'Sleep so far', windows: windows),
     night: n.name,
     files: n.recordings.length,
     layout: layout,

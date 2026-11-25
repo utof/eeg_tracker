@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The confirmation questions on a temporary emulator (DECISIONS 860-869): a batch on the card and in the notification.
 
-usage: python3 app/tool/confirm_check.py --apk <release or replay build> [--adb-port 5051] [--work DIR] [--out DIR] [--keep]
+usage: python3 app/tool/confirm_check.py --apk <release or replay build> [--adb-port 5051] [--adb-connect HOST:PORT] [--work DIR] [--out DIR] [--keep]
 
 Seeds a made-up sleep report and a made-up walk file (no recording of anyone), starts the app and checks:
   1. the Record tab shows the "Quick check" card with the batch ("19:08-21:14. The headband thinks you walked. Did
@@ -215,6 +215,8 @@ def main() -> int:
     p.add_argument("--out", type=Path)
     p.add_argument("--keep", action="store_true")
     p.add_argument("--adb-port", type=int, default=5051)
+    p.add_argument("--adb-connect", metavar="HOST:PORT",
+                   help="use the emulator already reachable at this adb address (a worker PC's: _local/remote/precheck_emu.sh)")
     p.add_argument("--work", type=Path, default=Path("/var/tmp"),
                    help="where the run's folder (emulator, staged files, logs) is made; a disk with 8 GB free")
     a = p.parse_args()
@@ -226,7 +228,8 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     pc.OUT = out
     results: list[pc.Result] = []
-    em = pc.Emulator(work, a.keep)
+    work.mkdir(parents=True, exist_ok=True)  # with --adb-connect nothing else makes it before the adb server's log
+    em = pc.Emulator(work, a.keep, connect=a.adb_connect)
     t0 = time.time()
     try:
         em.create()

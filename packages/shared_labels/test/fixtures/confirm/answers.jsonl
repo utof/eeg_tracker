@@ -20,4 +20,5 @@
 {"estimate_id":"est:0fea7725f24a166c","answer":"not_answered","why":"dismissed","at":"2026-11-22T12:55:00+03:00","via":"notification"}
 {"estimate_id":"est:0fea7725f24a166c","answer":"no","at":"2026-11-22T13:30:00+03:00","via":"card","card":"normal","guess":"walking","confidence":0.9,"shown":"2026-11-22T13:29:57+03:00","seconds":3.1,"age_min":49}
 {"estimate_id":"est:2688b4adefd45e56","answer":"not_sure","at":"2026-11-22T13:40:00+03:00","via":"card","card":"normal","guess":"nap","confidence":0.5,"shown":"2026-11-22T13:39:58+03:00","seconds":2.0,"age_min":14}
+{"estimate_id":"est:ccf7a756acd85bfe","answer":"not_answered","why":"too_many","at":"2026-11-21T14:00:00+03:00","via":"card"}
 {"estimate_id":"est:ccf7a756acd85bfe","answer":"said","at":"2026-11-22T13:50:00+03:00","via":"card","card":"blind"}

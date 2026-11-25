@@ -2,7 +2,7 @@
 // back, so best if the app asks right away"; DECISIONS 860-869). Everything else in the app talks to this class:
 //
 //   register(estimates)                 a detector's one call: "I think this happened then"
-//   pending()                           the card's batch: the few most valuable open questions
+//   pending()                           the card: every open question (a notification takes only a batch of them)
 //   pendingFor(recording, start, end)   the open questions of one recording (the stop sheet's "What was this recording?")
 //   answer / undo / note                Yes, No, Not sure; take it back; a few words of your own
 //   settle(recording, label, start, end) the stop sheet says a chip already answered it: never asked again
@@ -212,12 +212,6 @@ class ConfirmQuestions {
     for (final e in state.estimates.values) {
       final why = closedWhy(e, state, now);
       if (why != null) write(e, why);
-    }
-    final settings = store.settings();
-    if (settings.on) {
-      for (final e in overflow(state, settings, now, labelled: labelled())) {
-        write(e, WhyNot.tooMany);
-      }
     }
     if (n > 0) _afterChange();
     return n;

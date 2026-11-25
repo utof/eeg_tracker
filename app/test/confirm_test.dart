@@ -96,8 +96,9 @@ void main() {
   });
 
   group('the queue', () {
-    test('with more waiting than a batch holds: the newest and the least sure, in time order', () {
-      final q = make();
+    test('with more waiting than a batch holds: the notification takes the newest and the least sure, the card keeps every one', () async {
+      final phone = FakePhone();
+      final q = make(phone: phone);
       final sure = est(Labels.walking, at(9), 20, confidence: 0.9);
       final unsure = est(Labels.walking, at(11), 20, confidence: 0.4);
       final long = est(Labels.walking, at(13), 150, confidence: 0.8);
@@ -105,16 +106,25 @@ void main() {
       q.register([sure, unsure, long, rare]);
       q.store.saveSettings(const ConfirmSettings(perBatch: 3));
       final got = q.pending();
-      expect([for (final x in got) x.id], [unsure.id, long.id, rare.id], reason: 'the older, sure walk is dropped');
-      expect({for (final x in got) x.id: x.why}, {unsure.id: 'unsure', long.id: 'newest', rare.id: 'newest'});
-      expect(got.first.guessText, '11:00-11:20. The headband thinks you walked. Did you?');
-      // the one there was no room for is written down as not answered, never asked, and is no label
-      expect(q.close(), 1);
+      expect([for (final x in got) x.id], [sure.id, unsure.id, long.id, rare.id], reason: 'the older, sure walk stays on the card');
+      expect(got.first.guessText, '09:00-09:20. The headband thinks you walked. Did you?');
+      expect({for (final x in got) x.id: x.why}[unsure.id], 'unsure');
+      expect(quickChecksWaiting.value, 4, reason: 'the Record tab\'s badge counts all of them');
+      // the notification is planned for three; the fourth is not pushed
+      await q.plan();
+      expect(phone.armed.single.$2, [unsure.id, long.id, rare.id]);
+      // nothing is closed unasked: no "not answered" line, and it is no label
+      expect(q.close(), 0);
       final s = q.store.read();
-      expect((s.unanswered[sure.id]!.why, s.closed(sure.id)), (WhyNot.tooMany, true));
+      expect((s.unanswered.containsKey(sure.id), s.closed(sure.id)), (false, false));
       q.answer(unsure.id, Answer.yes);
-      expect([for (final x in q.pending()) x.id], [long.id, rare.id], reason: 'it does not come back');
-      expect(quickChecksWaiting.value, 2, reason: 'the Night tab\'s badge');
+      expect([for (final x in q.pending()) x.id], [sure.id, long.id, rare.id]);
+      expect(quickChecksWaiting.value, 3);
+      // it ages out by the usual rule: 48 hours after it ended
+      now = at(9, 21 + 48 * 60);
+      expect([for (final x in q.pending()) x.id], [long.id, rare.id]);
+      expect(q.close(), 1, reason: 'now it is written down as too old, as before');
+      expect(q.store.read().unanswered[sure.id]!.why, WhyNot.neverSeen);
     });
 
     test('a kind with few answers so far comes before one with many', () {

@@ -441,6 +441,7 @@ def test_the_keeper_leaves_another_running_link_alone(tmp_path):
     k.stop()
 
 
+@pytest.mark.realtime
 def test_a_real_kept_link_starts_and_stops(tmp_path):
     """The real phone_link.py --keep under the keeper, on a free port: it answers its status on this laptop, and
     ends when the keeper stops it."""

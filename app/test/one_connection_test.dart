@@ -374,7 +374,7 @@ void main() {
     expect(w.owner.live, isFalse);
     expect(await w.owner.lendToNight(), isNull);
     expect(w.band.count('disconnect'), 1);
-  });
+  }, tags: 'realtime');
 
   test('during a night no session takes the headband: the owner refuses in plain words', () async {
     final w = World();

@@ -1,6 +1,9 @@
 // The phone's probe of our own connection (lib/headband/own/probe.dart) on the fake headband, at 40 times real
 // time: the steps, the files it writes, and the plain verdict, for a headband that behaves as assumed and for ones
 // that do not (another channel order, no command 5, pairing needed, switched off).
+@Tags(['realtime'])
+library;
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;

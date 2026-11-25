@@ -214,6 +214,18 @@ void main() {
     expect(ConfirmStore(files).labelsFile.readAsStringSync(), contains('No: sat on the bus'));
   });
 
+  testWidgets('more waiting than a notification takes: the card still shows every question', (t) async {
+    final third = est(Labels.walking, DateTime(2026, 11, 20, 17, 55), 20, confidence: 0.95); // not overlapping the other walk
+    ConfirmQuestions(files).register([nap, walk, third]);
+    ConfirmStore(files).saveSettings(const ConfirmSettings(perBatch: 2));
+    await show(t, host(), height: 4400);
+    await settle(t);
+    expect(find.text('Not sure'), findsNWidgets(3), reason: 'three cards, though a notification holds two');
+    expect(find.text('15:59-17:49. The headband thinks you napped. Did you?'), findsOneWidget);
+    expect(find.text('19:08-21:14. The headband thinks you walked. Did you?'), findsOneWidget);
+    expect(find.text('17:55-18:15. The headband thinks you walked. Did you?'), findsOneWidget);
+  });
+
   testWidgets('answered questions are gone the next time the card loads; with none left there is no card', (t) async {
     ConfirmQuestions(files).register([nap, walk]);
     await show(t, host(changed: 1));

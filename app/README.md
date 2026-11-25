@@ -14,11 +14,11 @@ below). The **Smart alarm**, set just above Sleep, wakes you in a window you cho
 night, never in deep sleep, and always by the window's end (below). **Sound** (at the bottom, also during a night) plays calm sound
 for a state, with an optional beat, and with the headband shows what your brain does (below).
 
-**The bar at the bottom** (since 2026-11-20, DECISIONS 597): **Night** (the night screen: status, the strip, Sleep,
+**The bar at the bottom** (since 2026-11-20, DECISIONS 597): **Record** (the first screen: status, the strip, Sleep,
 Morning, Try these, Headband, Phone, with Record and Sleep pinned; the app opens here), **Sessions** (Meditation, Dream
 catcher, Nap coach, Lucid dreams, Work, Sound), **Signal** (the head, live traces and raw data, below), **Trends** and
 **More** (Your data: Export data, Export a night, Share on Wi-Fi; Settings; Licences). Where a section below says
-"on the main screen", look in the tab that holds it; Back on another tab returns to Night.
+"on the main screen", look in the tab that holds it; Back on another tab returns to Record.
 
 ## Owner steps, in the order to try them
 
@@ -71,7 +71,7 @@ of its own" is covered by another one's steps. The old one-hour phone test is st
 
 **When the headband is on anyway**
 
-- [When I put the headband on](#when-i-put-the-headband-on-automatic-recording-asks-first-unless-you-change-it): pair it once, then a bedtime with "Ask me" (5 minutes, then a few evenings)
+- [When I put the headband on](#when-i-put-the-headband-on-automatic-recording-asks-first-unless-you-change-it): let Android watch for it once, then a bedtime with "Ask me" (5 minutes, then a few evenings)
 
 **When the headband and the board are ready**
 
@@ -173,6 +173,18 @@ flutter test --concurrency=1               # writer, recorder rules (fake headba
 flutter build apk --release --target-platform android-arm64
 ```
 
+On a busy machine run the tests in two steps: the tests that wait on the wall clock (tagged `realtime`, see
+`dart_test.yaml`) fail when the CPU is shared and pass alone.
+
+```bash
+flutter test --exclude-tags realtime --concurrency=4    # everything else, in parallel
+flutter test --tags realtime --concurrency=1            # the real-time ones, alone
+```
+
+None of the tests needs a fixed port: they take free ones from the operating system, so two runs on one machine do
+not meet. `python3 tests/with_ports_held.py -- flutter test` runs a suite with the app's own ports (8765-8768,
+8770-8772) all taken, inside a private network namespace that nothing else on the machine sees.
+
 `flutter test` also renders the night screen in six states (two also at the owner's 393 dp width), the meditation
 screen in eleven, the sleep report in nine, the replay check's and alpha-theta's pages in nineteen, the dream catcher in thirteen, the nap coach in sixteen, the check-in, trends
 and Morning section in eighteen, sound for states in fourteen, Export data in nine, Headband connection in eleven, Try these in seven and "Was this you?" in thirteen
@@ -271,7 +283,8 @@ already on it (DECISIONS 873). A device whose clock is off by more than 5 s (a r
 
 `python3 tool/push_smoke.py <release APK> [--work <folder on a disk with room>]` (heavy build slot, about 25
 minutes, adb port 5049) pairs a temporary emulator with a receiver on this laptop and checks the phone's own
-sending (DECISIONS 849): the spare port, the scheduled job run by Android itself with the app closed, forced
+sending (DECISIONS 849). The receiver listens on a free port the OS picks (`--push-port N` chooses one), never on
+8772, which the laptop's own `phone_link.py --keep` holds for the real phone: the spare port, the scheduled job run by Android itself with the app closed, forced
 runs, the laptop's own copy beside it, and that no notification is shown. It waits for Android's own run before
 it forces any: every run of a periodic job moves Android's next window 15 minutes on.
 With `--replay <replay build>` it first makes a short recording with a sleep stretch on the replay build (the five
@@ -293,7 +306,7 @@ custom place); `dart run tool/replay_scenario.dart list` shows them, `... <name|
 On a device it needs a **replay build** (`--dart-define=EEG_REPLAY=true`; a normal build has no replay code at all)
 and `files/replay/plan.json` (only `adb root` can put it there):
 `{"files": ["talking/2026-11-20-100000.f32"], "speed": 1, "from_s": 0, "max_gap_s": 60, "loop": false}` with the
-files under `files/replay/` (the app's owner and SELinux label, as in step 1 below). Every session and Start night
+files under `files/replay/` (the app's owner and SELinux label, as in step 1 below). Every session, Record and Sleep
 then use the replay instead of the headband (the DIY board's switch still wins in the night recorder: turn it off);
 its name is "Replay (not a headband)" and the night's `.log` says what it plays.
 
@@ -344,7 +357,7 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
 4. **Export data**: pick or create `Download/EEG` in the picker, export, then
    `adb pull /sdcard/Download/EEG/eeg-export <dir>` and `python3 scripts/import_phone.py <dir> --dest <scratch>`
    (not the real `_local`).
-5. **Start night** without a headband: the service starts ("Searching ... The app keeps looking"); Stop ends it.
+5. **Sleep** without a headband: the service starts ("Searching ... The app keeps looking"); Stop ends it.
 6. **The live sleep scorer's speed** (the nap coach): `flutter build apk --release --target-platform android-x64
    -t tool/live_bench.dart`, install, open, then `adb logcat | grep BENCH`: the time per 30-second check at 5 to 60
    minutes of window and the peak memory. Reinstall the app afterwards.
@@ -366,7 +379,7 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
 9. **Share on Wi-Fi** (2026-11-19): switch it on in Your data, read the code from the sheet (`tool/emu.py texts`),
    `adb forward tcp:18765 tcp:8765`, then `curl -H "Authorization: Bearer <code>" http://127.0.0.1:18765/state`
    (401 without the code), `EEG_PHONE_TOKEN=<code> scripts/page_server.py --recorder http://127.0.0.1:18765` and
-   `EEG_PHONE_TOKEN=<code> scripts/pull_phone.py http://127.0.0.1:18765 --once --dest <scratch>`; Start night (the
+   `EEG_PHONE_TOKEN=<code> scripts/pull_phone.py http://127.0.0.1:18765 --once --dest <scratch>`; Sleep (the
    recorder's service serves, status `reconnecting` without a headband), Stop (the app serves again), switch off
    (the port closes). All of it passed; the emulator cannot show Wi-Fi with the screen off or the battery cost.
 
@@ -404,13 +417,13 @@ adb wait-for-device; adb install -r build/app/outputs/flutter-apk/app-release.ap
    this laptop?** in the app's own task; **Not now** sent nothing; **Connect** said **Connected**, the laptop printed
    "Paired" and copied (`_local/phone/link.json`, mode 600, with the phone's token), and its live pages answered from
    the phone. **New code** on the sheet reached the laptop by itself within seconds ("The phone says it is at ..."),
-   and the copies went on with the new token; a restart of the app and **Start night** (the recorder's service then
+   and the copies went on with the new token; a restart of the app and **Sleep** (the recorder's service then
    serves) each told the laptop again; the laptop command run again copied from the remembered phone without a scan.
    The first run found a bug the unit tests had missed: Dart sent the handshake chunked and Python's server read an
    empty body ("The laptop said no"); fixed in `69f5e27`. Not checked here: Chrome opening the page (Chrome hung at
    its first-run screen on the loaded laptop), a real camera, a VPN.
 
-13. **The night's Wi-Fi lines and lock** (2026-11-20, DECISIONS 616): Share on Wi-Fi on, Start night, then
+13. **The night's Wi-Fi lines and lock** (2026-11-20, DECISIONS 616): Share on Wi-Fi on, Sleep, then
    `adb logcat -s eeg_tracker flutter | grep -i wifi` shows who holds the lock (`wifi lock: recorder on, held for
    [screen, recorder]`) and a `wifi ...` line at every change: `adb shell svc wifi disable` / `enable`, the power
    key, `adb shell dumpsys deviceidle force-idle` (after `dumpsys battery unplug`). `adb shell dumpsys wifi` lists the
@@ -424,7 +437,7 @@ laptop's, not a phone's.
 
 **The combined app** (`feat/app-line` with the smart alarm, the dream catcher's text, "Unusual for you", two-pass
 scoring and sharp hours, 2026-11-19, release x86_64): every screen opened; the same night scored in 93 s and matched the laptop on all
-1330 scored epochs; Start night with Share on Wi-Fi on and the smart alarm set searched for the headband, served the
+1330 scored epochs; Sleep with Share on Wi-Fi on and the smart alarm set searched for the headband, served the
 laptop from the recorder's service, set the phone's alarm, took Lights off and Alarm off (the phone's alarm went
 away), and Stop ended it; the speech model downloaded in about 95 s and wrote out the three spoken answers word for
 word, and the night scored again afterwards with the same stages, both ONNX Runtimes loaded in one process. Sharp
@@ -454,7 +467,7 @@ process at about 330 MB (RSS). No app errors in logcat. The speech-model downloa
 `adb emu redir add udp:9000:9000` does not reach the guest's `wlan0` on the API 36 image, so the frames are sent from
 inside: frames from the fake board's encoder (`fake_board.encode` in `tests/fake_diy/fake_board.py`, consecutive
 sequence numbers) into a file, `adb push` it to `/data/local/tmp/frames.bin`, **DIY board (test)** on Headband
-connection, **Start night**, then `adb shell 'i=0; (while [ $i -lt 600 ]; do dd if=/data/local/tmp/frames.bin bs=37
+connection, **Sleep**, then `adb shell 'i=0; (while [ $i -lt 600 ]; do dd if=/data/local/tmp/frames.bin bs=37
 skip=$i count=1 2>/dev/null; sleep 0.02; i=$((i+1)); done) | nc -u -q 1 10.0.2.16 9000'` (10.0.2.16: the address the
 page shows). With Bluetooth's permissions revoked first (`adb shell pm revoke io.github.utof.eeg_tracker
 android.permission.BLUETOOTH_CONNECT`, and `BLUETOOTH_SCAN`) the night started, the screen read "Recording the board's
@@ -469,7 +482,7 @@ study reminders on, the phone's one plan (`shared_prefs/sharp_hours.xml`, `plan`
 (`e`) and morning (`m`) reminders together. An evening time set by hand a few minutes ahead (Change, then the
 picker's text input) rang on time: the `study_review` notification "Good time to learn something you want to keep",
 `files/study-review/prompts.jsonl` `shown`, and the next alarm armed was the next sharp question. Tapping it opened
-"Did you study something tonight?"; **Yes** wrote the answer to `files/study-review/log.jsonl`. A BrainBit Start night
+"Did you study something tonight?"; **Yes** wrote the answer to `files/study-review/log.jsonl`. Sleep on the BrainBit
 without a headband searched (a 31 s scan every 41 s), Share on Wi-Fi switched off and on three times within seconds
 left one server answering for the recorder (`ss -ltn`: one listener pair on 8765), Stop (and its confirmation) ended
 the service, the app's own server took over, and switching Share off freed the port. **Once, in the first of three
@@ -507,7 +520,7 @@ APKs under the ARM translation, x86_64 API 36 image):
 12. **When I put the headband on** (DECISIONS rows 600-609; a **debug** build: only it has the fake "headband came
    near"): `flutter build apk --debug --target-platform android-x64`, install with `-g`, and allow background starts the
    way the owner's fallback does (`adb shell dumpsys deviceidle whitelist +io.github.utof.eeg_tracker`; the emulator
-   has no companion pairing). Open Settings, **When I put the headband on**. Put "now" inside the bedtime window
+   cannot let Android watch for the headband). Open Settings, **When I put the headband on**. Put "now" inside the bedtime window
    (`run-as io.github.utof.eeg_tracker` and write `files/auto-start/settings.json` with `bed_min` an hour ahead), press
    Home, then `adb shell am broadcast -n io.github.utof.eeg_tracker/.AutoDebugReceiver -a
    io.github.utof.eeg_tracker.auto.DEBUG_PRESENCE --es fake worn` (`--es fake off` for a headband off the head,
@@ -524,7 +537,7 @@ APKs under the ARM translation, x86_64 API 36 image):
 The plugin's JVM tests: `cd android && ./gradlew :neurosdk2:testDebugUnitTest` after one `flutter build apk`.
 
 **The rest of the night pipeline review and BrainBit's calls off the main thread together** (seventh integration,
-2026-11-19, the arm64 release APK of `aa96f98` on the x86_64 API 36 image, `hw.cpu.ncore=2`): a BrainBit Start night
+2026-11-19, the arm64 release APK of `aa96f98` on the x86_64 API 36 image, `hw.cpu.ncore=2`): Sleep on the BrainBit
 without a headband, with Lights off tapped over and over from the moment of Start, kept the first tap: the saved night
 (`FlutterSharedPreferences.xml`, `prefs.night`) had `lightsOffMs` at the tap, 1.2 s after the recorder began the
 night, and the screen read "Lights off 16:26." with "Lights off again". The recorder was already up 0.35 s after
@@ -627,7 +640,7 @@ stages. What you see:
   "Sleep model 40 % (run 2 of 3)" and on from there. Nothing done before is done again except the preparation
   (a minute or two). The percentage counts the model's steps.
 - The scoring always waits about 45 seconds after the app opens or comes back, so the screen and Share on Wi-Fi
-  answer first. It stops when you press **Start night** or start a session (meditation, check-in, work session, nap,
+  answer first. It stops when you press **Record**, **Sleep** or start a session (meditation, check-in, work session, nap,
   ...), and goes on after them from where it was. While the laptop copies files over Share on Wi-Fi it says
   "Waiting while the laptop copies files" and goes on after.
 - "Scoring this night stopped before it finished" with **Try again** now appears only when the app closed three times
@@ -733,7 +746,7 @@ uv run --project analysis python scripts/compare_pulse.py _local/nights/2026-11-
 
 ## Sleep so far
 
-While a night records, the Night tab has **Sleep so far** under the Tonight strip: one line with what the last look
+While a night records, the Record tab has **Sleep so far** under the Tonight strip: one line with what the last look
 found ("At the last look: 3 h 37 min asleep by 03:28.") and **See sleep so far**. Its page shows the night up to 2
 minutes behind the recording: the chart as in the sleep report, asleep so far and when you fell asleep (the first
 sleep period's start), then deep, dream, light, awake in between and the wake-ups over 5 minutes. It is marked as
@@ -753,6 +766,9 @@ looks matched the report on 96 % of 30-second stretches; asleep 288 vs 288.5 min
   runs; meanwhile the live model's own readings fill in the chart, and the page says how many minutes are theirs.
 - A dropout and reconnect (a new file set, as on 2026-11-20 at 08:15) shows as hatched "no data"; the hours before it
   are not scored again. The DIY board's nights have no sleep so far (the page says why).
+- **In a recording started with Record it counts only the open sleep stretch**, from the moment you pressed Sleep, not
+  the hours of the recording before it (and not an earlier sleep you ended). With no sleep marked the section and the
+  page say "No sleep marked in this recording yet" and nothing is scored (DECISIONS row 1002).
 - Files: `files/cache/so-far/<night>.json` and `files/cache/live-stages/` (never exported; `docs/data-format.md`).
 
 ### Owner step: one look in the night (1 minute, one night)
@@ -787,7 +803,7 @@ the same comparison (counted from their start, or from a dream catcher's lights 
 the app scores each night it already has once more, between nights, which takes the same few minutes a night as
 before. The laptop's sleep report writes the same.
 
-Checked on the emulator (x64 release build, 2026-11-19): Start night without a headband, Lights off (the line
+Checked on the emulator (x64 release build, 2026-11-19): Sleep without a headband, Lights off (the line
 became "Lights off 02:20." and the button "Lights off again"), the question on a second tap, Stop; and a 2-hour piece
 of the owner's recorded night with a `lights off` marker at 03:12, scored on the phone side in 54 s: detector 4½ min,
 sleep model 3 min after lights off, agreeing. The headband, the phone's speed and a whole night still need the phone.
@@ -1240,11 +1256,11 @@ Wakes you within a window you choose, at a moment of light sleep, dream sleep or
 always by the end of the window. Off until you set it. The **i** button shows what the research says
 (`docs/evidence/smart-alarm.md`: the evidence that it beats a plain alarm is weak).
 
-1. Before Start, the line above **Start night** says "Smart alarm off." Tap **Set alarm**: set **Wake me by** (for
+1. Before Start, the line above **Sleep** says "Smart alarm off." Tap **Set alarm**: set **Wake me by** (for
    example 07:30) and how much earlier it may wake you (**15**, **20**, **30** or **45 min**; 30 first), then
    **Set alarm**. The line then says "Wakes you by 07:30 tomorrow, from 07:00 at a light moment." The setting stays
    for the next nights until you change it or tap **Alarm off** in the same sheet.
-2. **Start night** as always. At Start the app sets a real phone alarm at 07:30 (Android's alarm clock: the alarm
+2. **Sleep** as always. At Start the app sets a real phone alarm at 07:30 (Android's alarm clock: the alarm
    icon in the status bar). It rings even if the phone closes the app in the night, the sleep model is too slow or
    fails, or the headband's signal is lost. If the phone does not allow exact alarms, its alarm volume is off, or it
    blocks pages over the lock screen, the app says so and opens the setting.
@@ -1275,7 +1291,7 @@ not on the 11T, not with a head, and the volumes are guesses.
 1. Once: in the phone's settings for EEG Tracker, allow **Show on lock screen** and **Display pop-up windows while
    running in the background** (HyperOS "Other permissions"), and keep **Autostart** and **No restrictions** on (as for
    the night). Set the phone's **alarm** volume (not media) to where an alarm wakes you.
-2. Before a night: **Set alarm** for your usual time with **30 min**, then **Start night**. Check the alarm icon in
+2. Before a night: **Set alarm** for your usual time with **30 min**, then **Sleep**. Check the alarm icon in
    the status bar.
 3. In the morning, tell the assistant:
    - Did it wake you, at what time, and did you feel groggy? Was the first note too soft or too loud?
@@ -1300,7 +1316,7 @@ says what the research shows (`docs/evidence/lucid-cues.md`); the page says who 
    cues with words to read (am I dreaming? notice your body, your breathing; if it is a dream, look left-right-left-
    right, twice) and 12 with your eyes closed, about 15 minutes, the screen black and dim. Keep the media volume where
    it is now.
-3. **Start night** as usual, and tap **Lights off** when you settle: the cues may play from 4.5 hours after it, only
+3. **Sleep** as usual, and tap **Lights off** when you settle: the cues may play from 4.5 hours after it, only
    in dream sleep with your eyes moving and you lying still, never in deep sleep; at most 10 in a dream and 30 a
    night, a little louder each time; a stir makes them quieter and pauses them.
 4. If you notice you are dreaming: stay calm and look left-right-left-right, twice, wide.
@@ -1322,7 +1338,7 @@ recording, the same on silent nights.
 Nothing of this has run on a phone or a head yet: not the loudness, the model running half the night inside the
 recorder, or the eye-signal finder.
 
-1. The first evening: in bed, open **Lucid dreams**, **Turn on**, do the practice to the end. Then Start night and
+1. The first evening: in bed, open **Lucid dreams**, **Turn on**, do the practice to the end. Then Sleep and
    Lights off as usual.
 2. While awake with the headband on, once, make the eye signal on purpose (left-right-left-right, twice, wide, eyes
    closed) a few times a minute apart, and note the times: the morning search should find them (they show as "other"
@@ -1348,12 +1364,12 @@ night with the lucid dream cues: one kind of cue a night.
 
 1. **Settings** (the gear on the main screen), **Memory cues**, **Turn on**. Once on, the main screen has a Memory
    cues section between nights.
-2. Each evening, before Start night: **Start the evening task** (about 12 minutes). Set the media volume so the
+2. Each evening, before Sleep: **Start the evening task** (about 12 minutes). Set the media volume so the
    sounds are soft but clear and leave it there. 32 objects appear one by one at their places on a board, half with a
    soft bell, half with a soft knock; then put each one back (you see where it was and hear its sound again; up to 3
    rounds); then once more with no help. Last, lie down with the phone where it stays tonight and tap **I hear it** as
    soon as you hear the bell, then the knock (each plays every 3 s, a little louder each time).
-3. **Start night** within 3 hours, and tap **Lights off** when you settle. From 30 minutes to 4.5 hours after it,
+3. **Sleep** within 3 hours, and tap **Lights off** when you settle. From 30 minutes to 4.5 hours after it,
    when the headband reads light or deep sleep and you lie still, one of the two sounds plays, 3 dB under where you
    tapped: at most one every 10 s and 120 a night; a stir makes it quieter and pauses it, three stirs end it.
 4. In the morning, before anything else: **Start the morning test**, the same board with no help (about 2 minutes),
@@ -1644,15 +1660,16 @@ You wished the app would start reading by itself when you wear the headband and 
 first phase (DECISIONS rows 600-609; research `_local/research/2026-11-20-00-auto-activity.md`; the **i** button
 shows `docs/evidence/auto-start.md`).
 
-- Settings (the gear on the Night tab, or More, **Settings**), **When I put the headband on**. For **At night**, **Working** and **Anything
+- Settings (the gear on the Record tab, or More, **Settings**), **When I put the headband on**. For **At night**, **Working** and **Anything
   else**: **Automatic**, **Ask me** (the default) or **Do nothing**. "Anything else" can only ask for now.
-- **Pair the headband** once: Android's own dialog offers the headband ("BB Black"). Then Android tells the app when
-  the headband comes near and lets it start a recording with the app closed. Without it the battery exemption the app
+- **Let Android watch for the headband** once: Android's own dialog offers the headband ("BB Black"). Then Android
+  tells the app when the headband comes near and lets it start a recording with the app closed. (This is neither the
+  laptop's pairing nor the Bluetooth connection; **Stop watching** takes it back.) Without it the battery exemption the app
   already asks for does the same job, less reliably; with neither, the app checks only when you open it. The page says
   which of these your phone allows.
 - When it checks: when you open the app, every 10 minutes in your **bedtime window** (from 2 hours before your usual
   bedtime to your usual wake-up, from your last 14 days of nights; 23:00 to 07:00 until 3 nights; **Change** sets it
-  by hand), when the paired headband comes near, and when the laptop tray says a work session started (it tells the
+  by hand), when Android says the headband came near, and when the laptop tray says a work session started (it tells the
   phone paired by its QR code, through Share on Wi-Fi between nights). **Check now** runs one. Never during a
   recording or a session, nor while the Signal tab holds the headband, and not in the 30 minutes after a recording's
   last data.
@@ -1675,7 +1692,7 @@ shows `docs/evidence/auto-start.md`).
   before bed), and it stops itself in time. Otherwise: "Charge the headband for tonight" (once a day). A night is never
   refused, only warned about in the question.
 - A night started this way says so in its log ("started automatically" or "started after Yes"). Stop it in the
-  morning as usual. Starting anything by hand (Start night, a session) makes the watcher let go of the headband at
+  morning as usual. Starting anything by hand (Record, Sleep, a session) makes the watcher let go of the headband at
   once; its question goes away and nothing is kept.
 - **How often it was right** on the page counts your answers per kind.
 
@@ -1683,13 +1700,13 @@ Files, app-private, exported by Export data and listed by Share on Wi-Fi: `files
 `state.json`, `log.jsonl` (every check, guess, question, answer and outcome) and `laptop.json`; format in
 `docs/data-format.md`. A debug build has a fake "headband came near" for the emulator (Emulator smoke test).
 
-### Owner step: pair it, then a bedtime with "Ask me" (5 minutes, then a few evenings)
+### Owner step: let Android watch for the headband, then a bedtime with "Ask me" (5 minutes, then a few evenings)
 
-Nothing of this has run on a phone yet. Only the phone can tell: whether HyperOS shows the pairing dialog and keeps
+Nothing of this has run on a phone yet. Only the phone can tell: whether HyperOS shows Android's dialog and keeps
 "headband near" working with the screen off, the contact numbers on and off the head, and how much the checks take
 from the headband's battery.
 
-1. Settings, **When I put the headband on**, **Pair the headband** with the headband nearby and not in use. Choose
+1. Settings, **When I put the headband on**, **Let Android watch for the headband** with the headband nearby and not in use. Choose
    it in the dialog. Note what the "Watching for the headband" lines say.
 2. On a Xiaomi: Settings, Apps, EEG Tracker: **Autostart** on and **Battery saver: No restrictions**.
 3. Headband on, **Check now**: within about 20 seconds a quiet notification should ask. Tap **Not now**. Then take
@@ -1697,7 +1714,7 @@ from the headband's battery.
 4. At bedtime, leave everything on **Ask me**, put the headband on, put the phone on the charger and lock it. Within 10
    minutes "Headband on. Start the night?" should come. Tap **Start the night**. Stop in the morning as usual.
 5. Tell the assistant (and Export data: `auto-start/log.jsonl` has the contact numbers and battery of every check):
-   - Did the pairing dialog show the headband; did the question come, how late, with the screen off?
+   - Did Android's dialog show the headband; did the question come, how late, with the screen off?
    - Did the night's report start when you put the headband on, not when you tapped?
    - Did a question ever come at a wrong moment (off the head, in a session, right after Stop)?
    - The headband's battery in the evening and in the morning, on a day with checks.
@@ -1757,7 +1774,7 @@ mends a drop inside the same connection in seconds (the night stays in one file 
 needs the "Bluetooth stuck, restarting" path, and can never unpair anything. It has only met a made-up headband so
 far, so it sits behind a switch.
 
-Night screen, Headband section, **Headband connection** (between nights only: the headband keeps one connection):
+Record tab, Headband section, **Headband connection** (between nights only: the headband keeps one connection):
 
 - **Run the probe**: about 5 minutes with the headband on. The page says what to do in large type; a low tone means
   close your eyes, two rising tones mean open them, one tone means lift the electrode it names for 4 seconds. It
@@ -1782,7 +1799,7 @@ Python parser (make it again with `python3 app/test/fixtures/make_own_ble_vector
 ### Owner step: the probe on the phone, then one night with the switch on (15 minutes, then a night)
 
 1. Install the new APK. Charge the headband. Stop any night first; phone sound on (media volume about half).
-2. Night screen, scroll to Headband, **Headband connection**, **Run the probe**. Allow "Nearby devices" if asked.
+2. Record tab, scroll to Headband, **Headband connection**, **Run the probe**. Allow "Nearby devices" if asked.
    When it says so, put the headband on and tap **Ready**. Follow the page: sit still, close your eyes at the
    low tone, open them at the two rising tones, lift each electrode it names for 4 seconds.
 3. Read the sentence on top.
@@ -1816,10 +1833,10 @@ listens (DECISIONS rows 360-369, `docs/diy-board.md`). Same files as the laptop'
 > are yours to answer in a serial terminal. Today's firmware records only the chip's own test signal or its shorted
 > inputs: **not EEG**, whatever the channel names say. The page and the night screen say so too.
 
-Night screen, Headband section, **Headband connection** (between nights only), **Headband: BrainBit / DIY board
+Record tab, Headband section, **Headband connection** (between nights only), **Headband: BrainBit / DIY board
 (test)**:
 
-- **DIY board (test)**: Start night listens for the board instead of looking for the BrainBit. Its nights go to
+- **DIY board (test)**: Record and Sleep listen for the board instead of looking for the BrainBit. Its nights go to
   `files/recordings-diy/` (`.f32 .idx .log .markers.jsonl .header.json`, the laptop's layout: the board's sequence
   number, then each of its 4, 6 or 8 channels in volts at 4.5 V reference and gain 24, and a header naming them),
   never among the BrainBit nights. The page shows this phone's Wi-Fi address for the firmware's `UDP_HOST`, and the
@@ -1853,11 +1870,11 @@ Only after eeg_ads1299_lab's bring-up card has passed its steps on the bench; no
    the app shows on Headband connection (DIY board chosen); port 9000 stays. Build and flash it as the card says.
    Phone and board on the **same Wi-Fi** (a private network: the frames are not encrypted). If the phone's address
    changes later, reserve it in the router or change `UDP_HOST`.
-2. Install the new APK. Night screen, Headband section, **Headband connection**, choose **DIY board (test)**. Check
+2. Install the new APK. Record tab, Headband section, **Headband connection**, choose **DIY board (test)**. Check
    the address and the channel names.
 3. Power the board as the card says and answer its prompts in a serial terminal on the laptop (R, V, then T for the
    test signal). Close the terminal.
-4. On the phone: **Start night**. Within a minute the screen should say "Recording the board's test signal. It is
+4. On the phone: **Sleep**. Within a minute the screen should say "Recording the board's test signal. It is
    not EEG." and show about 3750 µV on every channel (the test square, 1.875 mV each way).
 5. After 10 minutes: **Stop**, **Export data**, and on the laptop `python3 scripts/import_phone.py <folder>`; tell
    the assistant. In `_local/recordings-diy/<time>.log` it looks for `driver DIY board`, `datagrams from <board>`,
@@ -1885,8 +1902,8 @@ third try is a short scan instead. Each try is written in the night's `.log` wit
 to 04:00, as in Trends): every night, nap, dream catcher and sound session, check-in, calibration, work session and
 meditation. The bar on top shows the space each kind takes, in the Storage page's colours; tap a part of it (or its
 word) to see only that kind, or **Storage** beside it for the space by kind of data and the automatic clearing. Each
-row says when it ran and how long, what it is and **who started it** ("You: Start night", "By itself: the headband
-watcher", "The headband watcher asked; you said Yes"), its tags (the button gives one: Start night means "sleep"; yours
+row says when it ran and how long, what it is and **who started it** ("You: Record or Sleep", "By itself: the headband
+watcher", "The headband watcher asked; you said Yes"), its tags (the button gives one: Sleep means "sleep"; yours
 follow), what was found in it, its size and whether the laptop holds a checked copy.
 
 A night is one recording even when the headband dropped out and came back: the recorder's reconnects join it, and so
@@ -1950,7 +1967,7 @@ the main way it can be wrong. On the laptop, `scripts/walks.py` makes the same w
 ### Owner step: a walk with the headband and the phone (2 minutes to set up, then a walk of 15 minutes or more)
 
 1. **Settings** → switch on **Count steps with the phone while recording**; allow **Physical activity**.
-2. Headband on, **Start night** (it records in the day too); the phone in your front trouser pocket.
+2. Headband on, **Record** (or **Sleep**: it records in the day too); the phone in your front trouser pocket.
 3. Walk as you usually do for 15 minutes or more, with a stop or two; then **Stop**.
 4. Open **Trends** (Walking, Steps (estimated) and where they came from) and the recording in the **Archive** (the
    Walking lane: tap a band for its pace and steps).
@@ -2165,7 +2182,7 @@ and `scripts/phone_link.py` do it by themselves; DECISIONS 690-699, `../docs/pho
 1. Leave the laptop's `python3 scripts/phone_link.py` running (or the tray, once it hosts the link) with Share on
    Wi-Fi on; its window prints "told the phone N files are safe here".
 2. Four days later open **More, Storage**: **On the laptop** has grown, and the oldest nights no longer count in
-   **Sleep nights, raw recordings**. Their sleep reports are still on the Night tab and in Trends.
+   **Sleep nights, raw recordings**. Their sleep reports are still on the Record tab and in Trends.
 3. On the laptop: `python3 scripts/catalog.py` lists those nights with "moved from phone"; their `.f32` files are in
    `_local/recordings/`.
 4. Tell the assistant if a page says something odd where the raw recording used to be.
@@ -2229,7 +2246,7 @@ From `docs/research/android-overnight-ble-xiaomi.md` section 8. Nothing here has
 1. `adb install -r eeg_tracker-recorder.apk`, open the app, fix every row under "Phone" (Nearby devices,
    battery optimisation, notifications; on Xiaomi also Autostart and Battery saver: No restrictions),
    lock the app in Recents.
-2. Headband on, Start night. Accept a pairing prompt if Android shows one. Check the contact words.
+2. Headband on, Sleep. Accept a pairing prompt if Android shows one. Check the contact words.
 3. `adb shell dumpsys activity services io.github.utof.eeg_tracker` shows `ForegroundService` with
    `isForeground=true` and type `connectedDevice`; `adb shell dumpsys power | grep -i ForegroundService`
    shows the wake lock.

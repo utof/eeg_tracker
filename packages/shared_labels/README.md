@@ -9,7 +9,7 @@ widgets; nothing here knows a headband, a detector or either app's screens.
 | Estimate | `lib/src/estimate.dart` | what a detector thinks happened over a stretch of clock time, and its card's words ("19:08-21:14. The headband thinks you walked. Did you?", or a blind card's "What were you doing 19:08-21:14?") |
 | Store | `lib/src/store.dart` | the files: `estimates.jsonl`, `answers.jsonl`, `asks.jsonl`, `armed.json`, `settings.json`, `labels.tsv`, `estimates.tsv` |
 | Exports | `lib/src/labels.dart` | answers as truth rows (`labels.tsv`, the schema of `scripts/truth.py`) and every estimate with its answer (`estimates.tsv`), tab-separated: what the laptop, another app or pandas reads |
-| Queue | `lib/src/queue.dart` | which estimates to ask about, which are dropped unasked, and `mayPush`: the one "may I push now?" |
+| Queue | `lib/src/queue.dart` | which estimates to ask about, which a notification takes and which wait on the card, which are dropped unasked (too old), and `mayPush`: the one "may I push now?" |
 | Back-off | `lib/src/backoff.dart` | fewer pushes when they go unanswered, a skipped hour, a blind batch after a run of fast Yes |
 | Stop sheet | `lib/src/stop_sheet.dart` | "What was this recording?": the chips (`StopChips`), what a tap does, and the tags a filled sheet makes (`stopSheetTags`: source `owner_stop_sheet`, confidence `certain` / `likely` / `within`, your words verbatim); golden files `tests/contract/labels/stop-sheet.*` |
 | Widgets | `lib/src/widgets.dart`, `times_editor.dart` | `ConfirmBatch` (buttons that name the thing, blind chips, "Yes, but the times are off"), `ConfirmCard`, and the timeline strip `TimesEditor` |

@@ -119,7 +119,7 @@ class ConfirmSettingsView extends StatelessWidget {
               child: TextButton(onPressed: onNotificationSettings, child: const Text('Notification settings')),
             ),
           ],
-          choice('Questions at a time, at most', s.perBatch, const [2, 3, 4], (v) => s.copyWith(perBatch: v)),
+          choice('Questions in a notification, at most', s.perBatch, const [2, 3, 4], (v) => s.copyWith(perBatch: v)),
           choice('Notifications a day, at most', s.perDay, const [1, 2], (v) => s.copyWith(perDay: v)),
           const SizedBox(height: 20),
           Text('Quiet hours', style: text.bodyLarge?.copyWith(height: 1.4)),

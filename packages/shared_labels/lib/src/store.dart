@@ -14,7 +14,7 @@
 //                                    "undo"      takes the standing answer back
 //                                    "not_answered"  no answer came, with "why": "dismissed" (the notification was
 //                                                swiped away), "expired" (asked, then too old), "never_seen",
-//                                                "short_and_old", "too_many" (dropped unasked). Never a Yes or a No;
+//                                                "short_and_old" (dropped unasked). Never a Yes or a No;
 //                                                a real answer given later stands
 //                                  or a few words you added: {"estimate_id", "note", "at"}. Written by the app and by
 //                                  the notification's buttons (ConfirmPrompts.kt), which work while the app is closed.
@@ -83,10 +83,7 @@ enum WhyNot {
   neverSeen('never_seen'),
 
   /// Dropped unasked: a short stretch that is hours old (nobody remembers it).
-  shortAndOld('short_and_old'),
-
-  /// Dropped unasked: more were waiting than a batch holds.
-  tooMany('too_many');
+  shortAndOld('short_and_old');
 
   const WhyNot(this.wire);
   final String wire;
@@ -311,7 +308,7 @@ class ConfirmState {
 
   bool answered(String id) => answers.containsKey(id);
 
-  /// Not answered and closed: dropped unasked or too old (store.dart [WhyNot.closes]).
+  /// Not answered and closed: too old, or a short stretch that is hours old (store.dart [WhyNot.closes]).
   bool closed(String id) => !answered(id) && (unanswered[id]?.why.closes ?? false);
 
   /// Answers that are labels (Yes or No) for [label].

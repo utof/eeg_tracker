@@ -1,0 +1,9 @@
+# Tests that wait on the wall clock (a fake headband's timers, a few seconds of silence, fixed delays) fail on a loaded
+# machine and pass alone. They are tagged `realtime` and run apart, after everything else:
+#
+#   flutter test --exclude-tags realtime --concurrency=4     everything else, in parallel
+#   flutter test --tags realtime --concurrency=1             the real-time ones, alone
+#
+# Nothing they check was loosened (analysis/tests/test_realtime_marks.py keeps the list).
+tags:
+  realtime:

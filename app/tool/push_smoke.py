@@ -8,10 +8,10 @@ host 10.0.2.2) with no notification; the spare port when 8765 is taken; the lapt
 With --replay (needs dart on PATH): first the replay build makes a short recording with a sleep stretch, a Stop and
 a chip on the sheet (tool/record_check.py's five steps), then APK is installed over it; the push must bring the
 recording's spans file and its tags to the laptop, where scripts/spans.py reads the sleep stretch (DECISIONS 836).
-With --push-port N the check's receiver listens on N and the emulator sends what the app addresses to the laptop's
-port 8772 there instead (a rule inside the emulator only): for a laptop whose own `phone_link.py --keep` holds 8772
-for the real phone. Without it the emulator's app would knock on the real receiver, which rightly refuses it (the
-run of 2026-11-25 01:07: every push "the laptop did not answer").
+The check's receiver listens on a port the OS says is free (--push-port N picks one) and the emulator sends what the
+app addresses to the laptop's port 8772 there instead (a rule inside the emulator only): the laptop's own
+`phone_link.py --keep` holds 8772 for the real phone, and the emulator's app must never knock on that receiver, which
+rightly refuses it (the run of 2026-11-25 01:07: every push "the laptop did not answer").
 
 Own adb server on port 5049, own temporary AVD under the work folder, both removed at the end. About 30-45 minutes:
 most of it is the wait for Android's own second run of the regular job.
@@ -23,7 +23,7 @@ What the order of the steps is for (the first run of this check, 2026-11-21, got
 - The headband watcher shows its own short notification when the app opens (channel `auto_start`); it is not the
   push's and is only listed.
 """
-import json, subprocess, sys, time, urllib.request
+import json, socket, subprocess, sys, time, urllib.request
 from pathlib import Path
 
 WT = Path(__file__).resolve().parents[2]
@@ -39,9 +39,18 @@ import spans as laptop_spans  # noqa: E402
 WORK = Path("/var/tmp/share_smoke")
 DEST = WORK / "dest"
 LINK_PORT = 18771
-PUSH_PORT: int | None = None  # the check's own receiver port (--push-port); None: the app's 8772
+PUSH_PORT = 0  # the check's own receiver port: --push-port, else one the OS says is free (push_port_from)
 JOB = "877201"
 RESULTS: list[tuple[str, bool, str]] = []
+
+
+def push_port_from(argv: list[str]) -> int:
+    """The port the check's receiver listens on: `--push-port N`, else a free one (never the real receiver's 8772)."""
+    if "--push-port" in argv:
+        return int(argv[argv.index("--push-port") + 1])
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 def note(name: str, ok: bool, detail: str = "") -> None:
@@ -156,15 +165,12 @@ def keep(*extra: str) -> subprocess.Popen:
     log = open(WORK / "keep.log", "ab")
     args = ["--keep", "--dest", str(DEST), "--address", "10.0.2.2", "--port", str(LINK_PORT), "--no-pages",
             "--no-after-pull", "--push-loopback-home", *extra]
-    if PUSH_PORT is None:
-        cmd = [sys.executable, "-I", str(WT / "scripts" / "phone_link.py"), *args]
-    else:
-        # the app still names the laptop's port 8772 in `Host`; this check's receiver listens on PUSH_PORT, so here
-        # (and only here) it also answers to that name: the real receiver's Host rule is untouched
-        start = ("import sys; sys.path.insert(0, sys.argv.pop(1)); import local_http as lh; own = lh.own_hosts; "
-                 "lh.own_hosts = lambda h, extra=(): own(h, extra) | {'10.0.2.2:8772'}; "
-                 "import phone_link; sys.exit(phone_link.main(sys.argv[1:]))")
-        cmd = [sys.executable, "-I", "-u", "-c", start, str(WT / "scripts"), *args, "--push-port", str(PUSH_PORT)]
+    # the app still names the laptop's port 8772 in `Host`; this check's receiver listens on PUSH_PORT, so here
+    # (and only here) it also answers to that name: the real receiver's Host rule is untouched
+    start = ("import sys; sys.path.insert(0, sys.argv.pop(1)); import local_http as lh; own = lh.own_hosts; "
+             "lh.own_hosts = lambda h, extra=(): own(h, extra) | {'10.0.2.2:8772'}; "
+             "import phone_link; sys.exit(phone_link.main(sys.argv[1:]))")
+    cmd = [sys.executable, "-I", "-u", "-c", start, str(WT / "scripts"), *args, "--push-port", str(PUSH_PORT)]
     return subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 
 
@@ -221,7 +227,7 @@ def spans_on_laptop(names: list[str]) -> None:
 def main() -> int:
     global WORK, DEST, PUSH_PORT
     apk = Path(sys.argv[1])
-    PUSH_PORT = int(sys.argv[sys.argv.index("--push-port") + 1]) if "--push-port" in sys.argv else None
+    PUSH_PORT = push_port_from(sys.argv)
     replay = Path(sys.argv[sys.argv.index("--replay") + 1]) if "--replay" in sys.argv else None
     natural = float(sys.argv[sys.argv.index("--natural-min") + 1]) if "--natural-min" in sys.argv else 32
     if "--work" in sys.argv:
@@ -240,11 +246,10 @@ def main() -> int:
         pc.sh("nohup toybox nc -L -p 8765 sleep 100000 >/dev/null 2>&1 &", check=False)
         time.sleep(2)
         pc.say("holder of 8765: " + pc.sh("ss -ltn 2>/dev/null | grep 8765 || netstat -ltn | grep 8765", check=False).strip())
-        if PUSH_PORT:
-            pc.sh(f"iptables -t nat -A OUTPUT -p tcp -d 10.0.2.2 --dport 8772 -j DNAT --to-destination 10.0.2.2:{PUSH_PORT}")
-            rule = pc.sh("iptables -t nat -S OUTPUT", check=False)
-            note(f"the emulator sends the app's pushes to this check's receiver (port {PUSH_PORT})", str(PUSH_PORT) in rule,
-                 rule.strip().splitlines()[-1] if rule.strip() else "no rule")
+        pc.sh(f"iptables -t nat -A OUTPUT -p tcp -d 10.0.2.2 --dport 8772 -j DNAT --to-destination 10.0.2.2:{PUSH_PORT}")
+        rule = pc.sh("iptables -t nat -S OUTPUT", check=False)
+        note(f"the emulator sends the app's pushes to this check's receiver (port {PUSH_PORT})", str(PUSH_PORT) in rule,
+             rule.strip().splitlines()[-1] if rule.strip() else "no rule")
         span_files = record_with_sleep(replay) if replay else []
         pc.install(apk)
         pc.start_app()
@@ -271,7 +276,7 @@ def main() -> int:
         note("the check's receiver has its port (no other receiver on this laptop holds it)", not taken,
              (WORK / "keep.log").read_text(errors="replace").strip().splitlines()[-1][:200] if taken else "")
         if taken:
-            raise RuntimeError("the receiver's port is taken: run with --push-port N")
+            raise RuntimeError("the receiver's port is taken since it was chosen: run it again (or with --push-port N)")
 
         # --- 2. the spare port: 8765 is held by nc, the app's server must be on 8766 and say why
         pc.adb("forward", "tcp:18765", "tcp:8765"); pc.adb("forward", "tcp:18766", "tcp:8766")

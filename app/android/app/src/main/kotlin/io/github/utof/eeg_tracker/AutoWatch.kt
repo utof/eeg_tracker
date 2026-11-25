@@ -353,7 +353,7 @@ object AutoWatch {
     private fun pair(activity: Activity, result: MethodChannel.Result) {
         val cdm = cdm(activity)
         if (cdm == null) {
-            result.success("this phone has no companion pairing")
+            result.success("this phone cannot let Android watch for the headband")
             return
         }
         pendingPair?.success("replaced by a newer try")
@@ -362,7 +362,7 @@ object AutoWatch {
             cdm.associate(request(), activity.mainExecutor, object : CompanionDeviceManager.Callback() {
                 override fun onAssociationPending(intentSender: IntentSender) = show(activity, intentSender)
                 override fun onAssociationCreated(associationInfo: AssociationInfo) = onAssociated(activity, associationInfo)
-                override fun onFailure(error: CharSequence?) = answerPair(error?.toString() ?: "pairing failed")
+                override fun onFailure(error: CharSequence?) = answerPair(error?.toString() ?: "Android would not start watching")
             })
         } else {
             cdm.associate(request(), object : CompanionDeviceManager.Callback() {
@@ -377,7 +377,7 @@ object AutoWatch {
         try {
             activity.startIntentSenderForResult(sender, REQUEST_PAIR, null, 0, 0, 0)
         } catch (e: Exception) {
-            answerPair(e.message ?: "the pairing dialog did not open")
+            answerPair(e.message ?: "Android's own dialog did not open")
         }
     }
 

@@ -495,7 +495,14 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
   String? _soFarLine() {
     if (!_running) return null;
     if (_diy.useDiy) return diySoFarRefusal(_diy.names);
-    return soFarLine(_soFar?.cached());
+    return soFarLine(_soFar?.cached(), noSleep: !_sleepMarked());
+  }
+
+  /// The running recording has an open sleep stretch, or is one from before sleep spans (no id: its whole files are
+  /// the night); a recording started with Record has none until Sleep is pressed.
+  bool _sleepMarked() {
+    final r = _status?.rec;
+    return r == null || r.id == null || r.openSleep != null;
   }
 
   Future<void> _refreshRunning() async {
@@ -600,6 +607,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
           final ms = _status?.rec.openSleep?.start.millisecondsSinceEpoch ?? _status?.nightStartMs ?? 0;
           return ms > 0 ? ms : null;
         },
+        sleepMarked: _sleepMarked,
       )..addListener(_onScoring);
     }
     // a "no night" asked before or during this screen's own Start is not acted on (NightStartGate)
