@@ -154,11 +154,14 @@ def _recording_nights(local: Path, phone: set[str], folder: str = "recordings", 
 
 def _add_phone_reports(local: Path, rows: dict[str, dict]) -> None:
     """The phone's sleep reports; a night whose raw signal is not on the laptop gets a row from its report alone."""
+    taken = spans.taken_ids(local)
     for p in sorted((local / "phone" / "nights").glob("*.report.json")):
         date = p.name[:-len(".report.json")]
         if not nf.DATE.match(date):
             continue
         rep = _json(p) or {}
+        if spans.report_all_taken(rep, taken):
+            continue  # every sleep stretch it was made from was taken away since ("Not sleep", DECISIONS 1025)
         if date not in rows:
             row = rows[date] = _row(date, _time(rep.get("data_start")), _time(rep.get("data_end")))
             t = rep.get("total") if isinstance(rep.get("total"), dict) else {}

@@ -204,7 +204,8 @@ A file set whose header has `recording` (Record first) is never chained like tha
 is said by that recording's sleep spans (`spans/`, above): each closed span of kind `sleep` (source `owner_button`,
 `owner_confirmed`, `auto_start` or `auto_resume`) is a time window; windows are joined into one night by the same rule applied to
 spans (the next starts under 3 hours after the last one's end, or has the same evening date, within 24 hours of the
-first), named by the evening date of the first. Only the samples inside the windows are read. Spans of kind `nap` are
+first; a stray span under 20 minutes that only the evening date would join is left out, see `spans/`), named by the
+evening date of the first. Only the samples inside the windows are read. Spans of kind `nap` are
 naps and never join a night. A recording with no sleep span gives no night. Old file sets chain as before, except
 those a "Not sleep" line names. An old chain and a span night with the same evening date are one night. The report
 of such a night has `span`: `{recording: [ids], spans: [ids], kind, from, windows}` (`from`: `pressed`,
@@ -864,9 +865,26 @@ the middle of a write leaves a half last line: skipped too).
 | `session` | the activity's own file, relative to `files/`, or absent |
 | `paused` | `[start, end]` pairs: the span stayed open while its activity was paused (`end` `null` while paused) |
 | `estimate` | the confirm-questions estimate this span confirms (`owner_confirmed` only) |
+| `removed` | `true`: this span was taken away (below); absent otherwise |
+| `moved_to` | beside `removed`: the id this span has in another recording's file (it was filed under the wrong recording); absent when the owner took it away |
 | `made` | when this line was written |
 
 A span needs `span`, `kind`, a `start` that parses and a `source`; `end` must be `null`, absent or a time.
+
+**A span taken away** (DECISIONS 1025). "Not sleep" or "Remove this mark" on the recording's page in the Archive
+writes the span's line once more with `"removed": true`, its times unchanged; "It was sleep after all" / "Put this
+mark back" writes it once more without it. As always the last line of a span is the span. A removed span counts
+nowhere: both readers leave it out of their `spans` and list it apart (`removed`), so it gives no night, no nap, no
+truth row and no row of `spans.tsv`; a new span never takes its number. The report of a night or nap left without any
+span is moved to `nights/not-sleep/<span id>.report.json`, never deleted, and comes home when the span is put back
+(unless another report was made there meanwhile). With `moved_to` the span was not taken away by you: the app filed
+it again under the recording that holds its hours (below, "A Yes to a sleep estimate"), and `moved_to` is its id there.
+
+**A Yes to a sleep estimate** ("Did you sleep 01:30-08:31?", `source` `owner_confirmed` with `estimate`) is one
+span, whole, in the file of the recording that holds its start (DECISIONS 1028): the `recording` id of the file set
+that holds that moment, and for a file set from before Record first the set's own stem. It is not cut where a file set
+ends. A span the app once filed under another recording (the night report's first file) is written again under the
+right one, and its old line gets `removed: true` and `moved_to`.
 
 **An activity on a recording.** Work, Meditate, alpha-theta, Sound, Dream catcher, the Nap coach, the check-in and
 the hands-free calibration run as a span on the recording (`source` `owner_button`), with `started_recording` `true`
@@ -904,7 +922,11 @@ the laptop leaves that night out). A later line `{"v": 1, "reviewed": "sleep", .
 `scripts/night_files.py`; DECISIONS 886-888, 904-907). A file set whose header names a recording is never chained by
 time. Its recording's closed spans of kind `sleep` are joined into nights by the chain rule applied to spans (the next
 starts under 3 hours after the last one's end, or has the same evening date, within 24 hours of the first); the night
-is named by the evening date of the first span's start and keeps its file, `nights/<evening date>.report.json`. A span
+is named by the evening date of the first span's start and keeps its file, `nights/<evening date>.report.json`.
+**A short stray span** (DECISIONS 1026): when only the evening date joins two sides (3 hours or more lie between
+them), a side under 20 minutes in all is left out of the night: Sleep pressed for four minutes in the afternoon does
+not move the start of that evening's night. It then has no report; alone on its evening date it is still that night.
+A span
 of kind `nap` is a nap: scored by itself, never part of a night, its report in `nights/naps/<span start stamp>.report.json`
 (same format; its `night_of` is that stamp). Only the samples inside the spans are read. On the phone a span still
 open ends at the recording's last data. A report made from spans carries
@@ -1372,7 +1394,8 @@ keep the history; `truth.tsv` adds three columns and drops the rows that break t
   `meditating`, `meeting`, `other`). Words may hold a tab, a newline or a double quote: the table and truth files quote
   such a cell (csv's minimal rule, `"` doubled, line ends kept as typed), so the words read back exactly.
 - **the phone's pressed spans** (`phone/spans/*.spans.jsonl`, above): every closed span with source `owner_button` or
-  `owner_confirmed` and a `label` is one row: `source` `owner_activity_button`, `confidence` `likely`, `recording` the
+  `owner_confirmed` and a `label` is one row (a span that was taken away is none, and a Yes to a sleep estimate whose
+  span was taken away is no `confirm:` row either): `source` `owner_activity_button`, `confidence` `likely`, `recording` the
   recording's id, `context` `activity button: <span kind>`, its id `span:<span id>`, `start` and `end` the span's. Open
   spans and `auto_start` spans give no row.
 - **golden files** `tests/contract/labels/`: `stop-sheet.tags.json` (a stop sheet's tags: `awake` certain, `walking`
@@ -1488,6 +1511,7 @@ label within `within_s` seconds.
 One row per span of every recording (Record first, DECISIONS 880-899): what you were doing while the headband
 recorded, read by `scripts/spans.py` from the phone's `phone/spans/*.spans.jsonl` (format above, "What you were doing
 in a recording"). The last line of a span is the span; open spans have no `end`. A column that does not apply is empty.
+A span that was taken away (`removed`) has no row.
 
 | Column | Meaning |
 |---|---|

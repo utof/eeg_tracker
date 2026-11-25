@@ -299,7 +299,7 @@ def archive_rows(local: Path, vocab: Vocabulary, out: Read) -> None:
 def span_rows(local: Path, vocab: Vocabulary, out: Read) -> None:
     """The phone's spans as truth: one row per closed span the owner pressed or confirmed that has a label (its id
     `span:<span id>`, the `recording` column the recording's id). Open spans and `auto_start` / `auto_resume` spans
-    give no row. Neither does a span made by a Yes to an estimate (`owner_confirmed` with `estimate`): that Yes is the
+    give no row; a span the owner took away is not in the reader's `spans` at all. Neither does a span made by a Yes to an estimate (`owner_confirmed` with `estimate`): that Yes is the
     `confirm:` row, which says whether the times were set; the span's times after a plain Yes are the detector's."""
     for rid, f in spans_mod.all(local).items():
         rel = (spans_mod.folder(local) / f"{rid}{spans_mod.SUFFIX}").relative_to(local).as_posix()
@@ -495,9 +495,11 @@ def confirm_row(c: Confirmed, vocab: Vocabulary | None = None) -> dict[str, str]
 def confirm_rows(local: Path, vocab: Vocabulary, out: Read) -> None:
     """The phone's answered confirmation questions as truth rows (`<local>/phone/confirm/`)."""
     rel = (CONFIRM_FOLDER / "answers.jsonl").as_posix()
+    # a Yes whose sleep stretch the owner took away afterwards ("Not sleep" in the Archive) is no truth any more
+    taken = {s.estimate for f in spans_mod.all(local).values() for s in f.removed if s.estimate and not s.moved_to}
     for c in read_confirm(local, vocab):
         r = confirm_row(c, vocab)
-        if r is None:
+        if r is None or (c.answer == "yes" and c.estimate.get("id") in taken):
             continue
         out.ids.add(r["label_id"])
         errs = row_errors(r, vocab)

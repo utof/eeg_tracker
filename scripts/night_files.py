@@ -54,6 +54,10 @@ REC_BYTES = 20  # one <I4f record in a BrainBit .f32; a recording's own record s
 IDX = struct.Struct("<dQ")
 CHAIN_GAP_S = 3 * 3600
 MAX_SPAN_S = 24 * 3600
+# Sleep spans of one evening date that lie CHAIN_GAP_S or more apart are one night only when each side is at least
+# this long: a shorter stray one (Sleep pressed by mistake, a 4-minute test) is left out of the night. Alone on its
+# evening date it is still that night. The phone's twin: `strayUnder` in app/lib/recorder/nights.dart (DECISIONS 1026).
+STRAY_UNDER_S = 20 * 60
 NEW_DATA_MIN = 10  # a report is out of date once this many minutes of new samples exist
 WINDOW_H = 20  # the hub looks at nights with data in the last 20 hours
 LOCK, STATUS, LOG = "sleep-report.lock", "sleep-report.status.json", "sleep-report.log"  # the sleep job's
@@ -231,8 +235,21 @@ def span_nights(recs: list[Rec], files: dict[str, spans_mod.SpansFile]) -> list[
             continue
         if out:
             n, sources = out[-1]
-            near = s.start_unix - n.end < CHAIN_GAP_S or evening_date(s.start_unix) == n.name
-            if near and s.start_unix - n.start < MAX_SPAN_S:
+            in_time = s.start_unix - n.start < MAX_SPAN_S
+            by_gap = s.start_unix - n.end < CHAIN_GAP_S
+            by_date = evening_date(s.start_unix) == n.name
+            stray = ""
+            if in_time and by_date and not by_gap:
+                # joined by the evening date alone, hours apart: a short stray stretch is no part of the night
+                if sum(b - a for a, b in n.windows or []) < STRAY_UNDER_S:
+                    stray = "before"
+                elif s.end_unix - s.start_unix < STRAY_UNDER_S:
+                    stray = "this"
+            if stray == "this":
+                continue
+            if stray == "before":
+                out.pop()
+            elif in_time and (by_gap or by_date):
                 n.windows.append((s.start_unix, s.end_unix))  # type: ignore[union-attr]
                 n.recs.extend(r for r in under if r not in n.recs)
                 n.span_ids.append(s.span)

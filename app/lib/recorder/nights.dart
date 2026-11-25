@@ -29,6 +29,12 @@ final RegExp _stem = RegExp(r'^(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})\.')
 const Duration chainGap = Duration(hours: 3);
 const Duration maxSpan = Duration(hours: 24);
 
+/// Sleep stretches of one evening date that lie [chainGap] or more apart are one night only when each side is at
+/// least this long: a shorter one (Sleep pressed by mistake in the afternoon, a 4-minute test) is left out of the
+/// night instead of moving its start by hours. Alone on its evening date it is still that night, too short to score.
+/// A planning value (DECISIONS 1026); the laptop's twin is `STRAY_UNDER_S` in scripts/night_files.py.
+const Duration strayUnder = Duration(minutes: 20);
+
 /// Start of the run that wrote [fileName] (`2026-11-18-231200.f32` and its `.idx`, `.log`), or null for any
 /// other file.
 DateTime? stemTime(String fileName) {
@@ -258,11 +264,24 @@ List<NightFiles> napsIn(Directory dir, {Directory? spansDir}) => _nightsAndNaps(
   }
   sleeps.sort((a, b) => a.$1.start.compareTo(b.$1.start));
   final groups = <List<(Span, List<_Rec>, DateTime)>>[];
+  Duration lengthOf(List<(Span, List<_Rec>, DateTime)> g) =>
+      g.fold(Duration.zero, (sum, p) => sum + p.$3.difference(p.$1.start));
   for (final s in sleeps) {
     final g = groups.isEmpty ? null : groups.last;
-    final near =
-        g != null && (s.$1.start.difference(g.last.$3) < chainGap || nightOf(s.$1.start) == nightOf(g.first.$1.start));
-    if (g == null || !near || s.$1.start.difference(g.first.$1.start) >= maxSpan) {
+    final inTime = g != null && s.$1.start.difference(g.first.$1.start) < maxSpan;
+    final byGap = g != null && s.$1.start.difference(g.last.$3) < chainGap;
+    final byDate = g != null && nightOf(s.$1.start) == nightOf(g.first.$1.start);
+    if (g != null && inTime && byDate && !byGap) {
+      // joined by the evening date alone, hours apart: a short stray stretch is no part of the night (DECISIONS 1026)
+      if (lengthOf(g) < strayUnder) {
+        groups
+          ..removeLast()
+          ..add([s]);
+        continue;
+      }
+      if (s.$3.difference(s.$1.start) < strayUnder) continue;
+    }
+    if (g == null || !inTime || !(byGap || byDate)) {
       groups.add([s]);
     } else {
       g.add(s);
@@ -299,6 +318,49 @@ List<NightFiles> napsIn(Directory dir, {Directory? spansDir}) => _nightsAndNaps(
   }
 
   return (nights: nights..sort(newestFirst), naps: naps..sort((a, b) => b.start.compareTo(a.start)));
+}
+
+/// Which recording holds a moment: for a sleep stretch found afterwards (a Yes to "Did you sleep?"), the recording
+/// its spans file belongs to (DECISIONS 1028). The folder is listed once; a file set is read only when asked about.
+class RecordingsAt {
+  RecordingsAt(this.dir) {
+    if (!dir.existsSync()) return;
+    final stems = <String>{};
+    for (final f in dir.listSync().whereType<File>()) {
+      final name = f.uri.pathSegments.last;
+      if (stemTime(name) != null) stems.add(name.substring(0, 17));
+    }
+    _sets = [for (final s in stems) (s, stemTime('$s.')!)]..sort((a, b) => a.$2.compareTo(b.$2));
+  }
+
+  final Directory dir;
+  List<(String, DateTime)> _sets = const [];
+  final Map<String, _SetEnd> _read = {};
+
+  /// The set's recording id (its header's `recording`; a set from before Record first is its own recording, named
+  /// by its stem) and its data's end; null for a set without samples or one that is not sleep's (a work session's).
+  (String, DateTime)? _of((String, DateTime) set) {
+    final e = _read[set.$1] ??= _setOf(dir, set.$1, set.$2, null);
+    return e.end == null || !e.sleep ? null : (e.recording ?? set.$1, e.end!);
+  }
+
+  /// The id of the recording that holds [start]; when none does (it falls between two file sets), of the first one
+  /// with data between [start] and [end]; null when there is none.
+  String? holding(DateTime start, DateTime end) {
+    for (final set in _sets.reversed) {
+      if (set.$2.isAfter(start)) continue;
+      final got = _of(set);
+      if (got == null) continue;
+      if (!got.$2.isBefore(start)) return got.$1;
+      break; // the newest data before the start ends before it: nothing older reaches it
+    }
+    for (final set in _sets) {
+      if (!set.$2.isAfter(start) || !set.$2.isBefore(end)) continue;
+      final got = _of(set);
+      if (got != null) return got.$1;
+    }
+    return null;
+  }
 }
 
 /// A file set's samples' end ([_lastData]), or null when it holds no whole sample, and whether it is sleep (its

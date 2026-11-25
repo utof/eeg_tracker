@@ -630,6 +630,8 @@ class HeadbandConnection {
       if (_panelWatchers > 0) leaseNight?.call(true, tapPanel);
       if (_riders.isNotEmpty) leaseNight?.call(true, tapRide);
     }
+    // while it lends, the owner says it lives: a recorder that hears nothing knows the screen's engine is gone
+    if (_lending) sendToNight?.call(lendAlive);
     // the recorder went quiet without saying idle: gone only when its service is (then the riders hear the end)
     _watchRecorder();
     if (band == null && _connecting == null && !nightRuns && _panelWatchers == 0 && !_reconnecting && _riders.isEmpty) {

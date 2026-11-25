@@ -15,6 +15,14 @@ FS = 250
 rng = np.random.default_rng(1)
 
 
+@pytest.fixture(autouse=True)
+def the_same_noise_for_every_test() -> None:
+    """Each test starts from the same seed, so its signal does not depend on which tests ran before it in the same
+    process (run in parallel, `test_aperiodic_slope[2.0]` got noise whose slope could not be fitted)."""
+    global rng  # noqa: PLW0603
+    rng = np.random.default_rng(1)
+
+
 def pink(n: int, uv: float = 5.0, exponent: float = 1.0) -> np.ndarray:
     """Noise with power ~ 1/f^exponent, scaled to the given spread."""
     spec = rng.normal(size=n // 2 + 1) + 1j * rng.normal(size=n // 2 + 1)

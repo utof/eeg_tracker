@@ -16,19 +16,25 @@ recording of anyone is needed. It checks:
      `owner_stop_sheet` into the recording's tags file;
   5. the sleep span gets a report file of its own (`nights/<date>.report.json` with `span`) (a SKIP when the scoring
      has not come to it within 3 minutes);
+  A1. (real phone, 2026-11-25: a Sleep pressed by mistake could not be taken back) the Archive's page of that
+     recording: "Not sleep" on its sleep stretch writes the span again with `removed: true` and puts its report away
+     under `nights/not-sleep/`; "It was sleep after all" writes it without and brings the report home;
   W1. Work on the running recording (after 1): a work span that did not start the recording, no second file set, the
      work session's own file names the recording and the span;
   W2. Stop work: the span closes, nothing is asked, the recording goes on;
   W3. Work pressed with nothing recording (after 5): the recorder starts, the work span says it started the
      recording; Stop work asks, "Stop everything" ends the recording.
   L1. (review finding 6) Signal, then Sleep: the night starts on the Signal tab's live connection (lent by the screen's
-     engine). The app is then swiped from Recents: the recording must go on, or pick up within 90 s, with the gap in
-     its log; the sleep span stays open.
+     engine). The app is then swiped from Recents: the recorder must notice that the lender is gone (its log says
+     so, no stream restart is tried) and have data again within 30 s; the sleep span stays open.
   L2. The app's whole process is then ended (kill -9, as Android does under memory pressure): Android must start the
      recorder again and the same recording must get data again within 150 s.
   L3. The app is opened again: it shows the running recording (Stop is offered, not Record), and "Stop everything"
      ends it with the sleep span closed.
-`--only main` runs 1-5 and W1-W3, `--only lent` L1-L3; without it, everything.
+  S1. (real phone, 2026-11-25: "the sheet did not show") that recording was started with Sleep and Sleep covers all
+     of it, so by design no sheet comes after "Stop everything" and no "Answer" line waits on the Record tab;
+     `spans/stop-sheet.json` names the recording with `saved` false.
+`--only main` runs 1-5, A1 and W1-W3, `--only lent` L1-L3 and S1; without it, everything.
 The emulator, its adb server and the helpers are the pre-install check's (tool/precheck.py). Emulator only: run it
 inside `_local/build_slot.sh heavy`, with --work on a disk with 8 GB free.
 """
@@ -46,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import emu  # noqa: E402
 import precheck as pc  # noqa: E402
 
+LENT_BACK_S = 30  # L1: data again this soon after the swipe (it was 52-59 s with three stream restarts)
 REC = f"{pc.FILES}/recordings"
 SPANS = f"{pc.FILES}/spans"
 
@@ -195,6 +202,75 @@ def work_starts_recording(before: set[str]) -> list[pc.Result]:
                       f"bytes; the sheet came: {bool(sheet)}", words)]
 
 
+def last_lines(recording: str) -> dict[str, dict]:
+    """The last line of every span of the recording, also of one that was taken away (`removed`)."""
+    by_id: dict[str, dict] = {}
+    for line in cat(f"{SPANS}/{recording}.spans.jsonl").splitlines():
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(d, dict) and isinstance(d.get("span"), str):
+            by_id[d["span"]] = d
+    return by_id
+
+
+def press(label: str) -> bool:
+    """Scrolls down to the button [label], brings it clear of the screen's lower edge, and taps it."""
+    hit = pc.find(label, exact=True, scrolls=16)
+    if hit is None:
+        return False
+    _, h = emu.screen_size()
+    if hit[2] > h * 0.8:
+        emu.scroll("down")
+        hit = emu.match(label, True) or hit
+    return tap(hit)
+
+
+def not_sleep(rec: str) -> list[pc.Result]:
+    """A1: the recording's page in the Archive takes its sleep stretch away and puts it back."""
+    name = "A1 Archive: Not sleep takes the sleep stretch away; It was sleep after all brings it back"
+    sleep = next((d for d in last_lines(rec).values() if d.get("kind") == "sleep"), None)
+    if sleep is None:
+        return [pc.Result(name, "FAIL", f"recording {rec} has no sleep stretch to take away")]
+    sid = sleep["span"]
+    night = pc.sh(f"grep -l '{sid}' {pc.FILES}/nights/*.report.json 2>/dev/null", check=False).split()
+    home = night[0] if night else ""
+    away = f"{pc.FILES}/nights/not-sleep/{sid}.report.json"
+
+    def there(path: str) -> bool:
+        return bool(path) and pc.sh(f"ls {path} 2>/dev/null", check=False).strip() != ""
+
+    opened = tap(pc.find_on_tab("More", "Open the archive", exact=True))
+    row = wait(lambda: emu.match(f"{rec[11:13]}:{rec[13:15]} – ", False), limit=90) if opened else None
+    tap(row)
+    words = pc.screen_words("a1-page")
+    took = press("Not sleep") if row else False
+    gone = wait(lambda: last_lines(rec).get(sid, {}).get("removed") is True, limit=20) if took else False
+    after_remove = (there(home), there(away))
+    words += pc.screen_words("a1-removed")
+    time.sleep(5)  # the message at the bottom goes
+    back = press("It was sleep after all") if gone else False
+    again = wait(lambda: "removed" not in last_lines(rec).get(sid, {"removed": True}), limit=20) if back else False
+    after_back = (there(home), there(away))
+    words += pc.screen_words("a1-back")
+    for _ in range(2):
+        pc.sh("input keyevent 4", check=False)
+        time.sleep(1.5)
+    pc.open_tab("Record")
+    last = last_lines(rec).get(sid, {})
+    kept = (last.get("start"), last.get("end")) == (sleep.get("start"), sleep.get("end"))
+    report_ok = not home or (after_remove == (False, True) and after_back == (True, False))
+    ok = bool(gone) and bool(again) and kept and report_ok
+    return [pc.Result(name, "PASS" if ok else "FAIL",
+                      f"stretch {sid}: taken away {bool(gone)}, put back {bool(again)}, its times kept {kept}; its report "
+                      + (f"{home.rsplit('/', 1)[1]}: at home / put away after Not sleep {after_remove}, after putting it "
+                         f"back {after_back}" if home else "was not made yet, so none to put away"),
+                      [f"archive opened {opened}, the recording's row found {bool(row)}, Not sleep tapped {took}, "
+                       f"It was sleep after all tapped {back}",
+                       "spans file: " + cat(f"{SPANS}/{rec}.spans.jsonl").replace("\n", " / "), *words])]
+
+
 def rec_sets(rec: str) -> dict[str, int]:
     """Every raw file of the recording [rec] (its header names it) with its size."""
     out: dict[str, int] = {}
@@ -307,11 +383,18 @@ def lent_night() -> list[pc.Result]:
     back, pause, lines = growth(rec, 120)
     logs = "".join(cat(f[: -len(".f32")] + ".log") for f in rec_sets(rec))
     span = next((x for x in spans(rec) if x.get("kind") == "sleep"), {})
-    said = [l for l in logs.splitlines() if "no data" in l or "reconnect" in l or "connected " in l or "gap" in l or "lost" in l]
+    said = [l for l in logs.splitlines() if "no data" in l or "reconnect" in l or "connected " in l or "gap" in l or "lost" in l
+            or "lent the connection" in l or "restarting stream" in l]
+    knew = "the screen that lent the connection is gone" in logs
+    restarts = logs.count("restarting stream")
     details = [f"recording {rec}; lent: {lent}; process {pid} before, {pc.app_pid() or 'none'} after; the task left Recents: {gone} ({how})",
                f"bytes before the swipe {a}, at the end {sum(rec_sets(rec).values())}; longest pause {pause:.0f} s", *lines,
+               f"the recorder knew the lender was gone: {knew}; stream restarts tried: {restarts}",
                f"file sets: {json.dumps(rec_sets(rec))}", f"sleep span: {json.dumps(span)}", *("  log: " + l for l in said[-12:])]
-    ok = lent and gone and back is not None and back <= 90 and span.get("end") is None and bool(span)
+    # the recorder hears nothing of the screen's engine for 4 s and reconnects at once (DECISIONS 1029): no stream
+    # restarts on a connection nobody lends any more, and data again within half a minute
+    ok = (lent and gone and back is not None and back <= LENT_BACK_S and knew and restarts == 0
+          and span.get("end") is None and bool(span))
     words = ("the recording never paused" if back == 0.0 else
              f"the recording paused {pause:.0f} s and went on {back:.0f} s after the swipe" if back is not None else
              "the recording did not come back within 120 s of the swipe")
@@ -357,6 +440,8 @@ def lent_night() -> list[pc.Result]:
     time.sleep(8)
     y = sum(rec_sets(rec).values())
     sheet = emu.match("What was this recording?", True)
+    words_after = pc.screen_words("l3-after")
+    answer = emu.match("Answer", True)
     if sheet:
         tap(emu.match("Skip", True))
     e = ended[0] if ended else {}
@@ -364,7 +449,18 @@ def lent_night() -> list[pc.Result]:
     out.append(pc.Result(n3, "PASS" if ok3 else "FAIL",
                          f"main screen {shown}; Stop offered {bool(stop)}, Record offered {offers_record}; sleep span ended "
                          f"{e.get('end')!r} by {e.get('ended_by')!r}; the files after Stop {x} -> {y} bytes",
-                         words3 + pc.screen_words("l3-after")))
+                         words3 + words_after))
+    # S1. Sleep started this recording and covers all of it: nothing to ask, by design (DECISIONS 890)
+    try:
+        seen = json.loads(cat(f"{SPANS}/stop-sheet.json") or "{}")
+    except ValueError:
+        seen = {}
+    ok_s = bool(ended) and not sheet and not answer and seen.get("recording") == rec and seen.get("saved") is False
+    out.append(pc.Result("S1 a recording that Sleep covers whole: no sheet after Stop everything, nothing left to answer",
+                         "PASS" if ok_s else "FAIL",
+                         f"the sheet came: {bool(sheet)}; an Answer line waits: {bool(answer)}; stop-sheet.json: {json.dumps(seen)}",
+                         [f"sleep span: {json.dumps(e)}", "by design: the sheet is skipped when what was pressed covers 90 % of "
+                          "the recording and no question waits"]))
     return out
 
 
@@ -483,6 +579,9 @@ def check(apk: Path, stage: Path, only: str = "") -> list[pc.Result]:
     else:
         results.append(pc.Result("5 the sleep span has its own report", "SKIP", "no report within 3 minutes of Stop",
                                  pc.screen_words("5-no-report")))
+
+    # A1. the Archive takes the sleep stretch away and puts it back
+    results += not_sleep(rec)
 
     # W3. Work pressed with nothing recording
     results += work_starts_recording(set(pc.sh(f"ls {REC}/*.log 2>/dev/null", check=False).split()))
