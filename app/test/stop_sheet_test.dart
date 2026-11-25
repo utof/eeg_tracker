@@ -3,10 +3,13 @@
 // golden file the laptop's truth.py reads (tests/contract/labels/stop-sheet.tags.json).
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:eeg_tracker/archive/tags.dart';
 import 'package:eeg_tracker/confirm/questions.dart';
+import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/spans/span.dart';
+import 'package:eeg_tracker/spans/span_log.dart';
 import 'package:eeg_tracker/spans/stop_sheet.dart';
 import 'package:eeg_tracker/ui/stop_sheet.dart';
 import 'package:eeg_tracker/ui/theme.dart';
@@ -96,6 +99,38 @@ void main() {
     expect(day.skips(questions: 0), isFalse);
     expect(day.done, {'working'});
     expect(day.marked, startsWith('Work 11:05-12:40 · Work 11:52-13:02'));
+  });
+
+  // The real phone, 2026-11-25: "the sheet did not show" after two Stops. Both are the rule, pinned here.
+  test('Sleep started the recording and Stop ended it: Sleep covers it all, so no sheet and nothing left to answer', () {
+    final rec = Directory('${files.path}/recordings')..createSync();
+    final pressed = DateTime(2026, 11, 25, 14, 17, 52), stopped = DateTime(2026, 11, 25, 14, 21, 29);
+    final batch = List.filled(250, Sample(0, Float32List.fromList([1e-5, 2e-5, 3e-5, 4e-5])));
+    String writeSet(DateTime at, int seconds, {String? recording}) {
+      final w = ChunkWriter.open(rec, at, inRecording: true, recording: recording);
+      for (var s = 0; s < seconds; s++) {
+        w.addBatch(at.add(Duration(seconds: s)), batch);
+      }
+      w.close();
+      return w.stem;
+    }
+
+    final rid = writeSet(pressed, 39); // the screen was swiped away: 59 s without data, then a second file set
+    writeSet(DateTime(2026, 11, 25, 14, 19, 30), 119, recording: rid);
+    SpanLog(Directory('${files.path}/spans')).add(rid, kind: 'sleep', start: pressed, end: stopped, source: 'owner_button', endedBy: 'recording_stopped', startedRecording: true);
+    final p = stopSheetPlan(files, rid, pressed.millisecondsSinceEpoch)!;
+    expect((p.start, p.end), (pressed, stopped));
+    expect(p.covered, 1.0);
+    expect(p.skips(questions: 0), isTrue); // no sheet after Stop, and no "Answer" line on the Record tab
+    expect(p.skips(questions: 1), isFalse); // a waiting "Did you sleep?" would still bring it
+  });
+
+  test('a recording that never got a sample and has nothing marked: there is nothing to ask about', () {
+    final at = DateTime(2026, 11, 25, 14, 25);
+    expect(stopSheetPlan(files, '2026-11-25-142500', at.millisecondsSinceEpoch), isNull); // no file set at all
+    final rec = Directory('${files.path}/recordings')..createSync();
+    final w = ChunkWriter.open(rec, at, inRecording: true)..close(); // a file set with a header and no sample
+    expect(stopSheetPlan(files, w.stem, at.millisecondsSinceEpoch), isNull);
   });
 
   test('Awake the whole time settles the recording\'s sleep estimates as No; a timed walk says Yes to the walk inside it', () {
