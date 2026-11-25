@@ -21,7 +21,7 @@ FLUTTER_FILES = [
 FLUTTER_TESTS = {
     "one_connection_test.dart": ["Start sleep with nothing live", "during a recording a session gets the recorder"],
     "night_recorder_test.dart": ["failed direct tries back off"],
-    "all_day_storage_test.dart": ["beside a live recording"],
+    "all_day_storage_test.dart": ["beside a live recording: old recordings are packed"],
 }
 
 
