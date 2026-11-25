@@ -149,6 +149,43 @@ void main() {
     expect(sleepChannelsMissing(['Fp1', 'Fp2', 'O1']), 'O2, T3, T4');
   });
 
+  group('a recording with no sleep marked (Record first)', () {
+    testWidgets('the section and the page say so, and nothing is scored', (tester) async {
+      var planned = 0;
+      late Directory root;
+      late SleepSoFar soFar;
+      await tester.runAsync(() async {
+        root = Directory.systemTemp.createTempSync('so_far_no_sleep');
+        soFar = SleepSoFar(
+          SoFarScorer(
+            recordingsDir: Directory('${root.path}/recordings')..createSync(),
+            openRun: (_) async => _Run(),
+            plan: (d, s) async {
+              planned++;
+              return null;
+            },
+          ),
+          nightStartMs: () => DateTime(2026, 11, 20, 18).millisecondsSinceEpoch,
+          sleepMarked: () => false,
+        );
+        await soFar.update();
+      });
+      addTearDown(() => root.deleteSync(recursive: true));
+      expect(planned, 0, reason: 'no look: there is no sleep to score');
+      expect(soFar.cached(), isNull);
+      expect(soFar.state.noSleep, isTrue);
+      expect(soFarLine(null, noSleep: true), 'No sleep marked in this recording yet, so there is no sleep so far.');
+      await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: SleepSoFarView(result: null, state: soFar.state)));
+      expect(find.text('No sleep marked in this recording yet. Sleep so far counts only the sleep you mark.'), findsOneWidget);
+      expect(find.textContaining('Nothing to show yet'), findsNothing);
+      soFar.dispose();
+    });
+
+    test('the line before any look is unchanged when sleep is marked', () {
+      expect(soFarLine(null), 'The sleep chart and totals of the night so far, scored on this phone when you open it.');
+    });
+  });
+
   group('the page', () {
     testWidgets('chart, totals and the honest note, all labelled as so far', (tester) async {
       tester.view.physicalSize = const Size(1081, 2400); // the owner's 11T: 393 dp wide
