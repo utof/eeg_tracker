@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The asking rules on a temporary emulator (DECISIONS 960-975), on top of the questions' own check (confirm_check.py).
 
-usage: python3 app/tool/asking_check.py --apk <release or replay build> [--adb-port 5056] [--work DIR] [--out DIR] [--keep]
+usage: python3 app/tool/asking_check.py --apk <release or replay build> [--adb-port 5056] [--adb-connect HOST:PORT] [--work DIR] [--out DIR] [--keep]
 
 Seeds a made-up sleep report, a made-up walk file with two walks (no recording of anyone) and one made-up earlier
 notification batch of today, starts the app and checks:
@@ -352,6 +352,8 @@ def main() -> int:
     p.add_argument("--out", type=Path)
     p.add_argument("--keep", action="store_true")
     p.add_argument("--adb-port", type=int, default=5056)
+    p.add_argument("--adb-connect", metavar="HOST:PORT",
+                   help="use the emulator already reachable at this adb address (a worker PC's: _local/remote/precheck_emu.sh)")
     p.add_argument("--work", type=Path, required=True,
                    help="where the run's folder (emulator, staged files, logs) is made; a disk with 8 GB free")
     a = p.parse_args()
@@ -363,7 +365,7 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     pc.OUT = out
     results: list[pc.Result] = []
-    em = pc.Emulator(work, a.keep)
+    em = pc.Emulator(work, a.keep, connect=a.adb_connect)
     t0 = time.time()
     try:
         em.create()
