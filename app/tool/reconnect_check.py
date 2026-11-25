@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The reconnect ladder on an emulator, as far as an emulator can show it (DECISIONS 940-945).
 
-usage: reconnect_check.py --replay REPLAY.apk --work DIR [--adb-port 5055] [--stage-c-min 10]
+usage: reconnect_check.py --replay REPLAY.apk --work DIR [--out DIR] [--adb-port 5055] [--stage-c-min 10]
+       [--adb-connect HOST:PORT]   (an emulator somebody else runs, as tool/precheck.py: `_local/remote/precheck_emu.sh`)
 
 Needs the candidate's replay build (`--dart-define=EEG_REPLAY=true`, never for a phone). It replays a short quiet
 recording that ENDS: to the night recorder that is a headband that went out of range and stays away. Then it watches
@@ -21,8 +22,9 @@ the night's `.log` and logcat for what the ladder does by the phone's real clock
 What it cannot show (the real phone and headband only): the waiting connect itself (`connectGatt(autoConnect)`),
 whether it survives HyperOS with the screen off or Deep Doze, the link's real timing line, and any radio fact.
 
-Everything it makes (the AVD, its temp files, logs, screenshots) stays under --work. It uses its own adb server on
---adb-port and its own emulator, nothing else. Run it inside `_local/build_slot.sh heavy`.
+It starts a plain recording (Record) and stops it at the end. Everything it makes (the AVD, its temp files, logs,
+screenshots) stays under --work. It uses its own adb server on --adb-port and its own emulator (inside
+`_local/build_slot.sh heavy`), or with --adb-connect the emulator of the worker PC's queue.
 """
 from __future__ import annotations
 
@@ -108,6 +110,9 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--replay", type=Path, required=True, help="the candidate's replay build")
     p.add_argument("--work", type=Path, required=True, help="where the AVD, the temp files and the logs go")
+    p.add_argument("--out", type=Path, help="where the logs go (default: WORK/out)")
+    p.add_argument("--adb-connect", metavar="HOST:PORT", help="use the emulator already reachable at this adb address "
+                   "(started by _local/remote/emu.sh); none is created or stopped here")
     p.add_argument("--adb-port", type=int, default=5055)
     p.add_argument("--stage-c-min", type=float, default=10, help="the build's ladderWaitAfter in minutes")
     p.add_argument("--keep", action="store_true")
@@ -116,7 +121,7 @@ def main() -> int:
         p.error(f"{a.replay} is not there")
     pc.use_adb_port(a.adb_port)
     work = a.work.resolve()
-    out = work / "out"
+    out = (a.out or work / "out").resolve()
     out.mkdir(parents=True, exist_ok=True)
     (work / "tmp").mkdir(exist_ok=True)
     # the emulator's own temp files beside the AVD, never on the root disk
@@ -132,7 +137,7 @@ def main() -> int:
         verdicts.append((v, name, words))
         pc.say(f"{v} {name}: {words}")
 
-    em = pc.Emulator(work, a.keep)
+    em = pc.Emulator(work, a.keep, a.adb_connect)
     t_run = time.time()
     log = ""
     try:
@@ -141,6 +146,8 @@ def main() -> int:
         f32 = pc.make_quiet(stage)
         stem = f32.name[: -len(".f32")]
         pc.install(a.replay)
+        pc.start_app()  # once, so the app's folders exist
+        pc.wait_main(240)
         pc.stop_app()
         plan = stage / "plan-ends.json"
         # not looping, and from its 8th minute: after 2 minutes the replayed headband is out of range for good
@@ -155,14 +162,14 @@ def main() -> int:
         before = set(pc.sh(f"ls {pc.FILES}/recordings/*.log 2>/dev/null", check=False).split())
         time.sleep(3)
         pc.start_app()
-        if not pc.wait_main():
-            step("the app starts", False, "the main screen did not come up in 2 minutes")
+        if not pc.wait_main(240):
+            step("the app starts", False, "the main screen did not come up in 4 minutes")
             raise RuntimeError("no main screen")
-        if not pc.open_tab("Night"):
-            raise RuntimeError("the Night tab was not found")
-        hit = pc.find("Start night", exact=False, scrolls=2)
+        if not pc.open_tab("Record"):
+            raise RuntimeError("the Record tab was not found")
+        hit = wait_for(lambda: pc.bar_button("Record"), 60)
         if hit is None:
-            raise RuntimeError("Start night was not found")
+            raise RuntimeError("the Record button was not found")
         pc.sh(f"input tap {hit[1]} {hit[2]}")
         t_start = time.time()
 
@@ -253,15 +260,21 @@ def main() -> int:
         # ---- stop
         pc.bring_to_front()
         time.sleep(4)
-        pc.open_tab("Night")
-        hit = emu.match("Stop", exact=True) or pc.find("Stop", exact=True, scrolls=2)
+        pc.open_tab("Record")
+        hit = wait_for(lambda: pc.bar_button("Stop"), 60)
         if hit:
             pc.sh(f"input tap {hit[1]} {hit[2]}")
             time.sleep(2)
-            confirm = emu.match("Stop", exact=True)
+            confirm = wait_for(lambda: emu.match("Stop", exact=True) if emu.match("Stop recording?", exact=True) else None, 20)
             if confirm:
                 pc.sh(f"input tap {confirm[1]} {confirm[2]}")
             time.sleep(8)
+            if emu.match("What was this recording?", exact=True):
+                skip = emu.match("Skip", exact=True)
+                if skip:
+                    pc.sh(f"input tap {skip[1]} {skip[2]}")
+        stopped = wait_for(lambda: pc.bar_button("Record"), 60)
+        step("Stop ends the recording", bool(stopped), "the Record button is back" if stopped else "still recording 60 s after Stop")
         _, log = night_log(before)
         lines.append(f"the night ran {round((time.time() - t_start) / 60, 1)} min; {len(tries(log))} tries in all")
     except Exception as e:
