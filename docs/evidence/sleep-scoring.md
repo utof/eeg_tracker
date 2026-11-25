@@ -67,7 +67,8 @@ sleep, against a usual 20-25 %.
   with 8 minutes on either side, each scored once and kept. AnySleep weighs everything it is given together, so these
   stretches can differ a little from the report after Stop, which scores the whole night at once; the page says so.
   On one recorded night (6 hours, on the laptop's stand-in for a phone) 96 in 100 of the 30-second stretches got the
-  same stage as the report, and the totals were within a minute or two.
+  same stage as the report, and the totals were within a minute or two. In a recording you started with Record, it
+  counts only the sleep you marked, from the moment you pressed Sleep; with none marked it says so and scores nothing.
 - Noise is shown, not hidden: the report says how much of your sleep the model read through a noisy signal
   (movement, jaw muscle or a loose electrode) or with no usable electrode, and a Signal line under the chart marks
   where. Nobody has tested how well the model copes with that noise on this headband, so treat those stretches with

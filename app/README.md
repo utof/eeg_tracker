@@ -753,6 +753,9 @@ looks matched the report on 96 % of 30-second stretches; asleep 288 vs 288.5 min
   runs; meanwhile the live model's own readings fill in the chart, and the page says how many minutes are theirs.
 - A dropout and reconnect (a new file set, as on 2026-11-20 at 08:15) shows as hatched "no data"; the hours before it
   are not scored again. The DIY board's nights have no sleep so far (the page says why).
+- **In a recording started with Record it counts only the open sleep stretch**, from the moment you pressed Sleep, not
+  the hours of the recording before it (and not an earlier sleep you ended). With no sleep marked the section and the
+  page say "No sleep marked in this recording yet" and nothing is scored (DECISIONS row 1002).
 - Files: `files/cache/so-far/<night>.json` and `files/cache/live-stages/` (never exported; `docs/data-format.md`).
 
 ### Owner step: one look in the night (1 minute, one night)
