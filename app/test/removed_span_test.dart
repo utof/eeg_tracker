@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:eeg_tracker/archive/items.dart' show sessionFilesIn;
+import 'package:eeg_tracker/confirm/questions.dart';
 import 'package:eeg_tracker/feedback/session_log.dart';
 import 'package:eeg_tracker/meditation/store.dart';
 import 'package:eeg_tracker/meditation/tracker.dart';
@@ -14,6 +15,7 @@ import 'package:eeg_tracker/spans/span.dart';
 import 'package:eeg_tracker/spans/span_log.dart';
 import 'package:eeg_tracker/work/store.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_labels/shared_labels.dart';
 
 void main() {
   late Directory files, rec, nights;
@@ -221,6 +223,49 @@ void main() {
     expect(works.list().map((s) => s.start), [w0, DateTime(2026, 11, 20, 10)]);
     expect(meds.list().map((s) => s.start), [m0]);
     expect(archive(), hasLength(3));
+  });
+
+  test('an open "Did you sleep?" about a stretch that was taken away is not asked; put back, it is asked again', () {
+    final t = theTest(); // Sleep 14:17:52 to 14:21:29, pressed by mistake
+    var now = DateTime(2026, 11, 25, 15);
+    final confirm = ConfirmQuestions(files, clock: () => now);
+    final guess = Estimate(
+      detector: 'sleep-periods',
+      version: 'test',
+      label: Labels.nap,
+      start: pressed.add(const Duration(seconds: 20)),
+      end: stopped.subtract(const Duration(seconds: 10)),
+      recording: t.recording,
+      confidence: 0.9,
+      made: stopped,
+    );
+    // another guess, hours away from the stretch: it is none of the removal's business
+    final other = Estimate(
+      detector: 'sleep-periods',
+      version: 'test',
+      label: Labels.nap,
+      start: DateTime(2026, 11, 25, 10),
+      end: DateTime(2026, 11, 25, 10, 40),
+      recording: 'another',
+      confidence: 0.9,
+      made: DateTime(2026, 11, 25, 10, 40),
+    );
+    confirm.register([guess, other]);
+    expect(confirm.pending().map((q) => q.estimate.id), containsAll([guess.id, other.id]));
+    expect(confirm.pendingFor(t.recording, pressed, stopped).map((q) => q.estimate.id), [guess.id]);
+
+    setSpanRemoved(files, t, removed: true);
+    expect(confirm.pending().map((q) => q.estimate.id), [other.id]);
+    expect(confirm.pendingFor(t.recording, pressed, stopped), isEmpty);
+    // nothing was answered for you: no Yes, no No, no label
+    expect(confirm.store.read().answered(guess.id), isFalse);
+
+    setSpanRemoved(files, log.read(t.recording).removed.single, removed: false);
+    expect(confirm.pending().map((q) => q.estimate.id), containsAll([guess.id, other.id]));
+
+    // a stretch filed again under another recording (`moved_to`) was not taken away by you: its question stays
+    log.write(log.read(t.recording).spans.single.asRemoved(true, movedTo: 'elsewhere-1'));
+    expect(confirm.pending().map((q) => q.estimate.id), containsAll([guess.id, other.id]));
   });
 
   test('the recording that runs now is the recorder\'s: its marks cannot be removed from the Archive', () {

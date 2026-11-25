@@ -18,6 +18,7 @@ import 'dart:io';
 import 'package:shared_labels/shared_labels.dart';
 
 import '../archive/tags.dart';
+import '../spans/span.dart' show spansIn;
 import 'phone.dart';
 import 'sources.dart';
 
@@ -37,16 +38,32 @@ class ConfirmQuestions {
   /// answer holds the times you set (record-first's sleep stretches hook in here).
   static void Function(Estimate estimate, Answered answer)? onYes;
 
-  /// The stretches you labelled yourself: every Archive tag (the stop sheet's chips are tags too).
+  /// The stretches you labelled yourself: every Archive tag (the stop sheet's chips are tags too), and every sleep
+  /// stretch you took away in the Archive ("Not sleep", DECISIONS 1025): you have said what that stretch was, so
+  /// "Did you sleep?" is not asked about it (DECISIONS 1043). Nothing is answered for you: put the stretch back and the
+  /// question is open again. A stretch only filed again under another recording (`moved_to`) was not taken away.
   List<Labelled> labelled() {
     final dir = archiveDirFor(filesDir);
-    if (!dir.existsSync()) return const [];
     final tags = TagStore(filesDir);
     return [
-      for (final f in dir.listSync().whereType<File>())
-        if (f.path.endsWith(tagsSuffix))
-          for (final t in tags.tags(f.uri.pathSegments.last.replaceAll(tagsSuffix, ''))) (start: t.start, end: t.end, word: t.label),
+      if (dir.existsSync())
+        for (final f in dir.listSync().whereType<File>())
+          if (f.path.endsWith(tagsSuffix))
+            for (final t in tags.tags(f.uri.pathSegments.last.replaceAll(tagsSuffix, ''))) (start: t.start, end: t.end, word: t.label),
+      ..._takenAway(),
     ];
+  }
+
+  List<Labelled> _takenAway() {
+    try {
+      return [
+        for (final f in spansIn(Directory('${filesDir.path}/spans')).values)
+          for (final s in f.removed)
+            if (s.isSleep && s.movedTo == null && s.end != null) (start: s.start, end: s.end!, word: Labels.asleep.id),
+      ];
+    } on FileSystemException {
+      return const [];
+    }
   }
 
   /// The other app's say on when a push may go out (queue.dart [OtherAsker]); null: nobody else asks. The link to
