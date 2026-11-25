@@ -374,19 +374,25 @@ class Probe:
     def swipe_away(self) -> bool:
         a, mode = self.adb, self.args.swipe
         if mode == "auto":
-            a.shell("input", "keyevent", "KEYCODE_APP_SWITCH")
-            time.sleep(2)
-            tgt = find_swipe_target(a.run("exec-out", "uiautomator", "dump", "/dev/stdout", timeout=40).stdout, "Probe source")
-            if tgt:
-                x, y, h = tgt
-                a.shell("input", "swipe", str(x), str(y), str(x), str(max(h // 20, 5)), "180")
-                time.sleep(1.5)
-            else:
-                print("  (recents: no card named 'Probe source' found in the screen dump)")
-            self.home()
-            if self.wait_dead(5):
-                self.swipe_method.add("recents swipe by adb")
-                return True
+            for attempt, ms in enumerate(("180", "300", "120"), 1):  # a slow or busy device needs a second look at recents
+                a.shell("input", "keyevent", "KEYCODE_APP_SWITCH")
+                tgt = None
+                for _ in range(4):
+                    time.sleep(1.5)
+                    tgt = find_swipe_target(a.run("exec-out", "uiautomator", "dump", "/dev/stdout", timeout=40).stdout, "Probe source")
+                    if tgt:
+                        break
+                if tgt:
+                    x, y, h = tgt
+                    a.shell("input", "swipe", str(x), str(y), str(x), str(max(h // 20, 5)), ms)
+                    time.sleep(1.5)
+                else:
+                    print("  (recents: no card named 'Probe source' found in the screen dump)")
+                self.home()
+                if self.wait_dead(4):
+                    self.swipe_method.add("recents swipe by adb")
+                    return True
+                print(f"  (swipe attempt {attempt}: the source's process is still there)")
         if mode in ("auto", "manual") and sys.stdin.isatty():
             input("  >> On the phone: open recents, swipe 'Probe source' away, press Home, then press Enter here. ")
             if self.wait_dead(3):
