@@ -112,7 +112,7 @@ void main() {
       var row = table(estimatesTsv(state), estimateColumns, walk.id);
       expect((row['answer'], row['why_not'], row['via'], row['label_id']), ('not_answered', 'dismissed', 'notification', ''));
       expect(openEstimates(state, now).map((e) => e.id), contains(walk.id), reason: 'a swiped notification leaves it on the card');
-      store.notAnswered(walk.id, WhyNot.tooMany, at: at);
+      store.notAnswered(walk.id, WhyNot.shortAndOld, at: at);
       state = store.read();
       expect(state.closed(walk.id), isTrue);
       expect(openEstimates(state, now).map((e) => e.id), isNot(contains(walk.id)));
