@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The confirmation questions on a temporary emulator (DECISIONS 860-869): a batch on the card and in the notification.
 
-usage: python3 app/tool/confirm_check.py --apk <release or replay build> [--adb-port 5051] [--adb-connect HOST:PORT] [--work DIR] [--out DIR] [--keep]
+usage: python3 app/tool/confirm_check.py --apk <release or replay build> [--adb-port 5051] [--adb-connect HOST:PORT] [--work DIR] [--out DIR] [--keep] [--at HH:MM]
 
 Seeds a made-up sleep report and a made-up walk file (no recording of anyone), starts the app and checks:
   1. the Record tab shows the "Quick check" card with the batch ("19:08-21:14. The headband thinks you walked. Did
@@ -11,6 +11,10 @@ Seeds a made-up sleep report and a made-up walk file (no recording of anyone), s
      the questions go by one after the other, and the notification leaves after the last;
   4. back in the app the card is gone, no second batch or notification came, and files/confirm/labels.tsv holds the
      Yes and the No.
+The stretches are seeded relative to the device's clock and the expected words follow the hour as the app's do (a
+stretch that ended before 04:00 is worded to the half hour after 04:00, DECISIONS 965 and 1090); near midnight and
+near 04:00 the device's clock is first put forward (asking_check.py `clock_for_the_check`). --at HH:MM puts it at that
+time of today, to try an hour of the day.
 The emulator, its adb server and the helpers are the pre-install check's (tool/precheck.py). Emulator only: run it
 inside `_local/build_slot.sh heavy`.
 """
@@ -91,9 +95,45 @@ def made_up(stage: Path, now: datetime) -> tuple[list[tuple[Path, str]], list[st
         p.write_text(json.dumps(obj))
         pairs.append((p, rel))
     slept = "you napped" if 9 <= s0.hour < 20 else "you slept"
-    return pairs, [f"{hm(s0)}-{hm(s1)}. The headband thinks {slept}. Did you?",
-                   f"{hm(w0)}-{hm(w1)}. The headband thinks you walked. Did you?",
-                   f"{hm(v0)}-{hm(v1)}. The headband thinks you walked. Did you?"]
+    # the words follow the hour of the run: a stretch that ended before 04:00, asked after 04:00, has its times to the
+    # half hour (ac.card_words; DECISIONS 965, 1090)
+    return pairs, [f"{ac.capital(ac.card_words(s0, s1, now))}. The headband thinks {slept}. Did you?",
+                   f"{ac.capital(ac.card_words(w0, w1, now))}. The headband thinks you walked. Did you?",
+                   f"{ac.capital(ac.card_words(v0, v1, now))}. The headband thinks you walked. Did you?"]
+
+
+def at_today(now: datetime, at: str) -> datetime:
+    """[at] ("HH:MM") of [now]'s day, in [now]'s time zone."""
+    h, m = (int(x) for x in at.split(":"))
+    return now.replace(hour=h, minute=m, second=0, microsecond=0)
+
+
+_CLOCK_MOVED = False
+
+
+def set_device_clock(t: datetime) -> datetime:
+    """Puts the emulator's wall clock at [t] (adbd runs as root; network time off so it stays) and returns what the
+    device then says. `restore_device_clock` puts it back."""
+    global _CLOCK_MOVED
+    _CLOCK_MOVED = True
+    pc.sh("settings put global auto_time 0", check=False)
+    pc.sh(f"cmd alarm set-time {int(t.timestamp() * 1000)} || date -u -s @{int(t.timestamp())}", check=False)
+    time.sleep(2)
+    now = datetime.strptime(pc.sh("date '+%Y-%m-%dT%H:%M:%S%z'").strip(), "%Y-%m-%dT%H:%M:%S%z")
+    if abs((now - t).total_seconds()) > 60:
+        raise RuntimeError(f"the device's clock could not be set: asked for {t.isoformat()}, it says {now.isoformat()}")
+    return now
+
+
+def restore_device_clock() -> None:
+    """After `set_device_clock`: this machine's time again, and network time on."""
+    if not _CLOCK_MOVED:
+        return
+    try:
+        pc.sh(f"cmd alarm set-time {int(time.time() * 1000)} || date -u -s @{int(time.time())}", check=False)
+        pc.sh("settings put global auto_time 1", check=False)
+    except Exception:  # the emulator may be gone already
+        pass
 
 
 def answers() -> list[dict]:
@@ -143,12 +183,19 @@ def tap_in_shade(word: str, limit: float = 30) -> bool:
     return True
 
 
-def check(apk: Path, stage: Path) -> list[pc.Result]:
+def check(apk: Path, stage: Path, at: str | None = None) -> list[pc.Result]:
     results: list[pc.Result] = []
     pc.install(apk)
     pc.start_app()  # once, so the app's folders exist
     pc.wait_main(240)
     now = datetime.strptime(pc.sh("date '+%Y-%m-%dT%H:%M:%S%z'").strip(), "%Y-%m-%dT%H:%M:%S%z")
+    import asking_check as ac  # the hours the check cannot run at, as the asking check has them
+    if at:
+        now = set_device_clock(at_today(now, at))
+    forward = ac.clock_for_the_check(now)
+    if forward:
+        print(f"the device's clock says {hm(now)}: put forward to {forward:%Y-%m-%d %H:%M} (clock_for_the_check)", flush=True)
+        now = set_device_clock(forward)
     pairs, questions = made_up(stage, now)
     pc.seed(pairs, stage)
     pc.sh("logcat -c", check=False)
@@ -219,6 +266,7 @@ def main() -> int:
                    help="use the emulator already reachable at this adb address (a worker PC's: _local/remote/precheck_emu.sh)")
     p.add_argument("--work", type=Path, default=Path("/var/tmp"),
                    help="where the run's folder (emulator, staged files, logs) is made; a disk with 8 GB free")
+    p.add_argument("--at", metavar="HH:MM", help="put the device's clock at this time of today first (to try an hour of the day)")
     a = p.parse_args()
     if not a.apk.is_file():
         p.error(f"{a.apk} is not there")
@@ -234,7 +282,7 @@ def main() -> int:
     try:
         em.create()
         em.start()
-        results = check(a.apk, work / "stage")
+        results = check(a.apk, work / "stage", a.at)
         (out / "logcat.txt").write_text(pc.logcat())
     except Exception as e:  # the list says what ran
         results.append(pc.Result("the check itself", "FAIL", f"{type(e).__name__}: {e}"))
@@ -243,6 +291,7 @@ def main() -> int:
         except Exception:
             pass
     finally:
+        restore_device_clock()
         em.stop()
         if not a.keep:
             shutil.rmtree(work / "stage", ignore_errors=True)

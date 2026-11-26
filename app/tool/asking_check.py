@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The asking rules on a temporary emulator (DECISIONS 960-975), on top of the questions' own check (confirm_check.py).
 
-usage: python3 app/tool/asking_check.py --apk <release or replay build> [--adb-port 5056] [--adb-connect HOST:PORT] [--work DIR] [--out DIR] [--keep]
+usage: python3 app/tool/asking_check.py --apk <release or replay build> [--adb-port 5056] [--adb-connect HOST:PORT] [--work DIR] [--out DIR] [--keep] [--at HH:MM]
 
 Seeds a made-up sleep report, a made-up walk file with two walks (no recording of anyone) and one made-up earlier
 notification batch of today, starts the app and checks:
@@ -15,6 +15,10 @@ notification batch of today, starts the app and checks:
      for tomorrow, and the question is on the card;
   6. more waiting than a batch holds (4): five more walks arrive; every one of the six open questions is on the card,
      in time order, and none is written down as not answered (DECISIONS 1000).
+The stretches are seeded relative to the device's clock and the expected words follow the hour as the app's do (a
+stretch that ended before 04:00 is worded to the half hour after 04:00, DECISIONS 965 and 1090); near midnight and
+near 04:00 the device's clock is first put forward (asking_check.py `clock_for_the_check`). --at HH:MM puts it at that
+time of today, to try an hour of the day.
 Emulator only: run it inside `_local/build_slot.sh heavy`, with --work on a disk with 8 GB free.
 """
 from __future__ import annotations
@@ -55,6 +59,51 @@ def span(a: datetime, b: datetime, now: datetime) -> str:
 
 def capital(s: str) -> str:
     return s[:1].upper() + s[1:]
+
+
+def asking_day(t: datetime) -> datetime:
+    """queue.dart `askingDay`: the day runs 04:00 to 04:00."""
+    return (t - timedelta(hours=4)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def half_hour(t: datetime) -> datetime:
+    t = t.replace(second=0, microsecond=0)
+    return t + timedelta(minutes=((t.minute + 15) // 30) * 30 - t.minute)
+
+
+def times_asked(end: datetime, now: datetime) -> bool:
+    """queue.dart `timesAsked`: a stretch's times are asked about only on its own day."""
+    return asking_day(end) == asking_day(now)
+
+
+def clock_for_the_check(now: datetime) -> datetime | None:
+    """The moment the device's clock is put forward to before the seeding, or None when [now] will do. The stretches
+    are seeded relative to the clock and worded as the app words them at that hour (`card_words`), so the check runs at
+    any hour but these two, where it could not show what it is about:
+      - 23:30 to 01:02: a run that crosses midnight sees "yesterday" appear on cards it seeded as today's, and the
+        made-up earlier batch must be today's and an hour old (line 5 of the asking check): the check starts at 01:02;
+      - 03:30 to 04:50: a run that crosses 04:00 sees its cards change to the half-hour wording under it (the app's day
+        runs 04:00 to 04:00), and until 04:45 the sure walk (it ends 45 minutes before now) would have ended the day
+        before, so no card would have "Yes, but the times are off" (line 2): the check starts at 04:50."""
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    since = now - midnight
+    if since >= timedelta(hours=23, minutes=30):
+        return midnight + timedelta(days=1, minutes=62)
+    if since < timedelta(minutes=62):
+        return midnight + timedelta(minutes=62)
+    if timedelta(hours=3, minutes=30) <= since < timedelta(hours=4, minutes=50):
+        return midnight + timedelta(hours=4, minutes=50)
+    return None
+
+
+def card_words(a: datetime, b: datetime, now: datetime) -> str:
+    """The stretch as the card says it at [now]: to the minute on the stretch's own day, else to the half hour
+    (estimate.dart `spanWords`, queue.dart `timesAsked`). A walk's card also holds the guess."""
+    if times_asked(b, now):
+        return span(a, b, now)
+    x, y = hm(half_hour(a)), hm(half_hour(b))
+    about = f"about {x}" if x == y else f"about {x} to {y}"
+    return f"yesterday, {about}" if b.date() < now.date() else about
 
 
 def walk_file(rec: str, start: datetime, walks: list[tuple[datetime, datetime, str]]) -> dict:
@@ -121,36 +170,19 @@ def made_up(stage: Path, now: datetime) -> tuple[list[tuple[Path, str]], dict]:
         p.write_text(text)
         pairs.append((p, rel))
     slept = "you napped" if nap else "you slept"
+    # the words follow the hour of the run (card_words): a stretch that ended before 04:00, asked after 04:00, has its
+    # times to the half hour and no "Yes, but the times are off" (DECISIONS 965, 1090)
     return pairs, {
-        "sleep": f"{capital(span(s0, s1, now))}. The headband thinks {slept}. Did you?",
-        "sleep_title": capital(span(s0, s1, now)),
-        "walk": f"{hm(w0)}-{hm(w1)}. The headband thinks you walked. Did you?",
-        "blind": f"What were you doing {hm(v0)}-{hm(v1)}?",
-        "blind_shown_guess": f"{hm(v0)}-{hm(v1)}. The headband thinks",
+        "sleep": f"{capital(card_words(s0, s1, now))}. The headband thinks {slept}. Did you?",
+        "sleep_title": capital(card_words(s0, s1, now)),
+        "walk": f"{capital(card_words(w0, w1, now))}. The headband thinks you walked. Did you?",
+        "blind": f"What were you doing {card_words(v0, v1, now)}?",
+        "blind_shown_guess": f"{capital(card_words(v0, v1, now))}. The headband thinks",
+        "links": [k for k, end in (("sleep", s1), ("walk", w1)) if times_asked(end, now)],
         "ids": {"sleep": sleep_id, "walk": estimate_id("walking", "walking", w0, w1, rec),
                 "blind": estimate_id("walking", "walking", v0, v1, rec)},
         "earlier": earlier, "now": now,
     }
-
-
-def asking_day(t: datetime) -> datetime:
-    """queue.dart `askingDay`: the day runs 04:00 to 04:00."""
-    return (t - timedelta(hours=4)).replace(hour=0, minute=0, second=0, microsecond=0)
-
-
-def half_hour(t: datetime) -> datetime:
-    t = t.replace(second=0, microsecond=0)
-    return t + timedelta(minutes=((t.minute + 15) // 30) * 30 - t.minute)
-
-
-def card_words(a: datetime, b: datetime, now: datetime) -> str:
-    """The stretch as the card says it at [now]: to the minute on the stretch's own day, else to the half hour
-    (estimate.dart `spanWords`, queue.dart `timesAsked`). A walk's card also holds the guess."""
-    if asking_day(b) == asking_day(now):
-        return span(a, b, now)
-    x, y = hm(half_hour(a)), hm(half_hour(b))
-    about = f"about {x}" if x == y else f"about {x} to {y}"
-    return f"yesterday, {about}" if b.date() < now.date() else about
 
 
 def tap(word: str, exact: bool = True, limit: float = 30) -> bool:
@@ -170,7 +202,7 @@ def cat(name: str) -> str:
     return pc.sh(f"cat {CONFIRM}/{name} 2>/dev/null", check=False)
 
 
-def check(apk: Path, stage: Path) -> list[pc.Result]:
+def check(apk: Path, stage: Path, at: str | None = None) -> list[pc.Result]:
     results: list[pc.Result] = []
     pc.install(apk)
     pc.start_app()  # once, so the app's folders exist
@@ -180,13 +212,12 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     def device_now() -> datetime:
         return datetime.strptime(pc.sh("date '+%Y-%m-%dT%H:%M:%S%z'").strip(), "%Y-%m-%dT%H:%M:%S%z")
     now = device_now()
-    # the made-up earlier batch must be today's and at least an hour old (an hour between batches)
-    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    if now - midnight < timedelta(minutes=62):
-        hold = (midnight + timedelta(minutes=62) - now).total_seconds()
-        print(f"just after midnight: waiting {hold / 60:.0f} min so today's earlier batch is an hour old", flush=True)
-        time.sleep(hold)
-        now = device_now()
+    if at:
+        now = cc.set_device_clock(cc.at_today(now, at))
+    forward = clock_for_the_check(now)
+    if forward:
+        print(f"the device's clock says {hm(now)}: put forward to {forward:%Y-%m-%d %H:%M} (clock_for_the_check)", flush=True)
+        now = cc.set_device_clock(forward)
     pairs, want = made_up(stage, now)
     ids = want["ids"]
     pc.seed(pairs, stage)
@@ -208,12 +239,14 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     if not card:
         return results
 
-    # the cards are in time order: sleep, the sure walk, the blind walk. Each card that shows its guess has the link;
-    # the walk's is the second from the top (the card's questions are one text node, so the place tells them apart)
+    # the cards are in time order: sleep, the sure walk, the blind walk. Each card that shows its guess has the link
+    # while its stretch is on its own day (want["links"]: the walk always, the sleep unless it ended before 04:00 and
+    # it is past 04:00 now); the walk's is the lowest (the card's questions are one text node, so the place tells
+    # them apart)
     links = sorted((n for n in emu.nodes() if n[0].strip() == "Yes, but the times are off"), key=lambda n: n[2])
-    opened = len(links) == 2
+    opened = "walk" in want["links"] and len(links) == len(want["links"])
     if opened:
-        pc.sh(f"input tap {links[1][1]} {links[1][2]}")
+        pc.sh(f"input tap {links[-1][1]} {links[-1][2]}")
         time.sleep(2)
     strip = bool(wait(lambda: emu.match("set the times", False), limit=20))
     moved = tap("End 5 minutes earlier", limit=10)
@@ -223,7 +256,8 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     results.append(pc.Result(
         "2 \"Yes, but the times are off\": the strip, an end moved, saved as confirmed times",
         "PASS" if opened and strip and moved and saved and good else "FAIL",
-        f"link tapped {opened}, strip shown {strip}, end moved {moved}, saved {saved}; answers.jsonl: {json.dumps(got)}",
+        f"link tapped {opened} ({len(links)} links on the card, expected under {' and '.join(want['links'])}), strip shown "
+        f"{strip}, end moved {moved}, saved {saved}; answers.jsonl: {json.dumps(got)}",
         pc.screen_words("times-saved")))
 
     chip = None
@@ -260,7 +294,7 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
     no_label = all(ids["sleep"] not in r for r in labels) and len(labels) == 2
     results.append(pc.Result(
         "4 Not sure is stored as its own answer, is no label, and is not asked again",
-        "PASS" if title and tapped and stored and no_label and not still and "not_sure" in row else "FAIL",
+        "PASS" if title == want["sleep_title"] and tapped and stored and no_label and not still and "not_sure" in row else "FAIL",
         f"notification title {title!r} (expected {want['sleep_title']!r}); line {json.dumps(got)}; label rows "
         f"{len(labels)} (none for it: {no_label}); card after reopening: {'still there' if still else 'gone'}; "
         f"estimates.tsv answer: {row[11] if len(row) > 11 else None!r}",
@@ -358,6 +392,7 @@ def main() -> int:
                    help="use the emulator already reachable at this adb address (a worker PC's: _local/remote/precheck_emu.sh)")
     p.add_argument("--work", type=Path, required=True,
                    help="where the run's folder (emulator, staged files, logs) is made; a disk with 8 GB free")
+    p.add_argument("--at", metavar="HH:MM", help="put the device's clock at this time of today first (to try an hour of the day)")
     a = p.parse_args()
     if not a.apk.is_file():
         p.error(f"{a.apk} is not there")
@@ -373,7 +408,7 @@ def main() -> int:
     try:
         em.create()
         em.start()
-        results = check(a.apk, work / "stage")
+        results = check(a.apk, work / "stage", a.at)
         (out / "logcat.txt").write_text(pc.logcat())
     except Exception as e:  # the list says what ran
         results.append(pc.Result("the check itself", "FAIL", f"{type(e).__name__}: {e}"))
@@ -382,6 +417,7 @@ def main() -> int:
         except Exception:
             pass
     finally:
+        cc.restore_device_clock()
         em.stop()
         if not a.keep:
             shutil.rmtree(work / "stage", ignore_errors=True)
