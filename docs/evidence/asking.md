@@ -95,9 +95,11 @@ monthly check on your own answers (below) shows whether they need changing.
 - [Reiter and Schoedel 2023, who answers a prompt](https://pmc.ncbi.nlm.nih.gov/articles/PMC11133120)
 - [Wang and others 2024, answering as a habit after 12 months](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC11329843/)
 
-Checked: the numbers are from the project's research note of 2026-11-24 (asking well), which read these pages or
-their abstracts. That note marks which it only saw as search summaries; none of those is used here.
+The numbers are from the project's research note of 2026-11-24 (asking well), which read these pages or their
+abstracts. That note marks which it only saw as search summaries; none of those is used here.
 
 ## Libraries and models
 
 - No model and no new library.
+
+Checked: 2026-11-24

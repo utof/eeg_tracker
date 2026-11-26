@@ -58,9 +58,11 @@ this headband's guesses is not known yet: that is exactly what your answers will
 - [Ulitzsch and others 2025, careless answers and question frequency](https://www.leibniz-ipn.de/en/research/publications/investigating-the-effect-of-experience-sampling-study-design-on-careless-and-insufficient-effort-responding-identified-with-a-screen-time-based-mixture-model)
 - [Bontempelli and others 2025, people revising their own labels](https://arxiv.org/html/2510.23635v1)
 
-Checked: the numbers are from the project's research note of 2026-11-20 (labelling the day), which read these pages.
+The numbers are from the project's research note of 2026-11-20 (labelling the day), which read these pages.
 
 ## Libraries and models
 
 - No model and no new library: the questions come from the app's own sleep scoring and walking detector, and the
   notification uses Android's own.
+
+Checked: 2026-11-20

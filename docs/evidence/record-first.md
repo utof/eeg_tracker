@@ -59,9 +59,11 @@ not measured on this headband.
 - [Brooks & Lack 2006, A brief afternoon nap following nocturnal sleep restriction: which nap duration is most recuperative?](https://doi.org/10.1093/sleep/29.6.831)
 - [Lovato & Lack 2010, The effects of napping on cognitive functioning](https://doi.org/10.1016/B978-0-444-53702-7.00009-9)
 
+The three sources exist as cited; the nap numbers are from the 2006 paper's abstract; the guideline's text was not
+re-read for this note.
+
 ## Libraries and models
 
 - None of its own. The sleep reports use the sleep model of the sleep-scoring note.
 
-Checked: 2026-11-25 (the three sources exist as cited; the nap numbers are from the 2006 paper's abstract; the
-guideline's text was not re-read for this note)
+Checked: 2026-11-25
