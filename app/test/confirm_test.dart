@@ -688,6 +688,55 @@ void main() {
     });
   });
 
+  group('the hour of the day (the emulator checks of 2026-11-26, DECISIONS 1090)', () {
+    // A stretch whose card shows its guess: the start moves back by whole minutes until the id does not draw blind.
+    Estimate shown(Label label, DateTime start, DateTime end) {
+      var s = start;
+      while (blindByDraw(est(label, s, end.difference(s).inMinutes).id)) {
+        s = s.subtract(const Duration(minutes: 1));
+      }
+      return est(label, s, end.difference(s).inMinutes, confidence: 0.85);
+    }
+
+    String hm(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+    test('at 01:45 every card of the night so far has its times to the minute and may have them corrected', () {
+      final d = DateTime(2026, 11, 26);
+      final sleep = shown(Labels.asleep, DateTime(2026, 11, 25, 22, 25), d.add(const Duration(minutes: 15)));
+      final walk = shown(Labels.walking, d.add(const Duration(minutes: 25)), d.add(const Duration(hours: 1)));
+      final late = shown(Labels.walking, d.add(const Duration(hours: 1, minutes: 9)), d.add(const Duration(hours: 1, minutes: 30)));
+      now = d.add(const Duration(hours: 1, minutes: 45));
+      final q = make()..register([sleep, walk, late]);
+      final got = q.pending();
+      expect([for (final x in got) x.text], [
+        '${hm(sleep.start)}-00:15. The headband thinks you slept. Did you?',
+        '${hm(walk.start)}-01:00. The headband thinks you walked. Did you?',
+        '${hm(late.start)}-01:30. The headband thinks you walked. Did you?',
+      ]);
+      expect([for (final x in got) x.exactTimes], [true, true, true]);
+    });
+
+    test('at 04:28 no question is held back; the ones that ended before 04:00 give their times to the half hour', () {
+      final d = DateTime(2026, 11, 26);
+      final sleep = shown(Labels.asleep, d.add(const Duration(hours: 1, minutes: 3)), d.add(const Duration(hours: 2, minutes: 55)));
+      final walk = shown(Labels.walking, d.add(const Duration(hours: 3, minutes: 5)), d.add(const Duration(hours: 3, minutes: 37)));
+      final late = shown(Labels.walking, d.add(const Duration(hours: 3, minutes: 46)), d.add(const Duration(hours: 4, minutes: 7)));
+      now = d.add(const Duration(hours: 4, minutes: 28));
+      final q = make()..register([sleep, walk, late]);
+      final got = q.pending();
+      expect(got, hasLength(3), reason: 'all three are asked');
+      expect(got[0].text, 'About 01:00 to 03:00. The headband thinks you slept. Did you?', reason: 'it ended 93 minutes ago, before 04:00');
+      expect(got[1].text, 'About 03:00 to 03:30. The headband thinks you walked. Did you?', reason: 'it ended 51 minutes ago, before 04:00');
+      expect(got[2].text, '${hm(late.start)}-04:07. The headband thinks you walked. Did you?');
+      expect([for (final x in got) x.exactTimes], [false, false, true], reason: '"Yes, but the times are off" only on the last');
+      // the same three a moment before 04:00: all to the minute
+      now = d.add(const Duration(hours: 3, minutes: 59));
+      final before = make().pending();
+      expect([for (final x in before) x.exactTimes], [true, true], reason: 'the third has not ended yet');
+      expect(before.first.text, '${hm(sleep.start)}-02:55. The headband thinks you slept. Did you?');
+    });
+  });
+
   test('settings: defaults, kept whole, and anything out of range falls back', () {
     final q = make();
     expect((q.settings.on, q.settings.perBatch, q.settings.perDay, q.settings.quietStartMin, q.settings.quietEndMin), (true, 4, 2, 1320, 480));
