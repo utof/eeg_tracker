@@ -6,7 +6,7 @@
 //   the walking pass's stretches
 // One state per epoch, the first that applies:
 //   No signal             no usable electrode, or no data                                near certain
-//   Asleep / Nap          a sleep stage in the report (Nap: under 3 hours, begun by day)  good
+//   Asleep / Nap          a sleep stage in the report (Nap: its sleep begun by day and under 3 hours)  good
 //   Walking / Running     a stretch of the walking pass                                   good; some when it is unsure
 //   Moving                3 or more seconds of movement in the epoch                      good
 //   Talking or chewing    2 or more jaw bursts in the epoch (which of the two: not told)  weak
@@ -130,7 +130,14 @@ List<Mark> happenedMarks({
   DateTime at(int i) => grid.add(Duration(seconds: i * epochS));
 
   // asleep, by the report: the epoch's middle falls on a sleep stage
-  final nap = stages != null && isDayNap(stages.start, stages.stages.length * epochS / 60);
+  // a nap: begun by day, and from the report's first to its last sleep under 3 hours (the time awake before and after
+  // it in the recording does not make a nap a night)
+  var nap = false;
+  if (stages != null) {
+    final sleep = RegExp('[123R]');
+    final first = stages.stages.indexOf(sleep), last = stages.stages.lastIndexOf(sleep);
+    nap = first >= 0 && isDayNap(stages.start.add(Duration(seconds: first * epochS)), (last - first + 1) * epochS / 60);
+  }
   bool asleepAt(int i) {
     if (stages == null) return false;
     final k = at(i).add(const Duration(seconds: epochS ~/ 2)).difference(stages.start).inSeconds;

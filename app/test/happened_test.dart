@@ -128,6 +128,12 @@ void main() {
     expect(marks.first.sure, Sure.good);
   });
 
+  test('a nap inside a long recording is a nap: only the report\'s own sleep counts, not the time awake around it', () {
+    final stages = (start: t0, stages: '${'W' * 200}${'2' * 100}${'W' * 200}'); // 50 minutes asleep in 4 hours 10
+    final marks = happenedMarks(stages: stages, from: t0, to: at(500));
+    expect(words(marks), ['Nap 200-300 good']);
+  });
+
   test('no pass (another electrode layout, or the raw signal left the phone): asleep and walking are still marked', () {
     final walk = WalkResult(
       recording: 'r',

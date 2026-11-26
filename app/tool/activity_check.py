@@ -77,26 +77,21 @@ def tap(hit: tuple[str, int, int] | None) -> bool:
     return True
 
 
-def clear_of_the_edge(label: str, exact: bool) -> tuple[str, int, int] | None:
-    """[label], scrolled to and brought clear of the screen's lower edge (the pinned bar hides what is under it)."""
-    hit = pc.find(label, exact=exact, scrolls=16)
-    if hit is None:
-        return None
-    _, h = emu.screen_size()
-    if hit[2] > h * 0.7:
-        emu.scroll("down")
-        hit = emu.match(label, exact) or hit
-    return hit
+def swipe_list() -> None:
+    """Scrolls the page's list down by a swipe that starts above the Record tab's pinned bar (emu.scroll starts on it)."""
+    w, h = emu.screen_size()
+    emu.adb("shell", "input", "swipe", str(w // 2), str(int(h * 0.55)), str(w // 2), str(int(h * 0.25)), "400")
+    time.sleep(0.8)
 
 
 def scroll_to(wanted, scrolls: int = 16) -> tuple[str, int, int] | None:  # noqa: ANN001
-    """The first element whose words [wanted] accepts, scrolling down to it and clear of the screen's lower edge."""
+    """The first element whose words [wanted] accepts, scrolling down until it is clear of the pinned bar."""
     _, h = emu.screen_size()
     for _ in range(scrolls):
         hit = next((n for n in emu.nodes() if wanted(n[0])), None)
-        if hit is not None and hit[2] < h * 0.75:
+        if hit is not None and hit[2] < h * 0.6:
             return hit
-        emu.scroll("down")
+        swipe_list()
     return next((n for n in emu.nodes() if wanted(n[0])), None)
 
 
@@ -118,7 +113,9 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
 
     # 1. the card asks with the two words
     card = pc.find_on_tab("Record", "Quick check", limit=180)
-    asked = cc.wait(lambda: clear_of_the_edge(question, False), limit=60) if card else None
+    asked = cc.wait(lambda: pc.find(question, False), limit=60) if card else None
+    # the card is one long element; its last question's words are buttons of their own, below the question
+    scroll_to(lambda l: l.strip() == "Resting") if asked else None
     words = pc.screen_words("card")
     chips = {w: emu.match(w, True) for w in ("Meditating", "Resting", "Something else", "Not sure")}
     ok = bool(asked) and all(chips.values())
@@ -143,7 +140,9 @@ def check(apk: Path, stage: Path) -> list[pc.Result]:
 
     # 3. the Archive's page of the recording has the lane
     opened = tap(pc.find_on_tab("More", "Open the archive", exact=True))
-    row = cc.wait(lambda: emu.match(f"{cc.hm(start)} – ", False), limit=120) if opened else None
+    # the quick checks' card leads the Archive too: the recording's row is under it
+    cc.wait(lambda: emu.match("on this phone, newest first", False), limit=120) if opened else None
+    row = scroll_to(lambda l: f"{cc.hm(start)} – " in l) if opened else None
     tap(row)
     # the timeline's own description for screen readers names every lane that has something
     lane = cc.wait(lambda: emu.match("What happened: ", False), limit=90) if row else None
