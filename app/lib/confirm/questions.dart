@@ -71,7 +71,7 @@ class ConfirmQuestions {
   static OtherAsker? otherApp;
 
   /// The cards for [picks]: 1 in 5 is blind, drawn by the estimate's id (or made blind by rule), unless [guessShown];
-  /// the times are asked about only on the stretch's own day.
+  /// the times are asked about on the stretch's own day or while it ended less than 4 hours ago ([timesAsked]).
   List<ConfirmQuestion> _questions(List<Pick> picks, DateTime now, ConfirmState state, {bool guessShown = false}) => [
     for (final p in picks)
       () {

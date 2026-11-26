@@ -688,7 +688,7 @@ void main() {
     });
   });
 
-  group('the hour of the day (the emulator checks of 2026-11-26, DECISIONS 1090)', () {
+  group('the hour of the day (the emulator checks of 2026-11-26, DECISIONS 1090 and 1091)', () {
     // A stretch whose card shows its guess: the start moves back by whole minutes until the id does not draw blind.
     Estimate shown(Label label, DateTime start, DateTime end) {
       var s = start;
@@ -716,7 +716,7 @@ void main() {
       expect([for (final x in got) x.exactTimes], [true, true, true]);
     });
 
-    test('at 04:28 no question is held back; the ones that ended before 04:00 give their times to the half hour', () {
+    test('at 04:28 no question is held back and the three that ended before 04:00 still have their minutes and the link', () {
       final d = DateTime(2026, 11, 26);
       final sleep = shown(Labels.asleep, d.add(const Duration(hours: 1, minutes: 3)), d.add(const Duration(hours: 2, minutes: 55)));
       final walk = shown(Labels.walking, d.add(const Duration(hours: 3, minutes: 5)), d.add(const Duration(hours: 3, minutes: 37)));
@@ -725,15 +725,61 @@ void main() {
       final q = make()..register([sleep, walk, late]);
       final got = q.pending();
       expect(got, hasLength(3), reason: 'all three are asked');
-      expect(got[0].text, 'About 01:00 to 03:00. The headband thinks you slept. Did you?', reason: 'it ended 93 minutes ago, before 04:00');
-      expect(got[1].text, 'About 03:00 to 03:30. The headband thinks you walked. Did you?', reason: 'it ended 51 minutes ago, before 04:00');
+      expect(got[0].text, '${hm(sleep.start)}-02:55. The headband thinks you slept. Did you?', reason: 'it ended 93 minutes ago: under 4 hours');
+      expect(got[1].text, '${hm(walk.start)}-03:37. The headband thinks you walked. Did you?', reason: 'it ended 51 minutes ago');
       expect(got[2].text, '${hm(late.start)}-04:07. The headband thinks you walked. Did you?');
-      expect([for (final x in got) x.exactTimes], [false, false, true], reason: '"Yes, but the times are off" only on the last');
+      expect([for (final x in got) x.exactTimes], [true, true, true], reason: '"Yes, but the times are off" on every one (DECISIONS 1091)');
       // the same three a moment before 04:00: all to the minute
       now = d.add(const Duration(hours: 3, minutes: 59));
       final before = make().pending();
       expect([for (final x in before) x.exactTimes], [true, true], reason: 'the third has not ended yet');
       expect(before.first.text, '${hm(sleep.start)}-02:55. The headband thinks you slept. Did you?');
+    });
+
+    test('4 hours after a stretch that ended before 04:00, its times go to the half hour and the link goes (DECISIONS 1091)', () {
+      final d = DateTime(2026, 11, 26);
+      final walk = shown(Labels.walking, d.add(const Duration(hours: 3, minutes: 20)), d.add(const Duration(hours: 3, minutes: 50)));
+      final q = make()..register([walk]);
+      for (final (since, exact) in [
+        (const Duration(hours: 3, minutes: 59), true),
+        (const Duration(hours: 4, minutes: 10), true),
+        (const Duration(hours: 7, minutes: 49), true),
+        (const Duration(hours: 7, minutes: 51), false),
+      ]) {
+        now = d.add(since);
+        final got = q.pending();
+        expect(got, hasLength(1), reason: hm(now));
+        expect(got.single.exactTimes, exact, reason: 'at ${hm(now)}');
+        expect(got.single.text, exact ? '${hm(walk.start)}-03:50. The headband thinks you walked. Did you?' : 'About 03:30 to 04:00. The headband thinks you walked. Did you?', reason: 'at ${hm(now)}');
+      }
+    });
+
+    test('a night split by an hour awake: at 06:30 the first piece has its times, at 08:30 it has the half hour (the second keeps them)', () {
+      final d = DateTime(2026, 11, 26);
+      final first = shown(Labels.asleep, d.subtract(const Duration(hours: 1)), d.add(const Duration(hours: 3, minutes: 10)));
+      final second = shown(Labels.asleep, d.add(const Duration(hours: 4, minutes: 20)), d.add(const Duration(hours: 8)));
+      final q = make()..register([first, second]);
+      now = d.add(const Duration(hours: 6, minutes: 30));
+      var got = q.pending();
+      expect([for (final x in got) x.exactTimes], [true], reason: 'the second piece is still going: no question yet');
+      expect(got.single.text, '${hm(first.start)}-03:10. The headband thinks you slept. Did you?');
+      now = d.add(const Duration(hours: 8, minutes: 30));
+      got = q.pending();
+      expect([for (final x in got) x.exactTimes], [false, true], reason: 'the first ended 5 h 20 min ago, the second 30 minutes ago');
+      expect(got.first.text, 'About 23:00 to 03:00. The headband thinks you slept. Did you?');
+      expect(got.last.text, '${hm(second.start)}-08:00. The headband thinks you slept. Did you?');
+    });
+
+    test('a night that ended at 07:00 keeps its minutes and the link all day', () {
+      final d = DateTime(2026, 11, 26);
+      final night = shown(Labels.asleep, d.subtract(const Duration(hours: 1)), d.add(const Duration(hours: 7)));
+      final q = make()..register([night]);
+      for (final since in [const Duration(hours: 7, minutes: 30), const Duration(hours: 13), const Duration(hours: 23, minutes: 59)]) {
+        now = d.add(since);
+        final got = q.pending();
+        expect(got.single.exactTimes, isTrue, reason: 'at ${hm(now)}');
+        expect(got.single.text, '${hm(night.start)}-07:00. The headband thinks you slept. Did you?', reason: 'at ${hm(now)}');
+      }
     });
   });
 

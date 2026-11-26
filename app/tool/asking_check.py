@@ -16,9 +16,9 @@ notification batch of today, starts the app and checks:
   6. more waiting than a batch holds (4): five more walks arrive; every one of the six open questions is on the card,
      in time order, and none is written down as not answered (DECISIONS 1000).
 The stretches are seeded relative to the device's clock and the expected words follow the hour as the app's do (a
-stretch that ended before 04:00 is worded to the half hour after 04:00, DECISIONS 965 and 1090); near midnight and
-near 04:00 the device's clock is first put forward (asking_check.py `clock_for_the_check`). --at HH:MM puts it at that
-time of today, to try an hour of the day.
+stretch's times are to the half hour once its day is over and it ended 4 hours ago or more, DECISIONS 965, 1090 and
+1091); near midnight and just before 04:00 the device's clock is first put forward (asking_check.py
+`clock_for_the_check`). --at HH:MM puts it at that time of today, to try an hour of the day.
 Emulator only: run it inside `_local/build_slot.sh heavy`, with --work on a disk with 8 GB free.
 """
 from __future__ import annotations
@@ -71,9 +71,13 @@ def half_hour(t: datetime) -> datetime:
     return t + timedelta(minutes=((t.minute + 15) // 30) * 30 - t.minute)
 
 
+TIMES_KEPT_FOR = timedelta(hours=4)  # queue.dart `ConfirmRule.timesKeptFor` (DECISIONS 1091)
+
+
 def times_asked(end: datetime, now: datetime) -> bool:
-    """queue.dart `timesAsked`: a stretch's times are asked about only on its own day."""
-    return asking_day(end) == asking_day(now)
+    """queue.dart `timesAsked`: a stretch's times are asked about on its own day or while it ended less than 4 hours
+    ago, also across 04:00."""
+    return asking_day(end) == asking_day(now) or now - end < TIMES_KEPT_FOR
 
 
 def clock_for_the_check(now: datetime) -> datetime | None:
@@ -82,23 +86,25 @@ def clock_for_the_check(now: datetime) -> datetime | None:
     any hour but these two, where it could not show what it is about:
       - 23:30 to 01:02: a run that crosses midnight sees "yesterday" appear on cards it seeded as today's, and the
         made-up earlier batch must be today's and an hour old (line 5 of the asking check): the check starts at 01:02;
-      - 03:30 to 04:50: a run that crosses 04:00 sees its cards change to the half-hour wording under it (the app's day
-        runs 04:00 to 04:00), and until 04:45 the sure walk (it ends 45 minutes before now) would have ended the day
-        before, so no card would have "Yes, but the times are off" (line 2): the check starts at 04:50."""
+      - 03:30 to 04:00: a run that crosses 04:00 would see the stretches that lines 5 and 6 seed 4 to 14 hours back
+        change their words under it (the app's day runs 04:00 to 04:00; only a stretch under 4 hours old keeps its
+        minutes across it, DECISIONS 1091): the check starts at 04:05. From 04:00 on it runs as it is: the first three
+        stretches end 15 to 90 minutes before the clock, so they keep their minutes and the times link at any hour,
+        also when they ended before 04:00."""
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     since = now - midnight
     if since >= timedelta(hours=23, minutes=30):
         return midnight + timedelta(days=1, minutes=62)
     if since < timedelta(minutes=62):
         return midnight + timedelta(minutes=62)
-    if timedelta(hours=3, minutes=30) <= since < timedelta(hours=4, minutes=50):
-        return midnight + timedelta(hours=4, minutes=50)
+    if timedelta(hours=3, minutes=30) <= since < timedelta(hours=4):
+        return midnight + timedelta(hours=4, minutes=5)
     return None
 
 
 def card_words(a: datetime, b: datetime, now: datetime) -> str:
-    """The stretch as the card says it at [now]: to the minute on the stretch's own day, else to the half hour
-    (estimate.dart `spanWords`, queue.dart `timesAsked`). A walk's card also holds the guess."""
+    """The stretch as the card says it at [now]: to the minute on the stretch's own day or while it ended under 4 hours
+    ago, else to the half hour (estimate.dart `spanWords`, queue.dart `timesAsked`). A walk's card also holds the guess."""
     if times_asked(b, now):
         return span(a, b, now)
     x, y = hm(half_hour(a)), hm(half_hour(b))
@@ -170,8 +176,8 @@ def made_up(stage: Path, now: datetime) -> tuple[list[tuple[Path, str]], dict]:
         p.write_text(text)
         pairs.append((p, rel))
     slept = "you napped" if nap else "you slept"
-    # the words follow the hour of the run (card_words): a stretch that ended before 04:00, asked after 04:00, has its
-    # times to the half hour and no "Yes, but the times are off" (DECISIONS 965, 1090)
+    # the words follow the hour of the run (card_words): these three ended 15 to 90 minutes before the clock, so they
+    # keep their minutes and the times link at any hour, also when they ended before 04:00 (DECISIONS 1091)
     return pairs, {
         "sleep": f"{capital(card_words(s0, s1, now))}. The headband thinks {slept}. Did you?",
         "sleep_title": capital(card_words(s0, s1, now)),
@@ -240,9 +246,8 @@ def check(apk: Path, stage: Path, at: str | None = None) -> list[pc.Result]:
         return results
 
     # the cards are in time order: sleep, the sure walk, the blind walk. Each card that shows its guess has the link
-    # while its stretch is on its own day (want["links"]: the walk always, the sleep unless it ended before 04:00 and
-    # it is past 04:00 now); the walk's is the lowest (the card's questions are one text node, so the place tells
-    # them apart)
+    # while its stretch keeps its times (want["links"]: both, as each ended under 4 hours ago, DECISIONS 1091); the
+    # walk's is the lowest (the card's questions are one text node, so the place tells them apart)
     links = sorted((n for n in emu.nodes() if n[0].strip() == "Yes, but the times are off"), key=lambda n: n[2])
     opened = "walk" in want["links"] and len(links) == len(want["links"])
     if opened:
@@ -317,8 +322,9 @@ def check(apk: Path, stage: Path, at: str | None = None) -> list[pc.Result]:
     before = cat("asks.jsonl")
     pc.start_app()
     pc.wait_main(240)
-    # the stretch's words depend on the hour of the run: before about 08:10 it ended before 04:00, the day before in the
-    # app's reckoning, so its card gives the times to the half hour (card_words)
+    # the stretch's words depend on the hour of the run: it ended 4 h 10 min before the clock, so from 04:00 to about
+    # 08:10 it ended before 04:00, the day before in the app's reckoning, and its card gives the times to the half hour
+    # (card_words); at other hours it is on its own day
     new_card = pc.find_on_tab("Record", f"{capital(card_words(a, b, now2))}. The headband thinks you walked", limit=180)
     armed = wait(lambda: cat("armed.json").strip() or None, limit=60)
     time.sleep(45)  # a batch that may go out does so at once: give it time to show that it does not

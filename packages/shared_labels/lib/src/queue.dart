@@ -34,8 +34,14 @@ abstract final class ConfirmRule {
   static const int pushesPerDay = 2, cardsPerBatch = 4;
 
   /// "The same day" runs from this hour to the same hour of the next day. A stretch's times are asked about
-  /// ("Yes, but the times are off") only on its own day; after that only whether it happened.
+  /// ("Yes, but the times are off") on its own day or while it is under [timesKeptFor] old; after that only whether it
+  /// happened.
   static const int dayStartsHour = 4;
+
+  /// A stretch keeps its exact times for this long after it ended, also across the day's start: a walk of 03:20-03:50
+  /// opened at 04:10 is still asked to the minute (DECISIONS 1091, the owner's 4 hours). Its own number, not
+  /// [shortAskWithin] (the 3 hours of row 969, which drops short stretches).
+  static const Duration timesKeptFor = Duration(hours: 4);
 
   /// A stretch shorter than [shortStretch] is dropped unasked once it is older than [shortAskWithin].
   static const Duration shortStretch = Duration(minutes: 15), shortAskWithin = Duration(hours: 3);
@@ -59,8 +65,10 @@ DateTime askingDay(DateTime t) {
   return DateTime(s.year, s.month, s.day);
 }
 
-/// Whether [e]'s start and end are still asked about at [now]: only on the stretch's own day.
-bool timesAsked(Estimate e, DateTime now) => askingDay(e.end) == askingDay(now);
+/// Whether [e]'s start and end are still asked about at [now]: on the stretch's own day, or while it ended less than
+/// [ConfirmRule.timesKeptFor] ago, also across the day's start.
+bool timesAsked(Estimate e, DateTime now) =>
+    askingDay(e.end) == askingDay(now) || now.difference(e.end) < ConfirmRule.timesKeptFor;
 
 /// One question of a batch: the estimate, and why it was picked (`unsure`, `long`, `rare`, `few`).
 class Pick {

@@ -92,6 +92,31 @@ void main() {
       expect(timesAsked(est(Labels.walking, at(1), 30), at(8)), isFalse, reason: 'a walk at 01:00 belongs to yesterday');
     });
 
+    test('the times are also asked about for 4 hours after a stretch ended, across 04:00 (DECISIONS 1091)', () {
+      final walk = est(Labels.walking, at(27, 20), 30); // 03:20 to 03:50 on the 21st
+      expect(timesAsked(walk, at(27, 59)), isTrue);
+      expect(timesAsked(walk, at(28, 10)), isTrue, reason: 'the day has turned, but it ended 20 minutes ago');
+      expect(timesAsked(walk, at(31, 49, 59)), isTrue, reason: 'just under 4 hours after 03:50');
+      expect(timesAsked(walk, at(31, 50)), isFalse, reason: '4 hours exactly is not under 4 hours');
+      expect(timesAsked(walk, at(31, 51)), isFalse);
+      expect(timesAsked(walk, at(40)), isFalse);
+
+      // the split night: asleep 23:00-03:10, up for an hour, asleep again 04:20-08:00
+      final first = est(Labels.asleep, at(23), 4 * 60 + 10), second = est(Labels.asleep, at(28, 20), 220);
+      expect(timesAsked(first, at(30, 30)), isTrue, reason: 'at 06:30 it ended 3 h 20 min ago');
+      expect(timesAsked(first, at(32, 30)), isFalse, reason: 'at 08:30 it ended 5 h 20 min ago');
+      expect(timesAsked(second, at(32, 30)), isTrue);
+      expect(questionOf(first, at(30, 30), exact: true), '23:00-03:10. The headband thinks you slept. Did you?');
+      expect(questionOf(first, at(32, 30), exact: false), 'About 23:00 to 03:00. The headband thinks you slept. Did you?');
+
+      // an ordinary night that ended after 04:00 keeps its times and the link all day, as before
+      final night = est(Labels.asleep, at(23), 8 * 60); // 23:00 to 07:00
+      for (final t in [at(31, 1), at(39), at(47, 59), at(51, 59)]) {
+        expect(timesAsked(night, t), isTrue, reason: '$t');
+      }
+      expect(timesAsked(night, at(52, 1)), isFalse);
+    });
+
     test('older than 48 hours, and a short stretch older than 3 hours', () {
       final walk = est(Labels.walking, at(10), 30), doze = est(Labels.nap, at(10), 14), quarter = est(Labels.nap, at(11), 15);
       store.register([walk, doze, quarter]);

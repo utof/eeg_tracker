@@ -12,9 +12,9 @@ Seeds a made-up sleep report and a made-up walk file (no recording of anyone), s
   4. back in the app the card is gone, no second batch or notification came, and files/confirm/labels.tsv holds the
      Yes and the No.
 The stretches are seeded relative to the device's clock and the expected words follow the hour as the app's do (a
-stretch that ended before 04:00 is worded to the half hour after 04:00, DECISIONS 965 and 1090); near midnight and
-near 04:00 the device's clock is first put forward (asking_check.py `clock_for_the_check`). --at HH:MM puts it at that
-time of today, to try an hour of the day.
+stretch's times are to the half hour once its day is over and it ended 4 hours ago or more, DECISIONS 965, 1090 and
+1091); near midnight and just before 04:00 the device's clock is first put forward (asking_check.py
+`clock_for_the_check`). --at HH:MM puts it at that time of today, to try an hour of the day.
 The emulator, its adb server and the helpers are the pre-install check's (tool/precheck.py). Emulator only: run it
 inside `_local/build_slot.sh heavy`.
 """
@@ -95,8 +95,8 @@ def made_up(stage: Path, now: datetime) -> tuple[list[tuple[Path, str]], list[st
         p.write_text(json.dumps(obj))
         pairs.append((p, rel))
     slept = "you napped" if 9 <= s0.hour < 20 else "you slept"
-    # the words follow the hour of the run: a stretch that ended before 04:00, asked after 04:00, has its times to the
-    # half hour (ac.card_words; DECISIONS 965, 1090)
+    # the words follow the hour of the run (ac.card_words; DECISIONS 965, 1091): these three ended 15 to 90 minutes
+    # before the clock, so they keep their minutes at any hour, also when they ended before 04:00
     return pairs, [f"{ac.capital(ac.card_words(s0, s1, now))}. The headband thinks {slept}. Did you?",
                    f"{ac.capital(ac.card_words(w0, w1, now))}. The headband thinks you walked. Did you?",
                    f"{ac.capital(ac.card_words(v0, v1, now))}. The headband thinks you walked. Did you?"]
