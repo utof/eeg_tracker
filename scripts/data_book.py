@@ -508,7 +508,7 @@ def write_epochs(out: Path, groups: list[Group], metas: dict[str, dict], store: 
 # ---- nights.tsv -----------------------------------------------------------------------------------------------------
 
 NIGHT_COLUMNS = [
-    "night", "kind", "source", "recording", "span_ids", "span_from", "counts", "scored", "wearer", "start", "end", "sleep_start", "sleep_end",
+    "night", "kind", "source", "recording", "span_ids", "span_from", "counts", "scored", "no_sleep_found", "wearer", "start", "end", "sleep_start", "sleep_end",
     "recorded_min", "missing_min", "in_bed_min", "asleep_min", "light_min", "deep_min", "dream_min",
     "awake_in_sleep_min", "wake_ups", "periods", "efficiency_pct", "fall_asleep_min", "lights_off_from",
     "drift_detector_min", "drift_agree",
@@ -705,6 +705,7 @@ def _report_numbers(rep: Report, stages: list[str] | None, probs: list[list[int]
     cross = r.get("cross_check") if isinstance(r.get("cross_check"), dict) else {}
     out = dict(
         kind=night_kind(rep, _num(t.get("recorded_min"))), source=rep.source, scored=rep.scored,
+        no_sleep_found=r.get("no_sleep_found") is True,
         start=iso(r["data_start"]), end=iso(r["data_end"]),
         sleep_start=iso(min((p["start"] for p in periods), default=None, key=lambda s: ds.parse_time(s))),
         sleep_end=iso(max((p["end"] for p in periods), default=None, key=lambda s: ds.parse_time(s))),
@@ -906,8 +907,12 @@ def day_rows(local: Path, nights: list[dict], sessions: list[dict], hashes: Hash
         if (n.get("asleep_noisy_pct") or 0) > ds.NOISY_NIGHT_SHARE * 100:
             excluded[day].append(dict(what=n["kind"], id=n["night"], why="noisy"))
             continue
-        d = days[day]
         inputs[day].add(("night " + n["night"], n["inputs_sha256"]))
+        if n.get("no_sleep_found"):  # a stretch the app started with under 10 min asleep: counts for nothing (DECISIONS 1132)
+            days.setdefault(day, {})  # the day has a row, which says why
+            excluded[day].append(dict(what=n["kind"], id=n["night"], why="no sleep found"))
+            continue
+        d = days[day]
         d[n["kind"] + "s"] = d.get(n["kind"] + "s", 0) + 1
         for k in ("asleep_min", "light_min", "deep_min", "dream_min", "wake_ups"):
             if n.get(k) is not None:

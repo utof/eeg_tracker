@@ -463,3 +463,24 @@ def test_a_session_whose_mark_was_removed_is_in_no_table_until_it_is_put_back(lo
     assert rows == own | {("work", stamp(w0)), ("meditation", stamp(m0))}
     assert (day["work_sessions"], day["work_min"], day["practice_min"]) == ("2", "36.5", "10")
     assert "mark removed" not in day["excluded"]
+
+
+def test_a_stretch_with_no_sleep_found_is_a_row_of_nights_but_counts_for_no_day(local: Path) -> None:
+    """DECISIONS 1132 (row 987's laptop half): the phone's report says `no_sleep_found`; nights.tsv keeps the row and
+    says so, days.tsv leaves it out of the day's sleep and names it. The same report without the mark counts."""
+    path = local / "phone" / "nights" / "2026-11-16.report.json"
+    rep = json.loads(path.read_text())
+    out, _ = build(local)
+    marked = {r["night"]: r["no_sleep_found"] for r in read(out / "nights.tsv")}
+    assert set(marked.values()) == {"0", ""}, "no night is marked yet"
+    assert {r["day"]: r for r in read(out / "days.tsv")}["2026-11-16"]["naps"] == "1"
+
+    rep["no_sleep_found"] = True
+    path.write_text(json.dumps(rep))
+    out, _ = build(local)
+    night = next(r for r in read(out / "nights.tsv") if r["night"] == "2026-11-16" and r["counts"] == "1")
+    assert (night["no_sleep_found"], night["scored"], night["asleep_min"]) == ("1", "1", "32")
+    day = {r["day"]: r for r in read(out / "days.tsv")}["2026-11-16"]
+    assert day["naps"] == "" and day["asleep_min"] == "" and day["fall_asleep_min"] == ""
+    assert day["excluded"] == "nap 2026-11-16: no sleep found"
+

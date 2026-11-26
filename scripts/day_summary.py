@@ -298,6 +298,9 @@ def _nights(days: Days, local: Path) -> None:
         if r.get("scored") is not True:
             days.excluded[day].append(dict(what="night", id=night, why="unscored: under 5 minutes recorded"))
             continue
+        if r.get("no_sleep_found") is True:  # trends.dart: a stretch the app started with under 10 min asleep (DECISIONS 1132)
+            days.excluded[day].append(dict(what="night", id=night, why="no sleep found"))
+            continue
         t = r["total"]
         extras = r.get("extras") if isinstance(r.get("extras"), dict) else None
         asleep_x = extras.get("asleep") if extras and isinstance(extras.get("asleep"), dict) else None
