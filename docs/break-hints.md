@@ -93,7 +93,7 @@ and rules (AFK spans, the 04:00 day, a real break is 5 minutes away).
 ```bash
 python3 scripts/aw_focus.py --dry-run            # what the last 7 days would give; writes nothing
 python3 scripts/aw_focus.py --since 2026-11-01   # (re)compute from a day; safe to repeat
-python3 scripts/aw_focus.py --show               # sessions beside the sharp-hours ratings, per 2-hour block
+python3 scripts/aw_focus.py --show               # sessions beside the sharp-hours ratings and reaction tests, per 2-hour block
 ```
 
 Files: `_local/phone/sharp-hours/focus-YYYY-MM.jsonl` ([format](data-format.md)). Flags: `--min` (35), `--switch` (3),

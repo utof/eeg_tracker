@@ -102,6 +102,19 @@ void main() {
     expect(day.marked, startsWith('Work 11:05-12:40 · Work 11:52-13:02'));
   });
 
+  test(
+    "a work span the headband watcher started is the app's guess: it covers nothing and the Worked chip is still asked (DECISIONS 1131)",
+    () {
+      Span work(String source) => Span(id: '$id-1', kind: 'work', start: start.add(const Duration(minutes: 3)), end: end, source: source);
+      final guess = StopSheetPlan(recording: id, start: start, end: end, spans: [work('auto_start')]);
+      expect(guess.covered, 0);
+      expect(guess.done, isEmpty);
+      expect(guess.skips(questions: 0), isFalse);
+      final pressed = StopSheetPlan(recording: id, start: start, end: end, spans: [work('owner_button')]);
+      expect(pressed.done, {'working'});
+    },
+  );
+
   // The real phone, 2026-11-25: "the sheet did not show" after two Stops. Both are the rule, pinned here.
   test('Sleep started the recording and Stop ended it: Sleep covers it all, so no sheet and nothing left to answer', () {
     final rec = Directory('${files.path}/recordings')..createSync();

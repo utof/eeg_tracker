@@ -216,6 +216,48 @@ def test_view_puts_ratings_and_sessions_in_the_same_blocks(tmp_path):
     assert "Seen together, not tested" in text and "08-10" in text
 
 
+def _test_line(day: str, hh: int, times: list, **extra) -> str:
+    """A 1-minute reaction test the phone kept (docs/data-format.md): it follows the rating of `hh:15`."""
+    return json.dumps({"version": 1, "at": f"{day}T{hh:02d}:16:00+03:00", "rating_at": f"{day}T{hh:02d}:15:00+03:00",
+                       "length_s": 60, "false_starts": 0, "times_ms": times, **extra})
+
+
+def test_view_puts_reaction_tests_beside_the_ratings_and_the_sessions(tmp_path):
+    """DECISIONS 1135: the tests' medians per 2-hour block of the rating they followed, with the phone's own rules."""
+    d = tmp_path / "phone" / "sharp-hours"; d.mkdir(parents=True)
+    (d / "ratings.jsonl").write_text("\n".join([_rating("2026-11-18", 9, 4), _rating("2026-11-18", 15, 3)]) + "\n")
+    (d / "reactions.jsonl").write_text("\n".join([
+        _test_line("2026-11-18", 9, [300, 310, 320, 330, 340]),                  # median 320
+        _test_line("2026-11-18", 9, [400, 400, 400, 400, 400, 400]),            # median 400: the block's median is 360
+        _test_line("2026-11-18", 15, [250, 260, 270, 280]),                      # 4 taps: no median, not counted
+        _test_line("2026-11-18", 15, [50, 300, 300, 300, 300]),                  # a tap under 100 ms: refused whole
+        _test_line("2026-11-12", 9, [200] * 5),                                  # a day with no laptop data
+        _test_line("2026-11-18", 11, [300, 310, 320, 331, 340, 351]),           # even: 325.5 rounds to 326
+    ]) + "\nbroken")
+    af.write_days(tmp_path, records([win(TERM, at(9), 40), win(TERM, at(16), 40)], [awake(at(9), 40), awake(at(16), 40)]))
+    tests = af.read_reactions(tmp_path)
+    assert sorted(m for _, _, m in tests) == [200, 320, 326, 400]      # 4 taps and a refused line are not tests
+    t = af.block_table(af.read_ratings(tmp_path), af.read_focus(tmp_path), tests)
+    rows = {r["block"]: r for r in t["rows"]}
+    assert t["days"] == 1 and t["tests_imported"]
+    assert (rows["08-10"]["tests"], rows["08-10"]["median_ms"], rows["08-10"]["sessions"]) == (2, 360.0, 1)
+    assert (rows["10-12"]["tests"], rows["10-12"]["median_ms"]) == (1, 326)
+    assert (rows["14-16"]["tests"], rows["14-16"]["median_ms"], rows["14-16"]["ratings"]) == (0, None, 1)
+    text = "\n".join(af.show_lines(t))
+    assert "tests" in text and "360" in text and "326" in text and "Seen together, not tested" in text
+
+
+def test_view_with_tests_and_sessions_but_no_ratings_and_the_old_view_without_tests(tmp_path):
+    d = tmp_path / "phone" / "sharp-hours"; d.mkdir(parents=True)
+    (d / "reactions.jsonl").write_text(_test_line("2026-11-18", 9, [300] * 5) + "\n")
+    af.write_days(tmp_path, records([win(TERM, at(9), 40)], [awake(at(9), 40)]))
+    t = af.block_table(af.read_ratings(tmp_path), af.read_focus(tmp_path), af.read_reactions(tmp_path))
+    assert t["days"] == 1 and not t["ratings_imported"] and t["tests_imported"]
+    assert {r["block"]: r["tests"] for r in t["rows"]}["08-10"] == 1
+    none = af.block_table(af.read_ratings(tmp_path), af.read_focus(tmp_path))      # the two-argument call of before
+    assert not none["tests_imported"] and "tests" not in "\n".join(af.show_lines(none))
+
+
 def test_view_without_ratings_and_without_anything(tmp_path):
     af.write_days(tmp_path, records([win(TERM, at(9), 40)], [awake(at(9), 40)]))
     t = af.block_table(af.read_ratings(tmp_path), af.read_focus(tmp_path))

@@ -2128,9 +2128,16 @@ class NightRecorder {
   /// A span command of the screen applied (spans/activities.dart `openSpanCommand`, `closeSpanCommand`): the span it
   /// opened or closed, or null when it did nothing.
   Span? spanCommand(Map<Object?, Object?> data) {
-    final kind = data['span_kind'], id = data['id'], by = data['by'], session = data['session'];
+    final kind = data['span_kind'], id = data['id'], by = data['by'], session = data['session'], source = data['source'];
     if (data['op'] == 'open' && kind is String && kind.isNotEmpty) {
-      return openSpan(kind, session: session is String ? session : null, startedRecording: data['started_recording'] == true);
+      return openSpan(
+        kind,
+        // who marked it: the headband watcher's work session says auto_start; nothing else may be named from outside
+        // (owner_confirmed is the stop sheet's, auto_resume the recorder's own; DECISIONS 1131)
+        source: source == 'auto_start' ? 'auto_start' : 'owner_button',
+        session: session is String ? session : null,
+        startedRecording: data['started_recording'] == true,
+      );
     }
     if (data['op'] == 'close' && id is String) return closeSpan(id, by: by is String ? by : 'owner');
     if (data['op'] == 'undo_off') return undoHeadbandOff().firstOrNull;

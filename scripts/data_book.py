@@ -21,6 +21,7 @@ is in docs/data-format.md ("The data book"). It reads `_local/` and writes only 
                  tags marked "This is what I was doing"; scripts/validate_detectors.py scores the detectors against it
   spans.tsv      one row per span of every recording: what you were doing in it (scripts/spans.py)
   guesses.tsv    one row per guess of "What happened" in a recording, the numbers behind it, your answer
+  focus.tsv      one row per ActivityWatch focus session on the laptop (scripts/aw_focus.py), with its hour and block
   README.md, book.json   what is there, how it was built (versions, row counts, time)
 
 Built from the files alone, so it can always be built again (delete the folder and run this); nothing reads it back
@@ -65,7 +66,7 @@ PROB_KEYS = ("p_W", "p_N1", "p_N2", "p_N3", "p_R")
 QUALITY_WORD = {"g": "good", "d": "degraded", "m": "missing"}
 DEFAULT_LOCAL = ROOT / "_local"
 TABLES = ("nights.tsv", "sessions.tsv", "days.tsv", "epochs.tsv.gz", "labels.tsv", "truth.tsv", "spans.tsv",
-          "estimates.tsv", "guesses.tsv")
+          "focus.tsv", "estimates.tsv", "guesses.tsv")
 
 
 # ---- cells and files ------------------------------------------------------------------------------------------------
@@ -509,7 +510,7 @@ def write_epochs(out: Path, groups: list[Group], metas: dict[str, dict], store: 
 # ---- nights.tsv -----------------------------------------------------------------------------------------------------
 
 NIGHT_COLUMNS = [
-    "night", "kind", "source", "recording", "span_ids", "span_from", "counts", "scored", "wearer", "start", "end", "sleep_start", "sleep_end",
+    "night", "kind", "source", "recording", "span_ids", "span_from", "counts", "scored", "no_sleep_found", "wearer", "start", "end", "sleep_start", "sleep_end",
     "recorded_min", "missing_min", "in_bed_min", "asleep_min", "light_min", "deep_min", "dream_min",
     "awake_in_sleep_min", "wake_ups", "periods", "efficiency_pct", "fall_asleep_min", "lights_off_from",
     "drift_detector_min", "drift_agree",
@@ -706,6 +707,7 @@ def _report_numbers(rep: Report, stages: list[str] | None, probs: list[list[int]
     cross = r.get("cross_check") if isinstance(r.get("cross_check"), dict) else {}
     out = dict(
         kind=night_kind(rep, _num(t.get("recorded_min"))), source=rep.source, scored=rep.scored,
+        no_sleep_found=r.get("no_sleep_found") is True,
         start=iso(r["data_start"]), end=iso(r["data_end"]),
         sleep_start=iso(min((p["start"] for p in periods), default=None, key=lambda s: ds.parse_time(s))),
         sleep_end=iso(max((p["end"] for p in periods), default=None, key=lambda s: ds.parse_time(s))),
@@ -860,6 +862,47 @@ def span_rows(local: Path) -> list[dict]:
     return rows
 
 
+# ---- focus.tsv ------------------------------------------------------------------------------------------------------
+
+FOCUS_COLUMNS = ["focus_id", "day", "start", "hour", "block", "active_min", "app", "rule", "through", "source_file",
+                 "inputs_sha256"]
+
+
+def focus_days(local: Path, hashes: Hashes) -> Iterable[tuple[str, str, dict, list[tuple[datetime, float, str]]]]:
+    """(file, its SHA-256, the day's line, its sessions) for every day of `<local>/phone/sharp-hours/focus-*.jsonl`
+    (scripts/aw_focus.py, docs/data-format.md). A line that is not a version-1 day with a session count, and an entry
+    with no readable start or minutes, are left out; the sessions are (start, active minutes, app), oldest first."""
+    for f in sorted((local / "phone" / "sharp-hours").glob("focus-*.jsonl")):
+        rel = f.relative_to(local).as_posix()
+        sha = hashes.sha(rel) or ""
+        for j in ds._lines(f):  # noqa: SLF001
+            if not (isinstance(j, dict) and j.get("version") == 1 and isinstance(j.get("day"), str)
+                    and ds._int_in(j.get("sessions"), 0, 10_000) is not None):  # noqa: SLF001
+                continue
+            sessions = []
+            for x in j.get("list") or []:
+                start = ds.parse_time(x.get("start")) if isinstance(x, dict) else None
+                minutes = _num(x.get("min")) if isinstance(x, dict) else None
+                if start is not None and minutes is not None:
+                    sessions.append((start, minutes, x.get("app") if isinstance(x.get("app"), str) else ""))
+            yield rel, sha, j, sorted(sessions, key=lambda t: t[0])
+
+
+def focus_rows(local: Path, hashes: Hashes) -> list[dict]:
+    """One row per focus session, by start: its 04:00 day (the day's line), the hour and 2-hour block of its start on
+    its own clock, its active minutes (counted, never summed into hours: DECISIONS 510), the app that held most of it
+    (an app's name, never a window title), the rule that found it and the file it came from."""
+    rows = []
+    for rel, sha, j, sessions in focus_days(local, hashes):
+        for start, minutes, app in sessions:
+            block = start.hour // 2 * 2
+            rows.append(dict(focus_id=start.strftime("%Y-%m-%d-%H%M%S"), day=j["day"], start=iso(start), hour=start.hour,
+                             block=f"{block:02d}-{block + 2:02d}", active_min=_r(minutes), app=app, rule=j.get("rule"),
+                             through=iso(j.get("through")), source_file=rel,
+                             inputs_sha256=digest_lines([(rel, sha)])))
+    return sorted(rows, key=lambda r: (r["start"], r["focus_id"]))
+
+
 # ---- days.tsv -------------------------------------------------------------------------------------------------------
 
 DAY_COLUMNS = [
@@ -907,8 +950,12 @@ def day_rows(local: Path, nights: list[dict], sessions: list[dict], hashes: Hash
         if (n.get("asleep_noisy_pct") or 0) > ds.NOISY_NIGHT_SHARE * 100:
             excluded[day].append(dict(what=n["kind"], id=n["night"], why="noisy"))
             continue
-        d = days[day]
         inputs[day].add(("night " + n["night"], n["inputs_sha256"]))
+        if n.get("no_sleep_found"):  # a stretch the app started with under 10 min asleep: counts for nothing (DECISIONS 1132)
+            days.setdefault(day, {})  # the day has a row, which says why
+            excluded[day].append(dict(what=n["kind"], id=n["night"], why="no sleep found"))
+            continue
+        d = days[day]
         d[n["kind"] + "s"] = d.get(n["kind"] + "s", 0) + 1
         for k in ("asleep_min", "light_min", "deep_min", "dream_min", "wake_ups"):
             if n.get(k) is not None:
@@ -943,16 +990,10 @@ def day_rows(local: Path, nights: list[dict], sessions: list[dict], hashes: Hash
             days[day]["laptop_work_min"] = round(days[day].get("laptop_work_min", 0) + s["active_min"], 1)
         if s["kind"] in ("work", "laptop_work") and s.get("meeting_min"):
             days[day]["meeting_min"] = round(days[day].get("meeting_min", 0) + s["meeting_min"], 1)
-    for f in sorted((local / "phone" / "sharp-hours").glob("focus-*.jsonl")):
-        sha = hashes.sha(f.relative_to(local).as_posix()) or ""
-        for j in ds._lines(f):  # noqa: SLF001
-            if not (isinstance(j, dict) and j.get("version") == 1 and isinstance(j.get("day"), str)
-                    and ds._int_in(j.get("sessions"), 0, 10_000) is not None):  # noqa: SLF001
-                continue
-            d = days[j["day"]]
-            d.update(focus_sessions=j["sessions"], focus_rule=j.get("rule"), focus_min=sum(
-                _num(x.get("min")) or 0 for x in j.get("list") or [] if isinstance(x, dict)))
-            inputs[j["day"]].add((f.relative_to(local).as_posix(), sha))
+    for rel, sha, j, sessions in focus_days(local, hashes):
+        days[j["day"]].update(focus_sessions=j["sessions"], focus_rule=j.get("rule"),
+                              focus_min=sum(minutes for _, minutes, _ in sessions))
+        inputs[j["day"]].add((rel, sha))
     for m in ds.read_mornings(local):
         rel = m["_file"].relative_to(local).as_posix()
         inputs[ds.day_key(m["_start"])].add((rel, hashes.sha(rel) or ""))
@@ -1325,6 +1366,7 @@ Tidy tables of everything eeg_tracker measured on this laptop, made by `scripts/
 | `labels.tsv` | label from the app's own stores (append-only: rows are only ever added) |
 | `truth.tsv` | truth label: what really happened, typed (`active` = 1: not corrected by a later row; `present` = 0: it did not happen) |
 | `spans.tsv` | span: what you were doing in a recording (Record first): sleep, nap, work, meditate, ... |
+| `focus.tsv` | ActivityWatch focus session on the laptop (35 minutes or more of related work), with its hour and 2-hour block |
 | `estimates.tsv` | what a detector thought happened and what you answered when the app asked (not a label until Yes or No) |
 | `guesses.tsv` | guess of "What happened" in a recording: what, how sure, the numbers behind it, your answer where asked |
 | `validation.tsv`, `validation.md` | detector against truth label, and its summary (`scripts/validate_detectors.py`) |
@@ -1382,6 +1424,8 @@ def build(local: Path, out: Path, now: datetime, full: bool = False, say: Callab
     n_labels, added, removed = update_labels(out / "labels.tsv", local, now)
     sprows = span_rows(local)
     _write(out / "spans.tsv", tsv(SPAN_COLUMNS, sprows).encode())
+    fprows = focus_rows(local, hashes)
+    _write(out / "focus.tsv", tsv(FOCUS_COLUMNS, fprows).encode())
     trows, rejected, from_where = truth.build(local)
     truth.write_table(out / "truth.tsv", trows)
     erows = estimate_rows(local)
@@ -1395,7 +1439,8 @@ def build(local: Path, out: Path, now: datetime, full: bool = False, say: Callab
                 models=sorted({r["model"] for r in nrows if r.get("model")}),
                 rows={"nights.tsv": len(nrows), "sessions.tsv": len(srows), "days.tsv": len(drows),
                       "epochs.tsv.gz": n_epochs, "labels.tsv": n_labels, "truth.tsv": len(trows),
-                      "spans.tsv": len(sprows), "estimates.tsv": len(erows), "guesses.tsv": len(grows)},
+                      "spans.tsv": len(sprows), "focus.tsv": len(fprows), "estimates.tsv": len(erows),
+                      "guesses.tsv": len(grows)},
                 recordings=len(groups), worked_out=worked, labels_added=added, labels_removed=removed,
                 truth_from=from_where, truth_rejected=[r.text() for r in rejected],
                 epoch_columns=len(ep_columns), problems=problems)

@@ -91,11 +91,19 @@ class BrainBitFinder implements HeadbandFinder, WaitingFinder {
   /// [activity]: the session behind this door is an activity of the recording (a span kind: `work`, `meditate`, ...;
   /// spans/activities.dart, DECISIONS 980): asking for the headband opens its span on the running recording, or
   /// starts the recorder first, and the session reads the recording's stream; letting the headband go closes the span.
-  BrainBitFinder({Future<HeadbandFinder> Function()? pick, bool recorder = false, bool own = false, this.activity})
-    : _pickWith = pick ?? (() => _default(recorder: recorder)),
-      _shared = pick == null && !recorder && !own ? HeadbandConnection.shared : null;
+  /// [activitySource]: who marked that span, `owner_button` or `auto_start` (the headband watcher's work session,
+  /// DECISIONS 1131).
+  BrainBitFinder({
+    Future<HeadbandFinder> Function()? pick,
+    bool recorder = false,
+    bool own = false,
+    this.activity,
+    this.activitySource = 'owner_button',
+  }) : _pickWith = pick ?? (() => _default(recorder: recorder)),
+       _shared = pick == null && !recorder && !own ? HeadbandConnection.shared : null;
 
   final String? activity;
+  final String activitySource;
 
   /// The activity this door started (null: none runs through it).
   ActivityRun? run;
@@ -158,7 +166,7 @@ class BrainBitFinder implements HeadbandFinder, WaitingFinder {
     if (kind == null || acts == null || _shared == null) return (await _pick()).find(scanFor, onFound: onFound);
     // the activity's sessions read BrainBit's O1 O2 T3 T4: refused for the DIY board before anything is started
     if (await diyChosen()) throw const NotForDiyBoard();
-    final started = run = await acts.begin(kind);
+    final started = run = await acts.begin(kind, source: activitySource);
     Headband? band;
     try {
       band = await (await _pick()).find(scanFor, onFound: onFound);

@@ -38,6 +38,7 @@ void main() {
       'record-first',
       'what-happened',
       'auto-lights-off',
+      'focus-sessions',
     ]) {
       final md = await rootBundle.loadString('assets/evidence/$name.md');
       expect(md, startsWith('# '), reason: name);

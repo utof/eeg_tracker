@@ -185,6 +185,46 @@ void main() {
     await byHand.onDestroy(DateTime.now(), false);
   });
 
+  test(
+    "the first span of a recording an activity started says who marked it: the watcher's guess is auto_start (DECISIONS 1131)",
+    () async {
+      // startRecorderService saves the kind of the first span and who marked it; the service opens the span with them
+      Future<List<(String, String)>> firstSpans() async {
+        final h = handler(NoBand());
+        await h.onStart(DateTime.now(), TaskStarter.developer);
+        List<Map<String, Object?>> lines = (await loadNight()).spans;
+        for (var i = 0; i < 100 && lines.isEmpty; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          lines = (await loadNight()).spans;
+        }
+        await h.onDestroy(DateTime.now(), false);
+        return [for (final l in lines) (l['kind'] as String, l['source'] as String)];
+      }
+
+      // the plugin's channel says no service runs; the start itself fails here (no engine), after the keys are saved
+      messenger.setMockMethodCallHandler(
+        const MethodChannel('flutter_foreground_task/methods'),
+        (call) async => call.method == 'isRunningService' ? false : null,
+      );
+      addTearDown(() => messenger.setMockMethodCallHandler(const MethodChannel('flutter_foreground_task/methods'), (_) async => null));
+      Future<void> start({String? source}) => startRecorderService(
+        '${files.path}/recordings',
+        sleep: false,
+        span: 'work',
+        spanSource: source ?? 'owner_button',
+      ).then((_) {}, onError: (Object _) {});
+
+      await start(source: 'auto_start');
+      expect(await firstSpans(), [('work', 'auto_start')]);
+
+      // pressed by hand: the source is yours again, nothing is left over from the earlier start
+      await FlutterForegroundTask.saveData(key: 'night', value: '');
+      await start();
+      await FlutterForegroundTask.saveData(key: 'night', value: '');
+      expect(await firstSpans(), [('work', 'owner_button')]);
+    },
+  );
+
   test('a wedged SDK: the native restart ends the process; Dart exits only if it is still alive 2 s later', () async {
     // PhoneChannel.kt arms the restart alarm and answers at once; its killProcess comes 300 ms later.
     final exits = <int>[];

@@ -177,6 +177,27 @@ def test_what_is_left_out_and_why(tmp_path):
     assert days["2026-11-23"]["quality"] == dict(night_noisy_share=0.6)
 
 
+def test_a_stretch_with_no_sleep_found_counts_for_nothing_and_is_named(tmp_path):
+    """DECISIONS 1132 (row 987's laptop half): the phone marks a sleep stretch the app started by itself with under
+    10 minutes asleep `no_sleep_found` and Trends skips it (trends.dart); the laptop's day numbers do the same, and the
+    day says why, so a missing night is not read as a night of no sleep. A stretch you pressed is never marked."""
+    loc = tmp_path / "_local"
+    nap = dict(extras=dict(asleep=dict(min=4.0, degraded_min=0.0, missing_min=0.0, jaw_bursts=0, jaw_per_hour=0.0)),
+               drift=dict(source="night start", model_onset_min=5.0))
+    r = _report("2026-11-24", "2026-11-24T14:00:00+03:00", "2026-11-24T14:40:00+03:00", 4.0, 4.0, 0.0, 0.0, 0, 36.0, **nap)
+    r["no_sleep_found"] = True
+    _w(loc / "phone/nights/2026-11-24.report.json", r)
+    d = days_by_key(loc)["2026-11-24"]
+    assert d["numbers"] == {} and d["counts"] == {}
+    assert d["excluded"] == [dict(what="night", id="2026-11-24", why="no sleep found")]
+    assert d["quality"] == {}  # its noise is not the day's noise
+
+    r["no_sleep_found"] = False  # the same stretch, not marked: it counts like any other
+    _w(loc / "phone/nights/2026-11-24.report.json", r)
+    d = days_by_key(loc)["2026-11-24"]
+    assert d["numbers"]["asleep"] == 4.0 and d["counts"] == dict(nights=1) and d["excluded"] == []
+
+
 def test_the_day_still_going_on_is_not_complete(tmp_path):
     loc = make_local(tmp_path)
     days = {d["day"]: d for d in ds.day_events(loc, datetime.fromisoformat("2026-11-21T03:00:00+03:00"))}

@@ -298,6 +298,9 @@ def _nights(days: Days, local: Path) -> None:
         if r.get("scored") is not True:
             days.excluded[day].append(dict(what="night", id=night, why="unscored: under 5 minutes recorded"))
             continue
+        if r.get("no_sleep_found") is True:  # trends.dart: a stretch the app started with under 10 min asleep (DECISIONS 1132)
+            days.excluded[day].append(dict(what="night", id=night, why="no sleep found"))
+            continue
         t = r["total"]
         extras = r.get("extras") if isinstance(r.get("extras"), dict) else None
         asleep_x = extras.get("asleep") if extras and isinstance(extras.get("asleep"), dict) else None
@@ -474,16 +477,11 @@ def _median(v: list[float]) -> float:
     return float(s[n // 2]) if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
 
 
-def _sharp(days: Days, local: Path) -> None:
-    folder = local / "phone" / "sharp-hours"
-    by_day: dict[str, list[int]] = defaultdict(list)
-    for j in _lines(folder / "ratings.jsonl"):
-        if not (isinstance(j, dict) and j.get("version") == 1 and j.get("scale") == "1-5"):
-            continue
-        at, v = parse_time(j.get("at")), _int_in(j.get("sharp"), 1, 5)
-        if at and v is not None:
-            by_day[day_key(at)].append(v)
-    rt: dict[str, list[float]] = defaultdict(list)
+def reaction_tests(folder: Path) -> list[tuple[datetime, int]]:
+    """(the time of the rating it followed, the median of its taps in ms) of each 1-minute reaction test in the phone's
+    `sharp-hours/` folder that the phone's own reader accepts and that has the 5 taps a median needs (the one rule for
+    the day numbers here and for scripts/aw_focus.py --show, DECISIONS 1135)."""
+    out: list[tuple[datetime, int]] = []
     for j in _lines(folder / "reactions.jsonl"):
         if not (isinstance(j, dict) and j.get("version") == 1):
             continue
@@ -495,7 +493,22 @@ def _sharp(days: Days, local: Path) -> None:
         if len(times) >= 5:  # the test's own rule; sharp/store.dart `_medianInt` rounds an even middle
             s = sorted(times)
             n = len(s)
-            rt[day_key(at)].append(s[n // 2] if n % 2 else round((s[n // 2 - 1] + s[n // 2]) / 2 + 1e-9))
+            out.append((at, s[n // 2] if n % 2 else round((s[n // 2 - 1] + s[n // 2]) / 2 + 1e-9)))
+    return out
+
+
+def _sharp(days: Days, local: Path) -> None:
+    folder = local / "phone" / "sharp-hours"
+    by_day: dict[str, list[int]] = defaultdict(list)
+    for j in _lines(folder / "ratings.jsonl"):
+        if not (isinstance(j, dict) and j.get("version") == 1 and j.get("scale") == "1-5"):
+            continue
+        at, v = parse_time(j.get("at")), _int_in(j.get("sharp"), 1, 5)
+        if at and v is not None:
+            by_day[day_key(at)].append(v)
+    rt: dict[str, list[float]] = defaultdict(list)
+    for at, median in reaction_tests(folder):
+        rt[day_key(at)].append(median)
     for day, v in by_day.items():
         days.numbers[day]["sharp"] = sum(v) / len(v)
         days.counts[day]["sharp_ratings"] = len(v)

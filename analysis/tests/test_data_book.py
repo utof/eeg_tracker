@@ -463,3 +463,59 @@ def test_a_session_whose_mark_was_removed_is_in_no_table_until_it_is_put_back(lo
     assert rows == own | {("work", stamp(w0)), ("meditation", stamp(m0))}
     assert (day["work_sessions"], day["work_min"], day["practice_min"]) == ("2", "36.5", "10")
     assert "mark removed" not in day["excluded"]
+
+
+def test_a_stretch_with_no_sleep_found_is_a_row_of_nights_but_counts_for_no_day(local: Path) -> None:
+    """DECISIONS 1132 (row 987's laptop half): the phone's report says `no_sleep_found`; nights.tsv keeps the row and
+    says so, days.tsv leaves it out of the day's sleep and names it. The same report without the mark counts."""
+    path = local / "phone" / "nights" / "2026-11-16.report.json"
+    rep = json.loads(path.read_text())
+    out, _ = build(local)
+    marked = {r["night"]: r["no_sleep_found"] for r in read(out / "nights.tsv")}
+    assert set(marked.values()) == {"0", ""}, "no night is marked yet"
+    assert {r["day"]: r for r in read(out / "days.tsv")}["2026-11-16"]["naps"] == "1"
+
+    rep["no_sleep_found"] = True
+    path.write_text(json.dumps(rep))
+    out, _ = build(local)
+    night = next(r for r in read(out / "nights.tsv") if r["night"] == "2026-11-16" and r["counts"] == "1")
+    assert (night["no_sleep_found"], night["scored"], night["asleep_min"]) == ("1", "1", "32")
+    day = {r["day"]: r for r in read(out / "days.tsv")}["2026-11-16"]
+    assert day["naps"] == "" and day["asleep_min"] == "" and day["fall_asleep_min"] == ""
+    assert day["excluded"] == "nap 2026-11-16: no sleep found"
+
+
+def test_focus_sessions_are_one_row_each_with_their_hour_and_block(local: Path) -> None:
+    """DECISIONS 1134: focus.tsv holds the laptop's ActivityWatch focus sessions (scripts/aw_focus.py) one to a row, so
+    they can be binned by hour of the day beside the ratings; no window titles, only the app's name; the day is the
+    04:00 day of the line, the hour and block those of the session's own start."""
+    f = local / "phone" / "sharp-hours" / "focus-2026-11.jsonl"
+    lines = [
+        f.read_text().rstrip("\n"),  # the fixture's day: two sessions at 10:00 with no app and no 'through'
+        json.dumps(dict(
+            version=1, day="2026-11-18", sessions=3, blocks={"08-10": 1, "22-24": 1, "00-02": 1},
+            list=[dict(start="2026-11-18T09:05:00+03:00", min=52, app="ghostty"),
+                  dict(start="2026-11-18T23:30:00+03:00", min=40, app="Code"),
+                  dict(start="2026-11-19T01:40:00+03:00", min=36, app="Code"),  # after midnight: still the 18th's day
+                  "not a session", dict(start="soon", min=40), dict(start="2026-11-18T12:00:00+03:00", min="long")],
+            through="2026-11-19T03:00:00+03:00", rule="focus-v1 min=35 switch=3")),
+        json.dumps(dict(version=1, day="2026-11-19", sessions=0, blocks={}, list=[], rule="focus-v1 min=35 switch=3")),
+        '{"version":1,"day":"2026-11-20","sessions":1,"list":[{"start":"2026-1',  # cut off by a crash
+    ]
+    f.write_text("\n".join(lines))
+    out, _ = build(local)
+    rows = read(out / "focus.tsv")
+    assert [(r["day"], r["hour"], r["block"], r["active_min"], r["app"]) for r in rows] == [
+        ("2026-11-17", "10", "10-12", "40", ""), ("2026-11-17", "10", "10-12", "45", ""),
+        ("2026-11-18", "9", "08-10", "52", "ghostty"), ("2026-11-18", "23", "22-24", "40", "Code"),
+        ("2026-11-18", "1", "00-02", "36", "Code")]
+    first = rows[2]
+    assert first["start"] == "2026-11-18T09:05:00+03:00" and first["focus_id"] == "2026-11-18-090500"
+    assert first["rule"] == "focus-v1 min=35 switch=3" and first["through"] == "2026-11-19T03:00:00+03:00"
+    assert first["source_file"] == "phone/sharp-hours/focus-2026-11.jsonl" and len(first["inputs_sha256"]) == 64
+    assert len({r["focus_id"] for r in rows if r["day"] == "2026-11-18"}) == 3
+    assert book(out)["rows"]["focus.tsv"] == 5 and "focus.tsv" in (out / "README.md").read_text()
+    days = {r["day"]: r for r in read(out / "days.tsv")}
+    assert (days["2026-11-18"]["focus_sessions"], days["2026-11-18"]["focus_min"]) == ("3", "128")  # the line's own count
+    assert (days["2026-11-19"]["focus_sessions"], days["2026-11-19"]["focus_min"]) == ("0", "0")  # a real zero, no rows
+

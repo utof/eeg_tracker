@@ -27,3 +27,8 @@ class QuietWorkSound implements WorkSound {
   @override
   Future<void> stop() => inner.stop();
 }
+
+/// Who marked the work span of a session on the recording: the headband watcher's start is the app's guess
+/// (`auto_start`, the stop sheet still asks and no truth row is made from it), your own start is `owner_button`
+/// (DECISIONS 1131).
+String workSpanSource(AutoWorkStart? auto) => auto == null ? 'owner_button' : 'auto_start';

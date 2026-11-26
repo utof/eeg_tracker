@@ -353,7 +353,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     // an activity pressed while nothing records starts the recorder as this tab does (permissions, the share
     // server's hand-over, the lend of a live connection); its "Stop everything" is this tab's Stop
     Activities.shared
-      ?..startRecording = ((kind) => _start(sleep: false, span: kind, quiet: true))
+      ?..startRecording = ((kind, {source = 'owner_button'}) => _start(sleep: false, span: kind, spanSource: source, quiet: true))
       ..stopRecording = _stopNow;
     // a Yes to "Did you sleep 15:59-17:49?", wherever it is answered, makes that stretch a sleep span with a report
     // (with the times you set, when you set them); one that cannot be written yet waits for [_sweepYeses]
@@ -847,7 +847,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
 
   /// Starts the recorder: with Sleep, alone (Record), or with [span] as its first span (an activity pressed while
   /// nothing recorded, DECISIONS 884). Null when it started, else why not (already said on screen unless [quiet]).
-  Future<String?> _start({bool sleep = true, String? span, bool quiet = false}) async {
+  Future<String?> _start({bool sleep = true, String? span, String spanSource = 'owner_button', bool quiet = false}) async {
     setState(() => _busy = true);
     _gate.begin();
     String? no(String why) {
@@ -882,7 +882,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       // the smart alarm belongs to Sleep; Record alone sets none
       final plan = sleep ? await _setAlarmClock(dir) : null;
       await _share.beforeNight(); // the recorder serves during the night: the app lets go of the port
-      final result = await startRecorderService(dir, alarm: plan, sleep: sleep, span: span);
+      final result = await startRecorderService(dir, alarm: plan, sleep: sleep, span: span, spanSource: spanSource);
       _status = null;
       _statusAtMs = null;
       return result is ServiceRequestFailure ? no('The recorder did not start: ${result.error}') : null;

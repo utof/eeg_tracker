@@ -297,33 +297,58 @@ def read_focus(dest: Path) -> dict[str, dict]:
 BLOCKS = [f"{h:02d}-{h + 2:02d}" for h in range(0, 24, 2)]
 
 
-def block_table(ratings: list[tuple[date, str, float]], focus: dict[str, dict]) -> dict:
-    """Per 2-hour block: ratings (count, mean) and focus sessions (total, per laptop day), over the days that have
-    laptop data; with ratings imported, over the days that have both."""
+def read_reactions(dest: Path) -> list[tuple[date, str, float]]:
+    """(day, 2-hour block, median ms) of each 1-minute reaction test, by the local time of the rating it followed. The
+    phone's own rules (a refused line, the 5 taps a median needs) are scripts/day_summary.py `reaction_tests`, the one
+    reading the day numbers use too."""
+    import day_summary   # here and not at the top: the tray imports this file, and day_summary reads more of the repo
+
+    out = []
+    for at, median in day_summary.reaction_tests(dest / "phone" / "sharp-hours"):
+        out.append((bh.day_key(at), block_of(at, at.tzinfo), float(median)))
+    return out
+
+
+def _middle(values: list[float]) -> float:
+    s = sorted(values); n = len(s)
+    return float(s[n // 2]) if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+
+def block_table(ratings: list[tuple[date, str, float]], focus: dict[str, dict],
+                tests: list[tuple[date, str, float]] | tuple = ()) -> dict:
+    """Per 2-hour block: ratings (count, mean), reaction tests (count, median of their medians) and focus sessions
+    (total, per laptop day), over the days that have laptop data; with ratings or tests imported, over the days that
+    have both a phone measure and laptop data."""
     days = set(focus)
-    if ratings:
-        days &= {d.isoformat() for d, _, _ in ratings}
+    if ratings or tests:
+        days &= {d.isoformat() for d, _, _ in ratings} | {d.isoformat() for d, _, _ in tests}
     rows = []
     for b in BLOCKS:
         vals = [v for d, bb, v in ratings if bb == b and d.isoformat() in days]
+        meds = [v for d, bb, v in tests if bb == b and d.isoformat() in days]
         n = sum(focus[d]["blocks"].get(b, 0) for d in days)
         rows.append(dict(block=b, ratings=len(vals), mean=round(sum(vals) / len(vals), 2) if vals else None,
+                         tests=len(meds), median_ms=round(_middle(meds), 1) if meds else None,
                          sessions=n, per_day=round(n / len(days), 2) if days else None))
-    return dict(days=len(days), ratings_imported=bool(ratings), rows=rows)
+    return dict(days=len(days), ratings_imported=bool(ratings), tests_imported=bool(tests), rows=rows)
 
 
 def show_lines(t: dict) -> list[str]:
+    imported = t["ratings_imported"] or t.get("tests_imported")
     if not t["days"]:
-        return ["No days with laptop focus data" + (" that also have ratings." if t["ratings_imported"] else
+        return ["No days with laptop focus data" + (" that also have ratings or reaction tests." if imported else
                 " yet: run aw_focus.py first.")]
-    head = ("over the %d days with both ratings and laptop data" if t["ratings_imported"] else
+    head = ("over the %d days with a rating or a test and laptop data" if imported else
             "over the %d days with laptop data (no sharp-hours ratings imported yet)") % t["days"]
+    tests = t.get("tests_imported")
     lines = [f"Focus sessions (35+ min of related work, counted, never summed as hours) {head}",
-             "block  | ratings  mean | focus sessions  per day", "-------+---------------+----------------------"]
+             "block  | ratings  mean " + ("| tests  median ms " if tests else "") + "| focus sessions  per day",
+             "-------+---------------" + ("+-----------------" if tests else "") + "+----------------------"]
     for r in t["rows"]:
-        if r["ratings"] or r["sessions"]:
+        if r["ratings"] or r["sessions"] or r.get("tests"):
             m = "-" if r["mean"] is None else f"{r['mean']:.2f}"
-            lines.append(f" {r['block']} | {r['ratings']:>7}  {m:>4} | {r['sessions']:>14}  {r['per_day']:>7.2f}")
+            rt = "" if not tests else "| %5d  %9s " % (r["tests"], "-" if r["median_ms"] is None else f"{r['median_ms']:.0f}")
+            lines.append(f" {r['block']} | {r['ratings']:>7}  {m:>4} {rt}| {r['sessions']:>14}  {r['per_day']:>7.2f}")
     return lines + ["Seen together, not tested: a block with more sessions is not a sharper block."]
 
 
@@ -355,7 +380,7 @@ def main(argv: list[str] | None = None, out: Callable[[str], object] = print, no
     ap.add_argument("--json", action="store_true", help="with --show: JSON instead of text")
     a = ap.parse_args(argv)
     if a.show:
-        t = block_table(read_ratings(a.dest), read_focus(a.dest))
+        t = block_table(read_ratings(a.dest), read_focus(a.dest), read_reactions(a.dest))
         out(json.dumps(t) if a.json else "\n".join(show_lines(t)))
         return 0
     if a.url:
