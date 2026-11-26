@@ -1940,6 +1940,9 @@ After 10 minutes without the headband it stops asking every minute and waits che
 The 10, 15, 5 and 2 minutes are planning values (one constant each in `lib/headband/reconnect_ladder.dart`); nobody
 has measured them on the phone yet.
 
+Tried once on the owner's phone (2026-11-26, DECISIONS 1092): locked and on the charger, the waiting connect brought
+the headband back after 28 minutes away, within seconds of it being switched on. Not tried yet: a phone on battery.
+
 ## Archive (every recording, its timeline and tags)
 
 **More** → **Open the archive** lists everything the phone keeps, newest first, under each day (a day runs from 04:00
