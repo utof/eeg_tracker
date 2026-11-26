@@ -25,8 +25,11 @@ recording of anyone is needed. It checks:
   W3. Work pressed with nothing recording (after 5): the recorder starts, the work span says it started the
      recording; Stop work asks, "Stop everything" ends the recording.
   L1. (review finding 6) Signal, then Sleep: the night starts on the Signal tab's live connection (lent by the screen's
-     engine). The app is then swiped from Recents: the recorder must notice that the lender is gone (its log says
-     so, no stream restart is tried) and have data again within 30 s; the sleep span stays open.
+     engine). The app is then swiped from Recents (tool/recents_swipe.py: the card is found on the screen, swiped
+     with quick flings, a new Recents session after two misses, Android's own task removal as the last try; a task
+     that could not be taken out at all FAILs with "could not swipe (check plumbing)" and the two minutes of watching
+     are skipped: the app was never tested): the recorder must notice that the lender is gone (its log says so, no
+     stream restart is tried) and have data again within 30 s; the sleep span stays open.
   L2. The app's whole process is then ended (kill -9, as Android does under memory pressure): Android must start the
      recorder again and the same recording must get data again within 150 s.
   L3. The app is opened again: it shows the running recording (Stop is offered, not Record), and "Stop everything"
@@ -57,7 +60,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import emu  # noqa: E402
 import precheck as pc  # noqa: E402
+import recents_swipe  # noqa: E402
 
+APP_LABEL = "EEG Tracker"  # what Recents calls the app's card
 LENT_BACK_S = 30  # L1: data again this soon after the swipe (it was 52-59 s with three stream restarts)
 REC = f"{pc.FILES}/recordings"
 SPANS = f"{pc.FILES}/spans"
@@ -326,29 +331,32 @@ def growth(rec: str, limit: float, every: float = 3) -> tuple[float | None, floa
     return back, max(longest, 0.0), lines
 
 
-def swipe_away() -> tuple[bool, str]:
-    """Takes the app's task out of Recents, as the owner's swipe does. True when its activity is gone."""
-    def task() -> str:
-        for line in pc.sh("am stack list 2>/dev/null", check=False).splitlines():
-            m = re.search(r"taskId=(\d+): " + pc.PKG.replace(".", r"\."), line)
-            if m:
-                return m.group(1)
-        return ""
+class AdbDevice:
+    """The emulator for recents_swipe: our adb server and serial, a hang is only a short answer."""
 
-    tid = task()
-    w, h = emu.screen_size()
-    pc.sh("input keyevent KEYCODE_APP_SWITCH", check=False)
-    time.sleep(3)
-    pc.sh(f"input swipe {w // 2} {h // 2} {w // 2} {h // 12} 200", check=False)
-    time.sleep(3)
-    how = "the Recents swipe"
-    if task():
-        # the gesture missed the card: Android's own removal of the task (what the swipe calls)
-        pc.sh(f"am stack remove {tid}", check=False)
-        time.sleep(3)
-        how = f"am stack remove {tid}"
-    pc.sh("input keyevent KEYCODE_HOME", check=False)
-    return not task(), how
+    def shell(self, command: str) -> str:
+        return pc.quiet(command)
+
+    def dump(self) -> str:
+        try:
+            return emu.adb("exec-out", "uiautomator", "dump", "/dev/tty", timeout=40).decode("utf-8", "replace")
+        except Exception:  # the screen is only evidence
+            return ""
+
+    def size(self) -> tuple[int, int]:
+        return emu.screen_size()
+
+    def sleep(self, seconds: float) -> None:
+        time.sleep(seconds)
+
+
+def swipe_away() -> recents_swipe.Swipe:
+    """Takes the app's task out of Recents, as the owner's swipe does (recents_swipe: the card is found on the screen,
+    swiped with up to five gestures, and only then removed with Android's own call). Keeps the screen it aimed at."""
+    swipe = recents_swipe.swipe_away(AdbDevice(), pc.PKG, APP_LABEL, pc.ACTIVITY)
+    if pc.OUT is not None and swipe.dump:
+        (pc.OUT / "l1-recents.xml").write_text(swipe.dump)
+    return swipe
 
 
 def lent_night() -> list[pc.Result]:
@@ -385,8 +393,10 @@ def lent_night() -> list[pc.Result]:
     time.sleep(20)
     a = sum(rec_sets(rec).values())
     pid = pc.app_pid()
-    gone, how = swipe_away()
-    back, pause, lines = growth(rec, 120)
+    swipe = swipe_away()
+    gone, how = swipe.gone, swipe.how
+    # a swipe that could not be made says nothing of the app: no two minutes of watching for it
+    back, pause, lines = growth(rec, 120) if gone else (None, 0.0, [])
     logs = "".join(cat(f[: -len(".f32")] + ".log") for f in rec_sets(rec))
     span = next((x for x in spans(rec) if x.get("kind") == "sleep"), {})
     said = [l for l in logs.splitlines() if "no data" in l or "reconnect" in l or "connected " in l or "gap" in l or "lost" in l
@@ -394,6 +404,7 @@ def lent_night() -> list[pc.Result]:
     knew = "the screen that lent the connection is gone" in logs
     restarts = logs.count("restarting stream")
     details = [f"recording {rec}; lent: {lent}; process {pid} before, {pc.app_pid() or 'none'} after; the task left Recents: {gone} ({how})",
+               *("  swipe: " + n for n in swipe.notes),
                f"bytes before the swipe {a}, at the end {sum(rec_sets(rec).values())}; longest pause {pause:.0f} s", *lines,
                f"the recorder knew the lender was gone: {knew}; stream restarts tried: {restarts}",
                f"file sets: {json.dumps(rec_sets(rec))}", f"sleep span: {json.dumps(span)}", *("  log: " + l for l in said[-12:])]
@@ -404,6 +415,10 @@ def lent_night() -> list[pc.Result]:
     words = ("the recording never paused" if back == 0.0 else
              f"the recording paused {pause:.0f} s and went on {back:.0f} s after the swipe" if back is not None else
              "the recording did not come back within 120 s of the swipe")
+    if not gone:
+        words = how  # "could not swipe (check plumbing): ..."
+    elif how != "the Recents swipe":
+        words += f"; the task left by: {how}"
     out = [pc.Result(n1, "PASS" if ok else "FAIL", words if lent and gone else f"lent {lent}, swiped {gone}; {words}", details)]
 
     # L2. the whole process ended
