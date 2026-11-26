@@ -7,14 +7,49 @@ The checks expected the minute wording at every hour and were red between 04:00 
 checks' own helpers."""
 from __future__ import annotations
 
+import importlib.util
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import ModuleType
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "app" / "tool"))
-import asking_check as ac  # noqa: E402
-import confirm_check as cc  # noqa: E402
+TOOL = ROOT / "app" / "tool"
+
+
+def _tool(name: str) -> ModuleType:
+    """A check of app/tool under a name of its own: `asking_check` is also the monthly self-check of scripts/, which
+    another test file imports under that name."""
+    spec = importlib.util.spec_from_file_location(f"tool_{name}", TOOL / f"{name}.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    held = {k: sys.modules.get(k) for k in ("asking_check", "confirm_check")}
+    sys.path.insert(0, str(TOOL))
+    try:
+        for k in held:  # the two checks import each other by their plain names
+            sys.modules.pop(k, None)
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(TOOL))
+        for k, v in held.items():
+            sys.modules.pop(k, None)
+            if v is not None:
+                sys.modules[k] = v
+    return module
+
+
+ac = _tool("asking_check")
+cc = _tool("confirm_check")
+
+
+@pytest.fixture(autouse=True)
+def _the_tools_own_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    """confirm_check.py imports asking_check when it seeds: that must be the tool's, not the one of scripts/."""
+    monkeypatch.setitem(sys.modules, "asking_check", ac)
+    monkeypatch.setitem(sys.modules, "confirm_check", cc)
+
 
 MSK = timezone(timedelta(hours=3))
 
