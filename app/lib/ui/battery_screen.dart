@@ -230,6 +230,10 @@ class _BatteryScreenState extends State<BatteryScreen> {
 
   List<Widget> _headband(BuildContext context, BatteryInputs i) {
     final out = <Widget>[const SectionHeading('The headband')];
+    if (i.band.percent != null) {
+      // the card's number, by the one battery rule (DECISIONS 946)
+      out.add(RecordRow(label: 'Now', value: i.band.words, note: [bandNowWords(i.band), ?i.band.note].join(' · ')));
+    }
     if (i.headband.isEmpty && i.contact.isEmpty && i.link.connects == 0) {
       out.add(const MutedLine('No recording with the headband in the last 14 days.', top: 0));
       return out;
@@ -238,7 +242,7 @@ class _BatteryScreenState extends State<BatteryScreen> {
       out.add(RecordRow(label: _when(run.start), value: run.perHour == null ? '—' : '${run.perHour!.toStringAsFixed(1)} %/h', note: headbandWords(run)));
     }
     if (i.headband.isNotEmpty) {
-      out.add(const MutedLine('Its gauge sticks at 0-2 % and 100 %, and sometimes at one value for hours: those readings are left out.'));
+      out.add(const MutedLine('Its gauge sticks at 0-2 % and 100 %, and sometimes at one value for an hour or more: those readings are left out.'));
     }
     final l = i.link;
     if (l.connects > 0 || l.drops > 0) {

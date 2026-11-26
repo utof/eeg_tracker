@@ -15,6 +15,7 @@
 // 5. The headband's own battery from the night logs, without the gauge's stuck values (headband_battery below).
 import 'dart:math' as math;
 
+import '../headband/battery_estimate.dart';
 import 'activity.dart' show featureLabel;
 
 /// A watched stretch is at most this long; a longer one is "app closed".
@@ -396,11 +397,17 @@ String sentences(List<String> parts) =>
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The headband's battery (DECISIONS 40, 716): the gauge reads whole percent and sticks at 0-2 % and 100 % while
-// streaming (scripts/battery.py), and on 2026-11-19 it held 6 % for nine hours: a value that does not move for 3 hours
-// of streaming is stuck too (rated drain about 10 % an hour).
+// streaming (scripts/battery.py), and on 2026-11-19 it held 6 % for nine hours: a value that does not move for an hour
+// is stuck too. Which values and how long: the one battery rule (headband/battery_estimate.dart `BandBatteryRule`).
 
-const Set<int> stuckLevels = {0, 1, 2, 100};
-const Duration flatStuck = Duration(hours: 3);
+/// The line under the Battery page's "Now" row: the hours the card's estimate stands for, by the one rule.
+String bandNowWords(BandBattery b) {
+  final h = b.hoursLeft;
+  final rate = BandBatteryRule.drainPctPerHour;
+  final r = rate == rate.roundToDouble() ? rate.toStringAsFixed(0) : rate.toStringAsFixed(1);
+  return '${h == null ? '' : 'about ${h.toStringAsFixed(1)} h of streaming left at $r % an hour · '}'
+      'the same estimate as on the headband card';
+}
 
 final RegExp _bandLine = RegExp(r'^(\S+) .*\bbattery (\d+)%');
 
@@ -439,7 +446,7 @@ class HeadbandRun {
 HeadbandRun? headbandRun(List<(DateTime, int)> readings) {
   if (readings.isEmpty) return null;
   final r = [...readings]..sort((a, b) => a.$1.compareTo(b.$1));
-  // a value seen over 3 hours or more that makes up at least half of the readings in that span is stuck (a value seen
+  // a value seen over an hour or more (the rule's time) that makes up at least half of the readings in that span is stuck (a value seen
   // again after a charge has other values between)
   final seen = <int, (int, int)>{};
   for (var i = 0; i < r.length; i++) {
@@ -449,17 +456,17 @@ HeadbandRun? headbandRun(List<(DateTime, int)> readings) {
   final flat = <int>{};
   for (final e in seen.entries) {
     final (a, b) = e.value;
-    if (r[b].$1.difference(r[a].$1) < flatStuck) continue;
+    if (r[b].$1.difference(r[a].$1) < BandBatteryRule.flatStuck) continue;
     final mine = r.sublist(a, b + 1).where((x) => x.$2 == e.key).length;
     if (mine * 2 >= b - a + 1) flat.add(e.key);
   }
   final counts = <int, int>{};
   for (final (_, v) in r) {
-    if (stuckLevels.contains(v) || flat.contains(v)) counts[v] = (counts[v] ?? 0) + 1;
+    if (BandBatteryRule.stuckLevels.contains(v) || flat.contains(v)) counts[v] = (counts[v] ?? 0) + 1;
   }
   var good = [
     for (final (t, v) in r)
-      if (!stuckLevels.contains(v) && !flat.contains(v)) (t, v),
+      if (!BandBatteryRule.stuckLevels.contains(v) && !flat.contains(v)) (t, v),
   ];
   for (var i = good.length - 1; i > 0; i--) {
     if (good[i].$2 > good[i - 1].$2 + 3) {

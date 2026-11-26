@@ -16,7 +16,7 @@ APP_TEST = ROOT / "app" / "test"
 PYTHON_FILES = ["test_diy_board.py", "test_fake_headband.py", "test_own_ble_driver.py"]
 FLUTTER_FILES = [
     "own_ble_controller_test.dart", "own_ble_driver_test.dart", "own_ble_mending_test.dart", "own_ble_probe_test.dart",
-    "own_ble_sessions_test.dart", "diy_night_test.dart", "roll_over_test.dart",
+    "own_ble_sessions_test.dart", "diy_night_test.dart", "roll_over_test.dart", "reconnect_roll_over_test.dart",
 ]
 FLUTTER_TESTS = {
     "one_connection_test.dart": ["Start sleep with nothing live", "during a recording a session gets the recorder"],

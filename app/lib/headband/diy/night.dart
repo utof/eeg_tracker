@@ -4,6 +4,7 @@
 import 'dart:io';
 
 import '../../recorder/night_recorder.dart' show RecorderTiming;
+import '../reconnect_ladder.dart' show LadderTiming;
 import '../../signal/layout.dart' show PositionsStore, signalDirFor;
 import 'board.dart';
 import 'settings.dart';
@@ -11,6 +12,8 @@ import 'settings.dart';
 /// The night recorder's rules with the DIY board. A "connection" is waiting for the board's datagrams, so every try
 /// listens (scanEvery 1: there is no direct way in) for a minute, with a short pause between tries (frames that
 /// arrive meanwhile are kept, board.dart `keepMax`); the deadline that would call it stuck is well beyond that wait.
+/// The reconnect ladder's long waits (headband/reconnect_ladder.dart) are for Bluetooth's radio; listening for
+/// datagrams costs none, so the board's night keeps listening however long the board is away.
 const RecorderTiming diyRecorderTiming = RecorderTiming(
   scanFor: Duration(seconds: 60),
   rescanFor: Duration(seconds: 60),
@@ -19,6 +22,7 @@ const RecorderTiming diyRecorderTiming = RecorderTiming(
   notFoundWaitLong: Duration(seconds: 1),
   reconnectWaits: [Duration(milliseconds: 200), Duration(seconds: 1)],
   scanEvery: 1,
+  ladder: LadderTiming.neverWait,
 );
 
 class DiyNight {

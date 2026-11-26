@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:eeg_tracker/alarm/rule.dart';
+import 'package:eeg_tracker/headband/reconnect_ladder.dart' show LadderTiming;
 import 'package:eeg_tracker/recorder/battery.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/headband.dart';
@@ -218,6 +219,9 @@ const fast = RecorderTiming(
   reconnectWaits: [Duration(milliseconds: 5), Duration(milliseconds: 10), Duration(milliseconds: 20)],
   scanEvery: 3,
   rescanFor: Duration(milliseconds: 20),
+  // Tests that move a clock of their own by hours (record_first_test) keep the short waits: the ladder's stage C waits
+  // minutes of real time. Stage C has its own tests (reconnect_waiting_test, reconnect_roll_over_test).
+  ladder: LadderTiming.neverWait,
   phoneLogEvery: Duration(minutes: 1),
 );
 
@@ -255,6 +259,46 @@ void main() {
   List<File> files(String ext) =>
       dir.listSync().whereType<File>().where((f) => f.path.endsWith('.$ext')).toList()
         ..sort((a, b) => a.path.compareTo(b.path));
+
+  test('Stop during the contact check, before the signal ran: the log says stopped, never "drop"', () async {
+    // 2026-11-20 01:07: the owner pressed Stop during the contact check of a new night, and the log said
+    // "drop (run failed); ... reconnecting". A stop is not a drop.
+    final band = FakeBand('a');
+    final r = NightRecorder(
+      finder: FakeFinder([band]),
+      dir: dir,
+      store: store,
+      onStatus: statuses.add,
+      onStuck: (r) async => stuck.add(r),
+      watch: null,
+      timing: const RecorderTiming(
+        tick: Duration(milliseconds: 10),
+        ticksPerCheck: 5,
+        scanFor: Duration(milliseconds: 20),
+        contactFor: Duration(milliseconds: 400),
+        settle: Duration(milliseconds: 5),
+        retryWait: Duration(milliseconds: 5),
+        sdkTimeout: Duration(milliseconds: 300),
+        connectTimeout: Duration(milliseconds: 300),
+        stopTimeout: Duration(seconds: 2),
+        reconnectWaits: [Duration(milliseconds: 5)],
+        rescanFor: Duration(milliseconds: 20),
+      ),
+    );
+    final running = r.run(restartedBySystem: false);
+    for (var i = 0; i < 200 && !band.calls.contains('startResist'); i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+    expect(band.calls, contains('startResist'));
+    await r.stop();
+    await running;
+    final log = files('log').single.readAsStringSync();
+    expect(log, isNot(contains('drop (')));
+    expect(log, isNot(contains('reconnecting')));
+    expect(log, contains('stopped, battery 77%'));
+    expect(band.calls, isNot(contains('startSignal')));
+    expect(store.state.lostAtMs, 0);
+  });
 
   test('a normal run: contact check, signal saved, clean stop', () async {
     final band = FakeBand('a');

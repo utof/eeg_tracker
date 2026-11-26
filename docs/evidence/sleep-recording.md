@@ -45,6 +45,11 @@ dry headband like this keeps good contact through a whole night at home.
 - Battery: stuck readings are ignored and a line through the last 90 minutes gives "about N h left".
 - Phone app (in progress): one background service of Android's "connected device" type, which has no time
   limit, reconnecting straight to the saved headband instead of scanning for it.
+- When the headband goes away for long (you left it at home, it is charging), the phone stops asking for it every
+  minute. After 10 minutes it lets the phone's Bluetooth chip listen for the headband by itself, which costs about
+  2% of the radio's time and connects when the headband shows up; every 15 minutes it also tries once directly.
+  Opening the app, unlocking the phone, switching Bluetooth on, or **Reconnect now** on the "Headband lost" notice
+  tries at once. The 10 and 15 minutes are planning values: nobody has measured them on this phone yet.
 - The same service watches for falling asleep (the drift-off detector, back-of-head alpha fading for 3 minutes) on
   the samples it already receives, after they are saved; if the detector ever fails or takes too long it switches
   itself off and the recording goes on. **Lights off** on the night screen marks the moment you close your eyes,
@@ -57,6 +62,7 @@ dry headband like this keeps good contact through a whole night at home.
 
 ## Sources
 
+- [Android: Bluetooth LE in the background (the waiting connect, `autoConnect`)](https://developer.android.com/develop/connectivity/bluetooth/ble/background)
 - [Mikhaylov 2024: dry headband vs gel, same layout](https://pmc.ncbi.nlm.nih.gov/articles/PMC11679099/)
 - [ZMax home nights (about 10% failed)](https://www.medrxiv.org/content/10.64898/2026.06.01.26354591v1)
 - [Muse-S sleep study (Lanthier 2026)](https://espace2.etsmtl.ca/33349/1/Lina-JM-2026-33349.pdf)

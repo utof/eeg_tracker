@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
+import '../headband/battery_estimate.dart';
 import 'battery_report.dart';
 import 'files.dart';
 import 'usage_report.dart';
@@ -133,6 +134,9 @@ typedef BatteryInputs = ({
   List<HeadbandRun> headband,
   List<ContactBlock> contact,
   LinkSummary link,
+
+  /// The headband's charge now, as the headband card shows it (headband/battery_estimate.dart).
+  BandBattery band,
 });
 
 /// The power samples of the last [days] days, the night logs' phone battery lines of the same days, the headband's
@@ -169,7 +173,13 @@ BatteryInputs loadBattery(String filesDir, {required DateTime now, int days = 14
     }
   }
   runs.sort((a, b) => b.start.compareTo(a.start));
-  return (report: batteryReport(points), headband: runs, contact: contactByBlock(contact), link: link);
+  return (
+    report: batteryReport(points),
+    headband: runs,
+    contact: contactByBlock(contact),
+    link: link,
+    band: BandBatteryStore.forRecordings(rec.path).load().now,
+  );
 }
 
 // Off the screen's thread. Top-level, so the isolate's closure holds only its arguments (a closure made inside a

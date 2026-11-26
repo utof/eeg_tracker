@@ -64,7 +64,7 @@ class OwnTiming {
 
 const Duration contactFor_ = contactFor;
 
-class OwnFinder implements HeadbandFinder {
+class OwnFinder implements HeadbandFinder, WaitingFinder {
   OwnFinder({
     required this.transport,
     this.settings = const OwnBleSettings(),
@@ -146,6 +146,18 @@ class OwnFinder implements HeadbandFinder {
     return _band(drv, await drv.connect());
   }
 
+  /// A waiting connect to [id]'s address; the headband it gives is the same object a direct connection gives.
+  @override
+  Future<WaitingConnect?> waitFor(BandId id) async {
+    await _quiet();
+    final drv = _driver(id.address, id.name, const Duration(seconds: 10));
+    final w = drv.waitForBand();
+    if (w == null) return null;
+    final band = w.info.then<Headband>((info) => _band(drv, info));
+    band.ignore(); // an end nobody waits for any more is not an uncaught error
+    return WaitingConnect(band: band, cancel: w.cancel);
+  }
+
   OwnHeadband _band(BrainBitBle drv, BandInfo info) {
     _address = info.address;
     if (info.name.isNotEmpty) _name = info.name;
@@ -160,7 +172,7 @@ class OwnFinder implements HeadbandFinder {
 }
 
 /// A transport that knows what is open on it: connection tries under way and links not yet let go (or lost).
-class _Held implements BleTransport {
+class _Held implements BleTransport, WaitingTransport {
   _Held(this._inner);
   final BleTransport _inner;
   int _open = 0;
@@ -203,12 +215,80 @@ class _Held implements BleTransport {
       rethrow;
     }
   }
+
+  /// An open waiting connect counts as open on Bluetooth until it is closed, or its link is let go or lost.
+  @override
+  BleWaiting? connectWaiting(String address, {required void Function() onLost}) {
+    final inner = _inner;
+    if (inner is! WaitingTransport) return null;
+    _open++;
+    var held = true;
+    void release() {
+      if (!held) return;
+      held = false;
+      if (--_open > 0) return;
+      final q = _quietNow;
+      _quietNow = null;
+      q?.complete();
+    }
+
+    final BleWaiting? w;
+    try {
+      w = (inner as WaitingTransport).connectWaiting(
+        address,
+        onLost: () {
+          release();
+          onLost();
+        },
+      );
+    } catch (_) {
+      release();
+      rethrow;
+    }
+    if (w == null) {
+      release();
+      return null;
+    }
+    final link = w.link.then<BleLink>(
+      (l) => _HeldLink(l, release),
+      onError: (Object e) {
+        release();
+        throw e;
+      },
+    );
+    link.ignore();
+    return _HeldWaiting(w, link, release);
+  }
 }
 
-class _HeldLink implements BleLink {
+class _HeldWaiting implements BleWaiting {
+  _HeldWaiting(this._inner, this.link, this._release);
+  final BleWaiting _inner;
+  final void Function() _release;
+
+  @override
+  final Future<BleLink> link;
+
+  @override
+  Future<void> cancel() async {
+    try {
+      await _inner.cancel();
+    } finally {
+      _release();
+    }
+  }
+}
+
+class _HeldLink implements BleLink, LinkFacts {
   _HeldLink(this._link, this._release);
   final BleLink _link;
   final void Function() _release;
+
+  @override
+  set onFacts(void Function(String line)? to) {
+    final l = _link;
+    if (l is LinkFacts) (l as LinkFacts).onFacts = to;
+  }
 
   @override
   bool get isConnected => _link.isConnected;
@@ -264,6 +344,9 @@ class OwnHeadband implements Headband, BandNotes, MendsDrops {
     _note('mode ${modeNames[_mode]} (command $_mode)');
     final st = _info.status;
     if (st != null) _note('status ${st.text()}');
+    // a timing report that came while the headband was being set up (before this object's log existed)
+    final timing = _drv.linkTiming;
+    if (timing != null) _note(timing);
   }
 
   final BrainBitBle _drv;

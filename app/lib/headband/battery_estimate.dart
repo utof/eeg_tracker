@@ -1,6 +1,6 @@
 // The headband's battery as one number for every screen (DECISIONS 853). The BrainBit's gauge reads whole percent and
-// sticks while it streams (0-2 % and 100 %, DECISIONS 40; 6 % for nine hours on 2026-11-19, lib/logs/battery_report.dart
-// `stuckLevels`), and it moved 99 -> 79 % over a 1.8-hour session on 2026-11-20: 11 % an hour, the laptop's rule too
+// sticks while it streams (0-2 % and 100 %, DECISIONS 40; 6 % for nine hours on 2026-11-19), and it moved 99 -> 79 %
+// over a 1.8-hour session on 2026-11-20: 11 % an hour, the laptop's rule too
 // (scripts/battery.py, DECISIONS 766). So the number shown is an estimate: the last reading we believe, minus
 // 11 % for every hour streamed since. A reading is believed when the gauge moved and landed near the estimate, when it
 // is the first one ever, or when a new connection reads higher than the estimate (it was charged). A reading far from
@@ -8,7 +8,20 @@
 import 'dart:convert';
 import 'dart:io';
 
-import '../logs/battery_report.dart' show stuckLevels;
+/// The one battery rule for the headband (DECISIONS 946): the card's estimate, the battery guard (auto/
+/// battery_guard.dart) and the Battery page (logs/battery_report.dart) all count with these.
+abstract final class BandBatteryRule {
+  /// What an hour of streaming takes, in percent: 99 % to 79 % in 1.8 h on the owner's headband (2026-11-20), the
+  /// laptop's number too (scripts/battery.py, DECISIONS 766). The maker's "up to 10 hours" would be 10.
+  static const double drainPctPerHour = 11;
+
+  /// Values the gauge sticks at while streaming (DECISIONS 40).
+  static const Set<int> stuckLevels = {0, 1, 2, 100};
+
+  /// A value that does not move for this long while streaming is stuck too (at the drain above a working gauge moves
+  /// 11 points in that time; the laptop's 60 minutes, DECISIONS 766).
+  static const Duration flatStuck = Duration(minutes: 60);
+}
 
 class BandBattery {
   const BandBattery({this.gauge, this.estimate, this.stuck = false, this.at});
@@ -29,7 +42,7 @@ class BandBattery {
   int? get percent => estimate ?? gauge;
 
   /// Hours of streaming left at the rated drain (null: unknown).
-  double? get hoursLeft => percent == null ? null : percent! / BandBatteryTrack.drainPctPerHour;
+  double? get hoursLeft => percent == null ? null : percent! / BandBatteryRule.drainPctPerHour;
 
   /// `about 62 %`, or `–`.
   String get words => percent == null ? '–' : 'about $percent %';
@@ -52,9 +65,6 @@ class BandBatteryTrack {
     this.lastStreaming = false,
     this.emptyTold = false,
   });
-
-  /// What an hour of streaming takes (the laptop's number, DECISIONS 766: 99 % to 79 % in 1.8 h on 2026-11-20).
-  static const double drainPctPerHour = 11;
 
   /// A reading within this many points of the estimate is in line with it.
   static const int nearPct = 8;
@@ -92,7 +102,7 @@ class BandBatteryTrack {
       believed = !low && !(streaming && gauge == 100);
     } else if (!streaming && gauge > est + nearPct && !low) {
       believed = true; // charged since
-    } else if (!streaming && longAgo && !stuckLevels.contains(gauge)) {
+    } else if (!streaming && longAgo && !BandBatteryRule.stuckLevels.contains(gauge)) {
       believed = true; // half a day without a reading: the old estimate says little, a fresh connection's reading more
     } else {
       believed = (moved || !streaming) && (gauge - est).abs() <= nearPct && !(low && est > nearPct);
@@ -126,7 +136,7 @@ class BandBatteryTrack {
   double? _estimate() {
     final a = anchorPct;
     if (a == null) return null;
-    return (a - BandBatteryTrack.drainPctPerHour * streamedMs / 3600000).clamp(0, 100).toDouble();
+    return (a - BandBatteryRule.drainPctPerHour * streamedMs / 3600000).clamp(0, 100).toDouble();
   }
 
   BandBattery get now {
@@ -135,7 +145,7 @@ class BandBatteryTrack {
     return BandBattery(
       gauge: g,
       estimate: est?.round(),
-      stuck: est != null && g != null && ((g - est).abs() > nearPct || (stuckLevels.contains(g) && (g - est).abs() > 2)),
+      stuck: est != null && g != null && ((g - est).abs() > nearPct || (BandBatteryRule.stuckLevels.contains(g) && (g - est).abs() > 2)),
       at: lastAtMs == 0 ? null : DateTime.fromMillisecondsSinceEpoch(lastAtMs),
     );
   }

@@ -31,6 +31,7 @@ import '../alarm/rule.dart';
 import '../cues/night_cues.dart';
 import '../headband/battery_estimate.dart';
 import '../headband/lend.dart' show LentBand;
+import '../headband/reconnect_ladder.dart';
 import '../logs/log.dart' show AppLog;
 import '../logs/metrics.dart' show Metrics;
 import '../signal/quality.dart' show QualityJudge, SecondMaker;
@@ -76,6 +77,8 @@ class RecorderTiming {
     ],
     this.scanEvery = 3,
     this.rescanFor = const Duration(seconds: 15),
+    this.ladder = const LadderTiming(),
+    this.awayCheckEvery = const Duration(minutes: 1),
     this.phoneLogEvery = const Duration(minutes: 1),
     this.packetLogEvery = const Duration(minutes: 10),
     this.driftBudget = 0.02,
@@ -125,8 +128,16 @@ class RecorderTiming {
   final int startAttempts;
   final Duration stopTimeout;
 
-  /// Wait before each reconnect try after a drop; the last one repeats until the headband is back.
+  /// Wait before each reconnect try after a drop; the last one repeats until the ladder's stage C
+  /// ([LadderTiming.waitAfter] without the headband; headband/reconnect_ladder.dart, DECISIONS 940).
   final List<Duration> reconnectWaits;
+
+  /// The reconnect ladder's own times: when the waiting begins, the safety try, the fallback.
+  final LadderTiming ladder;
+
+  /// While the ladder waits for its next step (up to 15 minutes in stage C), the long-loss rules ([spansAway],
+  /// [stopAway]) are looked at this often; between tries the loop looks at them itself (DECISIONS 1073).
+  final Duration awayCheckEvery;
 
   /// Every this many-th reconnect try is a scan instead of a direct connection (3: direct, direct, scan).
   final int scanEvery;
@@ -197,11 +208,40 @@ class NightRecorder {
     this.firstSpan,
     this.sleepSource = 'owner_button',
     this.bandBattery,
+    this.screenOn,
     ChunkWriter Function(Directory dir, DateTime start, {RecordingHeader? header, bool inRecording, String? recording})? openSet,
     DateTime Function()? clock,
   }) : _now = clock ?? DateTime.now,
        _openSet = openSet ?? ChunkWriter.open,
        _steps = stepProbe == null ? null : StepLog(stepProbe, clock ?? DateTime.now);
+
+  /// Whether the phone's screen is on (the ladder's fallback tries more often then); null: taken as off.
+  final Future<bool> Function()? screenOn;
+
+  /// The reconnect ladder (headband/reconnect_ladder.dart): it waits and names each try; the tries are made here.
+  late final ReconnectLadder _ladder = ReconnectLadder(
+    waits: timing.reconnectWaits,
+    scanEvery: timing.scanEvery,
+    timing: timing.ladder,
+    waitFor: _waitFor,
+    screenOn: screenOn,
+    log: _note,
+    clock: _now,
+  );
+
+  /// A reason to try for a lost headband right now (the app opened, the phone unlocked, Bluetooth on, "Reconnect
+  /// now"). Nothing happens while the headband is there.
+  void hint(ReconnectHint h) => _ladder.hint(h);
+
+  /// The stage of the ladder while a headband is being got back; null otherwise.
+  LadderStage? get ladderStage => _ladder.active ? _ladder.stage : null;
+
+  /// A waiting connect, where the connection in use has one and direct connections are not off for tonight.
+  Future<WaitingConnect?> _waitFor(BandId id) async {
+    final f = finder;
+    if (_night.directOff || f is! WaitingFinder) return null;
+    return (f as WaitingFinder).waitFor(id);
+  }
 
   /// The headband's battery track shared with the screens (headband/battery_estimate.dart): every gauge reading goes
   /// in. Null: none kept.
@@ -320,7 +360,7 @@ class NightRecorder {
 
   /// The drop being recovered from, and how the headband came back.
   ({int? lastDataMs, String? stem, String why})? _drop;
-  ({String how, int tryNo})? _via;
+  ({String how, int tryNo, String by})? _via;
 
   /// When the phone battery line was last written (unix ms).
   int _batteryLoggedMs = 0;
@@ -328,9 +368,6 @@ class NightRecorder {
   /// Packet numbers of tonight; [_packetsLoggedMs] is when its line was last written (unix ms).
   PacketAccount _packets = PacketAccount();
   int _packetsLoggedMs = 0;
-
-  /// Reconnect tries since the last run that recorded anything.
-  int _tries = 0;
 
   /// Samples received per half hour of clock time (the screen's night strip).
   final Map<int, int> _slots = {};
@@ -483,7 +520,13 @@ class NightRecorder {
       _notes = [for (final n in [...startNotes, ...notes]) (t, n)];
       _lastLog = _newestLog(prior.startMs);
       final stem = _lastLog?.uri.pathSegments.last.replaceFirst(RegExp(r'\.log$'), '');
-      if (prior.band != null) _drop = (lastDataMs: null, stem: stem, why: 'app process restarted');
+      if (prior.band != null) {
+        _drop = (lastDataMs: null, stem: stem, why: 'app process restarted');
+        // the ladder goes on from the time of the drop, when there was one, and tries once at once
+        if (_night.lostAtMs == 0) _night = _night.copyWith(lostAtMs: _now().millisecondsSinceEpoch);
+        _ladder.begin(DateTime.fromMillisecondsSinceEpoch(_night.lostAtMs));
+        _ladder.hint(ReconnectHint.restarted);
+      }
     } else {
       final plan = alarmPlan;
       _night = NightState(
@@ -623,18 +666,40 @@ class NightRecorder {
     return null;
   }
 
-  /// One try to get tonight's headband back after a drop or a process restart: directly by its address
-  /// after a growing wait; every [RecorderTiming.scanEvery]-th try, or every try once direct connections
-  /// are off, a short scan instead.
+  /// One step of the reconnect ladder (headband/reconnect_ladder.dart) to get tonight's headband back after a drop or
+  /// a process restart: the ladder waits and names the try; here it is made, directly by the address, or as a short
+  /// scan when the ladder says so (stages A and B, every [RecorderTiming.scanEvery]-th try) and on every try once
+  /// direct connections are off. In stage C the headband may also arrive by the waiting connect, with no try at all.
   Future<Headband?> _reconnectTry() async {
     final id = _night.band!;
-    final n = ++_tries;
-    final waits = timing.reconnectWaits;
+    _ladder.begin(_night.lostAtMs > 0 ? DateTime.fromMillisecondsSinceEpoch(_night.lostAtMs) : _now());
     _set(_status.copyWith(phase: Phase.reconnecting));
-    await _pause(waits.isEmpty ? Duration.zero : waits[min(n, waits.length) - 1]);
-    if (_stopping) return null;
-    var scan = _night.directOff || timing.scanEvery <= 1 || n % timing.scanEvery == 0;
+    // the ladder may wait many minutes here: the 60-minute rule and the 6-hour stop are not kept waiting with it
+    final away = Timer.periodic(timing.awayCheckEvery, (_) {
+      if (!_stopping) _away();
+    });
+    final LadderStep? step;
+    try {
+      step = await _ladder.next(id, stop: _stopSignal.future);
+    } finally {
+      away.cancel();
+    }
+    if (step == null || _stopping) {
+      final late = step?.band;
+      if (late != null) await _quietly(late.disconnectAndDispose);
+      return null;
+    }
+    final n = step.n;
+    final arrived = step.band;
+    if (arrived != null) {
+      _via = (how: 'waiting connect', tryNo: n, by: step.by);
+      _note('the headband showed up on the waiting connect (step $n)');
+      return arrived;
+    }
+    var scan = _night.directOff || timing.scanEvery <= 1 || step.scanDue;
     var how = scan ? 'scan' : 'direct to ${id.address}';
+    // the ordinary tries of stages A and B keep their old line; any other road is named
+    final why = const {'quick try', 'minute try', 'app restart'}.contains(step.by) ? '' : ', ${step.by}';
     final t0 = _now();
     String took() => '${(_now().difference(t0).inMilliseconds / 1000).toStringAsFixed(1)} s';
     try {
@@ -644,25 +709,31 @@ class NightRecorder {
       } on NeedsScan catch (e) {
         // The connection in use cannot reach this headband directly (the switch moved during the night): a scan now
         // rather than at every third try; once it connects, the night's headband is one it can reach.
-        _note('reconnect try $n ($how): $e; scanning instead');
+        _note('reconnect try $n ($how$why): $e; scanning instead');
         scan = true;
         how = 'scan';
         band = await _scan(timing.rescanFor);
       }
       if (band != null) {
-        _via = (how: scan ? 'scan' : 'direct', tryNo: n);
-        _note('reconnect try $n ($how): connected after ${took()}');
+        _via = (how: scan ? 'scan' : 'direct', tryNo: n, by: step.by);
+        _note('reconnect try $n ($how$why): connected after ${took()}');
         return band;
       }
       if (_stopping) return null;
-      _note('reconnect try $n ($how): not found after ${took()}');
+      _note('reconnect try $n ($how$why): not found after ${took()}');
     } on SdkStuck {
-      _note('reconnect try $n ($how): no answer for ${took()} (SDK stuck)');
+      _note('reconnect try $n ($how$why): no answer for ${took()} (SDK stuck)');
       rethrow;
     } catch (e) {
-      _note('reconnect try $n ($how): failed after ${took()}: ${_short(e)}');
+      _note('reconnect try $n ($how$why): failed after ${took()}: ${_short(e)}');
     }
-    _set(_status.copyWith(note: 'headband not found yet (try $n); trying again'));
+    _set(
+      _status.copyWith(
+        note: _ladder.stage == LadderStage.wait
+            ? 'headband away ${awayText(_now().difference(_ladder.lostAt ?? _now()))}; waiting for it'
+            : 'headband not found yet (try $n); trying again',
+      ),
+    );
     return null;
   }
 
@@ -796,7 +867,8 @@ class NightRecorder {
         _set(_status.copyWith(phase: Phase.recording, note: 'recording'));
         end = await _record(band, w, isLost, (next) => w = next);
       } else {
-        end = lost ? _End.lost : _End.failed;
+        // Stop pressed before the signal ran (during the contact check): a stop, not a drop
+        end = _stopping ? _End.stopped : (lost ? _End.lost : _End.failed);
       }
     } on SdkStuck catch (e) {
       await _cancel([sigSub, rangeSub, notesSub]);
@@ -834,14 +906,17 @@ class NightRecorder {
     if (d == null || v == null) return;
     final last = d.lastDataMs;
     final gap = last == null ? '' : ', ${((_now().millisecondsSinceEpoch - last) / 1000).toStringAsFixed(1)} s ago';
+    // which road brought it back, and after how long: after a week the log says which roads work on this phone
+    final back = _ladder.backLine(v.by);
     w.log(
       'reconnected (${v.how}, try ${v.tryNo}) after a drop (${d.why}); previous run ${d.stem ?? 'unknown'}, '
-      'last data ${last == null ? 'unknown' : logTime(DateTime.fromMillisecondsSinceEpoch(last))}$gap',
+      'last data ${last == null ? 'unknown' : logTime(DateTime.fromMillisecondsSinceEpoch(last))}$gap; $back',
     );
     _log.info('headband back after a drop (${d.why})', {
       'how': v.how,
       'try': v.tryNo,
       'why': d.why,
+      'by': v.by,
       if (last != null) 'reconnect_ms': _now().millisecondsSinceEpoch - last,
     });
   }
@@ -1521,6 +1596,9 @@ class NightRecorder {
       return null;
     }
     _rollFailedAt = null;
+    // the set that fills up has data in it ([_rollDue]), so the headband is back for the ladder too: a drop before
+    // the new set's first batch is a new drop, counted from the first step (DECISIONS 1070)
+    _bandIsBack();
     _logPackets(old);
     old.log('total samples ${old.samplesWritten}, ${(old.samplesWritten / sampleRateHz / 60).toStringAsFixed(1)} min');
     old.log('file set full; the recording goes on without a gap in ${next.stem}');
@@ -1532,6 +1610,14 @@ class NightRecorder {
     _continues = next;
     _log.info('the recording goes on in a new file set', {'from': old.stem, 'to': next.stem, 'samples': old.samplesWritten});
     return next;
+  }
+
+  /// The connection has recorded something since the last drop: the reconnect ladder ends, and the next drop starts
+  /// from the shortest wait. Called for a run that closes with samples and at a roll-over (the run's samples are then
+  /// in the set that was closed, not in the open one).
+  void _bandIsBack() {
+    _ladder.end();
+    _night = _night.copyWith(lostAtMs: 0);
   }
 
   /// The run was on a connection lent by the screen's engine, and that engine no longer exists (headband/lend.dart).
@@ -1567,8 +1653,8 @@ class NightRecorder {
     _status = _status.copyWith(nightSamples: _night.samples);
     _logPackets(w);
     w.log('total samples ${w.samplesWritten}, ${(w.samplesWritten / sampleRateHz / 60).toStringAsFixed(1)} min');
+    if (w.samplesWritten > 0) _bandIsBack();
     if (end != _End.stopped) _logDrop(w, end, lenderGone: _lenderGone(band));
-    if (w.samplesWritten > 0) _tries = 0; // a run that recorded something restarts the waits from the shortest
     try {
       if (end == _End.lost || lost() || !await _inRange(band)) {
         abandoned.add(band);
@@ -1621,6 +1707,8 @@ class NightRecorder {
       'drop ($why); last data ${last == null ? 'none' : logTime(DateTime.fromMillisecondsSinceEpoch(last))}; reconnecting',
     );
     _drop = (lastDataMs: last, stem: w.stem, why: why);
+    // kept with the night, so a restarted process goes on at the right stage of the ladder
+    if (_night.lostAtMs == 0) _night = _night.copyWith(lostAtMs: last ?? _now().millisecondsSinceEpoch);
     _log.warn('headband link dropped: $why', data: {'stem': w.stem, 'last_data_ms': last});
   }
 

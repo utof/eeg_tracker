@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:eeg_tracker/headband/battery_estimate.dart';
 import 'package:eeg_tracker/logs/files.dart';
 import 'package:eeg_tracker/logs/settings.dart';
 import 'package:eeg_tracker/ui/battery_screen.dart';
@@ -244,8 +245,12 @@ void main() {
   testWidgets('Battery: the Signal tab\'s sentence, the night, the headband\'s drain and its link', (tester) async {
     tester.view.physicalSize = const Size(1080, 9000);
     addTearDown(tester.view.reset);
+    // the headband card's estimate (the one battery rule, DECISIONS 946): the page shows the same number
+    BandBatteryStore.forRecordings(rec).save(BandBatteryTrack()..note(62, DateTime(2026, 11, 20, 9), streaming: false));
     await tester.pumpWidget(MaterialApp(theme: nightTheme(), home: BatteryScreen(recordingsDir: rec)));
     await _settle(tester);
+    expect(find.text('about 62 %'), findsOneWidget);
+    expect(find.textContaining('about 5.6 h of streaming left at 11 % an hour'), findsOneWidget);
     expect(find.text('230 mAh/h'), findsWidgets);
     expect(find.textContaining('It adds about 70 mAh an hour to what runs with it.'), findsOneWidget);
     expect(find.textContaining('Mostly the screen being on.'), findsOneWidget);

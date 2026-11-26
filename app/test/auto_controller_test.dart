@@ -11,6 +11,7 @@ import 'package:eeg_tracker/auto/log.dart';
 import 'package:eeg_tracker/auto/probe.dart';
 import 'package:eeg_tracker/auto/rules.dart';
 import 'package:eeg_tracker/auto/store.dart';
+import 'package:eeg_tracker/headband/battery_estimate.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart' show ChunkWriter, Sample;
 import 'package:eeg_tracker/recorder/headband.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -440,7 +441,39 @@ void main() {
     test('a night is never refused for the battery; the question says how long it lasts', () async {
       check.result = wornBand.withBattery(30);
       await answered(const AutoTrigger('bedtime'), 'no');
-      expect(phone.asked.single.text, contains('about 3 h'));
+      expect(phone.asked.single.text, contains('about 2 h'));
+    });
+  });
+
+  group('the battery guard counts with the headband card\'s estimate (the one battery rule)', () {
+    test('a gauge stuck at 6 % does not warn about a daytime session: the estimate says there is plenty', () async {
+      store.saveSettings(const AutoSettings().withChoice(WearKind.work, AutoChoice.start));
+      now = DateTime(2026, 11, 20, 10, 0);
+      // the card's track: charged to 99 % and streamed for an hour since (an hour ago)
+      final t0 = now.subtract(const Duration(hours: 2));
+      final track = BandBatteryTrack()..note(99, t0, streaming: false);
+      for (var m = 1; m <= 61; m++) {
+        track.streamingAt(t0.add(Duration(minutes: m)), streaming: true);
+      }
+      w.bandBattery.save(track);
+      LaptopStore(store.dir).save(LaptopWork(working: true, at: now.subtract(const Duration(minutes: 2))));
+      check.result = wornBand.withBattery(6);
+      await w.handle(const AutoTrigger('laptop'));
+      expect(starter.works, hasLength(1), reason: 'about 88 % by the estimate: the session starts');
+      expect(starter.works.single.limit, isNull, reason: 'the guard only warns');
+      expect(phone.notices, isEmpty, reason: 'at 6 % it would say "Charge the headband for tonight"');
+      expect(AutoLog(store.dir).events().where((e) => e['event'] == 'warned'), isEmpty);
+      expect(w.bandBattery.load().now.stuck, isTrue);
+    });
+
+    test('the check\'s reading goes into the card\'s track: a first reading is believed', () async {
+      now = DateTime(2026, 11, 20, 20, 0);
+      store.saveSettings(const AutoSettings(bedMin: 0, wakeMin: 8 * 60));
+      check.result = wornBand.withBattery(60);
+      await answered(const AutoTrigger('opened'), 'no');
+      expect(w.bandBattery.load().now.estimate, 60);
+      expect(last('warned')['estimate'], 60);
+      expect(phone.notices.single.$2, contains('It is at about 60 %; tonight needs about 100 %'));
     });
   });
 

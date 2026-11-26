@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import '../auto/channel.dart' show AutoChannel;
+import '../headband/connection.dart';
 import '../headband/diy/board.dart' show DiyFinder;
 import '../headband/finder.dart';
 import '../phone.dart';
@@ -15,21 +16,39 @@ import '../signal/signal_feed.dart';
 import 'nearby.dart';
 import 'own_ble_screen.dart' show phoneWifiAddress;
 
-SignalPhone phoneSignal() => SignalPhone(
-  nightRunning: () => FlutterForegroundTask.isRunningService,
-  leaseNight: (on) {
-    FlutterForegroundTask.sendDataToTask(nightTapLeaseMessage(on: on, user: tapSignal));
-    if (on) FlutterForegroundTask.sendDataToTask(statusCommand);
-  },
-  fromRecorder: _recorderMessages,
-  device: signalDevice,
-  readiness: _readiness,
-  finderFor: (d) => d.diy ? BrainBitFinder(pick: () async => DiyFinder(names: d.montage.names)) : BrainBitFinder(),
-  disposeFinder: (f, {required anyLost}) {
-    if (f is BrainBitFinder) f.dispose(anyLost: anyLost);
-  },
-  holdHeadband: AutoChannel.screenHolds,
-);
+SignalPhone phoneSignal() {
+  // The DIY board's connection of the Signal tab has an owner like the BrainBit's (headband/connection.dart), so the
+  // one headband card shows it: state and each channel's word from the one judge, for any number of channels
+  // (DECISIONS 947). Nothing is kept after the tab lets go, and no night is ever lent from it.
+  var names = const <String>[];
+  final diy = HeadbandConnection(
+    makeFinder: () => BrainBitFinder(pick: () async => DiyFinder(names: names)),
+    disposeFinder: (f, {required anyLost}) {
+      if (f is BrainBitFinder) f.dispose(anyLost: anyLost);
+    },
+  );
+  return SignalPhone(
+    nightRunning: () => FlutterForegroundTask.isRunningService,
+    leaseNight: (on) {
+      FlutterForegroundTask.sendDataToTask(nightTapLeaseMessage(on: on, user: tapSignal));
+      if (on) FlutterForegroundTask.sendDataToTask(statusCommand);
+    },
+    fromRecorder: _recorderMessages,
+    device: signalDevice,
+    readiness: _readiness,
+    finderFor: (d) {
+      if (!d.diy) return BrainBitFinder();
+      names = d.montage.names;
+      return diy.finder;
+    },
+    disposeFinder: (f, {required anyLost}) {
+      // the board's finder is its owner's to end
+      if (f is BrainBitFinder) f.dispose(anyLost: anyLost);
+    },
+    holdHeadband: AutoChannel.screenHolds,
+    diyConnection: diy,
+  );
+}
 
 /// The recorder's messages while someone listens (the night screen keeps its own callback).
 Stream<Object> _recorderMessages() {

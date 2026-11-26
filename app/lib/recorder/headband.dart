@@ -156,6 +156,24 @@ abstract class HeadbandFinder {
   Future<Headband> connectDirect(BandId id);
 }
 
+/// A waiting connect that is open now (headband/reconnect_ladder.dart, DECISIONS 940): the phone's Bluetooth chip
+/// listens for the headband and connects when it shows up, with no time limit and without waking the app.
+class WaitingConnect {
+  WaitingConnect({required this.band, required this.cancel});
+
+  /// The headband once it showed up and answered; an error when the waiting connect broke or was closed.
+  final Future<Headband> band;
+
+  /// Closes the waiting connect: nothing stays open on Bluetooth. Safe after [band] ended.
+  final Future<void> Function() cancel;
+}
+
+/// A finder that can leave a waiting connect open (our own connection; BrainBit's SDK and the DIY board cannot).
+abstract class WaitingFinder {
+  /// Opens a waiting connect to [id], or null when this connection has none.
+  Future<WaitingConnect?> waitFor(BandId id);
+}
+
 /// The phone side of the log: power state and why the last process ended. Optional in tests.
 abstract class PhoneProbe {
   /// One line such as `battery-opt exempt yes, power save no, standby bucket 10`, or null.
@@ -182,6 +200,7 @@ class NightState {
     this.band,
     this.directPending = false,
     this.directOff = false,
+    this.lostAtMs = 0,
     this.phoneBattery = const BatteryTrack(),
     this.packets = const PacketCounts(),
     this.lightsOffMs,
@@ -216,6 +235,10 @@ class NightState {
 
   /// No more direct connections tonight (see [directPending]).
   final bool directOff;
+
+  /// When the headband was lost (unix ms: its last data), while it is being got back; 0 while it is there. The
+  /// reconnect ladder of a restarted process goes on from it (headband/reconnect_ladder.dart).
+  final int lostAtMs;
 
   /// The phone battery's first and last reading tonight (the end-of-night drain line).
   final BatteryTrack phoneBattery;
@@ -284,6 +307,7 @@ class NightState {
     BandId? band,
     bool? directPending,
     bool? directOff,
+    int? lostAtMs,
     BatteryTrack? phoneBattery,
     PacketCounts? packets,
     int? lightsOffMs,
@@ -305,6 +329,7 @@ class NightState {
     band: band ?? this.band,
     directPending: directPending ?? this.directPending,
     directOff: directOff ?? this.directOff,
+    lostAtMs: lostAtMs ?? this.lostAtMs,
     phoneBattery: phoneBattery ?? this.phoneBattery,
     packets: packets ?? this.packets,
     lightsOffMs: lightsOffMs ?? this.lightsOffMs,
@@ -333,6 +358,7 @@ class NightState {
     'band': band?.toJson(),
     'directPending': directPending,
     'directOff': directOff,
+    'lostAtMs': lostAtMs,
     'phoneBattery': phoneBattery.toJson(),
     'packets': packets.toJson(),
     'lightsOffMs': lightsOffMs,
@@ -366,6 +392,7 @@ class NightState {
       band: BandId.fromJson(j['band']),
       directPending: j['directPending'] == true,
       directOff: j['directOff'] == true,
+      lostAtMs: (j['lostAtMs'] as num?)?.toInt() ?? 0,
       phoneBattery: BatteryTrack.fromJson(j['phoneBattery']),
       packets: PacketCounts.fromJson(j['packets']),
       lightsOffMs: (j['lightsOffMs'] as num?)?.toInt(),

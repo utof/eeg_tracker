@@ -16,6 +16,7 @@ import 'package:eeg_tracker/alarm/rule.dart';
 import 'package:eeg_tracker/headband/diy/board.dart';
 import 'package:eeg_tracker/headband/diy/night.dart';
 import 'package:eeg_tracker/headband/diy/settings.dart';
+import 'package:eeg_tracker/headband/reconnect_ladder.dart' show ladderWaitAfter;
 import 'package:eeg_tracker/lucid/live_cues.dart';
 import 'package:eeg_tracker/recorder/chunk_writer.dart';
 import 'package:eeg_tracker/recorder/header.dart';
@@ -207,6 +208,9 @@ void main() {
     expect(diyRecorderTiming.connectTimeout, greaterThan(const DiyTiming().directWait)); // a long wait is never "stuck"
     expect(diyRecorderTiming.scanFor + diyRecorderTiming.connectTimeout, greaterThan(diyRecorderTiming.scanFor));
     expect(diyRecorderTiming.reconnectWaits.last, lessThanOrEqualTo(const Duration(seconds: 1)));
+    // listening for datagrams costs no radio: the ladder's long waits (stage C) never begin for the board
+    expect(diyRecorderTiming.ladder.waitAfter, greaterThan(const Duration(days: 365)));
+    expect(const RecorderTiming().ladder.waitAfter, ladderWaitAfter);
     expect(plan.notes.join('\n'), contains("off for the DIY board: they read BrainBit's O1 O2 T3 T4"));
     expect(plan.notes.join('\n'), contains('the lucid cues and the live sleep model they share'));
   });

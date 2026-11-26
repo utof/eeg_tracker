@@ -130,7 +130,7 @@ List<Sample>? _samples(Map<Object?, Object?> m) {
 
 /// The recorder's finder for a night that may start lent: the first search returns the lent connection when there is an
 /// offer; every later try (and every try without one) goes to [inner], after the owner was told to let go.
-class LendFinder implements HeadbandFinder {
+class LendFinder implements HeadbandFinder, WaitingFinder {
   LendFinder({
     required this.inner,
     required this.toScreen,
@@ -207,6 +207,15 @@ class LendFinder implements HeadbandFinder {
   Future<Headband> connectDirect(BandId id) async {
     await _take();
     return inner.connectDirect(id);
+  }
+
+  /// The recorder's own finder's waiting connect, once nothing on the screen holds the headband.
+  @override
+  Future<WaitingConnect?> waitFor(BandId id) async {
+    final f = inner;
+    if (f is! WaitingFinder) return null;
+    await _take();
+    return (f as WaitingFinder).waitFor(id);
   }
 }
 

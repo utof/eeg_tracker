@@ -1714,10 +1714,10 @@ shows `docs/evidence/auto-start.md`).
   show on the screen and the lock-screen card; its chime only with **Chime in automatic work sessions** on. After 10
   yes in a row for the night or for work, the page (and a notification) offers to switch it to Automatic.
 - **The headband's battery only warns** (DECISIONS 1010): when the app's estimate says too little is left for tonight
-  (planning: 10 % an hour, plus 15 %; down to 15 % while bedtime is 4 hours or more away), it says "Charge the
-  headband for tonight" once a day, and the question says it too. Nothing is refused and no session or recording is
-  stopped because of the estimate (it has not been measured on this headband). One constant flips it back to the
-  stopping rule: `BatteryRule.onlyWarns` in `lib/auto/battery_guard.dart`.
+  (11 % an hour, the app's one battery rule, plus 15 %; down to 15 % while bedtime is 4 hours or more away), it says
+  "Charge the headband for tonight" once a day, and the question says it too. Nothing is refused and no session or
+  recording is stopped because of the estimate. One constant flips it back to the stopping rule:
+  `BatteryRule.onlyWarns` in `lib/auto/battery_guard.dart`.
 - A night started this way says so in its log ("started automatically" or "started after Yes"). Stop it in the
   morning as usual. Starting anything by hand (Record, Sleep, a session) makes the watcher let go of the headband at
   once; its question goes away and nothing is kept.
@@ -1922,6 +1922,23 @@ The app saves what it has and reconnects by itself: first straight to the same h
 because Android blocks scans while the screen is off), after 2, 5, 10, 30 s and then every minute; every
 third try is a short scan instead. Each try is written in the night's `.log` with its time (`drop`,
 `reconnect try`, `reconnected`), so gaps can be marked later. It never stops trying until you press Stop.
+
+After 10 minutes without the headband it stops asking every minute and waits cheaply instead (DECISIONS 940-945):
+
+- With our own connection the phone's Bluetooth chip listens for the headband by itself (a "waiting connect": about
+  2% of the radio's time, the app sleeps) and connects when it shows up; every 15 minutes the app also tries once
+  directly. With BrainBit's library, which has no waiting connect, the app tries once every 5 minutes, every 2 minutes
+  while the screen is on.
+- A try at once, whenever: you open the app, unlock the phone, switch Bluetooth on, or tap **Reconnect now** on the
+  "Headband lost" notice (the notice then says if that try found nothing).
+- The `.log` says which road brought it back and after how long: `reconnected (...); waited 3 h 12 min; back by:
+  waiting connect`. With our own connection it also has the link's real timing once per connection (`link timing:
+  interval 15 ms, latency 0, timeout 5.0 s`).
+- A long recording going on in a new file set (every 4 hours) is not a drop: nothing is tried and nothing is shown.
+  A drop right at that moment is a drop like any other, counted from the first step.
+
+The 10, 15, 5 and 2 minutes are planning values (one constant each in `lib/headband/reconnect_ladder.dart`); nobody
+has measured them on the phone yet.
 
 ## Archive (every recording, its timeline and tags)
 

@@ -1,14 +1,17 @@
-// The headband battery guard (DECISIONS 605): the night comes first. BrainBit is rated "up to 10 hours" (one user
-// reports less), so planning values are 10 % an hour while streaming, a 15 % margin, and 4 hours to charge. A night is
-// never refused (a short night beats none), only warned about. A daytime session (work, other) may run while the
-// headband keeps enough for tonight: with bedtime 4 hours away or more it may go down to the margin but ends 4 hours
-// before bedtime (time to charge); later it may use only what is above tonight's need (night hours x 10 % + 15 %).
+// The headband battery guard (DECISIONS 605, 946): the night comes first. The drain per hour of streaming is the one
+// battery rule's (headband/battery_estimate.dart `BandBatteryRule`: 11 %, measured on the owner's headband), the
+// charge it counts with is the same estimate the headband card shows; a 15 % margin and 4 hours to charge are planning
+// values. A night is never refused (a short night beats none), only warned about. A daytime session (work, other) may
+// run while the headband keeps enough for tonight: with bedtime 4 hours away or more it may go down to the margin but
+// ends 4 hours before bedtime (time to charge); later it may use only what is above tonight's need (night hours x the
+// drain + 15 %, at most a full charge).
 // A night is warned about only when the battery would not reach the usual wake-up (no margin there: it is a guess).
 // Under 40 minutes is not worth starting. Without a battery reading it is allowed, and the log says so.
 //
 // Since DECISIONS 1010 the guard ONLY WARNS (`BatteryRule.onlyWarns`): the numbers above are an estimate nobody has
 // measured on this headband, so they decide a "Charge the headband for tonight" notice and nothing else. No session
 // is refused, none is given an end, no recording is stopped. Set the constant to false for the stopping rule above.
+import '../headband/battery_estimate.dart' show BandBatteryRule;
 import 'bedtime.dart';
 import 'store.dart';
 
@@ -16,7 +19,7 @@ abstract final class BatteryRule {
   /// true (the chosen default): the estimate only warns; false: it refuses and ends daytime sessions as written above.
   static const bool onlyWarns = true;
 
-  static const double drainPctPerHour = 10, marginPct = 15;
+  static const double marginPct = 15;
   static const Duration chargeTime = Duration(hours: 4);
   static const Duration minSession = Duration(minutes: 40);
 }
@@ -35,8 +38,12 @@ class BatteryVerdict {
   final String? note;
 }
 
-/// What a whole usual night takes, with the margin (an 8-hour night: 95 %).
-int nightNeedPct(UsualNight w) => (w.nightHours * BatteryRule.drainPctPerHour + BatteryRule.marginPct).ceil();
+/// What a whole usual night takes, with the margin, at most a full charge (an 8-hour night: 8 x 11 + 15 is over 100,
+/// so 100 %).
+int nightNeedPct(UsualNight w) {
+  final need = (w.nightHours * BandBatteryRule.drainPctPerHour + BatteryRule.marginPct).ceil();
+  return need > 100 ? 100 : need;
+}
 
 BatteryVerdict guardBattery(
   WearKind kind,
@@ -48,8 +55,8 @@ BatteryVerdict guardBattery(
   if (batteryPct == null) return const BatteryVerdict(allowed: true, note: 'headband battery not known');
   if (kind == WearKind.night) {
     final toWake = w.hoursToWake(now);
-    if (batteryPct >= toWake * BatteryRule.drainPctPerHour) return const BatteryVerdict(allowed: true);
-    final hours = (batteryPct / BatteryRule.drainPctPerHour).floor();
+    if (batteryPct >= toWake * BandBatteryRule.drainPctPerHour) return const BatteryVerdict(allowed: true);
+    final hours = (batteryPct / BandBatteryRule.drainPctPerHour).floor();
     return BatteryVerdict(
       allowed: true,
       note: 'headband at $batteryPct %: about $hours h, the night needs about ${toWake.round()} h',
@@ -59,10 +66,10 @@ BatteryVerdict guardBattery(
   final chargeH = BatteryRule.chargeTime.inMinutes / 60;
   final double hours;
   if (toBed >= chargeH) {
-    final byBattery = (batteryPct - BatteryRule.marginPct) / BatteryRule.drainPctPerHour;
+    final byBattery = (batteryPct - BatteryRule.marginPct) / BandBatteryRule.drainPctPerHour;
     hours = byBattery < toBed - chargeH ? byBattery : toBed - chargeH;
   } else {
-    hours = (batteryPct - nightNeedPct(w)) / BatteryRule.drainPctPerHour;
+    hours = (batteryPct - nightNeedPct(w)) / BandBatteryRule.drainPctPerHour;
   }
   final limit = Duration(minutes: (hours * 60).floor());
   if (limit < BatteryRule.minSession) {

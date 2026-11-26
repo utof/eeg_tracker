@@ -186,9 +186,15 @@ class Phone {
   /// Schedules the foreground service to start again in [delayMs], then ends this process.
   /// The headband-lost notice (lib/headband/lost_watch.dart): one card, replaced by the next. False when notifications
   /// are off for the app (or there is no phone).
-  static Future<bool> bandNotice(String title, String text) async {
+  /// [reconnect]: with a "Reconnect now" button (a recording that is trying to get the headband back).
+  static Future<bool> bandNotice(String title, String text, {bool reconnect = false}) async {
     try {
-      return await _channel.invokeMethod<bool>('bandNotice', {'title': title, 'text': text}) ?? false;
+      return await _channel.invokeMethod<bool>('bandNotice', {
+            'title': title,
+            'text': text,
+            'reconnect': reconnect,
+          }) ??
+          false;
     } catch (_) {
       return false;
     }
