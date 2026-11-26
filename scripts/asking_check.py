@@ -117,7 +117,8 @@ def age_band(row: Row) -> str:
 
 
 def is_guess_shown(row: Row) -> bool:
-    return row.get("card", "") != "blind" and row.get("answer", "") in ("yes", "no")
+    # a blind card hides the guess; a choice card ("Meditating or resting?") shows two words and no guess
+    return row.get("card", "") not in ("blind", "choice") and row.get("answer", "") in ("yes", "no")
 
 
 def summary(rows: list[Row]) -> str:
@@ -201,7 +202,7 @@ def table_c(rows: list[Row], key: Callable[[Row], str], names: Iterable[str], ti
         mark = ASKED if rate is not None and rate > NOT_SURE_LIMIT and total >= MIN_CARDS else ""
         body.append([n, str(total), str(counts["yes"]), str(counts["no"]), str(counts["not_sure"]),
                      str(counts["said"]), shown(rate), mark])
-    head = [title, "Answered", "Yes", "No", "Not sure", "Said (blind card)", "Not sure %", "Note"]
+    head = [title, "Answered", "Yes", "No", "Not sure", "Said (blind or choice card)", "Not sure %", "Note"]
     return markdown(head, body)
 
 

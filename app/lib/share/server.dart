@@ -816,7 +816,7 @@ class ShareServer {
     }
     if (working == null) return _json(res, 400, {'error': 'send {"working": true} or {"working": false}'});
     final take = onWork;
-    if (take == null) return _json(res, 503, {'error': 'the work signal is not taken now (a night records)'});
+    if (take == null) return _json(res, 503, {'error': 'the work signal is not taken by this server'});
     take(working, meeting);
     return _json(res, 202, {'ok': true});
   }

@@ -132,7 +132,7 @@ def test_empty_table(tmp_path: Path) -> None:
 def test_golden_file(tmp_path: Path) -> None:
     code, text = run(GOLDEN, "--days", "0")
     assert code == 0
-    assert "15 estimates in the period: 13 answered, 1 not answered (short_and_old: 1), 1 still waiting." in text
+    assert "16 estimates in the period: 14 answered, 1 not answered (short_and_old: 1), 1 still waiting." in text
     assert "| under 0.5 | 0 | 0 | 0 | - |" in text
     assert "| 0.5 to 0.7 | 1 | 0 | 1 | 0 |" in text
     assert "| 0.7 to 0.9 | 1 | 1 | 0 | 100 |" in text
@@ -143,8 +143,11 @@ def test_golden_file(tmp_path: Path) -> None:
     assert "| nap | 1 | 0 | 1 | 100 | too few |" in text
     assert "| asleep | 0 | - | 3 | 67 | too few |" in text
     assert "| all | 2 | 50 | 8 | 63 | too few |" in text
+    # the choice card ("Meditating or resting?", eyes closed and still) is neither a blind card nor a guess shown
+    assert "| eyes_closed | 0 | - | 0 | - | too few |" in text
+    assert "| eyes_closed | 1 | 0 | 0 | 0 | 1 | 0 |" in text
     assert "| walking | 7 | 2 | 2 | 1 | 2 | 14 |" in text
     assert "| nap | 3 | 1 | 0 | 1 | 1 | 33 |" in text
     assert "| asleep | 3 | 2 | 1 | 0 | 0 | 0 |" in text
-    assert "| under 1 h | 7 | 2 | 1 | 1 | 3 | 14 |" in text
+    assert "| under 1 h | 8 | 2 | 1 | 1 | 4 | 13 |" in text
     assert "| not known | 6 | 3 | 2 | 1 | 0 | 17 |" in text

@@ -60,6 +60,8 @@ String laptopWords(ArchiveItem i) {
 
 /// How good the activity tags are, in plain words (docs/detectors.md; DECISIONS 700-709).
 const String howGood =
+    'What happened is the app\'s one best guess for each moment; tap a stretch to read where it comes from and how sure '
+    'it is. The rows under it are the detail. '
     'Found by the app, with planning values nobody has checked against what you were doing: asleep comes from the sleep '
     'report (a model not yet validated on this headband); eyes closed and drowsy are read against this recording\'s own '
     'first minutes, so they work best when it starts awake with eyes open; talking is jaw muscle, so chewing counts too; '
@@ -187,10 +189,23 @@ class RecordingView extends StatelessWidget {
             for (final l in Lane.values.where((l) => l != Lane.tags))
               _LaneRow(
                 lane: l,
-                value: tl.of(l).isEmpty ? 'none' : lengthText(tl.total(l)),
+                // the first lane is one guess per moment: its total says little, its count of stretches more
+                value: tl.of(l).isEmpty
+                    ? 'none'
+                    : (l == Lane.happened
+                          ? '${tl.of(l).length} ${tl.of(l).length == 1 ? 'stretch' : 'stretches'}'
+                          : lengthText(tl.total(l))),
                 onTap: onLane == null ? null : () => onLane!(l),
               ),
           const Para(howGood, color: Night.inkMuted),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => showEvidence(context, 'what-happened'),
+              icon: const Icon(Icons.info_outline),
+              label: const Text('How sure each guess is'),
+            ),
+          ),
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(

@@ -6,7 +6,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:eeg_tracker/activity/guesses.dart';
+import 'package:eeg_tracker/activity/happened.dart';
 import 'package:eeg_tracker/archive/bands.dart';
+import 'package:eeg_tracker/auto/bedtime.dart' show UsualNight;
 import 'package:eeg_tracker/archive/delete.dart';
 import 'package:eeg_tracker/archive/detail.dart';
 import 'package:eeg_tracker/archive/items.dart';
@@ -580,6 +583,13 @@ void main() {
       expect(spans(Lane.moving), 'Moving 5:0-5:30');
       expect(tl.total(Lane.sleep), const Duration(minutes: 3));
       expect(tl.of(Lane.sleep).single.source, contains('light 2 min, deep 1 min, dream 1 min'));
+      // the first lane: one best guess per moment (the 1.5 minutes of closed eyes are under its 3 minutes; asleep at
+      // night is "Asleep"), each saying how sure it is; it never overlaps itself
+      expect(lanes.first, Lane.happened);
+      expect(spans(Lane.happened), 'No signal 0:0-1:0, Drowsy 2:30-4:0, Talking or chewing 4:0-5:0, Moving 5:0-5:30, Asleep 6:0-9:0');
+      expect(tl.of(Lane.happened).first.source, endsWith('How sure: near certain.'));
+      expect(tl.of(Lane.happened)[1].source, endsWith('How sure: some.'));
+      expect(tl.of(Lane.happened)[1].tone, BandTone.faint);
     });
 
     test('a work session\'s breaks and meetings; its own epochs without a pass; sessions and your tags', () {
@@ -659,6 +669,33 @@ void main() {
       d = loadDetail(files, l.items.single, const []);
       expect(d.passKept, isTrue);
       expect(d.input.seen!.epochs, 2);
+    });
+
+    test('the guesses file follows the kept pass: written once, again only when what it was made from changed', () {
+      final s = writeSet(rec, at(13, 0), seconds: 120, uv: (i, c) => 0); // flat zeros: 2 minutes of no signal
+      final item = listArchive(files).items.single;
+      expect(keepGuesses(files, item), isFalse, reason: 'no pass yet');
+      expect(guessesFileFor(files, s).existsSync(), isFalse);
+      seeAndKeep(files, s, [File('${rec.path}/$s.f32')]);
+      expect(keepGuesses(files, item, usual: const UsualNight(bedMin: 23 * 60, wakeMin: 7 * 60)), isTrue);
+      final g = readGuesses(guessesFileFor(files, s))!;
+      expect(g.recording, s);
+      expect([for (final m in g.marks) m.what], [What.noSignal]);
+      expect(g.numbers.single['good_signal_share'], 0);
+      expect(g.numbers.single['minutes_from_bedtime'], -600);
+      expect(keepGuesses(files, item), isFalse, reason: 'made from the same pass');
+      // another layout: no pass can run, the file is still written (with the marks that need no pass: none here)
+      final diy = Directory('${files.path}/recordings-diy')..createSync();
+      final h8 = RecordingHeader(
+        channels: [for (var c = 1; c <= 8; c++) HeaderChannel('Ch$c')],
+        sampleRate: 250,
+        device: 'DIY board',
+        counter: counterSequence,
+      );
+      final board = writeSet(diy, at(15, 0), seconds: 60, header: h8);
+      final other = listArchive(files).items.firstWhere((i) => i.id == board);
+      expect(keepGuesses(files, other), isTrue);
+      expect(readGuesses(guessesFileFor(files, board))!.marks, isEmpty);
     });
   });
 }

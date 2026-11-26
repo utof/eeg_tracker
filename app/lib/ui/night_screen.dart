@@ -53,6 +53,8 @@ import 'memory_cues_screen.dart';
 import 'storage_screen.dart';
 import 'nap_reports_screen.dart';
 import 'nap_screen.dart';
+import '../morning/offer.dart';
+import 'morning_offer_line.dart';
 import 'morning_screen.dart';
 import 'morning_section.dart';
 import 'nearby.dart';
@@ -1217,9 +1219,44 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
     unawaited(_refresh());
   }
 
+  /// The morning check-in offer's line (DECISIONS 1110); null when the rule says no. "Not now" is kept in memory
+  /// only: after a restart of the app the line may show again within the 2 hours.
+  String? _morningDismissed;
+
+  Widget? _morningAsk() {
+    final s = _running ? _status : null;
+    if (s == null) return null;
+    final now = DateTime.now();
+    final data = s.lastDataMs == null ? null : DateTime.fromMillisecondsSinceEpoch(s.lastDataMs!);
+    final offer = morningOffer(
+      spans: s.rec.spans,
+      now: now,
+      lastDataAt: data,
+      lastCheckIn: _lastCheckIn(now),
+      dismissedSpanId: _morningDismissed,
+    );
+    if (offer == null) return null;
+    return MorningOfferLine(
+      offer: offer,
+      onCheckIn: () => unawaited(_checkIn()),
+      onNotNow: () => setState(() => _morningDismissed = offer.spanId),
+    );
+  }
+
+  /// When today's first check-in was saved, from "09:12" ([_checkedInAt]); the first of the day is all that is known
+  /// here, a later one of the running recording is a `check_in` span the rule reads.
+  DateTime? _lastCheckIn(DateTime now) {
+    final t = _checkedInAt;
+    if (t == null || t.length != 5) return null;
+    final h = int.tryParse(t.substring(0, 2)), m = int.tryParse(t.substring(3));
+    if (h == null || m == null) return null;
+    final at = DateTime(now.year, now.month, now.day, h, m);
+    return at.isAfter(now) ? at.subtract(const Duration(days: 1)) : at;
+  }
+
   /// The check-in owns the headband while it runs, so it too starts only between nights.
   Future<void> _checkIn() async {
-    if (_running) return;
+    // on a running recording the screen rides it as the `check_in` activity (its finder's door, DECISIONS 980)
     await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const MorningScreen()));
     unawaited(_refresh());
   }
@@ -1414,6 +1451,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
         recordingsDir: _dir,
         onOpen: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SleepExperimentsScreen(recordingsDir: _dir))),
       ),
+      morningAsk: _morningAsk(),
       onStopSheet: () => unawaited(_stopSheet()),
       onEndActivity: _endActivity,
       onUndo: () {
@@ -1464,7 +1502,7 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
               filesPath: _filesDir!,
               phone: _confirmPhone,
               takesOpen: true,
-              passes: recentWalkPasses,
+              passes: recentPasses,
               changed: (_running, sleep?.nightOf, sleep?.scored, sleep?.scoringStep == null),
             ),
       onConfirmSettings: _filesDir == null ? null : _confirmSettings,

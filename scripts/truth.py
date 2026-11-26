@@ -351,6 +351,9 @@ def _jsonl(path: Path) -> list[dict]:
 
 CONFIRM_FOLDER = Path("phone") / "confirm"
 # the words kept after "Saved:" (packages/shared_labels/lib/src/store.dart); `skip` is the older word for `not_sure`
+# The detectors whose question is a choice card, and the two words it offers (packages/shared_labels
+# lib/src/estimate.dart `choiceChips`; DECISIONS 1105): "Meditating or resting?" for eyes closed and still.
+CHOICES = {"eyes-closed-rest": ("meditating", "resting")}
 CONFIRM_ANSWERS = {"yes": "Yes", "no": "No", "not_sure": "Not sure", "said": "Said"}
 CONFIRM_WHY_NOT = ("dismissed", "expired", "never_seen", "short_and_old")
 CONFIRM_CLOSES = tuple(w for w in CONFIRM_WHY_NOT if w != "dismissed")  # the question is closed: asked no more
@@ -370,7 +373,7 @@ class Confirmed:
     at: str = ""
     via: str = ""
     note: str = ""
-    card: str = ""  # normal, blind, or "" (no card was shown)
+    card: str = ""  # normal, blind, choice (two words to pick from), or "" (no card was shown)
     said: str = ""
     words: str = ""
     times_confirmed: bool = False
@@ -384,8 +387,8 @@ class Confirmed:
     @property
     def agrees(self) -> bool | None:
         """A blind card: whether what the owner said is what the detector thought; None when it cannot be told."""
-        if self.answer != "said" or not self.said:
-            return None
+        if self.answer != "said" or not self.said or self.card == "choice":
+            return None  # a choice card: the detector guessed neither of the words it offered
         guess = self.estimate["label"]
         return self.said == guess or {self.said, guess} <= ONE_QUESTION
 
@@ -409,7 +412,7 @@ def _answer_line(c: Confirmed, a: dict, labels: set[str]) -> bool:
         return False
     c.answer, c.at, c.said, c.words = answer, a["at"], said, words
     c.via = a["via"] if isinstance(a.get("via"), str) else "card"
-    c.card = a["card"] if a.get("card") in ("normal", "blind") else ""
+    c.card = a["card"] if a.get("card") in ("normal", "blind", "choice") else ""
     s, e = parse_time(a.get("start")), parse_time(a.get("end"))
     c.times_confirmed = bool(answer == "yes" and a.get("times_confirmed") is True and s and e and e > s)
     c.start, c.end = (a["start"], a["end"]) if c.times_confirmed else ("", "")
@@ -481,6 +484,8 @@ def confirm_row(c: Confirmed, vocab: Vocabulary | None = None) -> dict[str, str]
     word = (c.words or label) if c.answer == "said" else ("Yes, with my times" if c.times_confirmed
                                                           else CONFIRM_ANSWERS[c.answer])
     asked = "the app asked without showing its guess" if c.answer == "said" else "the app asked"
+    if c.answer == "said" and c.card == "choice":
+        asked = "the app asked to pick " + " or ".join(CHOICES.get(str(e.get("detector")), ()))
     return dict(label_id="confirm:" + e["id"][4:], start=_iso(c.start if c.times_confirmed else e.get("start")),
                 end=_iso(c.end if c.times_confirmed else e.get("end")),
                 recording=e.get("recording") or "", kind=kind, label=label, value="", unit="",

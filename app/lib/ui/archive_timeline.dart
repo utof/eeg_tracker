@@ -123,7 +123,8 @@ class TimelineViewState extends State<TimelineView> {
     final pulse = widget.pulse != null && widget.pulse!.hasReading ? widget.pulse : null;
     final pulseH = pulse == null ? 0.0 : math.max(2 * laneH, 2 * height(scaleStyle) + 10);
     final g = _Geometry(laneH: laneH, gap: 6, lanes: lanes.length, pulseH: pulseH);
-    final labelW = scaler.scale(96).clamp(96.0, 140.0);
+    // wide enough for the longest lane word, "What happened"
+    final labelW = scaler.scale(112).clamp(112.0, 156.0);
     final tickH = height(tickStyle) + 8;
     final end = _from.add(_len);
     final tl = widget.timeline;

@@ -1,5 +1,7 @@
 // A recording's timeline for the Archive (DECISIONS 700-709): its activity as bands on worded lanes, from what the phone
 // already knows of that time, each band saying where it came from:
+//   What happened  one best guess per moment with how sure it is (activity/happened.dart; DECISIONS 1101-1104): the
+//                  lanes under it are its detail. Never mixed with what you marked or tagged yourself.
 //   Sleep        asleep (N1 N2 N3 REM) by the night's sleep report, where the night was scored
 //   Eyes closed  awake with eyes closed: the detectors' pass (seen.dart), or the work session's own epochs
 //   Drowsy       getting drowsy or drowsy, awake with eyes open: the same
@@ -12,6 +14,7 @@
 //   Your tags    the spans you tagged
 // A band is a run of 30 s epochs (bridging one odd epoch), at least the rule's length (seen.dart ActivityRule: planning
 // values). Asleep wins: eyes closed, drowsy and talking are not shown asleep. Plain Dart.
+import '../activity/happened.dart';
 import '../detectors/detectors.dart' show epochS;
 import '../walking/detector.dart' show StretchKind;
 import '../walking/pass.dart' show WalkResult, WalkSummary;
@@ -20,6 +23,7 @@ import 'seen.dart';
 import 'tags.dart';
 
 enum Lane {
+  happened('What happened'),
   sleep('Sleep'),
   eyes('Eyes closed'),
   drowsy('Drowsy'),
@@ -181,6 +185,24 @@ Timeline timelineOf(ArchiveItem item, TimelineInput input) {
   void add(Band b) {
     final s = b.start.isBefore(from) ? from : b.start, e = b.end.isAfter(to) ? to : b.end;
     if (e.isAfter(s)) bands.add(Band(b.lane, s, e, b.label, source: b.source, tone: b.tone, tag: b.tag));
+  }
+
+  // one best guess per moment, with how sure it is
+  for (final m in happenedMarks(seen: input.seen, stages: input.stages, walk: input.walk, from: from, to: to)) {
+    add(
+      Band(
+        Lane.happened,
+        m.start,
+        m.end,
+        m.what.word,
+        source: '${m.source} How sure: ${m.sure.word}.',
+        tone: switch (m.sure) {
+          _ when m.what == What.noSignal => BandTone.warn,
+          Sure.some || Sure.weak => BandTone.faint,
+          _ => BandTone.found,
+        },
+      ),
+    );
   }
 
   // asleep, by the report

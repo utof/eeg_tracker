@@ -54,8 +54,14 @@ so the app asks instead.
 - Checks happen only at sensible moments: when you open the app, every 10 minutes in your bedtime window (from 2 hours
   before your usual bedtime to your usual wake-up, from your last 14 days of recorded nights; 23:00 to 07:00 until 3
   nights are recorded; you can set it by hand), when Android says the headband came near (at most every 30
-  minutes), and when the laptop tray says a work session started (it tells the paired phone through Share on Wi-Fi
-  between nights). Never during a recording or a session, nor while the Signal tab holds the headband.
+  minutes), and when the laptop tray says a work session started (it tells the paired phone through Share on Wi-Fi).
+  Never during a session, nor while the Signal tab holds the headband; during a recording only the laptop's word is
+  taken (next point).
+- While a recording runs and the laptop says you started working: no check is needed (the recording is the proof the
+  headband is on). If nothing is marked on the recording and data arrived in the last 2 minutes, the Work setting
+  decides: Start automatically opens the work page and its silent session reads the same recording; Ask me shows one
+  quiet notice, "The laptop says you are working. Work session on this recording?"; Do nothing does nothing. Not now
+  keeps it quiet for 30 minutes. The laptop's "work ended" does not end the session.
 - A check connects for about 10 seconds: contact on every electrode, by name (any headband or helmet), and the
   battery, then it lets go. A board without contact readings would be judged from 20 seconds of signal instead (flat
   or railed means not on skin); the DIY helmet must never use its chip's lead-off currents on a person.
@@ -101,4 +107,4 @@ so the app asks instead.
 - Android's CompanionDeviceManager (part of Android); no new library.
 - The app's own contact check, night recorder and work session (this repository, MIT).
 
-Checked: 2026-11-20
+Checked: 2026-11-26

@@ -20,6 +20,7 @@ is in docs/data-format.md ("The data book"). It reads `_local/` and writes only 
   truth.tsv      what really happened, typed (scripts/truth.py): the hand file, <local>/truth/*.tsv and the Archive
                  tags marked "This is what I was doing"; scripts/validate_detectors.py scores the detectors against it
   spans.tsv      one row per span of every recording: what you were doing in it (scripts/spans.py)
+  guesses.tsv    one row per guess of "What happened" in a recording, the numbers behind it, your answer
   README.md, book.json   what is there, how it was built (versions, row counts, time)
 
 Built from the files alone, so it can always be built again (delete the folder and run this); nothing reads it back
@@ -34,7 +35,7 @@ The phone link's after-pull jobs run it (scripts/after_pull.py).
 """
 from __future__ import annotations
 
-import argparse, fcntl, gzip, hashlib, io, json, os, sys, time
+import argparse, fcntl, gzip, hashlib, io, json, os, re, sys, time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -64,7 +65,7 @@ PROB_KEYS = ("p_W", "p_N1", "p_N2", "p_N3", "p_R")
 QUALITY_WORD = {"g": "good", "d": "degraded", "m": "missing"}
 DEFAULT_LOCAL = ROOT / "_local"
 TABLES = ("nights.tsv", "sessions.tsv", "days.tsv", "epochs.tsv.gz", "labels.tsv", "truth.tsv", "spans.tsv",
-          "estimates.tsv")
+          "estimates.tsv", "guesses.tsv")
 
 
 # ---- cells and files ------------------------------------------------------------------------------------------------
@@ -991,6 +992,152 @@ def _marker_how(text: str) -> tuple[str, str | None]:
     return "app", None
 
 
+# ---- guesses.tsv ----------------------------------------------------------------------------------------------------
+
+GUESS_COLUMNS = ["guess_id", "recording", "what", "start", "end", "minutes", "sure", "minutes_from_bedtime",
+                 "in_bedtime_window", "charging", "screen_on_share", "laptop_working", "phone_steps_per_min",
+                 "eyes_closed_share", "back_alpha", "jaw_bursts_per_min", "movement_s_per_min", "good_signal_share",
+                 "estimate_id", "answer", "said", "truth_label", "truth_present", "truth_source", "made", "file"]
+
+# The phone's numbers of a mark (app/lib/activity/guesses.dart), copied as they are; a missing one stays empty.
+GUESS_PHONE_NUMBERS = ("minutes_from_bedtime", "eyes_closed_share", "back_alpha", "jaw_bursts_per_min",
+                       "movement_s_per_min", "good_signal_share")
+
+# Which questions are about which guess: the estimate's label for the mark's word (the same stretch when one covers
+# half of the shorter, as the questions' own rule: shared_labels ConfirmRule.sameShare).
+GUESS_LABELS = {"asleep": {"asleep", "nap", "night_sleep"}, "nap": {"asleep", "nap", "night_sleep"},
+                "walking": {"walking", "running"}, "running": {"walking", "running"},
+                "eyes_closed_resting": {"eyes_closed"}}
+SAME_SHARE = 0.5
+LAPTOP_WORD_MAX_H = 12  # a laptop word older than this says nothing about now (the tray always sends the end)
+
+SCREEN_LINE = re.compile(r"^(\S+) .*; screen (on|off);")
+STEPS_LINE = re.compile(r"^(\S+) phone steps (\d+)\s*$")
+
+
+def _log_readings(local: Path) -> tuple[list[tuple[float, bool]], list[tuple[float, int]]]:
+    """The screen's state changes and the step counter's readings in the phone's recording logs, each by time."""
+    screen: list[tuple[float, bool]] = []
+    steps: list[tuple[float, int]] = []
+    for folder in ("recordings", "recordings-diy"):
+        for f in sorted((local / "phone" / folder).glob("*.log")):
+            try:
+                lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            for ln in lines:
+                m = SCREEN_LINE.match(ln)
+                n = None if m else STEPS_LINE.match(ln)
+                t = ds.parse_time((m or n).group(1)) if (m or n) else None
+                if t is None:
+                    continue
+                if m:
+                    screen.append((t.timestamp(), m.group(2) == "on"))
+                elif n:
+                    steps.append((t.timestamp(), int(n.group(2))))
+    return sorted(screen), sorted(steps)
+
+
+def _screen_on_share(screen: list[tuple[float, bool]], a: float, b: float) -> float | None:
+    """The share of a..b the phone's screen was on; None while its state was not known at `a` (no line yet, or the
+    last one over an hour old: another recording's)."""
+    before = [x for x in screen if x[0] <= a]
+    if not before or a - before[-1][0] > 3600 or b <= a:
+        return None
+    on, at, state = 0.0, a, before[-1][1]
+    for t, s in screen:
+        if t <= a or t >= b:
+            continue
+        if state:
+            on += t - at
+        at, state = t, s
+    if state:
+        on += b - at
+    return on / (b - a)
+
+
+def _steps_per_min(steps: list[tuple[float, int]], a: float, b: float) -> float | None:
+    """Steps a minute by the phone's counter over a..b (readings up to 2 minutes outside count as its edges); None
+    without two readings, or when the counter started again."""
+    near = [x for x in steps if a - 120 <= x[0] <= b + 120]
+    if len(near) < 2 or near[-1][1] < near[0][1] or b <= a:
+        return None
+    return (near[-1][1] - near[0][1]) / ((b - a) / 60)
+
+
+def _laptop_words(local: Path) -> list[tuple[float, bool]]:
+    out = []
+    for j in ds._lines(local / "phone" / "auto-start" / "log.jsonl"):  # noqa: SLF001
+        t = ds.parse_time(j.get("at")) if isinstance(j, dict) and j.get("event") == "laptop" else None
+        if t is not None and isinstance(j.get("working"), bool):
+            out.append((t.timestamp(), j["working"]))
+    return sorted(out)
+
+
+def _overlap_share(a0: float, a1: float, b0: float, b1: float) -> float:
+    shorter = min(a1 - a0, b1 - b0)
+    return 1.0 if shorter <= 0 and b0 <= a0 <= b1 else (max(0.0, min(a1, b1) - max(a0, b0)) / shorter if shorter > 0 else 0.0)
+
+
+def guess_rows(local: Path, truth_rows: list[dict[str, str]] | None = None) -> list[dict]:
+    """guesses.tsv: one row per mark of the phone's "What happened" files (`<local>/phone/activity/*.guesses.json`):
+    what the app guessed for a stretch of a recording and how sure it was, the numbers behind it, the question asked
+    about it with the owner's answer, and the truth label that covers it. The phone's numbers are copied as they are;
+    the laptop adds the screen and the step counter (the recordings' logs) and its own work word (the watcher's log).
+    `charging` is always empty: the phone does not write it down during a recording yet. Empty = not known, never 0.
+    No model reads this table yet."""
+    screen, steps = _log_readings(local)
+    words = _laptop_words(local)
+    asked = truth.read_confirm(local)
+    if truth_rows is None:
+        truth_rows = truth.build(local)[0]
+    covers = []
+    for r in truth_rows:
+        a, b = ds.parse_time(r.get("start")), ds.parse_time(r.get("end"))
+        if a is not None and b is not None and r.get("active", "1") != "0":
+            covers.append((a.timestamp(), b.timestamp(), r))
+    rows = []
+    for f in sorted((local / "phone" / "activity").glob("*.guesses.json")):
+        j = _json(f)
+        if not isinstance(j, dict) or j.get("version") != 1 or not isinstance(j.get("marks"), list):
+            continue
+        rec = j.get("recording") if isinstance(j.get("recording"), str) else f.name[:-len(".guesses.json")]
+        for m in j["marks"]:
+            a, b = (ds.parse_time(m.get(k)) if isinstance(m, dict) else None for k in ("start", "end"))
+            if a is None or b is None or b <= a or not isinstance(m.get("what"), str):
+                continue
+            ta, tb = a.timestamp(), b.timestamp()
+            row = dict(guess_id=f"{rec}/{m['what']}/{a.strftime('%H:%M:%S')}", recording=rec, what=m["what"],
+                       start=iso(a), end=iso(b), minutes=_r((tb - ta) / 60), sure=m.get("sure"),
+                       made=iso(j.get("made")), file=f.relative_to(local).as_posix())
+            for k in GUESS_PHONE_NUMBERS:
+                row[k] = _num(m.get(k))
+            window = m.get("in_bedtime_window")
+            row["in_bedtime_window"] = window if isinstance(window, bool) else None
+            row["screen_on_share"] = _screen_on_share(screen, ta, tb)
+            row["phone_steps_per_min"] = _steps_per_min(steps, ta, tb)
+            said = [w for w in words if w[0] <= (ta + tb) / 2 and (ta + tb) / 2 - w[0] <= LAPTOP_WORD_MAX_H * 3600]
+            row["laptop_working"] = said[-1][1] if said else None
+            labels = GUESS_LABELS.get(m["what"], set())
+            best = None
+            for c in asked:
+                e = c.estimate
+                ea, eb = ds.parse_time(e.get("start")), ds.parse_time(e.get("end"))
+                if e.get("label") not in labels or ea is None or eb is None:
+                    continue
+                share = _overlap_share(ta, tb, ea.timestamp(), eb.timestamp())
+                if share >= SAME_SHARE and (best is None or share > best[0]):
+                    best = (share, c)
+            if best is not None:
+                row.update(estimate_id=best[1].estimate["id"], answer=best[1].answer, said=best[1].said)
+            cover = max(((_overlap_share(ta, tb, ca, cb), r) for ca, cb, r in covers), key=lambda x: x[0], default=None)
+            if cover is not None and cover[0] >= SAME_SHARE:
+                row.update(truth_label=cover[1].get("label"), truth_present=cover[1].get("present"),
+                           truth_source=cover[1].get("source"))
+            rows.append(row)
+    return sorted(rows, key=lambda r: (r["start"] or "", r["guess_id"]))
+
+
 def labels_now(local: Path) -> tuple[list[dict], set[str]]:
     """Every label in eeg_tracker's own stores now, and the stores read (a label gone from a store read now gets a
     tombstone row)."""
@@ -1179,6 +1326,7 @@ Tidy tables of everything eeg_tracker measured on this laptop, made by `scripts/
 | `truth.tsv` | truth label: what really happened, typed (`active` = 1: not corrected by a later row; `present` = 0: it did not happen) |
 | `spans.tsv` | span: what you were doing in a recording (Record first): sleep, nap, work, meditate, ... |
 | `estimates.tsv` | what a detector thought happened and what you answered when the app asked (not a label until Yes or No) |
+| `guesses.tsv` | guess of "What happened" in a recording: what, how sure, the numbers behind it, your answer where asked |
 | `validation.tsv`, `validation.md` | detector against truth label, and its summary (`scripts/validate_detectors.py`) |
 | `book.json` | how the last build went: versions, row counts, time, problems |
 
@@ -1238,6 +1386,8 @@ def build(local: Path, out: Path, now: datetime, full: bool = False, say: Callab
     truth.write_table(out / "truth.tsv", trows)
     erows = estimate_rows(local)
     _write(out / "estimates.tsv", tsv(ESTIMATE_COLUMNS, erows).encode())
+    grows = guess_rows(local, trows)
+    _write(out / "guesses.tsv", tsv(GUESS_COLUMNS, grows).encode())
     hashes.save()
     import epoch_signal as es
     book = dict(format=FORMAT, version=VERSION, built=iso(now), seconds=round(time.time() - t0, 1),
@@ -1245,7 +1395,7 @@ def build(local: Path, out: Path, now: datetime, full: bool = False, say: Callab
                 models=sorted({r["model"] for r in nrows if r.get("model")}),
                 rows={"nights.tsv": len(nrows), "sessions.tsv": len(srows), "days.tsv": len(drows),
                       "epochs.tsv.gz": n_epochs, "labels.tsv": n_labels, "truth.tsv": len(trows),
-                      "spans.tsv": len(sprows), "estimates.tsv": len(erows)},
+                      "spans.tsv": len(sprows), "estimates.tsv": len(erows), "guesses.tsv": len(grows)},
                 recordings=len(groups), worked_out=worked, labels_added=added, labels_removed=removed,
                 truth_from=from_where, truth_rejected=[r.text() for r in rejected],
                 epoch_columns=len(ep_columns), problems=problems)

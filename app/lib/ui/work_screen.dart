@@ -81,7 +81,8 @@ class _WorkScreenState extends State<WorkScreen> {
     final running = await FlutterForegroundTask.isRunningService;
     if (!mounted) return;
     setState(() => _recordingRuns = running);
-    if (widget.auto != null && !running) unawaited(_autoStart());
+    // the watcher's start, also on a running recording (the session rides it; DECISIONS 1108)
+    if (widget.auto != null) unawaited(_autoStart());
     await _load();
   }
 

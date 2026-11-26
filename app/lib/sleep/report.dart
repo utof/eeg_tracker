@@ -8,6 +8,7 @@ import 'dart:io';
 
 import '../walking/detector.dart' show walkDetector;
 import '../wearer/check.dart' show nightSignal, wearerAnswerIn;
+import 'auto_lights_off.dart';
 import 'drift.dart';
 import 'extras.dart';
 import 'periods.dart';
@@ -17,7 +18,7 @@ import 'rem_check.dart';
 /// 2026-11-19 also `drift_off` (drift.dart) and `wearer_signal` ("Was this you?", wearer/check.dart), added without a
 /// new version; and `wearer`, the owner's answer, which a rebuilt report keeps. Since 2026-11-20 also `probs` (the
 /// model's per-epoch probabilities) and `rem_check` (the dream sleep check, rem_check.dart), without a new version.
-/// Since 2026-11-24 also `walking` (the epochs the walking detector calls walking, scored awake; DECISIONS 920).
+/// Since 2026-11-26 also `auto_lights_off` (auto_lights_off.dart; absent when no run was found). Since 2026-11-24 also `walking` (the epochs the walking detector calls walking, scored awake; DECISIONS 920).
 /// On the phone a report of an older version is kept as it is and offers "Score again" (DECISIONS row 580; the
 /// laptop rebuilds it).
 const int reportVersion = 2;
@@ -310,6 +311,15 @@ Map<String, dynamic> buildReport({
       driftWhyNot = '$e';
     }
   }
+  // the app's own guess of Lights off, beside the drift-off result; it never changes drift_off
+  Map<String, Object?>? autoOff;
+  if (seen != null) {
+    try {
+      autoOff = autoLightsOffReport(seen.autoLightsOffS, ds?.tapped, start);
+    } on Object {
+      autoOff = null;
+    }
+  }
   Map<String, Object?>? wearer;
   if (seen != null) {
     try {
@@ -353,6 +363,7 @@ Map<String, dynamic> buildReport({
       'extras_error': whyNot,
       'drift_off': drift,
       'drift_off_error': driftWhyNot,
+      'auto_lights_off': ?autoOff,
       'wearer_signal': wearer,
       'probs': probs,
       'rem_check': check,

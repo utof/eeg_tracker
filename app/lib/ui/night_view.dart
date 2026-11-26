@@ -229,6 +229,7 @@ class NightView extends StatelessWidget {
     this.onArchive,
     this.onRecord,
     this.experimentAsk,
+    this.morningAsk,
     this.onSleepNow,
     this.onStopSheet,
     this.onEndActivity,
@@ -254,6 +255,10 @@ class NightView extends StatelessWidget {
   /// Tonight's question of the running sleep experiment (sleep_experiment_ask.dart, DECISIONS 1084): in the pinned
   /// bar right above the Sleep button, never while a sleep stretch is open; null: none.
   final Widget? experimentAsk;
+
+  /// The morning check-in offer (morning_offer_line.dart, DECISIONS 1110): above the buttons and above the
+  /// experiment's question when both would show; null: none.
+  final Widget? morningAsk;
   final NightViewModel model;
 
   /// Record: the recording alone, no sleep span (null: no such button, the layout of before).
@@ -447,7 +452,7 @@ class NightView extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
                 child: _withAsk(
                   // the evening question belongs to the moment before Sleep: not once a sleep stretch is open
-                  m.running && m.sleeping ? null : experimentAsk,
+                  [morningAsk, m.running && m.sleeping ? null : experimentAsk],
                   _Action(
                   m,
                   onStart: onStart,
@@ -475,9 +480,12 @@ class NightView extends StatelessWidget {
   }
 
   /// The pinned bar with the evening question above its buttons.
-  static Widget _withAsk(Widget? ask, Widget action) => ask == null
-      ? action
-      : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [ask, action]);
+  static Widget _withAsk(List<Widget?> asks, Widget action) {
+    final shown = [for (final a in asks) ?a];
+    return shown.isEmpty
+        ? action
+        : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [...shown, action]);
+  }
 }
 
 Color _toneColor(Tone t) => switch (t) {

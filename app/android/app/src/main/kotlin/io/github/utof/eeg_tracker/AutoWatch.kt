@@ -62,6 +62,9 @@ object AutoWatch {
     private const val REQ_TICK = 60
     private const val RECORDER = "com.pravera.flutter_foreground_task.service.ForegroundService"
 
+    /** [busyReason]'s word while the recorder runs (lib/auto/controller.dart `recordingBusy`). */
+    const val RECORDING_BUSY = "night recording"
+
     /** A presence event starts a check at most this often: our own connection can make the headband vanish and return. */
     private const val PRESENCE_EVERY_MS = 30L * 60 * 1000
 
@@ -241,7 +244,7 @@ object AutoWatch {
      * reads files and never the headband.)
      */
     fun busyReason(context: Context): String? = when {
-        recorderRunning(context) -> "night recording"
+        recorderRunning(context) -> RECORDING_BUSY
         SessionService.sessionRunning -> "session"
         SharpPrompts.screenHeld -> "session on screen"
         screenHolds -> "signal on screen"
@@ -270,11 +273,17 @@ object AutoWatch {
 
     // ---- checks ------------------------------------------------------------------------------------------------------
 
-    /** Starts a check for [reason] unless the headband is busy or every kind is off. [fake]: debug builds only. */
+    /**
+     * Starts a check for [reason] unless the headband is busy or every kind is off; the laptop's word also during a
+     * recording (DECISIONS 1107). [fake]: debug builds only.
+     */
     fun requestCheck(context: Context, reason: String, force: Boolean = false, fake: String? = null) {
         if (!force && allOff(context)) return
         val busy = busyReason(context)
-        if (busy != null) {
+        // the laptop's work word is the one trigger taken while the recorder runs: the watcher then touches no
+        // headband and only starts or offers the work session on that recording (lib/auto/controller.dart, 7)
+        val onRecording = reason == "laptop" && busy == RECORDING_BUSY
+        if (busy != null && !onRecording) {
             Log.i(TAG, "no check for $reason: $busy")
             return
         }

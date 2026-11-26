@@ -9,6 +9,7 @@ import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 
+import '../activity/guesses.dart' show keepGuessesInBackground;
 import '../archive/bands.dart';
 import '../archive/delete.dart';
 import '../archive/detail.dart';
@@ -187,6 +188,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
     } catch (e) {
       w = (walk: null, why: 'Could not read it: $e');
     }
+    if (widget.walk == null) unawaited(keepGuessesInBackground(widget.filesPath, _item).catchError((Object _) => false));
     if (!mounted) return;
     final i = _input!;
     setState(() {
@@ -236,6 +238,8 @@ class _RecordingScreenState extends State<RecordingScreen> {
     } catch (e) {
       s = (seen: null, why: 'Could not read it: $e');
     }
+    // the guesses file follows the pass (activity/guesses.dart); not in tests, which give their own pass
+    if (widget.see == null) unawaited(keepGuessesInBackground(widget.filesPath, _item).catchError((Object _) => false));
     if (!mounted) return;
     final i = _input!;
     setState(() {

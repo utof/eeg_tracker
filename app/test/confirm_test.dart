@@ -328,7 +328,7 @@ void main() {
         File('${from.path}/$n').copySync('${files.path}/confirm/$n');
       }
       final state = ConfirmStore(files).read();
-      expect(state.estimates, hasLength(15));
+      expect(state.estimates, hasLength(16));
       expect(labelsTsv(state), File('${from.path}/labels.tsv').readAsStringSync());
       expect(estimatesTsv(state), File('${from.path}/estimates.tsv').readAsStringSync());
       expect(tsvCell('a "b"'), '"a ""b"""');

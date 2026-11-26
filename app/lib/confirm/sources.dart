@@ -1,5 +1,5 @@
 // Where the estimates come from today (DECISIONS 865): the sleep report's periods (a night, a nap, and an awake
-// recording the model scored as sleep) and the walking pass's walks. A new detector adds a function like these and one
+// recording the model scored as sleep), the walking pass's walks, and eyes closed and still by day (DECISIONS 1105). A new detector adds a function like these and one
 // line in [collectEstimates], or calls `ConfirmQuestions.register` itself when it finishes; nothing here knows the
 // electrode layout. No eating question: there is no eating detector yet, and "eating or talking?" has no one label a Yes
 // could become.
@@ -7,6 +7,8 @@ import 'dart:io';
 
 import 'package:shared_labels/shared_labels.dart';
 
+import '../activity/guesses.dart' show restEstimates, usualNightOf;
+import '../activity/happened.dart' show HappenedRule;
 import '../sleep/report.dart';
 import '../walking/detector.dart' show walkDetector;
 import '../walking/pass.dart' show WalkResult, keptWalks;
@@ -17,9 +19,9 @@ abstract final class SourceRule {
   /// A sleep period with less sleep than this, or a walk with less walking, is not worth a question.
   static const double minAsleepMin = 10, minWalkingMin = 5;
 
-  /// A period under this long that starts in the day is asked as a nap.
-  static const double napUnderMin = 180;
-  static const int dayFromHour = 9, dayToHour = 20;
+  /// A period under this long that starts in the day is asked as a nap (one rule with the "What happened" lane's Nap).
+  static const double napUnderMin = HappenedRule.napUnderMin;
+  static const int dayFromHour = HappenedRule.dayFromHour, dayToHour = HappenedRule.dayToHour;
 
   /// A night with this much found awake inside: a Yes is `likely`, not `certain` (not every minute fits).
   static const double awakeInsideMin = 5;
@@ -95,6 +97,12 @@ List<Estimate> collectEstimates(Directory filesDir, {DateTime? now}) {
   for (final k in keptWalks(filesDir).values) {
     final w = k.walk;
     if (w != null) out.addAll(walkEstimates(w, detector: k.detector, made: at));
+  }
+  // eyes closed and still by day: "Meditating or resting?" (activity/guesses.dart; at most one a day)
+  try {
+    out.addAll(restEstimates(filesDir, usual: usualNightOf(filesDir, at), now: at));
+  } on FileSystemException {
+    // none this time
   }
   return out;
 }

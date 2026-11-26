@@ -392,7 +392,7 @@ void main() {
     expect(works.last, (true, true));
     await host!.stop();
 
-    // the night recorder's server has no hook: the laptop hears 503 and the night is not disturbed
+    // a host without the hook (the recorder's had none before DECISIONS 1107; it has one now): the laptop hears 503
     final night = await freePort();
     await makeHost(null).start(config(night, paired: true));
     await until(() => host!.status.up);

@@ -15,6 +15,7 @@ import '../detectors/detectors.dart';
 import '../recorder/header.dart' show readHeader;
 import '../walking/detector.dart' show WalkWindows, walkingEpochs;
 import '../wearer/check.dart' show NightWindow, NightWindowSampler;
+import 'auto_lights_off.dart';
 import 'drift.dart';
 import 'night_signal.dart';
 import 'periods.dart' show asleepStages;
@@ -50,6 +51,7 @@ class NightSeen {
     required this.moves,
     this.drift,
     this.driftError,
+    this.autoLightsOffS,
     this.wearer,
     this.eye,
     this.walking,
@@ -59,6 +61,9 @@ class NightSeen {
   final List<(int, int)> moves;
   final DriftSeen? drift;
   final String? driftError;
+
+  /// The automatic Lights off (auto_lights_off.dart): the first second of its run; null when there was none.
+  final int? autoLightsOffS;
   final NightWindow? wearer;
   final EyeSeen? eye;
   final List<bool>? walking;
@@ -99,7 +104,15 @@ NightSeen? seeNight(List<File> f32Files, {List<(double, double)>? windows}) {
   final layout = joinLayout(f32Files, names: names, windows: windows);
   if (layout.samples == 0) return null;
   final drift = NightDrift(f32Files, layout.startUnix);
-  final det = Detectors(onSecond: drift.second);
+  final auto = AutoLightsOffFinder(screenChangesIn(f32Files), layout.startUnix);
+  final det = Detectors(onSecond: (s) {
+    drift.second(s);
+    try {
+      auto.second(s); // a guess beside the report: it may never break the pass the report needs
+    } on Object {
+      // no guess for this night
+    }
+  });
   final wearer = NightWindowSampler(drift.markedLightsOffS);
   final eye = pair == null ? null : EyeMoveCounter(sampleRate: sampleRate);
   final walk = WalkWindows(names.length, sampleRate, quick: true);
@@ -119,6 +132,7 @@ NightSeen? seeNight(List<File> f32Files, {List<(double, double)>? windows}) {
     moves: det.movement,
     drift: drift.seen,
     driftError: drift.error,
+    autoLightsOffS: auto.foundS,
     wearer: wearer.window,
     eye: eye == null ? EyeSeen.not(why ?? noEyePair) : EyeSeen.measured(pair!.label, eye.finish()),
     walking: walkingEpochs(walk.windows, det.epochs.length),

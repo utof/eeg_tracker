@@ -16,8 +16,9 @@ const List<String> labelColumns = [
 String sourceOf(String via) => via == AnswerVia.stopSheet.wire ? 'owner_stop_sheet' : 'owner_app_prompt';
 
 /// What the detector said, for people and agents reading the row.
-String contextOf(Estimate e, {bool blind = false}) =>
-    '${blind ? 'the app asked without showing its guess' : 'the app asked'}; ${e.detector} (${e.version}) said ${e.label.id}'
+String contextOf(Estimate e, {bool blind = false, bool choice = false}) =>
+    '${choice ? 'the app asked to pick ${choiceWords(e)}' : (blind ? 'the app asked without showing its guess' : 'the app asked')}; '
+    '${e.detector} (${e.version}) said ${e.label.id}'
     '${e.confidence == null ? '' : ', confidence ${e.confidence!.toStringAsFixed(2)}'}';
 
 /// One answered estimate as a row; null for Not sure, and for a blind card's words that name no label.
@@ -48,7 +49,7 @@ Map<String, String>? labelRow(Estimate e, Answered a) {
     'created': isoLocal(a.at),
     'supersedes': '',
     'owner_words': a.note == null ? words : '$words: ${a.note}',
-    'context': contextOf(e, blind: a.answer == Answer.said),
+    'context': contextOf(e, blind: a.answer == Answer.said, choice: a.answer == Answer.said && a.card == CardKind.choice),
     'present': a.answer == Answer.no ? '0' : '1',
     'estimate_id': e.id,
     'times_confirmed': set ? '1' : '0',
@@ -97,7 +98,7 @@ String tsvNumber(double v) {
 /// `answer`: `yes`, `no`, `not_sure` (its own answer: no label), `said` (a blind card: `said` is the label you picked,
 /// `agrees` 1 when it is what the detector thought, 0 when not), `not_answered` (no answer came, `why_not` says why;
 /// never read as Yes or No), or empty: still waiting. `label` and `confidence` are the detector's guess; `card` what
-/// the card showed (`normal`, `blind`); `times_confirmed` 1 only when you set the times yourself, which are then
+/// the card showed (`normal`, `blind`, `choice`: two words to pick from, `said` is the one picked, `agrees` empty); `times_confirmed` 1 only when you set the times yourself, which are then
 /// `confirmed_start` and `confirmed_end` (`start` and `end` stay the detector's).
 ///
 /// [takenAway] as in [labelsTsv]: such a Yes stays `yes` (it was said) and its `label_id` is empty, as in the laptop's

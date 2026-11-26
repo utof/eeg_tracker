@@ -14,11 +14,16 @@
 //     for 30 minutes and the rest of the wearing. After 10 yes in a row the app offers to start that kind by itself
 //     (only your tap switches it).
 //  6. Every step goes into the log (log.dart).
+//  7. Phase 2 (DECISIONS 1107-1109): the laptop's work word during a running recording is the one trigger taken while
+//     the recorder holds the headband. No worn check (the recording is the proof); nothing when anything is marked
+//     now, when no data arrived in the last 2 minutes, or when the word is old. Then as the Work setting says: the
+//     work page opens and its silent session rides the recording, or one quiet question.
 // Sounds, alarms, cues, neurofeedback, the dream catcher and the microphone are never started from here.
 import 'dart:async';
 import 'dart:io';
 
-import '../recorder/nights.dart' show dateName, nightsIn;
+import '../recorder/header.dart' show tryHeader;
+import '../recorder/nights.dart' show dataEndOf, dateName, nightsIn, stemTime;
 import '../sleep/report.dart' show isoLocal;
 import '../headband/battery_estimate.dart';
 import 'battery_guard.dart';
@@ -29,6 +34,40 @@ import 'preroll.dart';
 import 'probe.dart';
 import 'rules.dart';
 import 'store.dart';
+import '../spans/span.dart';
+
+/// AutoWatch.kt's word for "the recorder runs" (`busyReason`).
+const String recordingBusy = 'night recording';
+
+/// The laptop's work word on a running recording (DECISIONS 1107-1109).
+abstract final class OnRecordingRule {
+  /// The headband counts as on the head while data arrived this recently (the recorder itself judges nothing else).
+  static const Duration dataFresh = Duration(minutes: 2);
+}
+
+/// The recording that runs now, as the watcher's own engine can read it from the files: its id, when its newest file
+/// set's data ended, and what is marked on it and still open.
+typedef RunningRecording = ({String id, DateTime? lastData, List<Span> open});
+
+/// The newest file set in [recordings] taken as the running recording (call only while the recorder runs); null
+/// without one.
+RunningRecording? runningRecordingOf(Directory recordings) {
+  try {
+    File? newest;
+    for (final f in recordings.listSync().whereType<File>()) {
+      final name = f.uri.pathSegments.last;
+      if (!name.endsWith('.f32') || stemTime(name) == null) continue;
+      if (newest == null || name.compareTo(newest.uri.pathSegments.last) > 0) newest = f;
+    }
+    if (newest == null) return null;
+    final name = newest.uri.pathSegments.last;
+    final id = tryHeader(newest)?.recording ?? name.substring(0, name.length - '.f32'.length);
+    final spans = readSpans(spansFileOf(spansDirFor(recordings.path), id)).spans;
+    return (id: id, lastData: dataEndOf(newest), open: [for (final s in spans) if (!s.closed) s]);
+  } on FileSystemException {
+    return null;
+  }
+}
 
 /// What woke the watcher: `presence` (the headband came near), `bedtime` (a check in the bedtime window), `laptop`,
 /// `opened` (the app), `now` ("Check now" on the settings page, [force]: asks even when quiet or already asked).
@@ -113,8 +152,12 @@ class AutoWatch {
     this.simulate,
     DateTime Function()? clock,
     Future<void> Function(Duration)? waitFor,
+    this.running,
   }) : _now = clock ?? DateTime.now,
        _wait = waitFor ?? Future<void>.delayed;
+
+  /// The running recording (tests give their own; null: read from the files, [runningRecordingOf]).
+  final RunningRecording? Function()? running;
 
   /// The app's recordings folder (its parent holds `auto-start/`).
   final String recordings;
@@ -200,6 +243,7 @@ class AutoWatch {
     final s = store.settings();
     if (s.allOff && !t.force) return _skip(now, t, 'every kind is Do nothing');
     final busy = await phone.busy();
+    if (busy == recordingBusy && t.reason == 'laptop') return _onRecording(t, now, s);
     if (busy != null) return _skip(now, t, 'busy: $busy');
     if (_answer != null) return _skip(now, t, 'a question is open');
     final ended = _lastData();
@@ -315,6 +359,83 @@ class AutoWatch {
       if (opened) return;
     }
     await _ask(kind, now, probe, preroll, guard, s);
+  }
+
+  /// The laptop says "working" while a recording runs (see the top of the file, 7).
+  Future<void> _onRecording(AutoTrigger t, DateTime now, AutoSettings s) async {
+    if (_answer != null) return _skip(now, t, 'a question is open');
+    const kind = WearKind.work;
+    final choice = s.choice(kind);
+    if (choice == AutoChoice.nothing) return _skip(now, t, 'Do nothing (${kind.wire})');
+    var st = store.state();
+    if (st.quiet(kind, now)) return _skip(now, t, 'quiet after Not now (${kind.wire})');
+    final word = laptop.load();
+    if (word == null || !word.working || now.difference(word.at) > KindRule.laptopFresh) {
+      return _skip(now, t, 'the laptop does not say "working" now');
+    }
+    final read = running;
+    final rec = read != null ? read() : runningRecordingOf(Directory(recordings));
+    if (rec == null) return _skip(now, t, 'the running recording was not found');
+    if (rec.open.isNotEmpty) return _skip(now, t, 'marked now: ${rec.open.map((x) => x.kind).join(', ')}');
+    final last = rec.lastData;
+    if (last == null || now.difference(last) > OnRecordingRule.dataFresh) {
+      return _skip(now, t, 'no data from the headband in the last ${OnRecordingRule.dataFresh.inMinutes} minutes');
+    }
+    final quiet = !s.workChime;
+    log.add(now, 'check', {
+      'trigger': t.reason,
+      'on_recording': rec.id,
+      'guess': kind.wire,
+      'reasons': const ['laptop: work session', 'a recording runs'],
+      'choice': choice.wire,
+      'laptop': {'working': word.working, 'at': isoLocal(word.at)},
+    });
+    if (choice == AutoChoice.start) {
+      final opened = await starter.openWork(quiet: quiet);
+      log.add(_now(), 'start', {
+        'kind': kind.wire,
+        'how': 'automatic',
+        'recording': rec.id,
+        'quiet': quiet,
+        if (!opened) 'error': 'Android did not let the app open its page',
+      });
+      if (opened) return;
+    }
+    final id = isoLocal(now);
+    final q = AutoQuestion(
+      id: id,
+      kind: kind,
+      title: 'The laptop says you are working',
+      text: 'Work session on this recording? ${quiet ? 'Hints on the screen, no chime.' : 'Hints with the chime.'}',
+      actions: const [('yes', 'Start'), ('no', 'Not now')],
+      workQuiet: quiet,
+    );
+    final a = await _waitFor(q, kind);
+    final at = _now();
+    st = store.state();
+    if (a == 'yes') {
+      // the tap itself opened the work page, which starts the session on the recording
+      log.add(at, 'start', {'kind': kind.wire, 'how': 'yes', 'recording': rec.id, 'quiet': quiet});
+    } else if (a == 'no' || a == 'none') {
+      st = st.copyWith(quietUntil: {...st.quietUntil, kind: at.add(AutoRule.quietAfterNo)});
+    }
+    store.saveState(_streak(st, kind, a, at));
+  }
+
+  /// Shows [q], waits for its answer (`none` after [AutoRule.askFor]), takes it away again and logs both.
+  Future<String> _waitFor(AutoQuestion q, WearKind kind) async {
+    final answer = _answer = Completer<String>();
+    _questionId = q.id;
+    await phone.ask(q);
+    final askedAt = _now();
+    log.add(askedAt, 'question', {'kind': kind.wire, 'text': q.title});
+    final a = await Future.any([answer.future, _wait(AutoRule.askFor).then((_) => 'none')]);
+    _answer = null;
+    _questionId = null;
+    await phone.withdraw();
+    final at = _now();
+    log.add(at, 'answer', {'kind': kind.wire, 'answer': a, 'after_s': at.difference(askedAt).inSeconds});
+    return a;
   }
 
   Future<void> _startNightAuto(DateTime found, KindGuess guess, BatteryVerdict guard) async {
