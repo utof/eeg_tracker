@@ -24,7 +24,7 @@ import '../recorder/recorder_service.dart';
 import '../recorder/status.dart';
 import '../confirm/questions.dart';
 import '../spans/activities.dart';
-import '../spans/span.dart' show Span, leftOpen, spanWord, spansLine, undoLine;
+import '../spans/span.dart' show Span, leftOpen, sleepKinds, spanWord, spansLine, undoLine;
 import '../spans/stop_sheet.dart';
 import 'stop_sheet.dart';
 import '../session_keeper.dart' show PhoneSessionKeeper;
@@ -81,6 +81,14 @@ import 'trends_screen.dart';
 
 const String _xiaomiDoneKey = 'xiaomiChecked';
 
+/// The last recording had a sleep stretch (Sleep or Nap, not taken away), so the Record tab may call it a night; an
+/// awake recording is never a night (Record first; DECISIONS 1137). A state without spans from before Record first
+/// reads as a night ([NightState.sleepKit]).
+bool lastWasNight(NightState last) {
+  if (last.spans.isEmpty) return last.sleepKit;
+  return last.spans.any((d) => sleepKinds.contains(d['kind']) && d['removed'] != true);
+}
+
 /// Title, sentence and tone for the status block. Pure, so it is tested without a phone. [diy]: the DIY board is
 /// chosen (its words, and this phone's Wi-Fi address for them).
 ({String title, String sentence, Tone tone}) describeNight({
@@ -96,11 +104,11 @@ const String _xiaomiDoneKey = 'xiaomiChecked';
     if (words != null) return words;
   }
   if (!running) {
-    final hadNight = last != null && last.samples > 0;
+    final had = last != null && last.samples > 0;
     return (
       title: 'Ready',
-      sentence: hadNight
-          ? 'Last night is saved. Put the headband on to start a new one.'
+      sentence: had
+          ? '${lastWasNight(last) ? 'Last night' : 'Last recording'} is saved. Put the headband on to start a new one.'
           : 'Put the headband on and switch it on, then start the night.',
       tone: Tone.calm,
     );
@@ -1362,7 +1370,8 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       minutes: s != null ? s.minutesRecorded : (showLast ? last.samples / sampleRateHz / 60 : null),
       dataAgeSeconds: s?.lastDataMs == null ? null : ((now - s!.lastDataMs!) ~/ 1000).clamp(0, 1 << 30),
       coverage: showLast && rows.isNotEmpty ? nightCoverage(rows) : null,
-      stripTitle: _running ? 'Tonight' : 'Last night',
+      lastWasNight: last == null || lastWasNight(last),
+      stripTitle: _running ? 'Tonight' : (last == null || lastWasNight(last) ? 'Last night' : 'Last recording'),
       rows: rows,
       battery: s?.battery,
       rssi: s?.rssi,

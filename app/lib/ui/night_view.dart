@@ -67,6 +67,7 @@ class NightViewModel {
     this.minutes,
     this.dataAgeSeconds,
     this.coverage,
+    this.lastWasNight = true,
     this.stripTitle = 'Tonight',
     this.rows = const [],
     this.battery,
@@ -128,6 +129,9 @@ class NightViewModel {
 
   /// Share of the night saved (0..1), shown in the morning.
   final double? coverage;
+
+  /// The last recording had a sleep stretch: only then is it worded as a night (DECISIONS 1137).
+  final bool lastWasNight;
   final String stripTitle;
   final List<StripRow> rows;
   final int? battery;
@@ -601,6 +605,8 @@ class _Readouts extends StatelessWidget {
             parts: [(m.coverage == null ? '–' : '${(m.coverage! * 100).floor()}', true), (' %', false)],
             label: 'of the night saved',
           );
+    // an awake recording is no night: its minutes alone, no share of a night
+    if (!m.running && !m.lastWasNight) return Readout(parts: _minutes(m.minutes!), label: 'recorded');
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
