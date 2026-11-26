@@ -74,6 +74,16 @@ def test_the_card_is_found_in_the_dump_from_the_laptop_emulator() -> None:
     assert (card.cx, card.cy) == (540, 1106)
 
 
+def test_the_card_is_found_in_the_dump_from_the_desktop_emulator_while_it_still_slides_in() -> None:
+    """The desktop's dump (the L1 run of 2026-11-26 09:14) caught the card off the middle and clipped by the screen's
+    right edge: the swipe starts inside the part that shows."""
+    dump = fixture("desktop_emulator_one_card.xml")
+    card = rs.find_card(dump, "EEG Tracker")
+    assert card == rs.Card(467, 207, 1080, 2006, "EEG Tracker")
+    first = rs.gestures(card, *rs.screen_size(dump))[0]
+    assert card.left <= first.x0 <= card.right and first.x0 == first.x1
+
+
 def test_the_first_run_tip_does_not_hide_the_card() -> None:
     card = rs.find_card(fixture("laptop_emulator_one_card_with_tip.xml"), "EEG Tracker")
     assert card == rs.Card(173, 207, 907, 2006, "EEG Tracker")
