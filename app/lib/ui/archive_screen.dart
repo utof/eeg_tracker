@@ -10,6 +10,7 @@ import 'dart:isolate';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
+import '../activity/guesses.dart' show keepGuessesInBackground;
 import '../archive/delete.dart';
 import '../archive/items.dart';
 import '../archive/page.dart';
@@ -168,6 +169,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     } catch (e) {
       result = (seen: null, why: 'Could not read it: $e');
     }
+    if (widget.see == null) unawaited(keepGuessesInBackground(files, item).catchError((Object _) => false));
     if (!mounted) return;
     final p = _page!;
     setState(() {
@@ -201,6 +203,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     } catch (e) {
       result = (walk: null, why: 'Could not read it: $e');
     }
+    if (widget.walk == null) unawaited(keepGuessesInBackground(files, item).catchError((Object _) => false));
     if (!mounted) return;
     final p = _page!;
     final minutes = result.walk?.walkingMin ?? 0;

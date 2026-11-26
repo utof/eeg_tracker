@@ -11,6 +11,7 @@ import '../detectors/detectors.dart' show EpochQuality;
 import '../pulse/detector.dart' show pulseAsleep;
 import '../pulse/night.dart' show pulseAsleepWords, pulseLowestWords;
 import '../recorder/nights.dart' show nightLabel;
+import '../sleep/auto_lights_off.dart' show AutoLightsOff, autoLightsCheck;
 import '../sleep/drift.dart' show driftCheck;
 import '../sleep/report.dart';
 import '../wearer/wearer.dart' show WearerLine;
@@ -247,7 +248,14 @@ class SleepReportView extends StatelessWidget {
       ],
       if (dream != null) DreamSleepCheck(check: dream, onInfo: onDreamInfo),
       if (drift != null)
-        FallingAsleepSection(drift: drift, check: driftCheck([r, ...others]), onInfo: onDriftInfo),
+        FallingAsleepSection(
+          drift: drift,
+          check: driftCheck([r, ...others]),
+          onInfo: onDriftInfo,
+          // the app's own guess of lights off, shown and compared, used for nothing yet (DECISIONS 1111-1112)
+          auto: AutoLightsOff.read(r.json['auto_lights_off']),
+          autoCheck: autoLightsCheck([r, ...others]),
+        ),
       if (alarm != null) WakingUpSection(content: alarm!, onInfo: onAlarmInfo),
       if (x != null) ExtrasSection(extras: x, earlier: earlierJaw(r.nightOf, others), onInfo: onExtrasInfo),
       if (wearer != null && !wearerLeads(wearer))

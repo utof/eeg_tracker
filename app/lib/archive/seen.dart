@@ -8,6 +8,8 @@
 //   level    a alert, g getting drowsy, d drowsy, - not known (before its 3-minute baseline, or too noisy)
 //   jaw      jaw bursts (both sides) starting in the epoch
 //   move     seconds with movement (3 or more channels jumping) in the epoch
+//   alpha    back alpha against this recording's eyes-open baseline (2.4 = 2.4 times), null where not read; only in
+//            passes made since phase 2 of automatic recording (DECISIONS 1113: one of the guesses table's numbers)
 // The pass needs O1 O2 T3 T4 (by name or site) at 250 samples a second, like every detector: another layout is told in
 // words and gets no activity tags, only its sessions and your tags (DECISIONS 633).
 // Kept in `files/cache/archive-seen/<id>.json` with the size and modified time of every raw file it read, so it runs
@@ -39,12 +41,17 @@ class RecordingSeen {
     required this.level,
     required this.jaw,
     required this.move,
+    this.alpha,
   });
 
   /// The joined recording's first sample, unix ms (a whole second).
   final int startMs;
   final String quality, eyes, level;
   final List<int> jaw, move;
+
+  /// Back alpha per epoch as a multiple of the recording's eyes-open baseline; null: this pass kept none (an older
+  /// pass), or no baseline was reached.
+  final List<double?>? alpha;
 
   int get epochs => quality.length;
   DateTime get start => DateTime.fromMillisecondsSinceEpoch(startMs);
@@ -57,6 +64,7 @@ class RecordingSeen {
     'level': level,
     'jaw': jaw,
     'move': move,
+    'alpha': ?alpha,
   };
 
   static RecordingSeen? fromJson(Object? j) {
@@ -66,7 +74,16 @@ class RecordingSeen {
     final n = q.length;
     if (e.length != n || l.length != n || jw.length != n || m.length != n) return null;
     if (jw.any((x) => x is! int) || m.any((x) => x is! int)) return null;
-    return RecordingSeen(startMs: s, quality: q, eyes: e, level: l, jaw: jw.cast<int>(), move: m.cast<int>());
+    final al = j['alpha'];
+    return RecordingSeen(
+      startMs: s,
+      quality: q,
+      eyes: e,
+      level: l,
+      jaw: jw.cast<int>(),
+      move: m.cast<int>(),
+      alpha: al is List && al.length == n ? [for (final x in al) x is num ? x.toDouble() : null] : null,
+    );
   }
 }
 
@@ -135,6 +152,16 @@ RecordingSeen? seeRecording(List<File> f32Files) {
     eyes.write(w == null ? '-' : (w.eyesClosed ? 'c' : (w.alpha == null ? '-' : 'o')));
     level.write(w == null ? '-' : _levelChar(w));
   }
+  final base = drowsy.baseline?.alpha;
+  final alpha = base == null || !(base > 0)
+      ? null
+      : [
+          for (var i = 0; i < n; i++)
+            () {
+              final a = i < drowsy.epochs.length ? drowsy.epochs[i].alpha : null;
+              return a == null ? null : (a / base * 100).round() / 100;
+            }(),
+        ];
   return RecordingSeen(
     startMs: layout.startUnix * 1000,
     quality: [for (final e in det.epochs) _q[e.quality]!].join(),
@@ -142,6 +169,7 @@ RecordingSeen? seeRecording(List<File> f32Files) {
     level: level.toString(),
     jaw: jaw,
     move: move,
+    alpha: alpha,
   );
 }
 

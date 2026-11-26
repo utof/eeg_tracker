@@ -1696,7 +1696,8 @@ shows `docs/evidence/auto-start.md`).
 - When it checks: when you open the app, every 10 minutes in your **bedtime window** (from 2 hours before your usual
   bedtime to your usual wake-up, from your last 14 days of nights; 23:00 to 07:00 until 3 nights; **Change** sets it
   by hand), when Android says the headband came near, and when the laptop tray says a work session started (it tells the
-  phone paired by its QR code, through Share on Wi-Fi between nights). **Check now** runs one. Never during a
+  phone paired by its QR code, through Share on Wi-Fi; during a recording only this one is taken, see "What happened in
+  a recording" below). **Check now** runs one. Never during a
   recording or a session, nor while the Signal tab holds the headband, and not in the 30 minutes after a recording's
   last data.
 - A check connects for about 10 seconds: contact on each electrode (off the head: no contact at all) and the battery,
@@ -1792,6 +1793,41 @@ Nobody has made these gestures with this headband yet: the levels are first gues
 3. Next time you use the dream catcher, answer one "were you drifting?" by gesture.
 4. Export data: the laptop can then check the calibration's own EEG (`files/hands-free/recordings/`) against the
    Python reference (`analysis/hands_free.py`), the first real gestures this code has seen.
+
+## What happened in a recording (the app's own guesses; automatic recording, phase 2)
+
+The second phase of "it understands what I'm doing" (DECISIONS rows 1100-1116; spec
+`docs/specs/2026-11-26-activity-phase2.md`; the **i** notes `docs/evidence/what-happened.md` and
+`auto-lights-off.md`). Nothing here plays a sound, sets an alarm or starts a session with sound.
+
+- **What happened**: the first lane on a recording's page (Archive, any recording). One best guess per moment: no
+  signal, asleep or a nap, walking, moving, talking or chewing, eyes closed and resting, drowsy. Tap a stretch: it
+  says where the guess comes from and how sure it is. It appears once the recording has stopped and its pass has run
+  (about a minute for a night; it now runs when you stop a recording, not only when the Archive is open).
+- **Meditating or resting?** If your eyes were closed and you were still for 3 minutes or more during the day, the
+  quick checks ask once, with the two words, **Something else** and **Not sure**. At most one a day. Not asked about
+  time you marked yourself (Meditate, a sound, Sleep, a nap, a check-in) or tagged.
+- **Work while you record**: when the laptop tray says you started working and the headband is recording with
+  nothing marked, the app does what **When I put the headband on** says for **Working**: **Automatic** opens the
+  Work page and starts its silent session on the same recording; **Ask me** shows one quiet notice ("The laptop says
+  you are working"); **Do nothing** does nothing. Not checked on a phone yet.
+- **Morning**: after you tap Stop sleep in the morning (a sleep of 3 hours or more) and the recording goes on, one
+  line above the Record tab's buttons offers the morning check-in for 2 hours. It is never started for you.
+- **The app's own Lights off**: the sleep report's "Falling asleep" part has one muted line with the app's guess of
+  when you put the phone down, next to your tap. It is used for nothing until it has matched your taps.
+- On the laptop, `guesses.tsv` in the data book lists every guess with its numbers and your answer.
+
+### Owner step: one ordinary day (nothing to set up; 2 minutes of looking)
+
+1. Record a day as usual. Once in the day, sit with eyes closed for 5 minutes without marking anything.
+2. Stop the recording. Leave the app open for a minute: the Record tab's quick check should ask "... Your eyes were
+   closed and you were still. Meditating or resting?" (it may wait for its usual asking time). Tap what it was.
+3. Archive, that recording: is the **What happened** lane right in broad strokes? Tap two stretches.
+4. If the laptop tray runs: start working while the headband records with nothing marked. Does the notice (or the
+   Work page) come, and does the work session run on the recording?
+5. The next morning, after Stop sleep: does the check-in line show? After a night with a Lights off tap: what does
+   the muted line in "Falling asleep" say?
+6. Tell the assistant what was wrong or annoying: a guess that was plainly off, a question at a bad moment.
 
 ## Our own headband connection (test, off by default)
 

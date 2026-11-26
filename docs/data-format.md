@@ -15,7 +15,7 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 | The phone over Wi-Fi | `GET /files`, `GET /files/<path>` on the phone; mirrored into `_local/recordings/` and `_local/phone/`, with `_local/phone/pull-state.json` and `pulls.jsonl` | the phone app's Share on Wi-Fi (`app/lib/share/`); read by `scripts/pull_phone.py` |
 | The laptop's work sessions | `_local/laptop/work/<stamp>.work.json`, `labels.jsonl` (below) | the laptop tray (`scripts/tray.py`, `scripts/laptop_work.py`) from ActivityWatch |
 | Catalog of nights | `_local/catalog/catalog.json`, `<date>.sha256`, `catalog.txt`, `history.log` | `scripts/catalog.py` (below) |
-| The data book | `_local/data/nights.tsv`, `sessions.tsv`, `days.tsv`, `epochs.tsv.gz`, `labels.tsv`, `truth.tsv`, `spans.tsv`, `book.json`, `README.md` | `scripts/data_book.py`, after each copy from the phone through `scripts/after_pull.py` (below) |
+| The data book | `_local/data/nights.tsv`, `sessions.tsv`, `days.tsv`, `epochs.tsv.gz`, `labels.tsv`, `truth.tsv`, `spans.tsv`, `estimates.tsv`, `guesses.tsv`, `book.json`, `README.md` | `scripts/data_book.py`, after each copy from the phone through `scripts/after_pull.py` (below) |
 | Truth labels | `_local/analyses/truth-labels.tsv` (the hand file), `_local/truth/*.tsv`, the Archive's tags marked "This is what I was doing"; the vocabulary `scripts/truth_vocabulary.tsv` | the assistant from chat, the owner by hand or on the phone; checked by `scripts/truth.py` (below) |
 | Detectors against the truth | `_local/data/validation.tsv`, `validation.md` | `scripts/validate_detectors.py`, after each data book build (below) |
 | Raw recordings packed after a day | `<stamp>.f32.xz` on the laptop, `<stamp>.f32.gz` on the phone, in place of `<stamp>.f32`; `_local/packing.jsonl`, `files/packing.jsonl` | `scripts/pack_old.py` (daily), the phone app between nights (`app/lib/recorder/packed.dart`); below |
@@ -230,6 +230,7 @@ or windows change, not when its files grow.
 | `extras_error` | why the detectors' pass failed, else `null` |
 | `drift_off` | when you fell asleep after lights off, by the drift-off detector and by the sleep model (below); `null` when unscored or when the detector did not run. Added 2026-11-19 without a new `version`: a version-2 report without this key was written before it and is rebuilt once |
 | `drift_off_error` | why the drift-off detector did not run (the detectors' pass failed, or the detector itself), else `null` |
+| `auto_lights_off` | the app's own guess of lights off (DECISIONS 1111-1112): `time`, `second` (from the night's first sample), `tap_diff_min` (the guess minus your Lights off tap, in minutes; `null` without a tap) and `version` 1. The first run of 60 seconds with the phone's screen off (the `.log` lines `screen off`), a clean signal, no blink and no movement. Absent when no such run was found. Logged and compared only: nothing is counted from it. Added 2026-11-26 without a new `version`; an older report is not rebuilt for it |
 | `stages` | one character per 30 s from `data_start`: `W 1 2 3 R` by AnySleep, `-` where over 5 s of the epoch was missing (the phone's from the start; the laptop's since 2026-11-20, `""` when unscored) |
 | `probs` | AnySleep's mean probabilities per 30 s epoch, the same epochs as `stages` (below); `null` when unscored. Added 2026-11-20 without a new `version` |
 | `rem_check` | the dream sleep check (below); `null` when unscored. Added 2026-11-20 without a new `version`: a version-2 report without this key was written before it; the laptop rebuilds it once, the phone keeps it and offers "Score again" |
@@ -776,11 +777,32 @@ cut off by a crash is skipped. Nothing here holds EEG (the minutes kept while th
 | `settings.json` | `version` 1, `choices` (`night`, `work`, `other`: `start`, `ask` or `nothing`; `other` never `start` in phase 1), `work_chime` (automatic work sessions chime), `bed_min` and `wake_min` (the bedtime window set by hand, minutes after midnight; `null` while it follows the recorded nights) |
 | `state.json` | `version` 1, `quiet_until` (per kind: no question before then, after Not now or no answer), `yes_streak` (per kind), `offered` (kinds offered "start automatically" in this streak), `worn_since` (the wearing in progress), `asked_this_wearing`, `charge_notice_day` |
 | `laptop.json` | `version` 1, `working` (the laptop's latest word on a work session), `at`, and `meeting` when the word said it (DECISIONS 685) |
+| `log.jsonl`, since phase 2 | also `laptop` (every word from the laptop: `working`, `meeting` when said; DECISIONS 1113), and, for the laptop's word during a running recording (DECISIONS 1107): a `check` with `trigger` `laptop`, `on_recording` (the recording's id), `guess` `work`, `reasons`, `choice`, `laptop` and none of the worn check's fields; `start` with `recording`; `skipped` with `why` `marked now: <kinds>`, `no data from the headband in the last 2 minutes`, `the laptop does not say "working" now` or `the running recording was not found` |
 | `log.jsonl` | one line per event, each with `version` 1, `at` and `event`: `check` (`trigger`: `presence`, `bedtime`, `laptop`, `opened` or `now`; `near`, `worn` (`null` when it could not be told), `how` (`resistance`, `signal`, `simulated` in a debug build, `none`), `ohms` per channel (`null` = no contact), `battery` (%), `guess` (`night`, `work`, `other`), `reasons`, `choice`, `window` (`HH:MM-HH:MM`), `phone` (`charging`, `screen_on`, `screen_off_min`, `dnd`, `laptop`, `next_alarm`), `error`); `skipped` (`trigger`, `why`); `question` (`kind`, `text`); `answer` (`kind`, `answer`: `yes`, `no`, `none` (no answer in 15 minutes or swiped away), `released` (a start by hand), for `other` also `night` or `work`; `after_s`); `start` (`kind`, `how`: `automatic` or `yes`, `preroll_s` and `stem` (the run the kept minutes became), `quiet` and `limit_min` for work, `error`); `warned` (`kind`, `why`, `battery`: the battery guard said "charge the headband" and went on; it only warns, DECISIONS 1010); `declined` (`kind`, `why`, `battery`: written only under the guard's stopping rule, which is off); `offer` (`kind`, `yes_in_a_row`); `offer_answer` (`kind`, `accept`); `released` |
 
 A night the watcher started has a first line in its first run's `.log`: `started automatically: ...` or `started after
 "Yes" ...`, and the minutes kept while asking are the night's first run, whose `.log` begins `auto-start: the headband
 was found on ...`.
+
+### What happened in a recording, the app's own guesses (`activity/`)
+
+Automatic recording, phase 2 (DECISIONS 1100-1116): `<recording>.guesses.json`, one per recording whose detectors'
+pass is kept, written whole (a temporary name, then renamed) each time the marks are worked out again: after the pass
+or the walking pass ran, or the night's report changed. It is a record of what the app guessed, not a label: only your
+answer to a question makes a label (`confirm/`).
+
+| Key | Content |
+|---|---|
+| `version`, `recording`, `made` | 1, the recording's id, when the file was written |
+| `key` | what the marks were made from (the pass's raw files, the walk file and the report by size and modified time): the same key means nothing is written again |
+| `marks` | the "What happened" lane's stretches in time order, never overlapping, each with `what` (`no_signal`, `asleep`, `nap`, `running`, `walking`, `moving`, `talking_or_chewing`, `eyes_closed_resting`, `drowsy`), `start`, `end`, `sure` (`near certain`, `strong`, `good`, `some`, `weak`) and the numbers behind it |
+
+The numbers of a mark: `minutes_from_bedtime` (its start against your usual bedtime, -720 to 719; -598 = 9 h 58
+before it) and `in_bedtime_window` (inside the watcher's bedtime window), and, from the detectors' pass over the mark's
+half minutes, `eyes_closed_share`, `good_signal_share` (0 to 1), `jaw_bursts_per_min`, `movement_s_per_min` and
+`back_alpha` (back alpha as a multiple of the recording's eyes-open level; `null` when the pass kept none). A recording
+of another electrode layout has only the marks that need no pass (`asleep`, `nap`, `walking`, `running`) and none of
+the pass's numbers. A missing number is "not known", never 0.
 
 ### Pulse (`pulse/`)
 
@@ -815,7 +837,7 @@ by `ConfirmPrompts.kt`. Lines are only ever added; times are local with their UT
 | File | Holds |
 |---|---|
 | `estimates.jsonl` | one line per estimate: `{"id": "est:<16 hex>", "detector": "walking", "version": "walk-v2", "confidence": 0.9 or null, "start", "end", "recording": "2026-11-20-175012" or null, "kind": "activity", "label": "walking", "yes_means": "certain" or "likely", "made"}`. `label` and `kind` are the vocabulary's (`scripts/truth_vocabulary.tsv`). The id is the SHA-1 of detector, label, start, end and recording, so the same finding is never kept twice, whatever the detector's version |
-| `answers.jsonl` | one line per answer: `{"estimate_id", "answer", "at", "via": "card" or "notification" or "stop_sheet"}` plus, when a card was shown, what the card was: `"card"` (`normal`, or `blind`: the guess was not shown), `"guess"` and `"confidence"` (what the detector said), `"shown"`, `"seconds"` (from shown to answered), `"age_min"` (how old the stretch was when shown). `answer` is `yes` (it happened; with `"times_confirmed": false` the start and end are still the detector's, with `true` and `"start"`, `"end"` they are the ones you set under "Yes, but the times are off"), `no`, `not_sure` (its own answer: never a label, never asked again; the older word `skip` reads the same), `said` (a blind card: `"said"` is the label you picked, `"words"` your own), `undo`, or `not_answered` with `"why"`: `dismissed` (the notification was swiped away; the question stays on the card), `expired` (asked, then too old), `never_seen`, `short_and_old` (dropped unasked). A `not_answered` line is never read as Yes or No, and a real answer given later stands. Your own words: `{"estimate_id", "note", "at"}`. The first yes, no, not_sure or said of an estimate stands; `undo` takes it (and its note) back, as if never answered |
+| `answers.jsonl` | one line per answer: `{"estimate_id", "answer", "at", "via": "card" or "notification" or "stop_sheet"}` plus, when a card was shown, what the card was: `"card"` (`normal`, `blind`: the guess was not shown, or `choice`: two words to pick from, as "Meditating or resting?", DECISIONS 1105), `"guess"` and `"confidence"` (what the detector said), `"shown"`, `"seconds"` (from shown to answered), `"age_min"` (how old the stretch was when shown). `answer` is `yes` (it happened; with `"times_confirmed": false` the start and end are still the detector's, with `true` and `"start"`, `"end"` they are the ones you set under "Yes, but the times are off"), `no`, `not_sure` (its own answer: never a label, never asked again; the older word `skip` reads the same), `said` (a blind or a choice card: `"said"` is the label you picked, `"words"` your own), `undo`, or `not_answered` with `"why"`: `dismissed` (the notification was swiped away; the question stays on the card), `expired` (asked, then too old), `never_seen`, `short_and_old` (dropped unasked). A `not_answered` line is never read as Yes or No, and a real answer given later stands. Your own words: `{"estimate_id", "note", "at"}`. The first yes, no, not_sure or said of an estimate stands; `undo` takes it (and its note) back, as if never answered |
 | `asks.jsonl` | one line per batch that went out as a notification: `{"at", "via": "notification", "estimates": [ids], "why": {id: "newest" or "unsure" or "long" or "rare" or "few"}, "blind": [ids made blind by rule]}`; what the Android side did with it: `{"at", "event": "shown" or "held" or "late" or "skipped" or "dismissed", "batch", "reason"}`; and every back-off step with its reason: `{"at", "event": "backoff", "step": "pause" or "one_a_day" or "normal" or "skip_hour" or "blind_batch", "reason", "until", "hour"}` (DECISIONS 972) |
 | `armed.json` | the batch waiting for its moment (written whole) |
 | `settings.json` | `{"version": 1, "on", "per_batch" (3-5), "per_day" (1-6), "quiet_start_min", "quiet_end_min"}` |
@@ -1060,8 +1082,9 @@ for 12 hours, else 403 `not sharing on this Wi-Fi` (the cable always works). 401
   optionally with `"meeting": true|false`: the paired laptop's tray says a work session started or ended there, and whether it is in a meeting (`scripts/laptop_work.py`;
   automatic recording, DECISIONS 603; meetings 666 and 685: sent at the session's start and end and at each
   meeting's start and end inside it): 202, kept in `auto-start/laptop.json`; a word that only changes the meeting
-  asks for no headband check; the phone's work session labels its meeting minutes by it. 400 for any other body; 503
-  during a night (the recorder's server does not take it).
+  asks for no headband check; the phone's work session labels its meeting minutes by it. 400 for any other body. Also taken
+  while a recording runs (by the recorder's server, DECISIONS 1107: the watcher then starts or offers the work session
+  on that recording); 503 only from an app older than that.
 - `GET /files`: `{"format": "eeg-tracker-phone-files", "version": 1, "listed", "recording", "files": [...],
   "totals"}`; each file has the manifest's `path`, `bytes`, `sha256`, `modified_ms` (the same files and paths as the
   export folder above) and, for a recording packed after a day, `original`. A file changed in the last 20 s is still
@@ -1376,8 +1399,8 @@ What the phone's detectors thought happened and what you answered when the app a
 | `answer`, `answered`, `via` | `yes`, `no`, `not_sure` (its own answer, no label), `said` (a blind card), `not_answered` (no answer came: never a Yes or a No) or empty (still waiting); when; `card`, `notification` or `stop_sheet` |
 | `label_id` | the truth row a yes or a no made (`confirm:...` in `truth.tsv`); empty for a Yes whose sleep stretch you took away afterwards ("Not sleep" in the Archive): the Yes stays as what was said, and there is no truth row |
 | `owner_words` | a blind card's own words, and the few words you added |
-| `card` | what the card showed: `normal` (the guess), `blind` (no guess); empty when no card was shown (a stop-sheet chip) |
-| `said`, `agrees` | a blind card: the label you picked, and 1 when it is the detector's `label` (sleep and a nap count as one), 0 when not; empty when your words name no label |
+| `card` | what the card showed: `normal` (the guess), `blind` (no guess), `choice` (two words to pick from: the detector `eyes-closed-rest`, whose `label` is `eyes_closed`, asks "Meditating or resting?"); empty when no card was shown (a stop-sheet chip) |
+| `said`, `agrees` | a blind card: the label you picked, and 1 when it is the detector's `label` (sleep and a nap count as one), 0 when not; empty when your words name no label. A choice card: `said` is the word you picked and `agrees` is empty (the detector guessed neither word) |
 | `times_confirmed` | on a `yes`: 1 when you set the times yourself, 0 when the Yes only says it happened. **Do not take `start` and `end` as truth unless this is 1** |
 | `confirmed_start`, `confirmed_end` | the times you set (`start`, `end` stay the detector's) |
 | `shown`, `seconds_to_answer`, `age_min` | when the card came on screen, the seconds to the answer, and how many minutes old the stretch was then |
@@ -1548,6 +1571,28 @@ A span that was taken away (`removed`) has no row.
 | `paused_minutes` | minutes the activity was paused while the span stayed open (Work during a nap); empty when never paused |
 | `active_minutes` | `minutes` minus `paused_minutes`; empty while the span is open |
 | `estimate` | the confirm-questions estimate a confirmed span answers |
+
+### `guesses.tsv` (DECISIONS 1113)
+
+One row per mark of the phone's "What happened" files (`phone/activity/*.guesses.json`, above): what the app guessed
+for a stretch of a recording, how sure it was, the numbers behind it, the question asked about it with your answer,
+and the truth label that covers it. Rebuilt whole each run. It is the table a personal model would learn from; no
+model reads it yet (that needs about 30 answers of each kind). An empty cell is "not known", never 0.
+
+| Column | Meaning |
+|---|---|
+| `guess_id`, `recording` | `<recording>/<what>/<HH:MM:SS of its start>`, and the recording |
+| `what`, `sure` | the guess (`no_signal`, `asleep`, `nap`, `running`, `walking`, `moving`, `talking_or_chewing`, `eyes_closed_resting`, `drowsy`) and how sure the app says it is (`near certain`, `strong`, `good`, `some`, `weak`) |
+| `start`, `end`, `minutes` | the stretch |
+| `minutes_from_bedtime`, `in_bedtime_window` | the start against your usual bedtime (-598 = 9 h 58 before it), and whether it is inside the watcher's bedtime window (1 or 0), as the phone wrote them |
+| `charging` | always empty: the phone does not write down whether it charges during a recording yet |
+| `screen_on_share` | the share of the stretch the phone's screen was on, from the recordings' `.log` lines (read every 10 seconds); empty when no line says so within the hour before |
+| `laptop_working` | 1 when the laptop's last word before the stretch's middle (the `laptop` lines of `phone/auto-start/log.jsonl`, at most 12 hours old) said "working", 0 when it said not; empty without one |
+| `phone_steps_per_min` | steps a minute by the phone's own counter (`phone steps N` in the `.log`, when that switch is on); empty without two readings |
+| `eyes_closed_share`, `back_alpha`, `jaw_bursts_per_min`, `movement_s_per_min`, `good_signal_share` | the detectors' pass over the stretch, as the phone wrote them |
+| `estimate_id`, `answer`, `said` | the quick check about this stretch (the estimate of a matching label that covers half of the shorter of the two), your answer (as in `estimates.tsv`; empty: not answered yet) and the word you picked |
+| `truth_label`, `truth_present`, `truth_source` | the truth label that covers half or more of the stretch, whatever its source: its label, 1 (it happened) or 0, and where it came from |
+| `made`, `file` | when the phone wrote the guesses file, and the file |
 
 ### After each copy from the phone (`scripts/after_pull.py`)
 

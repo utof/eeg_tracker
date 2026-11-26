@@ -24,6 +24,9 @@ class EegApp : Application() {
                     AlarmChannel.register(it.dartExecutor.binaryMessenger, this@EegApp)
                     // the reconnect ladder's hints: unlock, Bluetooth on, the app in front, "Reconnect now"
                     ReconnectHints.register(it.dartExecutor.binaryMessenger, this@EegApp)
+                    // the laptop's work word reaches the recorder's own Share on Wi-Fi server while it records: it asks
+                    // the headband watcher for a check from here (DECISIONS 1107; no pairing from this engine)
+                    AutoWatch.register(it.dartExecutor.binaryMessenger, this@EegApp, null)
                 }
             }
 

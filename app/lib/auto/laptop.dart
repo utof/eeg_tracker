@@ -3,7 +3,8 @@
 // rather than guessing from the brain. [laptopWorkSignal] keeps the latest word in files/auto-start/laptop.json and,
 // when work starts, asks the watcher for a check. The tray sends it to the phone paired by its QR code when a session
 // starts or ends (scripts/laptop_work.py `phone_work_signal`): Share on Wi-Fi's `POST /work`, with its token, taken by
-// the app's own server between nights (share/control.dart); during a night it answers 503.
+// the app's own server between recordings (share/control.dart) and by the recorder's while it records
+// (recorder/recorder_service.dart, DECISIONS 1107: the watcher then starts or offers the work session on the recording).
 // The word may say whether the laptop's session is in a meeting (`meeting`, DECISIONS 666 and 685): the tray sends it
 // at the session's start and end and whenever a meeting starts or ends inside it. A word that only changes the meeting
 // asks for no check; the work session on the phone reads it ([laptopMeetingNow]) to label its meeting minutes.
@@ -13,6 +14,7 @@ import 'dart:io';
 import '../phone.dart';
 import '../sleep/report.dart' show isoLocal;
 import 'channel.dart';
+import 'log.dart';
 import 'rules.dart';
 import 'store.dart';
 
@@ -79,6 +81,16 @@ void seedLaptopWord(String recordingsDir) {
   } catch (_) {}
 }
 
+/// Keeps [word] as the latest in [autoDir] (`files/auto-start`) and writes it as one `laptop` line of the auto log
+/// (every word, DECISIONS 1113); true when it asks for a headband check ([asksForCheck]).
+bool keepLaptopWord(Directory autoDir, LaptopWork word) {
+  final store = LaptopStore(autoDir);
+  final before = store.load();
+  store.save(word);
+  AutoLog(autoDir).add(word.at, 'laptop', {'working': word.working, 'meeting': ?word.meeting});
+  return asksForCheck(before, word);
+}
+
 /// The hook for the laptop: a work session started ([working] true) or ended, and whether it is in a meeting
 /// ([meeting]; null: not said). Keeps it, and when work starts asks for a check (the watcher decides whether one
 /// runs). Never throws.
@@ -88,9 +100,6 @@ Future<void> laptopWorkSignal({required bool working, bool? meeting, DateTime? a
   try {
     final rec = await Phone.recordingsDir();
     if (rec == null) return;
-    final store = LaptopStore(autoDirFor(rec));
-    final before = store.load();
-    store.save(word);
-    if (asksForCheck(before, word)) await AutoChannel.requestCheck('laptop');
+    if (keepLaptopWord(autoDirFor(rec), word)) await AutoChannel.requestCheck('laptop');
   } catch (_) {}
 }

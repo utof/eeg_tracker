@@ -22,3 +22,4 @@
 {"estimate_id":"est:2688b4adefd45e56","answer":"not_sure","at":"2026-11-22T13:40:00+03:00","via":"card","card":"normal","guess":"nap","confidence":0.5,"shown":"2026-11-22T13:39:58+03:00","seconds":2.0,"age_min":14}
 {"estimate_id":"est:ccf7a756acd85bfe","answer":"not_answered","why":"too_many","at":"2026-11-21T14:00:00+03:00","via":"card"}
 {"estimate_id":"est:ccf7a756acd85bfe","answer":"said","at":"2026-11-22T13:50:00+03:00","via":"card","card":"blind"}
+{"estimate_id":"est:7e543b86a870bc65","answer":"said","at":"2026-11-22T16:05:06+03:00","via":"card","card":"choice","guess":"eyes_closed","confidence":0.8,"shown":"2026-11-22T16:05:00+03:00","seconds":6.0,"age_min":53,"said":"meditating"}

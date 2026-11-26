@@ -13,6 +13,8 @@ import '../archive/page.dart' show loadArchiveInBackground;
 import '../confirm/phone.dart';
 import '../confirm/questions.dart';
 
+import '../activity/guesses.dart' show keepGuessesInBackground;
+import '../archive/seen.dart' show seeInBackground;
 import '../walking/pass.dart' show walkInBackground;
 import 'archive_screen.dart' show phoneArchiveBusy;
 import 'confirm_view.dart';
@@ -22,21 +24,33 @@ import 'evidence_sheet.dart';
 Future<int> gatherInBackground(String filesPath) =>
     Isolate.run(() => ConfirmQuestions(Directory(filesPath)).gather(), debugName: 'confirm-gather');
 
-/// The walking pass for the newest recordings that have none yet (the Archive runs it too, when it is open), so a
-/// walk is asked about soon after its recording stops. At most [max] recordings, only those that ended within the
-/// asking age, and never while something records or the night is being scored. True when a pass ran.
-Future<bool> recentWalkPasses(String filesPath, {int max = 2, DateTime? now}) async {
+/// The passes for the newest recordings that have none yet (the Archive runs them too, when it is open), so a walk,
+/// or closed eyes by day ("Meditating or resting?"), is asked about soon after its recording stops (DECISIONS 1106:
+/// such a short stretch is only asked about within a few hours). The walking pass and the detectors' pass, each for
+/// at most [max] recordings and only those that ended within the asking age; then the guesses file of each of those
+/// recordings (activity/guesses.dart). Never while something records or the night is being scored. True when
+/// something new was kept.
+Future<bool> recentPasses(String filesPath, {int max = 2, DateTime? now}) async {
   final busy = await phoneArchiveBusy();
   if (busy.nightRecording || busy.sessionRunning || busy.scoring) return false;
   final page = await loadArchiveInBackground(filesPath);
   final at = now ?? DateTime.now();
   final dir = Directory(filesPath);
+  final recent = {
+    for (final i in page.list.items)
+      if (at.difference(i.end) <= ConfirmRule.maxAge) i.id: i,
+  };
   var ran = false;
-  for (final id in page.toWalk.take(max)) {
-    final item = page.list.items.where((i) => i.id == id).firstOrNull;
-    if (item == null || at.difference(item.end) > ConfirmRule.maxAge) continue;
-    await walkInBackground(filesPath, id, [for (final f in item.rawFiles(dir)) f.path]);
+  for (final id in page.toWalk.where(recent.containsKey).take(max)) {
+    await walkInBackground(filesPath, id, [for (final f in recent[id]!.rawFiles(dir)) f.path]);
     ran = true;
+  }
+  for (final id in page.toSee.where(recent.containsKey).take(max)) {
+    await seeInBackground(filesPath, id, [for (final f in recent[id]!.rawFiles(dir)) f.path]);
+    ran = true;
+  }
+  for (final item in recent.values) {
+    if (await keepGuessesInBackground(filesPath, item)) ran = true;
   }
   return ran;
 }
@@ -56,7 +70,7 @@ class ConfirmCardHost extends StatefulWidget {
   /// Tests: the gathering on the test's own thread; null: [gatherInBackground].
   final Future<int> Function(String filesPath)? gather;
 
-  /// Detector passes to run for the newest recordings before asking (the phone: [recentWalkPasses]); true: one ran.
+  /// Detector passes to run for the newest recordings before asking (the phone: [recentPasses]); true: one ran.
   final Future<bool> Function(String filesPath)? passes;
   final DateTime Function()? clock;
 
@@ -155,9 +169,9 @@ class _ConfirmCardHostState extends State<ConfirmCardHost> with WidgetsBindingOb
     });
   }
 
-  /// A blind card's chip.
+  /// A blind card's chip, or one of a choice card's two words.
   void _said(ConfirmQuestion q, Label label) {
-    _confirm.answer(q.id, Answer.said, card: CardKind.blind, shown: _shown, said: label);
+    _confirm.answer(q.id, Answer.said, card: q.kind, shown: _shown, said: label);
     setState(() {
       _answers[q.id] = Answer.said;
       _saved[q.id] = label.chip;
@@ -168,7 +182,7 @@ class _ConfirmCardHostState extends State<ConfirmCardHost> with WidgetsBindingOb
   Future<void> _words(ConfirmQuestion q) async {
     final words = await askWords(context, q.text, null);
     if (words == null || !mounted) return;
-    _confirm.answer(q.id, Answer.said, card: CardKind.blind, shown: _shown, words: words);
+    _confirm.answer(q.id, Answer.said, card: q.kind, shown: _shown, words: words);
     setState(() {
       _answers[q.id] = Answer.said;
       _saved[q.id] = cleanNote(words);

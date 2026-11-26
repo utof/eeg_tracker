@@ -15,7 +15,8 @@ import 'vocabulary.dart';
 /// A card that shows the guess has the two buttons that name the thing and "Not sure", always in that order, and,
 /// with [onTimes] and on the day of the stretch, a small "Yes, but the times are off" that opens the timeline
 /// (times_editor.dart). A blind card ([ConfirmQuestion.kind], drawn only with [onSaid]) offers chips and words of
-/// your own instead and never shows the guess.
+/// your own instead and never shows the guess; a choice card (two words the detector cannot tell apart) is drawn the
+/// same way with its two words.
 class ConfirmBatch extends StatelessWidget {
   const ConfirmBatch({
     super.key,
@@ -109,7 +110,8 @@ class _Question extends StatelessWidget {
   final VoidCallback? onUndo, onNote, onTimes, onWords;
   final ValueChanged<Label>? onSaid;
 
-  bool get _blind => question.kind == CardKind.blind && onSaid != null;
+  /// Drawn with chips: a blind card, or a choice card ("Meditating or resting?").
+  bool get _blind => question.kind != CardKind.normal && onSaid != null;
 
   String _word(Answer a) => switch (a) {
     Answer.yes => question.yes,

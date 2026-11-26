@@ -4,10 +4,12 @@
 //   for what the drift-off detector is doing. The first tap is instant (the moment you close your eyes); a later tap
 //   asks first, because it moves the night's comparison to that moment.
 // - Sleep report: lights off, the minutes from it to sleep by the detector and by the sleep model as log lines, whether
-//   they agree, and the running check toward "4 of 5 nights within 5 minutes".
+//   they agree, and the running check toward "4 of 5 nights within 5 minutes"; and, when there is one, the app's own
+//   guess of lights off as one muted line (DECISIONS 1111-1112).
 import 'package:flutter/material.dart';
 
 import '../detectors/drift_off.dart' show DriftState;
+import '../sleep/auto_lights_off.dart';
 import '../sleep/drift.dart';
 import 'alarm_view.dart' show AlarmLine;
 import 'theme.dart';
@@ -172,11 +174,42 @@ String checkSentence(DriftCheck c) {
       : 'The check: ${c.agree} of the last 5 nights agree within 5 minutes; it needs 4 to be trusted.';
 }
 
+/// The app's own guess of lights off, in one line, with how it did against your taps.
+String autoLightsOffLine(AutoLightsOff a, AutoLightsCheck c) {
+  final diff = a.tapDiffMin;
+  final String vs;
+  if (diff == null) {
+    vs = '';
+  } else if (diff.abs() < 0.5) {
+    vs = ' (the same time as your tap)';
+  } else {
+    vs = ' (${afterText(diff.abs())} ${diff > 0 ? 'after' : 'before'} your tap)';
+  }
+  final guess = 'The app\'s own guess of lights off: ${_clock(a.time)}$vs.';
+  if (c.trusted) return '$guess Within 5 minutes of your tap on ${c.agree} of ${c.nights} nights.';
+  if (c.nights == 0) return '$guess Not used yet: no night with your tap and this guess yet.';
+  final tail = c.decided
+      ? 'on only ${c.agree} of the last 5 nights.'
+      : 'on ${c.agree} of ${c.nights} ${c.nights == 1 ? 'night' : 'nights'} so far.';
+  return '$guess Not used yet: within 5 minutes of your tap $tail';
+}
+
 /// The sleep report's "Falling asleep" section.
 class FallingAsleepSection extends StatelessWidget {
-  const FallingAsleepSection({super.key, required this.drift, required this.check, this.onInfo});
+  const FallingAsleepSection({
+    super.key,
+    required this.drift,
+    required this.check,
+    this.onInfo,
+    this.auto,
+    this.autoCheck = const AutoLightsCheck(0, 0),
+  });
   final DriftResult drift;
   final DriftCheck check;
+
+  /// The app's own guess of lights off (null when none was found) and how it did against your taps.
+  final AutoLightsOff? auto;
+  final AutoLightsCheck autoCheck;
   final VoidCallback? onInfo;
 
   @override
@@ -245,6 +278,10 @@ class FallingAsleepSection extends StatelessWidget {
           Text(checkSentence(check), style: body?.copyWith(fontFeatures: tabular)),
           const SizedBox(height: 8),
           Text('Both are guesses: this checks that they agree, not that either is right.', style: muted),
+          if (auto != null) ...[
+            const SizedBox(height: 8),
+            Text(autoLightsOffLine(auto!, autoCheck), style: muted?.copyWith(fontFeatures: tabular)),
+          ],
         ],
       ),
     );

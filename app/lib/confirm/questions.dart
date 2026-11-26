@@ -17,6 +17,7 @@ import 'dart:io';
 
 import 'package:shared_labels/shared_labels.dart';
 
+import '../activity/guesses.dart' show oneRestADay;
 import '../archive/tags.dart';
 import '../spans/span.dart' show spansIn;
 import 'phone.dart';
@@ -77,13 +78,14 @@ class ConfirmQuestions {
       () {
         final e = p.estimate;
         final exact = timesAsked(e, now);
-        final blind = !guessShown && (state.forcedBlind.contains(e.id) || blindByDraw(e.id));
+        final choice = isChoice(e); // "Meditating or resting?": two words, never a guess, never drawn blind
+        final blind = !choice && !guessShown && (state.forcedBlind.contains(e.id) || blindByDraw(e.id));
         final guess = questionOf(e, now, exact: exact);
         return ConfirmQuestion(
           e,
-          blind ? blindQuestionOf(e, now, exact: exact) : guess,
+          choice ? choiceQuestionOf(e, now, exact: exact) : (blind ? blindQuestionOf(e, now, exact: exact) : guess),
           p.why,
-          kind: blind ? CardKind.blind : CardKind.normal,
+          kind: choice ? CardKind.choice : (blind ? CardKind.blind : CardKind.normal),
           exactTimes: exact,
           guessText: guess,
         );
@@ -225,7 +227,7 @@ class ConfirmQuestions {
   /// the labels file (the notification's buttons write answers while the app is closed). Plain file work, fit for a
   /// background isolate. Returns how many estimates were new.
   int gather({List<Estimate> Function(Directory filesDir)? collect}) {
-    final added = store.register((collect ?? collectEstimates)(filesDir));
+    final added = store.register(oneRestADay((collect ?? collectEstimates)(filesDir), store.read().estimates.values));
     if (added > 0 || store.answersFile.existsSync()) _afterChange();
     return added;
   }
@@ -290,8 +292,9 @@ class ConfirmQuestions {
           for (final c in cards)
             {
               'card': c.kind.name,
-              'yes': c.kind == CardKind.blind ? '' : c.yes,
-              'no': c.kind == CardKind.blind ? '' : c.no,
+              // a blind or a choice card has no Yes and No: its notification opens the app, where the chips are
+              'yes': c.kind == CardKind.normal ? c.yes : '',
+              'no': c.kind == CardKind.normal ? c.no : '',
               'guess': c.estimate.label.id,
               'confidence': c.estimate.confidence,
               'end_ms': c.estimate.end.millisecondsSinceEpoch,

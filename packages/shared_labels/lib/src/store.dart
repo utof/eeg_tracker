@@ -2,7 +2,7 @@
 //   files/confirm/estimates.jsonl  one line per estimate a detector registered (estimate.dart)
 //   files/confirm/answers.jsonl    one line per answer: {"estimate_id", "answer", "at", "via": "card" | "notification"
 //                                  | "stop_sheet"} and, when a card was shown, what the card was: "card" ("normal" |
-//                                  "blind": the guess was not shown), "guess" and "confidence" (what the detector
+//                                  "blind": the guess was not shown, "choice": two words to pick from), "guess" and "confidence" (what the detector
 //                                  said), "shown", "seconds" (from shown to answered), "age_min" (how old the stretch
 //                                  was when shown). "answer" is one of
 //                                    "yes"       it happened; "times_confirmed" false: the stretch's start and end are
@@ -63,10 +63,12 @@ enum Answer {
   static Answer? of(Object? s) => values.where((a) => a.wire == s || a.name == s).firstOrNull;
 }
 
-/// What a card showed: the guess ("The headband thinks you slept"), or not (a blind card, asking.md).
+/// What a card showed: the guess ("The headband thinks you slept"), not the guess (a blind card, asking.md), or two
+/// words to pick from where the detector cannot tell which ("Meditating or resting?", estimate.dart [isChoice]).
 enum CardKind {
   normal,
-  blind;
+  blind,
+  choice;
 
   static CardKind? of(Object? s) => values.where((k) => k.name == s).firstOrNull;
 }
@@ -162,7 +164,9 @@ class Answered {
 
   /// Whether a blind card's answer names what the detector thought ([guessed]); null when it is not such an answer or
   /// your words name no label.
-  bool? agrees(Label guessed) => answer != Answer.said || said == null ? null : said!.sameAs(guessed);
+  /// A choice card's answer is neither: the detector guessed none of the words it offered.
+  bool? agrees(Label guessed) =>
+      answer != Answer.said || said == null || card == CardKind.choice ? null : said!.sameAs(guessed);
 
   Answered withNote(String? note) => Answered(
     answer,

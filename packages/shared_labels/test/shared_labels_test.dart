@@ -42,7 +42,7 @@ void main() {
       File('test/fixtures/confirm/$n').copySync('${files.path}/confirm/$n');
     }
     final state = ConfirmStore(files).read();
-    expect(state.estimates, hasLength(15));
+    expect(state.estimates, hasLength(16));
     if (Platform.environment['UPDATE_GOLDEN'] == '1') {
       File('test/fixtures/confirm/labels.tsv').writeAsStringSync(labelsTsv(state));
       File('test/fixtures/confirm/estimates.tsv').writeAsStringSync(estimatesTsv(state));
@@ -145,6 +145,76 @@ void main() {
       final label = table(labelsTsv(state), labelColumns, 'confirm:${nap.id.substring(4)}');
       expect((label['label'], label['kind'], label['present'], label['times_confirmed'], label['owner_words']), ('working', 'activity', '1', '0', 'at my desk'));
       expect(label['context'], 'the app asked without showing its guess; sleep-periods (s1) said nap, confidence 0.90');
+    });
+  });
+
+  group('a choice card: "Meditating or resting?" (eyes closed and still; DECISIONS 1105-1106)', () {
+    late Directory files;
+    late ConfirmStore store;
+    final rest = Estimate(detector: restDetector, version: 'rest-v1', label: Labels.eyesClosed, start: DateTime(2026, 11, 20, 13, 5), end: DateTime(2026, 11, 20, 13, 12), confidence: 0.8, recording: 'rec');
+    final walk = Estimate(detector: 'walking', version: 'w1', label: Labels.walking, start: DateTime(2026, 11, 20, 19, 8), end: DateTime(2026, 11, 20, 21, 14));
+    final now = DateTime(2026, 11, 20, 14, 0);
+    setUp(() {
+      files = Directory.systemTemp.createTempSync('shared-labels-choice');
+      store = ConfirmStore(files);
+    });
+    tearDown(() => files.deleteSync(recursive: true));
+    Map<String, String> table(String tsv, List<String> columns, String id) =>
+        Map.fromIterables(columns, tsv.split('\n').firstWhere((l) => l.contains(id)).split('\t'));
+
+    test('which estimates get one, its words and its two chips', () {
+      expect((isChoice(rest), isChoice(walk)), (true, false));
+      expect(choiceQuestionOf(rest, now), '13:05-13:12. Your eyes were closed and you were still. Meditating or resting?');
+      expect(
+        choiceQuestionOf(rest, now.add(const Duration(days: 1)), exact: false),
+        'Yesterday, about 13:00. Your eyes were closed and you were still. Meditating or resting?',
+      );
+      final q = ConfirmQuestion(rest, choiceQuestionOf(rest, now), 'newest', kind: CardKind.choice, guessText: questionOf(rest, now));
+      expect(q.chips, [Labels.meditating, Labels.resting]);
+      expect(CardKind.of('choice'), CardKind.choice);
+    });
+
+    test('the picked word becomes the label; the tables say it was a choice, and "agrees" is not counted', () {
+      store.register([rest]);
+      final at = DateTime(2026, 11, 20, 14, 0, 6);
+      store.answer(rest.id, Answer.said, at: at, card: CardKind.choice, shown: now, estimate: rest, said: Labels.meditating);
+      final state = store.read();
+      expect(state.answers[rest.id]!.agrees(rest.label), isNull, reason: 'the detector guessed neither word');
+      final row = table(estimatesTsv(state), estimateColumns, rest.id);
+      expect((row['answer'], row['card'], row['label'], row['said'], row['agrees'], row['detector']), ('said', 'choice', 'eyes_closed', 'meditating', '', restDetector));
+      final label = table(labelsTsv(state), labelColumns, 'confirm:${rest.id.substring(4)}');
+      expect((label['label'], label['kind'], label['present'], label['times_confirmed'], label['owner_words']), ('meditating', 'activity', '1', '0', 'meditating'));
+      expect(label['context'], 'the app asked to pick meditating or resting; eyes-closed-rest (rest-v1) said eyes_closed, confidence 0.80');
+    });
+
+    testWidgets('the card shows the two words, "Something else" and "Not sure"; never Yes and No', (t) async {
+      t.view.physicalSize = const Size(393, 900);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      final said = <Label>[];
+      final answers = <Answer>[];
+      var words = 0;
+      final q = ConfirmQuestion(rest, choiceQuestionOf(rest, now), 'newest', kind: CardKind.choice, guessText: questionOf(rest, now));
+      await t.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ConfirmBatch(questions: [q], onAnswer: (_, a) => answers.add(a), onSaid: (_, l) => said.add(l), onWords: (_) => words++, onTimes: (_, _, _) {}),
+          ),
+        ),
+      );
+      expect(find.text('13:05-13:12. Your eyes were closed and you were still. Meditating or resting?'), findsOneWidget);
+      for (final chip in ['Meditating', 'Resting', 'Something else', 'Not sure']) {
+        expect(find.text(chip), findsOneWidget, reason: chip);
+      }
+      expect(find.text('Sleeping'), findsNothing, reason: 'not a blind card\'s long list');
+      expect(find.text('Eyes closed'), findsNothing);
+      expect(find.text('Yes, but the times are off'), findsNothing);
+      await t.tap(find.text('Resting'));
+      await t.tap(find.text('Something else'));
+      await t.tap(find.text('Not sure'));
+      expect(said, [Labels.resting]);
+      expect((words, answers.single), (1, Answer.skip));
+      expect(t.takeException(), isNull);
     });
   });
 

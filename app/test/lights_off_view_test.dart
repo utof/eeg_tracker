@@ -1,6 +1,7 @@
 // Lights off and "Falling asleep" in words (lib/ui/lights_off_view.dart): the line above the night screen's buttons,
 // the minutes, the agreement and the check, the bar's buttons and the question before a second Lights off.
 import 'package:eeg_tracker/detectors/drift_off.dart' show DriftState;
+import 'package:eeg_tracker/sleep/auto_lights_off.dart';
 import 'package:eeg_tracker/sleep/drift.dart';
 import 'package:eeg_tracker/ui/lights_off_view.dart';
 import 'package:eeg_tracker/ui/theme.dart';
@@ -110,5 +111,25 @@ void main() {
     await tester.tap(find.text('Lights off now'));
     await tester.pumpAndSettle();
     expect(answer, isTrue);
+  });
+
+  testWidgets('Falling asleep shows the app\'s own guess as one line, only when there is one', (tester) async {
+    final drift = DriftResult(
+      lightsOff: DateTime(2026, 11, 18, 23, 38),
+      from: LightsOffFrom.button,
+      agree: true,
+      counted: true,
+      onsetMin: 10,
+      modelOnsetMin: 11,
+      diffMin: -1,
+    );
+    final auto = AutoLightsOff(time: DateTime(2026, 11, 18, 23, 41), second: 10, tapDiffMin: 3);
+    await tester.pumpWidget(app(SingleChildScrollView(
+      child: FallingAsleepSection(drift: drift, check: const DriftCheck(0, 0), auto: auto, autoCheck: const AutoLightsCheck(2, 5)),
+    )));
+    expect(find.textContaining('The app\'s own guess of lights off: 23:41'), findsOneWidget);
+    expect(find.textContaining('Not used yet'), findsOneWidget);
+    await tester.pumpWidget(app(SingleChildScrollView(child: FallingAsleepSection(drift: drift, check: const DriftCheck(0, 0)))));
+    expect(find.textContaining('own guess'), findsNothing);
   });
 }

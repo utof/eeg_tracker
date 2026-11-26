@@ -151,6 +151,26 @@ List<Label> blindChips(Estimate e) {
   ];
 }
 
+/// The detector of "eyes closed and still" (the app's activity/rest_question.dart). It cannot tell meditating from
+/// resting, so its card offers the two words instead of a guess (a choice card, DECISIONS 1105).
+const String restDetector = 'eyes-closed-rest';
+
+/// Whether [e] is asked with a choice card.
+bool isChoice(Estimate e) => e.detector == restDetector;
+
+/// The two words a choice card offers.
+List<Label> choiceChips(Estimate e) => const [Labels.meditating, Labels.resting];
+
+/// The choice as the tables' `context` says it: `meditating or resting`.
+String choiceWords(Estimate e) => choiceChips(e).map((l) => l.id).join(' or ');
+
+/// The words of a choice card: "13:05-13:12. Your eyes were closed and you were still. Meditating or resting?"
+String choiceQuestionOf(Estimate e, DateTime now, {bool exact = true}) {
+  final chips = choiceChips(e);
+  return '${_capital(spanWords(e, now, exact: exact))}. Your eyes were closed and you were still. '
+      '${chips.first.chip} or ${chips.last.chip.toLowerCase()}?';
+}
+
 /// Whether [id]'s card is a blind one: 1 card in [oneIn], picked by the estimate's id and [seed], so the same card is
 /// blind on the card, in the notification and in a test, and nothing is rolled at run time.
 bool blindByDraw(String id, {String seed = blindSeed, int oneIn = blindOneIn}) {
@@ -176,7 +196,7 @@ class ConfirmQuestion {
   /// Why it was picked: `newest`, `unsure`, `long`, `rare`, `few`.
   final String why;
 
-  /// A blind card does not show the guess; it offers [chips] and words of your own.
+  /// A blind card does not show the guess; it offers [chips] and words of your own. A choice card offers its two words.
   final CardKind kind;
 
   /// The times are still asked about ("Yes, but the times are off"): only on the day of the stretch (asking.md).
@@ -192,6 +212,6 @@ class ConfirmQuestion {
   String get yes => estimate.label.yesWord;
   String get no => estimate.label.noWord;
 
-  /// A blind card's choices.
-  List<Label> get chips => blindChips(estimate);
+  /// A blind card's choices; a choice card's two words.
+  List<Label> get chips => kind == CardKind.choice ? choiceChips(estimate) : blindChips(estimate);
 }

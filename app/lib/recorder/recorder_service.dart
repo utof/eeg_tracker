@@ -12,6 +12,7 @@ import '../alarm/live_alarm.dart';
 import '../alarm/record.dart';
 import '../alarm/rule.dart';
 import '../auto/channel.dart' show AutoChannel;
+import '../auto/laptop.dart' show laptopWorkSignal;
 import '../handsfree/store.dart' show nightGestures;
 import '../headband/battery_estimate.dart';
 import '../headband/connection.dart';
@@ -533,6 +534,9 @@ class RecorderTaskHandler extends TaskHandler {
       filesDir: files,
       onLog: (line) => _recorder?.note(line),
       onMarker: (text) => _recorder?.addMarker(text),
+      // the laptop's work word during a recording: kept, and the watcher asked (it starts or offers the work session
+      // on this recording, auto/controller.dart 7; DECISIONS 1107)
+      onWork: (working, meeting) => unawaited(laptopWorkSignal(working: working, meeting: meeting)),
       onChange: (s) {
         FlutterForegroundTask.sendDataToMain(shareMessage(s));
         _shownAtMs = 0; // the notification's next line says where it is shared

@@ -253,6 +253,27 @@ const List<TryCard> tryCards = [
     readme: [TryRef('Archive', 'look through a day, tag it, delete one')],
   ),
   TryCard(
+    id: 'what-happened',
+    group: TryGroup.tonight,
+    title: 'What happened: the app\'s own guesses',
+    what: 'After a recording stops, the app guesses what went on in it and asks about one thing: "Meditating or resting?".',
+    takes: 'An ordinary day, then 2 minutes of looking',
+    steps: [
+      'Record a day as usual. Once, sit with eyes closed for 5 minutes without marking anything.',
+      'Stop the recording and leave the app open for a minute. Answer "Meditating or resting?" when the quick check asks.',
+      'More, Open the archive, that recording: look at the first lane, What happened, and tap two stretches.',
+      'If the laptop tray runs: start working while the headband records with nothing marked.',
+      'The next morning after Stop sleep: is there a line offering the check-in above the buttons?',
+    ],
+    tell: [
+      'A guess that was plainly wrong, and at what time.',
+      'Whether the question came, and whether it came at a bad moment.',
+      'What happened when the laptop said you were working: a notice, the Work page, or nothing.',
+    ],
+    opens: TryOpen.archive,
+    readme: [TryRef('What happened in a recording', 'one ordinary day')],
+  ),
+  TryCard(
     id: 'sleep-so-far',
     group: TryGroup.anotherNight,
     title: 'Sleep so far, in the night',

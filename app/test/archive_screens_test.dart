@@ -206,11 +206,11 @@ void main() {
         RecordingView(model: RecordingViewModel(item: _night, timeline: tl), onDanger: () {}, onAddTag: () {}, onSignal: () {}),
         'archive_recording_$s',
         scale: scale,
-        height: 2900,
+        height: 3200, // one lane and one "i" link taller since "What happened" (DECISIONS 1101)
       );
       expect(find.text('Danger zone'), findsOneWidget);
       expect(find.text('Remove from this phone'), findsNothing); // only on this phone: no normal removal
-      for (final l in ['Sleep', 'Eyes closed', 'Drowsy', 'Talking', 'Moving', 'Signal', 'Work', 'Meeting', 'Sessions', 'Your tags']) {
+      for (final l in ['What happened', 'Sleep', 'Eyes closed', 'Drowsy', 'Talking', 'Moving', 'Signal', 'Work', 'Meeting', 'Sessions', 'Your tags']) {
         expect(find.text(l), findsWidgets, reason: l);
       }
     });
@@ -409,6 +409,8 @@ void main() {
       await tester.pumpWidget(recording(_board, deleted));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(find.text('Remove from this phone'), 300);
+      await tester.ensureVisible(find.text('Remove from this phone')); // clear of the screen's lower edge
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Remove from this phone'));
       await tester.pumpAndSettle();
       expect(find.textContaining('It stays on your laptop'), findsOneWidget);
