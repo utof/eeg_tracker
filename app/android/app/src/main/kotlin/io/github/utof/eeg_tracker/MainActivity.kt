@@ -102,6 +102,7 @@ class MainActivity : FlutterActivity() {
                             mapOf(
                                 "notifications" to SharpPrompts.notificationsOn(applicationContext),
                                 "studyNotifications" to SharpPrompts.notificationsOn(applicationContext, SharpPrompts.STUDY_CHANNEL),
+                                "experimentNotifications" to SharpPrompts.notificationsOn(applicationContext, SharpPrompts.EXPERIMENT_CHANNEL),
                             ),
                         )
                         "openChannelSettings" -> {

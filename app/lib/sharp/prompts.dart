@@ -84,6 +84,17 @@ class ChannelSharpPhone implements SharpPhone {
         });
 }
 
+/// Notifications are allowed for the app and for the sleep experiment reminder's own channel. True when the phone
+/// cannot be asked (tests, a desktop harness): nothing to warn about.
+Future<bool> experimentNotificationsOn() async {
+  try {
+    final m = await const MethodChannel('eeg_tracker/sharp').invokeMapMethod<String, Object?>('status');
+    return m?['experimentNotifications'] != false;
+  } catch (_) {
+    return true;
+  }
+}
+
 /// Hands the phone the moments ahead from the saved settings: none when off or never set up. Called at every app
 /// start and return (the night screen), and after each change on the sharp-hours page.
 Future<void> rearmSharp(SharpStore store, SharpPhone phone, DateTime now) async {

@@ -537,10 +537,12 @@ One folder per experiment (DECISIONS rows 1050-1063), named by when it was start
 | File | Content |
 |---|---|
 | `plan.json` | written once: `version` 1, `id`, `kind` (`caffeine_late`, `workout_late`, `alcohol`), `created`, `start` (the first evening that counts, `YYYY-MM-DD`; a day runs 04:00 to 04:00), `picked` (the app picks the test nights) and then `salt` (the secret the picks are drawn from) and `draw`, `with` and `without` (what each means, in words), `watched` (the numbers compared: `efficiency`, `deep`, `awake`, `pulse`, `sleep_start`, `dream`), `day` (which night an answer is judged by) |
-| `log.jsonl` | one line per tap, added at the end: `at`, `day`, `event`. `started`; `answer` with `answer` (`with`, `without`, `neither`, or null when taken back); `odd` with `flag` (`ill`, `away`) and `on`; `pick` with `index` (from 0) and `with`; `ended`. The last line about a day wins |
+| `log.jsonl` | one line per tap, added at the end: `at`, `day`, `event`. `started`; `answer` with `answer` (`with`, `without`, `neither`, or null when taken back); `odd` with `flag` (`ill`, `away`) and `on`; `pick` with `index` (from 0) and `with`; `reminder` with `on` (the evening reminder's switch; off until a line says on); `ended`. The last line about a day wins |
 
 An evening's answer is judged by the sleep report of the next day; the app works the result out again from the
-reports each time, so no result is stored.
+reports each time, so no result is stored. `sleep-experiments/prompts.jsonl` (beside the folders) is the phone's log
+of the evening reminder, in the lines of the sharp-hours `prompts.jsonl`: `planned`, `at`, `event` (`shown`,
+`skipped` with `reason`, `late`, `snoozed`, `dismissed`).
 
 ### Hands-free controls (`hands-free/`)
 
@@ -817,7 +819,7 @@ by `ConfirmPrompts.kt`. Lines are only ever added; times are local with their UT
 | `asks.jsonl` | one line per batch that went out as a notification: `{"at", "via": "notification", "estimates": [ids], "why": {id: "newest" or "unsure" or "long" or "rare" or "few"}, "blind": [ids made blind by rule]}`; what the Android side did with it: `{"at", "event": "shown" or "held" or "late" or "skipped" or "dismissed", "batch", "reason"}`; and every back-off step with its reason: `{"at", "event": "backoff", "step": "pause" or "one_a_day" or "normal" or "skip_hour" or "blind_batch", "reason", "until", "hour"}` (DECISIONS 972) |
 | `armed.json` | the batch waiting for its moment (written whole) |
 | `settings.json` | `{"version": 1, "on", "per_batch" (3-5), "per_day" (1-6), "quiet_start_min", "quiet_end_min"}` |
-| `labels.tsv` | your answers as truth rows in the truth schema below (the 17 columns), rebuilt whole by the app: a file pandas reads without the laptop |
+| `labels.tsv` | your answers as truth rows in the truth schema below (the 17 columns), rebuilt whole by the app: a file pandas reads without the laptop. A Yes whose sleep stretch you took away afterwards in the Archive has no row while that lasts (and an empty `label_id` in `estimates.tsv`); put the stretch back and the row is back |
 | `estimates.tsv` | every estimate with its answer, in the columns of the data book's `estimates.tsv` below, rebuilt whole by the app. With `labels.tsv` it is what another app (utof_tracker, once linked) takes as data, so it never asks the same thing again |
 
 A Yes is a truth row that it happened (`present` 1, `likely`, `times_confirmed` 0: the times are still the
@@ -1266,7 +1268,9 @@ are cut by `night_files.py`'s chain rule and named by the evening date, as the c
 
 One row per session file: the phone's work sessions (`phone/work-sessions/`), the laptop's (`laptop/work/`),
 meditation and alpha-theta (`phone/meditations/`, `phone/alpha-theta/`), the nap coach (`phone/naps/`) and sound for
-states (`phone/sound-states/`). A column that does not apply to a kind is empty.
+states (`phone/sound-states/`). A column that does not apply to a kind is empty. A session whose mark on its
+recording was removed in the Archive ("Remove this mark") has no row, and its minutes are in no day of `days.tsv`
+(the day's `excluded` says "mark removed"); put the mark back and both are back. The session's file is never deleted.
 
 | Column | Meaning |
 |---|---|

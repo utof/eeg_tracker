@@ -275,6 +275,13 @@ def taken_ids(local: Path | str) -> set[str]:
     return {s.span for f in all(local).values() for s in f.removed}
 
 
+def mark_taken(session: object, taken: set[str]) -> bool:
+    """A session file (work, meditation, nap coach, ...) whose mark on the recording was taken away ("Remove this
+    mark" in the Archive) and not put back: it counts in no table, as on the phone (DECISIONS 1042, 1080). Its file
+    stays. [taken]: `taken_ids`."""
+    return rode_on_recording(session) and isinstance(session, dict) and session.get("span") in taken
+
+
 def report_all_taken(report: object, taken: set[str]) -> bool:
     """A sleep report (its JSON) that came from sleep spans every one of which was taken away since: the phone has
     put its own away (`nights/not-sleep/`); a copy of it must not make a night by itself."""

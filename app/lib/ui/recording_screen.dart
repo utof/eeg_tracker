@@ -16,6 +16,7 @@ import '../archive/items.dart';
 import '../archive/raw_remover.dart' show OnLaptop;
 import '../archive/seen.dart';
 import '../archive/tags.dart';
+import '../confirm/questions.dart' show ConfirmQuestions;
 import '../recorder/recorder_service.dart' show loadNight;
 import '../spans/not_sleep.dart';
 import '../spans/span.dart';
@@ -135,6 +136,12 @@ class _RecordingScreenState extends State<RecordingScreen> {
       return;
     }
     _changed = true;
+    try {
+      // a Yes that made this stretch is no label while it is taken away (DECISIONS 1081)
+      ConfirmQuestions(_files).writeTables();
+    } on FileSystemException {
+      // the tables are written again at the app's next start
+    }
     setState(_readMarks);
     _say(switch ((s.removed, s.isSleep)) {
       (false, true) => 'Not sleep: it is in no night now. Its report is put away, not deleted.',

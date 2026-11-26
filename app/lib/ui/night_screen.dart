@@ -63,6 +63,8 @@ import 'night_view.dart';
 import 'phone_checks.dart';
 import 'pair_dialog.dart';
 import 'share_sheet.dart';
+import 'sleep_experiment_ask.dart';
+import 'sleep_experiments_screen.dart';
 import 'sleep_report_screen.dart';
 import 'sleep_scoring.dart';
 import 'sleep_so_far.dart';
@@ -1407,6 +1409,11 @@ class _NightScreenState extends State<NightScreen> with WidgetsBindingObserver {
       onStart: _start,
       onRecord: () => unawaited(_start(sleep: false)),
       onSleepNow: () => unawaited(_sleepNow()),
+      // tonight's question of a running sleep experiment, above the Sleep button (DECISIONS 1084)
+      experimentAsk: SleepExperimentAsk(
+        recordingsDir: _dir,
+        onOpen: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SleepExperimentsScreen(recordingsDir: _dir))),
+      ),
       onStopSheet: () => unawaited(_stopSheet()),
       onEndActivity: _endActivity,
       onUndo: () {
