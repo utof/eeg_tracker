@@ -36,6 +36,7 @@ void main() {
       'walking',
       'pulse',
       'record-first',
+      'focus-sessions',
     ]) {
       final md = await rootBundle.loadString('assets/evidence/$name.md');
       expect(md, startsWith('# '), reason: name);

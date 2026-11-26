@@ -235,10 +235,11 @@ you feel?" questions a day at random waking moments, two with a 1-minute reactio
 session; after 3 weeks and about 60 answers, your answers by time of day, hours since waking and sleep pressure, with
 ranges, "seen together, not tested". Code in `app/lib/sharp/`; files in [docs/data-format.md](docs/data-format.md);
 how to use it, switch it off and the owner step in [app/README.md](app/README.md) ("Sharp hours"). Computer focus
-sessions from ActivityWatch are not part of it yet: a later laptop importer could read ActivityWatch's local REST API
-(`aw-server`, port 5600), count focus sessions the way the research found valid (runs of related work of 35-60 minutes,
-counted, never summed as hours) per 2-hour block of each 04:00-04:00 day, and write them beside the phone's imported
-`_local/phone/sharp-hours/` files for the laptop's statistics (DECISIONS row 289).
+sessions from ActivityWatch are the laptop's part (`scripts/aw_focus.py`): it reads ActivityWatch's local REST API
+(`aw-server`, port 5600) and counts focus sessions the way the research found valid (runs of related work of 35 minutes
+or more, counted, never summed as hours) per 2-hour block of each 04:00-04:00 day, writes them beside the phone's
+imported `_local/phone/sharp-hours/` files, and the data book keeps one row per session (`focus.tsv`) for the laptop's
+statistics (DECISIONS rows 289, 510-514, 1133-1136; the "i" note is `docs/evidence/focus-sessions.md`).
 
 **Study reminders** (phone app, the assistant's proposal, off unless switched on in Settings): a nudge to study in the
 evening, 1 to 2 hours before your usual bedtime, and to try recalling it in the morning before looking, with a one-tap

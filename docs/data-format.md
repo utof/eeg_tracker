@@ -15,7 +15,7 @@ Three layers, from raw to summary. Each is written once and never edited in plac
 | The phone over Wi-Fi | `GET /files`, `GET /files/<path>` on the phone; mirrored into `_local/recordings/` and `_local/phone/`, with `_local/phone/pull-state.json` and `pulls.jsonl` | the phone app's Share on Wi-Fi (`app/lib/share/`); read by `scripts/pull_phone.py` |
 | The laptop's work sessions | `_local/laptop/work/<stamp>.work.json`, `labels.jsonl` (below) | the laptop tray (`scripts/tray.py`, `scripts/laptop_work.py`) from ActivityWatch |
 | Catalog of nights | `_local/catalog/catalog.json`, `<date>.sha256`, `catalog.txt`, `history.log` | `scripts/catalog.py` (below) |
-| The data book | `_local/data/nights.tsv`, `sessions.tsv`, `days.tsv`, `epochs.tsv.gz`, `labels.tsv`, `truth.tsv`, `spans.tsv`, `book.json`, `README.md` | `scripts/data_book.py`, after each copy from the phone through `scripts/after_pull.py` (below) |
+| The data book | `_local/data/nights.tsv`, `sessions.tsv`, `days.tsv`, `epochs.tsv.gz`, `labels.tsv`, `truth.tsv`, `spans.tsv`, `focus.tsv`, `book.json`, `README.md` | `scripts/data_book.py`, after each copy from the phone through `scripts/after_pull.py` (below) |
 | Truth labels | `_local/analyses/truth-labels.tsv` (the hand file), `_local/truth/*.tsv`, the Archive's tags marked "This is what I was doing"; the vocabulary `scripts/truth_vocabulary.tsv` | the assistant from chat, the owner by hand or on the phone; checked by `scripts/truth.py` (below) |
 | Detectors against the truth | `_local/data/validation.tsv`, `validation.md` | `scripts/validate_detectors.py`, after each data book build (below) |
 | Raw recordings packed after a day | `<stamp>.f32.xz` on the laptop, `<stamp>.f32.gz` on the phone, in place of `<stamp>.f32`; `_local/packing.jsonl`, `files/packing.jsonl` | `scripts/pack_old.py` (daily), the phone app between nights (`app/lib/recorder/packed.dart`); below |
@@ -1177,7 +1177,7 @@ line per ack (`acked`, `phone`, `files`) and the catalog's night rows `moved_fro
 
 ## The data book (`_local/data/`)
 
-`scripts/data_book.py` (DECISIONS 760-769) turns everything eeg_tracker measured on the laptop into seven tidy tables, so
+`scripts/data_book.py` (DECISIONS 760-769) turns everything eeg_tracker measured on the laptop into tidy tables, so
 hundreds of days can be read in one place and every number traced to the files it came from. It reads `_local/` and
 writes only into `_local/data/` (or `--out`); nothing reads the book back as input, and it can always be built again
 from `_local/` (`uv run --project analysis python scripts/data_book.py`; `--full` works out everything again). The
@@ -1229,6 +1229,7 @@ are cut by `night_files.py`'s chain rule and named by the evening date, as the c
 | `source` | whose report the row holds: `laptop` (`nights/<date>.report.json`, or a laptop report kept in `analyses/`), `phone` (`phone/nights/`), or for a night with no report the catalog's `laptop`, `phone`, `laptop+phone`, `diy` |
 | `counts` | 1 for the one row per night that counts (days.tsv adds it up): scored before unscored, then the laptop's in `nights/`, a laptop report in `analyses/`, the phone's |
 | `scored` | 1 when the report scored stages (under 5 minutes recorded: 0) |
+| `no_sleep_found` | 1 when the phone's report says `no_sleep_found`: a sleep stretch the app started by itself with under 10 minutes asleep (DECISIONS 987, 1132). The row stays; days.tsv leaves it out of the day's sleep and names it in `excluded` (`nap 2026-11-24: no sleep found`). 0 for every other report; empty when there is no report |
 | `wearer` | `me` or `someone else` from "Was this you?" in either report; empty when not answered |
 | `start`, `end` | the report's `data_start` and `data_end` (the catalog's first and last data without a report) |
 | `sleep_start`, `sleep_end` | the first sleep period's start, the last one's end |
@@ -1311,8 +1312,8 @@ report kept by hand in `analyses/` can therefore have sleep the export lacks.
 | `work_sessions`, `work_min`, `work_drowsy_pct`, `work_first_drowsy_min`, `break_hints`, `hints_followed`, `work_breaks`, `work_sharp` | the phone's work sessions by the Trends' rules (no numbers under 30 readable minutes) |
 | `laptop_work_min`, `meeting_min` | the laptop sessions' active minutes (not "not work"); meeting minutes of both |
 | `sharp`, `day_reaction_ms`, `recall`, `practice_min`, `settled_pct` | sharp-hours ratings (mean) and tap tests (median), study recall, meditation and alpha-theta minutes, the settled share |
-| `focus_sessions`, `focus_min`, `focus_rule` | the laptop's ActivityWatch focus sessions that started that day, their active minutes, the rule (`focus-*.jsonl`, `scripts/aw_focus.py`); empty: the laptop had no data that day |
-| `excluded` | what was left out and why (`night 2026-11-20: someone else`, `work: under 30 readable minutes`) |
+| `focus_sessions`, `focus_min`, `focus_rule` | the laptop's ActivityWatch focus sessions that started that day, their active minutes, the rule (`focus-*.jsonl`, `scripts/aw_focus.py`; the sessions themselves are in `focus.tsv`); empty: the laptop had no data that day |
+| `excluded` | what was left out and why (`night 2026-11-20: someone else`, `nap 2026-11-24: no sleep found`, `work: under 30 readable minutes`) |
 | `measures_version`, `inputs_sha256` | the Trends' measure list version; the hash of the day's sources |
 
 ### `epochs.tsv.gz`
@@ -1548,6 +1549,33 @@ A span that was taken away (`removed`) has no row.
 | `paused_minutes` | minutes the activity was paused while the span stayed open (Work during a nap); empty when never paused |
 | `active_minutes` | `minutes` minus `paused_minutes`; empty while the span is open |
 | `estimate` | the confirm-questions estimate a confirmed span answers |
+
+### `focus.tsv`
+
+One row per focus session on the laptop (DECISIONS 510-514, 1133-1135): 35 minutes or more of related work found in
+ActivityWatch by `scripts/aw_focus.py`, read by the data book from the days' lines of
+`phone/sharp-hours/focus-YYYY-MM.jsonl` (format above, "Focus sessions beside the ratings"). It is there so sessions can
+be binned by the hour of the day next to the sharp-hours ratings (`labels.tsv`, kind `sharp`) and the reaction tests;
+`days.tsv` keeps the day's count. A session is counted, never summed into hours. Window titles are never in it. A day
+the laptop had under 35 active minutes has no line and so no row; a day with data and no session has no row either
+(its count of 0 is in `days.tsv`). An entry whose start or minutes cannot be read is left out here and in `days.tsv`'s
+`focus_min`.
+
+| Column | Meaning |
+|---|---|
+| `focus_id` | the session's start as `YYYY-MM-DD-HHMMSS` |
+| `day` | the 04:00-04:00 day of the line (a session at 01:40 belongs to the evening before) |
+| `start` | the start with its UTC offset |
+| `hour`, `block` | the hour (0-23) and the 2-hour block (`08-10`) of the clock the session started in, on the start's own clock; a longer session is not counted again in later blocks |
+| `active_min` | minutes at the keyboard in the session, to the minute |
+| `app` | the app that held most of it (an app's name, never a window title) |
+| `rule` | the rule that found it (`focus-v1 min=35 switch=3`); numbers are only comparable under one rule |
+| `through` | the last moment of laptop data that day (the day may still be going on) |
+| `source_file`, `inputs_sha256` | the month's file it was read from (path from `_local/`) and the hash of that source |
+
+`python3 scripts/aw_focus.py --show` prints the same sessions per 2-hour block beside the number and mean of the
+ratings and the number and middle of the reaction tests (the tests' medians, by the rating each followed), over the
+days that have laptop data and a rating or a test; `--json` gives the same as JSON. "Seen together, not tested."
 
 ### After each copy from the phone (`scripts/after_pull.py`)
 

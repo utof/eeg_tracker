@@ -1051,9 +1051,10 @@ Files, app-private, exported by Export data: `files/sharp-hours/settings.json`, 
 and counts **focus sessions** (35 minutes or more of related work in terminals, editors, AI-assistant windows and
 documentation, with short switches allowed and no break of 5 minutes) per day and per 2-hour block, into
 `_local/phone/sharp-hours/focus-YYYY-MM.jsonl` beside the imported ratings. Sessions are counted, never summed as
-hours, and no window title is stored. `python3 scripts/aw_focus.py --show` prints them next to your ratings, block by
-block, "seen together, not tested". The rule and the files: `docs/break-hints.md` ("Focus sessions"), `docs/data-format.md`
-(DECISIONS rows 510-514).
+hours, and no window title is stored. `python3 scripts/aw_focus.py --show` prints them next to your ratings and
+reaction tests, block by block, "seen together, not tested"; the laptop's data book also keeps one row per session
+(`focus.tsv`). The rule and the files: `docs/break-hints.md` ("Focus sessions"), `docs/data-format.md` (DECISIONS rows
+510-514, 1133-1135).
 
 ### Owner step: switch it on and watch the first two days (2 minutes, then a tap a few times a day)
 
