@@ -192,12 +192,33 @@ class ConfirmQuestions {
     await plan();
   }
 
+  /// The estimates whose Yes made a sleep stretch that you took away afterwards and did not put back (the laptop's
+  /// truth.py `taken_away`). A stretch only filed again under another recording (`moved_to`) is not one.
+  Set<String> _yesTakenAway() {
+    try {
+      return {
+        for (final f in spansIn(Directory('${filesDir.path}/spans')).values)
+          for (final s in f.removed)
+            if (s.movedTo == null) ?s.estimate,
+      };
+    } on FileSystemException {
+      return const {};
+    }
+  }
+
   /// Rewrites the two tables another app or a spreadsheet reads (DECISIONS 869): the labels, and every estimate with
-  /// its answer.
+  /// its answer. A Yes whose stretch was taken away is no label while that lasts (DECISIONS 1081): the answer is kept,
+  /// and putting the stretch back brings the label back.
   void _afterChange() {
     final state = store.read();
-    store.writeLabels(labelsTsv(state));
-    store.writeEstimates(estimatesTsv(state));
+    final taken = _yesTakenAway();
+    store.writeLabels(labelsTsv(state, takenAway: taken));
+    store.writeEstimates(estimatesTsv(state, takenAway: taken));
+  }
+
+  /// The two tables written again from what is on disk: after a marked stretch was taken away or put back.
+  void writeTables() {
+    if (store.answersFile.existsSync()) _afterChange();
   }
 
   /// Gathers the estimates the detectors left on disk ([collect], default: sleep reports and walk files) and rewrites

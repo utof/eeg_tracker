@@ -175,7 +175,7 @@ void main() {
         scale: scale,
         height: 1500,
       );
-      expect(find.text('Experiments'), findsOneWidget);
+      expect(find.text('Self-experiments'), findsOneWidget);
       await _shoot(
         tester,
         Scaffold(

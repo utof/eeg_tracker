@@ -18,11 +18,13 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * The sharp-hours questions (DECISIONS rows 281-283) and the study reminders (rows 400-401): rings the moments the
+ * The sharp-hours questions (DECISIONS rows 281-283), the study reminders (rows 400-401) and a sleep experiment's
+ * evening reminder (row 1085, lib/sleep_experiments/reminder.dart; "Sleep experiment: tonight's question", logged in
+ * files/sleep-experiments/prompts.jsonl): rings the moments the
  * app's Dart side drew (lib/sharp/schedule.dart, lib/study/schedule.dart) as a notification "How sharp do you feel?"
  * or "Good time to learn something you want to keep" / "Try to recall what you studied last night, before looking",
  * and logs what happened to each moment in files/sharp-hours/prompts.jsonl (files/study-review/prompts.jsonl for
- * the study reminders). One list and one alarm chain carry all three kinds of moment ([Kind]); the same rules
+ * the study reminders). One list and one alarm chain carry every kind of moment ([Kind]); the same rules
  * apply to each.
  *
  * - No exact-alarm permission. Each moment is armed twice: a window alarm (setWindow, 10 minutes: on time while
@@ -40,8 +42,10 @@ import java.util.Locale
 object SharpPrompts {
     const val CHANNEL = "sharp_hours"
     const val STUDY_CHANNEL = "study_review"
+    const val EXPERIMENT_CHANNEL = "sleep_experiment"
     private const val NOTIFICATION_ID = 4713
     private const val STUDY_NOTIFICATION_ID = 4714
+    private const val EXPERIMENT_NOTIFICATION_ID = 4715
     const val ACTION_FIRE = "io.github.utof.eeg_tracker.sharp.FIRE"
     const val ACTION_SNOOZE = "io.github.utof.eeg_tracker.sharp.SNOOZE"
     const val ACTION_DISMISSED = "io.github.utof.eeg_tracker.sharp.DISMISSED"
@@ -70,9 +74,12 @@ object SharpPrompts {
     enum class Kind(val wire: String, val code: String, val folder: String) {
         SHARP("sharp", "s", "sharp-hours"),
         STUDY_EVENING("study_evening", "e", "study-review"),
-        STUDY_MORNING("study_morning", "m", "study-review");
+        STUDY_MORNING("study_morning", "m", "study-review"),
 
-        val isStudy: Boolean get() = this != SHARP
+        /** A running sleep experiment's evening reminder (lib/sleep_experiments/reminder.dart, DECISIONS 1085). */
+        SLEEP_EXPERIMENT("sleep_experiment", "x", "sleep-experiments");
+
+        val isStudy: Boolean get() = this == STUDY_EVENING || this == STUDY_MORNING
 
         companion object {
             fun ofWire(s: String?): Kind = values().firstOrNull { it.wire == s } ?: SHARP
@@ -184,8 +191,17 @@ object SharpPrompts {
     fun dismissed(context: Context, planned: Long, test: Boolean, kind: Kind) =
         log(context, planned, System.currentTimeMillis(), "dismissed", null, test, kind)
 
-    private fun notificationId(kind: Kind): Int = if (kind.isStudy) STUDY_NOTIFICATION_ID else NOTIFICATION_ID
-    private fun channelOf(kind: Kind): String = if (kind.isStudy) STUDY_CHANNEL else CHANNEL
+    private fun notificationId(kind: Kind): Int = when {
+        kind.isStudy -> STUDY_NOTIFICATION_ID
+        kind == Kind.SLEEP_EXPERIMENT -> EXPERIMENT_NOTIFICATION_ID
+        else -> NOTIFICATION_ID
+    }
+
+    private fun channelOf(kind: Kind): String = when {
+        kind.isStudy -> STUDY_CHANNEL
+        kind == Kind.SLEEP_EXPERIMENT -> EXPERIMENT_CHANNEL
+        else -> CHANNEL
+    }
 
     private fun busyReason(context: Context): String? = when {
         recorderRunning(context) -> "night recording"
@@ -225,6 +241,12 @@ object SharpPrompts {
             c.setShowBadge(false)
             nm.createNotificationChannel(c)
         }
+        if (nm.getNotificationChannel(EXPERIMENT_CHANNEL) == null) {
+            val c = NotificationChannel(EXPERIMENT_CHANNEL, "Sleep experiment reminder", NotificationManager.IMPORTANCE_DEFAULT)
+            c.description = "Once in the evening while tonight's question is unanswered (off unless switched on in Trends, Sleep experiments)"
+            c.setShowBadge(false)
+            nm.createNotificationChannel(c)
+        }
     }
 
     private fun show(context: Context, planned: Long, test: Boolean, kind: Kind, now: Long) {
@@ -256,6 +278,7 @@ object SharpPrompts {
             Kind.SHARP -> "How sharp do you feel?" to (if (test) "One tap, then a 1-minute reaction test." else "One tap.")
             Kind.STUDY_EVENING -> "Good time to learn something you want to keep" to "Afterwards, one tap: did you study?"
             Kind.STUDY_MORNING -> "Try to recall what you studied last night, before looking" to "Then one tap: how much came back?"
+            Kind.SLEEP_EXPERIMENT -> "Sleep experiment: tonight's question" to "One tap: what happened today?"
         }
         val n = Notification.Builder(context, channelOf(kind))
             .setSmallIcon(R.drawable.ic_sharp)

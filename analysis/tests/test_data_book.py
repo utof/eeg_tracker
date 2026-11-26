@@ -407,3 +407,59 @@ def test_two_reports_kept_by_hand_the_earlier_counts_and_a_renamed_sleep_json_is
     assert [n["report_file"] for n in counting] == ["analyses/2026-11-16-b-nap.report.json"]
     rows = [r for r in read(out / "epochs.tsv.gz") if r["recording"] == "2026-11-16"]
     assert rows[0]["start"] == at(NIGHT) and [r["stage"] for r in rows[: len(names)]] == names
+
+
+def test_a_session_whose_mark_was_removed_is_in_no_table_until_it_is_put_back(local: Path) -> None:
+    """DECISIONS 1080: the phone leaves such a session out of its lists (1042); the laptop's sessions.tsv and the
+    day's work and practice numbers do the same. Its file stays, and putting the mark back brings every row back."""
+    rec = stamp(WORK)
+    w0, m0 = WORK + timedelta(minutes=20), WORK + timedelta(minutes=45)
+    phone = local / "phone"
+    (phone / "work-sessions" / f"{stamp(w0)}.work.json").write_text(json.dumps(dict(
+        version=1, kind="work_session", app="eeg_tracker work", start=w0.isoformat(),
+        end=(w0 + timedelta(minutes=30)).isoformat(), ended="stopped", recording=rec, span=f"{rec}-1", worn_min=30.0,
+        epochs=[dict(at=(w0 + timedelta(seconds=30 * k)).isoformat(), s=30 * k, level="alert", eyes_closed=False)
+                for k in range(60)])))
+    (phone / "meditations").mkdir()
+    (phone / "meditations" / f"{stamp(m0)}.meditation.json").write_text(json.dumps(dict(
+        version=1, kind="meditation", start=m0.isoformat(), runS=600, settledS=300, end="finished", recording=rec,
+        span=f"{rec}-2")))
+
+    def line(n: int, kind: str, t: datetime, minutes: int, **more: object) -> dict:
+        return dict(v=1, span=f"{rec}-{n}", kind=kind, start=at(t), end=at(t + timedelta(minutes=minutes)),
+                    source="owner_button", made=at(t), **more)
+
+    work, med = line(1, "work", w0, 30), line(2, "meditate", m0, 10)
+    f = phone / "spans" / f"{rec}.spans.jsonl"
+    f.parent.mkdir()
+
+    def tables(*lines: dict) -> tuple[set[tuple[str, str]], dict]:
+        f.write_text("".join(json.dumps(x) + "\n" for x in lines))
+        out, _ = build(local)
+        day = next(r for r in read(out / "days.tsv") if r["day"] == "2026-11-17")
+        return {(r["kind"], r["session"]) for r in read(out / "sessions.tsv")}, day
+
+    own = {("work", stamp(WORK)), ("laptop_work", "2026-11-17-100000")}
+    rows, day = tables(work, med)
+    assert rows == own | {("work", stamp(w0)), ("meditation", stamp(m0))}
+    # the day's own 6.5 readable minutes and this session's 30
+    assert (day["work_sessions"], day["work_min"], day["practice_min"]) == ("2", "36.5", "10")
+    assert "mark removed" not in day["excluded"]
+
+    rows, day = tables(work, med, {**work, "removed": True})
+    assert rows == own | {("meditation", stamp(m0))}
+    assert (day["work_sessions"], day["work_min"], day["practice_min"]) == ("", "", "10")
+    assert f"work session {stamp(w0)}: mark removed" in day["excluded"]
+
+    rows, day = tables(work, med, {**work, "removed": True}, {**med, "removed": True})
+    assert rows == own
+    assert (day["work_sessions"], day["work_min"], day["practice_min"]) == ("", "", "")
+    assert f"meditation {stamp(m0)}: mark removed" in day["excluded"]
+    # nothing was deleted
+    assert (phone / "work-sessions" / f"{stamp(w0)}.work.json").exists()
+    assert (phone / "meditations" / f"{stamp(m0)}.meditation.json").exists()
+
+    rows, day = tables(work, med, {**work, "removed": True}, {**med, "removed": True}, work, med)
+    assert rows == own | {("work", stamp(w0)), ("meditation", stamp(m0))}
+    assert (day["work_sessions"], day["work_min"], day["practice_min"]) == ("2", "36.5", "10")
+    assert "mark removed" not in day["excluded"]

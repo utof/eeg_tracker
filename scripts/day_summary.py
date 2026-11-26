@@ -14,7 +14,8 @@ last sleep period), a check-in's number is the first of the day that has it. Rea
   pulse/*.pulse.json                 the laptop's (scripts/compare_pulse.py --out)  phone/pulse/*.pulse.json  the phone's
 
 Left out, and said so in the day's `excluded` list: anything marked "someone else" (nights, check-ins, work
-sessions), nights scored from under 5 minutes, the sleep numbers of a night more than half of whose time asleep was
+sessions), work and practice sessions whose mark on the recording was removed in the Archive ("mark removed"; put
+back, they count again), nights scored from under 5 minutes, the sleep numbers of a night more than half of whose time asleep was
 noisy or missing, the headband numbers of a check-in with under half its signal clean, and the work numbers of a day
 with under 30 readable minutes. A day's time is the timestamp's own UTC offset (the phone's local time then).
 Walking (DECISIONS 800-809) uses the minute rules of analysis/walk_minutes.py (standard library only, shared with the
@@ -32,12 +33,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "analysis"))
 import walk_minutes as wm  # noqa: E402  (standard library only)
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import spans  # noqa: E402  (a session whose mark was removed counts nowhere)
+
 SCHEMA = 1  # of the eeg_day event (docs/utof-interface.md)
 MEASURES_VERSION = 4  # of the measure list below (2: sleep efficiency, sleep regularity, the sleep rating,
 #                       DECISIONS 658; 3: walking and estimated steps, DECISIONS 800-809; 4: pulse while asleep,
 #                       DECISIONS 817)
 DAY_START_HOUR = 4
 SOMEONE_ELSE = "someone else"
+MARK_REMOVED = "mark removed"  # the session's mark on its recording was taken away in the Archive
 NOISY_NIGHT_SHARE = 0.5  # planning value (DECISIONS 553): more of the time asleep noisy or missing than this
 CLEAN_CHECKIN_SHARE = 0.5  # planning value (DECISIONS 553): less of a check-in's signal kept than this
 EFFICIENCY_MIN_IN_BED = 30  # sleep_days.dart efficiencyMinInBedMin (DECISIONS 654): shorter stays say nothing
@@ -531,10 +536,15 @@ def _epoch_time(e: dict, start: datetime) -> datetime | None:
 def _work(days: Days, local: Path) -> None:
     """work/days.dart `workDayNumbers`, line by line."""
     sessions = []
+    taken = spans.taken_ids(local)
     for f in sorted((local / "phone" / "work-sessions").glob("*.work.json")):
         j = _json(f)
         start = parse_time(j.get("start")) if isinstance(j, dict) and j.get("kind") == "work_session" else None
         if start is None:
+            continue
+        if spans.mark_taken(j, taken):  # as work/store.dart leaves it out of its lists (DECISIONS 1042, 1080)
+            days.excluded[day_key(start)].append(dict(what="work session", id=f.name.removesuffix(".work.json"),
+                                                      why=MARK_REMOVED))
             continue
         if _wearer(j) == SOMEONE_ELSE:
             days.excluded[day_key(start)].append(dict(what="work session", id=f.name.removesuffix(".work.json"),
@@ -608,6 +618,7 @@ def _work(days: Days, local: Path) -> None:
 
 def _practice(days: Days, local: Path) -> None:
     settled: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])
+    taken = spans.taken_ids(local)
     for folder, suffix, kind in (("meditations", ".meditation.json", "meditation"),
                                  ("alpha-theta", ".alphatheta.json", "alpha-theta")):
         for f in sorted((local / "phone" / folder).glob("*" + suffix)):
@@ -618,6 +629,9 @@ def _practice(days: Days, local: Path) -> None:
             if start is None or run is None or run <= 0 or sett is None or sett < 0 or sett > run + 0.05:
                 continue
             day = day_key(start)
+            if spans.mark_taken(j, taken):  # as meditation/store.dart leaves it out (DECISIONS 1042, 1080)
+                days.excluded[day].append(dict(what=kind, id=f.name.removesuffix(suffix), why=MARK_REMOVED))
+                continue
             days.add(day, "practice", run / 60)
             days.counts[day]["practice_sessions"] += 1
             days.sources[day].add("phone")

@@ -3,12 +3,15 @@
 //   files/sleep-experiments/<id>/plan.json   which experiment, the day it started, whether the app picks the nights
 //                                            (then also the secret the picks are drawn from); written once
 //   files/sleep-experiments/<id>/log.jsonl   one line per tap, added at the end, never rewritten: `answer`, `odd`,
-//                                            `pick`, `ended`. The last line about a day wins.
+//                                            `pick`, `ended`, `reminder` (the evening reminder's switch). The last
+//                                            line about a day wins.
 // Export data and Share on Wi-Fi take the folder with everything else (their rule is "everything except"), so the
 // laptop gets it under phone/sleep-experiments/ with no new code.
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart' show ValueNotifier;
 
 import '../experiments/experiment.dart' show experimentId;
 import '../training/check.dart' show allocate, Arm, newSalt;
@@ -79,7 +82,10 @@ class DayLog {
 
 /// An experiment with everything logged so far.
 class ExperimentLog {
-  const ExperimentLog(this.plan, this.days, this.ended);
+  const ExperimentLog(this.plan, this.days, this.ended, {this.remind = false});
+
+  /// The evening reminder is switched on (reminder.dart); off until the owner switches it on.
+  final bool remind;
   final SleepExperiment plan;
   final Map<String, DayLog> days;
 
@@ -94,6 +100,10 @@ class SleepExperimentStore {
   SleepExperimentStore(this.dir);
   final Directory dir;
 
+  /// Counts every line this app wrote to an experiment's log (a tap, a start, an end), on any page: the Record tab's
+  /// line listens, so an answer given on Trends takes the question away there too.
+  static final ValueNotifier<int> written = ValueNotifier<int>(0);
+
   File _f(String id, String name) => File('${dir.path}/$id/$name');
 
   void _line(String id, DateTime at, String day, String event, [Map<String, Object?> more = const {}]) {
@@ -102,6 +112,7 @@ class SleepExperimentStore {
       mode: FileMode.append,
       flush: true,
     );
+    written.value++;
   }
 
   /// One experiment; null when its plan cannot be read. A damaged log line is skipped.
@@ -117,6 +128,7 @@ class SleepExperimentStore {
     if (plan == null) return null;
     final answers = <String, Answer>{}, odd = <String, Set<String>>{}, picks = <String, (int, bool)>{};
     String? ended;
+    var remind = false;
     var lines = const <String>[];
     try {
       lines = _f(id, 'log.jsonl').readAsLinesSync();
@@ -151,12 +163,14 @@ class SleepExperimentStore {
           if (i is int && i >= 0 && w is bool) picks.putIfAbsent(day, () => (i, w));
         case 'ended':
           ended ??= day;
+        case 'reminder':
+          if (j['on'] is bool) remind = j['on'] as bool;
       }
     }
     final days = {...answers.keys, ...odd.keys, ...picks.keys};
     return ExperimentLog(plan, {
       for (final d in days) d: DayLog(answer: answers[d], odd: odd[d] ?? const {}, pickIndex: picks[d]?.$1, pick: picks[d]?.$2),
-    }, ended);
+    }, ended, remind: remind);
   }
 
   /// Every readable experiment, newest first.
@@ -216,6 +230,14 @@ class SleepExperimentStore {
     final index = e.picksMade, w = pickAt(e.plan.salt!, index);
     _line(id, now, day, 'pick', {'index': index, 'with': w});
     return w;
+  }
+
+  /// Switches the evening reminder on or off. False when the experiment does not run.
+  bool setReminder(String id, bool on, DateTime now) {
+    final e = read(id);
+    if (e == null || !e.running) return false;
+    _line(id, now, dayKey(now), 'reminder', {'on': on});
+    return true;
   }
 
   /// Ends the experiment: what is logged stays and the result stays readable.

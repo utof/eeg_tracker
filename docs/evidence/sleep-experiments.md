@@ -54,8 +54,14 @@ pulse from this headband are a first guess that has not been checked against a l
 
 ## How the app uses this
 
-- Trends, then Sleep experiments. One at a time, from a short list: **Late caffeine**, **Late hard workout**,
-  **Alcohol**.
+- Trends, right under today's numbers: **Sleep experiments: one tap each evening**. One at a time, from a short
+  list: **Late caffeine**, **Late hard workout**, **Alcohol**. (The section below it, **Self-experiments: a task on
+  days the app picks**, is the older kind: any habit of your own, and the app tells you each day what to do.)
+- While one runs, tonight's question is also on the Record tab, right above the Sleep button, from 17:00 until you
+  answer it. It is not shown once a sleep stretch is open.
+- A reminder is optional and off until you switch on **Remind me in the evening** on the experiment's page: one
+  notification about 45 minutes before your usual bedtime (22:15 until the app knows it), only while tonight is
+  unanswered. Like the app's other reminders it does not come while a recording or a session runs.
 - Each evening one tap out of three. Caffeine: "A lot, late", "None after noon", "In between". Workout: "Late",
   "Early", "None or light". Alcohol: "3 or more", "None", "1 or 2". The middle kind of evening goes in neither pile,
   because the studies say it is too small to show.

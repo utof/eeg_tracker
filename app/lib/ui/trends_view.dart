@@ -78,7 +78,8 @@ class TrendsView extends StatelessWidget {
   /// The "Unusual for you" section (unusual_view.dart), right after the summary line; null: none.
   final Widget? unusual;
 
-  /// The "Sleep experiments" section (sleep_experiments_view.dart), before Self-experiments; null: none.
+  /// The "Sleep experiments" section (sleep_experiments_view.dart), under today's numbers and before
+  /// Self-experiments; null: none.
   final Widget? sleepExperiments;
 
   /// Opens the sharp-hours page (the assistant's proposal, DECISIONS rows 280-289); the section shows only with it.
@@ -126,6 +127,26 @@ class TrendsView extends StatelessWidget {
             MeasureEntry(row: r, today: m.today),
           ],
           if (none.isNotEmpty && withData.isNotEmpty) Para('Nothing yet for ${_join(none)}.', color: Night.inkMuted, top: 20),
+          // the two kinds of experiment, next to each other right under today's numbers (DECISIONS 1083)
+          ?sleepExperiments,
+          if (onExperiments != null) ...[
+            const SectionHeading('Self-experiments: a task on days the app picks'),
+            if (experimentLine != null)
+              OwnText(child: Para(experimentLine!, color: Night.ink, top: 0))
+            else
+              const Para(
+                'The numbers on this page are only seen together. To test one habit of your own, let the app draw '
+                'random days for a few weeks.',
+                color: Night.inkMuted,
+                top: 0,
+              ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: onExperiments,
+              icon: const Icon(Icons.science_outlined),
+              label: const Text('Self-experiments'),
+            ),
+          ],
           const SectionHeading('Sleep pressure'),
           Text(pressureHeadline(m.pressure, m.now), style: text.titleLarge?.copyWith(height: 1.3)),
           if (!m.pressure.isEmpty) ...[
@@ -156,25 +177,6 @@ class TrendsView extends StatelessWidget {
               if (i > 0) const Divider(height: 25),
               _DayEntry(day: d, rows: m.rows, today: m.today),
             ],
-          ],
-          ?sleepExperiments,
-          if (onExperiments != null) ...[
-            const SectionHeading('Self-experiments'),
-            if (experimentLine != null)
-              OwnText(child: Para(experimentLine!, color: Night.ink, top: 0))
-            else
-              const Para(
-                'Everything above is only seen together. To test one habit, let the app draw random days for a '
-                'few weeks.',
-                color: Night.inkMuted,
-                top: 0,
-              ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: onExperiments,
-              icon: const Icon(Icons.science_outlined),
-              label: const Text('Experiments'),
-            ),
           ],
           if (onSharp != null) ...[
             const SectionHeading('Sharp hours'),

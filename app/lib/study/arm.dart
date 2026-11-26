@@ -3,10 +3,13 @@
 import 'dart:isolate';
 
 import '../sharp/hours.dart' show sharpDayNumbers;
+import '../sharp/page.dart' show recentNights;
 import '../sharp/prompts.dart';
 import '../sharp/schedule.dart';
 import '../sharp/store.dart';
 import '../sleep/report.dart';
+import '../sleep_experiments/reminder.dart';
+import '../sleep_experiments/store.dart';
 import '../wearer/wearer.dart' show recentOwnNightReports;
 import '../work/days.dart' show readWorkDayNumbers;
 import 'page.dart';
@@ -20,10 +23,34 @@ List<PlannedPrompt> plannedPrompts({
   StudySettings? study,
   List<SleepReport> reports = const [],
   List<StudyAnswer> answers = const [],
+  ExperimentLog? sleepExperiment,
 }) => [
   if (sharp != null) ...upcomingPrompts(now, sharp),
   if (study != null) ...upcomingStudy(now, study, timesFor(study, sharp, reports, now), answers),
+  // a running sleep experiment's evening reminder, when switched on (DECISIONS 1085)
+  ...upcomingExperimentReminders(
+    now,
+    sleepExperiment,
+    reminderMinute(recentNights(reports, now), studyWindow(sharp, reports, now)),
+  ),
 ]..sort((a, b) => a.at.compareTo(b.at));
+
+/// The minute of the day a sleep experiment's evening reminder rings at, from the app's folders (the page says it).
+int experimentReminderMinute(String recordingsDir, DateTime now) {
+  final sharp = SharpStore(sharpDirFor(recordingsDir)).settings();
+  final reports = recentOwnNightReports(recordingsDir, now);
+  return reminderMinute(recentNights(reports, now), studyWindow(sharp, reports, now));
+}
+
+/// The running sleep experiment when its evening reminder is switched on; null otherwise (nothing more is read).
+ExperimentLog? remindedExperiment(String recordingsDir) {
+  try {
+    final e = SleepExperimentStore(sleepExperimentsDirFor(recordingsDir)).active();
+    return e != null && e.remind ? e : null;
+  } on Object {
+    return null; // a reminder is never worth losing the other reminders
+  }
+}
 
 /// The moments ahead from the app's folders (beside [recordingsDir]): the settings, the study log and, while the
 /// study reminders are on, only the reports of the recent nights (found by name; DECISIONS 620-629: every report was
@@ -32,7 +59,8 @@ List<PlannedPrompt> promptsFromFiles(String recordingsDir, DateTime now) {
   final sharp = SharpStore(sharpDirFor(recordingsDir)).settings();
   final store = StudyStore(studyDirFor(recordingsDir));
   final study = store.settings();
-  final on = study?.on == true;
+  final experiment = remindedExperiment(recordingsDir);
+  final on = study?.on == true || experiment != null;
   return plannedPrompts(
     now: now,
     sharp: sharp,
@@ -40,7 +68,8 @@ List<PlannedPrompt> promptsFromFiles(String recordingsDir, DateTime now) {
     // the nights the owner wore ("Was this you?", DECISIONS 377), as Sharp hours reads them; the times use only the
     // recent ones (sharp/page.dart recentNights)
     reports: on ? recentOwnNightReports(recordingsDir, now) : const [],
-    answers: on ? store.answers() : const [],
+    answers: study?.on == true ? store.answers() : const [],
+    sleepExperiment: experiment,
   );
 }
 

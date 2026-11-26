@@ -43,7 +43,7 @@ can only help you look at your own days.
 - Whether studying late costs you sleep was not researched here. The app does not know what or how long you study:
   keep to what you would do anyway.
 - Seen together, not tested: days you study in the evening may differ in other ways (a calm day, more energy). The
-  self-experiment "Study in the evening or the morning" (Trends, Experiments) draws the days at random and compares your
+  self-experiment "Study in the evening or the morning" (Trends, Self-experiments) draws the days at random and compares your
   recall the next morning. On a morning-study day the recall comes 24 hours after studying, not 12, which can favour
   the evening; the experiment cannot remove that difference, so keep it in mind when you read its answer.
 

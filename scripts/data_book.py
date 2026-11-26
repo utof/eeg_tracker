@@ -789,7 +789,10 @@ def _laptop_work(j: dict) -> dict:
 
 
 def session_rows(local: Path, hashes: Hashes) -> list[dict]:
+    """sessions.tsv. A session whose mark on the recording was removed in the Archive has no row until the mark is put
+    back (DECISIONS 1080); its file stays."""
     rows = []
+    taken = spans.taken_ids(local)
     specs = (("phone/work-sessions", ".work.json", "work"), ("laptop/work", ".work.json", "laptop_work"),
              ("phone/meditations", ".meditation.json", "meditation"),
              ("phone/alpha-theta", ".alphatheta.json", "alpha_theta"), ("phone/naps", ".nap.json", "nap_coach"),
@@ -797,7 +800,7 @@ def session_rows(local: Path, hashes: Hashes) -> list[dict]:
     for folder, suffix, kind in specs:
         for f in sorted((local / folder).glob("*" + suffix)):
             j = _json(f)
-            if not isinstance(j, dict) or ds.parse_time(j.get("start")) is None:
+            if not isinstance(j, dict) or ds.parse_time(j.get("start")) is None or spans.mark_taken(j, taken):
                 continue
             rel = f.relative_to(local).as_posix()
             row = dict(session=f.name[: -len(suffix)], kind=kind, start=iso(j.get("start")), ended=j.get("ended"),

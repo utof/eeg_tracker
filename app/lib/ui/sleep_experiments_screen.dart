@@ -8,6 +8,9 @@ import 'package:flutter/material.dart';
 
 import '../phone.dart';
 import '../pulse/night.dart' show pulseDayNumbers;
+import '../sharp/prompts.dart';
+import '../sharp/schedule.dart' show clockText;
+import '../study/arm.dart' show experimentReminderMinute, rearmPrompts;
 import '../sleep_experiments/kinds.dart';
 import '../sleep_experiments/result.dart';
 import '../sleep_experiments/store.dart';
@@ -40,7 +43,12 @@ Map<String, String> neededBeforeStart(Map<String, NightNumbers> nights) => {
 };
 
 class SleepExperimentsScreen extends StatefulWidget {
-  const SleepExperimentsScreen({super.key, this.recordingsDir, this.id, this.now, this.readNights});
+  const SleepExperimentsScreen({super.key, this.recordingsDir, this.id, this.now, this.readNights, this.phone, this.notificationsOn});
+
+  /// The phone's one list of reminders (re-armed after every tap here), and whether the reminder's notifications are
+  /// allowed (tests); null: the phone's.
+  final SharpPhone? phone;
+  final Future<bool> Function()? notificationsOn;
 
   /// The app's recordings folder when the caller knows it.
   final String? recordingsDir;
@@ -62,6 +70,8 @@ class _SleepExperimentsScreenState extends State<SleepExperimentsScreen> {
   SleepExperimentPage? _page;
   List<ExperimentLog> _earlier = const [];
   Map<String, NightNumbers> _nights = const {};
+  int? _remindMin;
+  bool _notificationsOff = false;
 
   DateTime get _now => (widget.now ?? DateTime.now)();
   SleepExperimentStore get _store => SleepExperimentStore(sleepExperimentsDirFor(_dir!));
@@ -78,12 +88,21 @@ class _SleepExperimentsScreenState extends State<SleepExperimentsScreen> {
       _dir ??= widget.recordingsDir ?? await Phone.recordingsDir();
       if (_dir == null) throw StateError("the app's folder is not known");
       if (nights) _nights = await (widget.readNights ?? _inBackground)(_dir!);
+      if (nights) {
+        try {
+          _remindMin = experimentReminderMinute(_dir!, _now);
+        } catch (_) {
+          // the page stands without the reminder's time
+        }
+      }
       final all = _store.all();
       final shown = widget.id != null
           ? all.where((e) => e.plan.id == widget.id).firstOrNull
           : (all.where((e) => e.running).firstOrNull ?? all.firstOrNull);
+      final allowed = shown != null && shown.remind ? await (widget.notificationsOn ?? experimentNotificationsOn)() : true;
       if (!mounted) return;
       setState(() {
+        _notificationsOff = !allowed;
         _page = shown == null ? null : SleepExperimentPage(result: resultFor(shown, _nights), today: dayKey(_now));
         _earlier = widget.id != null
             ? const []
@@ -105,6 +124,9 @@ class _SleepExperimentsScreenState extends State<SleepExperimentsScreen> {
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Not saved: $e')));
     }
+    // tonight's reminder is not needed once answered, and the switch itself changes the list
+    final dir = _dir;
+    if (dir != null) unawaited(rearmPrompts(dir, widget.phone ?? ChannelSharpPhone(), _now).catchError((Object _) {}));
     unawaited(_load(nights: false));
   }
 
@@ -161,6 +183,9 @@ class _SleepExperimentsScreenState extends State<SleepExperimentsScreen> {
       onPick: own ? () => _write((s, id, now) => s.pick(id, now)) : null,
       onEnd: own ? _end : null,
       onNew: own ? _new : null,
+      onRemind: own ? (on) => _write((s, id, now) => s.setReminder(id, on, now)) : null,
+      remindAt: _remindMin == null ? null : clockText(_remindMin!),
+      notificationsOff: _notificationsOff,
       onOpen: (id) => Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => SleepExperimentsScreen(recordingsDir: _dir, id: id, now: widget.now, readNights: widget.readNights),

@@ -58,11 +58,15 @@ Map<String, String>? labelRow(Estimate e, Answered a) {
 /// A cell as Python's csv writes it with its minimal quoting (and pandas reads by default).
 String tsvCell(String v) => RegExp('[\t\n\r"]').hasMatch(v) ? '"${v.replaceAll('"', '""')}"' : v;
 
-/// The whole labels file: a header, then the rows by start time, then id.
-String labelsTsv(ConfirmState state) {
+/// A Yes that is no label any more: its estimate is in [takenAway] (the stretch the Yes made was taken away later).
+bool _yesTakenAway(String estimateId, Answered a, Set<String> takenAway) => a.answer == Answer.yes && takenAway.contains(estimateId);
+
+/// The whole labels file: a header, then the rows by start time, then id. [takenAway]: the estimates whose Yes made a
+/// stretch you took away afterwards; such a Yes has no row while that lasts (the columns are the same).
+String labelsTsv(ConfirmState state, {Set<String> takenAway = const {}}) {
   final rows = <Map<String, String>>[
     for (final a in state.answers.entries)
-      if (state.estimates[a.key] != null) ?labelRow(state.estimates[a.key]!, a.value),
+      if (state.estimates[a.key] != null && !_yesTakenAway(a.key, a.value, takenAway)) ?labelRow(state.estimates[a.key]!, a.value),
   ]..sort((a, b) {
       final t = DateTime.parse(a['start']!).compareTo(DateTime.parse(b['start']!));
       return t != 0 ? t : a['label_id']!.compareTo(b['label_id']!);
@@ -95,7 +99,10 @@ String tsvNumber(double v) {
 /// never read as Yes or No), or empty: still waiting. `label` and `confidence` are the detector's guess; `card` what
 /// the card showed (`normal`, `blind`); `times_confirmed` 1 only when you set the times yourself, which are then
 /// `confirmed_start` and `confirmed_end` (`start` and `end` stay the detector's).
-String estimatesTsv(ConfirmState state) {
+///
+/// [takenAway] as in [labelsTsv]: such a Yes stays `yes` (it was said) and its `label_id` is empty, as in the laptop's
+/// table.
+String estimatesTsv(ConfirmState state, {Set<String> takenAway = const {}}) {
   final rows = <Map<String, String>>[
     for (final e in state.estimates.values)
       () {
@@ -117,7 +124,7 @@ String estimatesTsv(ConfirmState state) {
           'answer': a?.answer.wire ?? (none == null ? '' : notAnsweredWire),
           'answered': a != null ? isoLocal(a.at) : (none == null ? '' : isoLocal(none.at)),
           'via': a?.via ?? none?.via ?? '',
-          'label_id': a == null || labelRow(e, a) == null ? '' : 'confirm:${e.id.substring(4)}',
+          'label_id': a == null || labelRow(e, a) == null || _yesTakenAway(e.id, a, takenAway) ? '' : 'confirm:${e.id.substring(4)}',
           'owner_words': [?a?.words, ?a?.note].join(': '),
           'card': a?.card?.name ?? '',
           'said': a?.said?.id ?? '',
