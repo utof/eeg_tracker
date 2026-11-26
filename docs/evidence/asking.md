@@ -56,8 +56,9 @@ monthly check on your own answers (below) shows whether they need changing.
 
 - **Yes** is kept as "it happened". The times stay the headband's guess, marked as not confirmed, so nothing later
   treats them as fact. **"Yes, but the times are off"** keeps your times, marked as confirmed (also when you looked
-  and left them). It is offered only on the day of the stretch; later the card asks only whether it happened, with
-  the times to the half hour.
+  and left them). It is offered on the day of the stretch, and for 4 hours after the stretch ended even when that
+  crosses 04:00 (a walk of 03:20-03:50 opened at 04:10 still has it); later the card asks only whether it happened,
+  with the times to the half hour.
 - **Not sure** is kept as its own answer. It is not a fact, it is never asked again, and nothing that trains or
   scores a detector sees it. **No answer** (a notification swiped away, a question that got too old) is kept
   separately and is never read as Yes or No.
