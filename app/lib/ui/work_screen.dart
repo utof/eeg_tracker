@@ -38,7 +38,7 @@ class WorkScreen extends StatefulWidget {
 }
 
 class _WorkScreenState extends State<WorkScreen> {
-  final BrainBitFinder _finder = BrainBitFinder(activity: 'work');
+  late final BrainBitFinder _finder = BrainBitFinder(activity: 'work', activitySource: workSpanSource(widget.auto));
   late final WorkController _c = WorkController(
     finder: _finder,
     sound: widget.auto?.quiet == true ? QuietWorkSound(SoloudWorkSound()) : SoloudWorkSound(),

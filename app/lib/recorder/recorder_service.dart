@@ -67,6 +67,9 @@ const String _sleepKey = 'startSleep';
 /// ...; Record first step 4, DECISIONS 884); absent: none.
 const String _spanKey = 'startSpan';
 
+/// Who marked that first span: `auto_start` for the headband watcher's work session (DECISIONS 1131); missing: you.
+const String _spanSourceKey = 'startSpanSource';
+
 /// A night started while the screen's engine holds a live connection: its offer to lend it (headband/lend.dart,
 /// DECISIONS 856). Read once by the recorder at its start, then removed.
 const String _lendKey = 'lend';
@@ -178,6 +181,7 @@ Future<ServiceRequestResult> startRecorderService(
   bool fromWatcher = false,
   bool sleep = true,
   String? span,
+  String spanSource = 'owner_button',
 }) async {
   if (!fromWatcher) await AutoChannel.release();
   if (recordingsDir != null) await FlutterForegroundTask.saveData(key: _dirKey, value: recordingsDir);
@@ -185,8 +189,10 @@ Future<ServiceRequestResult> startRecorderService(
   await FlutterForegroundTask.saveData(key: _sleepKey, value: sleep ? '1' : '0');
   if (span == null || sleep) {
     await FlutterForegroundTask.removeData(key: _spanKey);
+    await FlutterForegroundTask.removeData(key: _spanSourceKey);
   } else {
     await FlutterForegroundTask.saveData(key: _spanKey, value: span);
+    await FlutterForegroundTask.saveData(key: _spanSourceKey, value: spanSource);
   }
   if (autoNotes == null) {
     await FlutterForegroundTask.removeData(key: _autoKey);
@@ -391,6 +397,7 @@ class RecorderTaskHandler extends TaskHandler {
     final auto = await _autoNotes();
     final sleep = await _startsWithSleep();
     final firstSpan = sleep ? null : await _firstSpan();
+    final firstSource = firstSpan == null ? null : await _firstSpanSource();
     // Stop (or the system's destroy) came while this was starting: it has been answered; no night starts after it.
     if (_stopping) return;
     final diy = _diy = this.finder == null ? diyNightFor(rec) : null;
@@ -457,7 +464,7 @@ class RecorderTaskHandler extends TaskHandler {
       },
       sleep: sleep,
       firstSpan: firstSpan,
-      sleepSource: auto != null ? 'auto_start' : 'owner_button',
+      sleepSource: auto != null || firstSource == 'auto_start' ? 'auto_start' : 'owner_button',
       startNotes: [
         ...?diy?.notes,
         if (starter != TaskStarter.system) ...?auto,
@@ -789,6 +796,14 @@ class RecorderTaskHandler extends TaskHandler {
     try {
       final kind = await FlutterForegroundTask.getData<String>(key: _spanKey);
       return kind == null || kind.isEmpty ? null : kind;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<String?> _firstSpanSource() async {
+    try {
+      return await FlutterForegroundTask.getData<String>(key: _spanSourceKey);
     } catch (_) {
       return null;
     }

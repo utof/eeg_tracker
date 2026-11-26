@@ -136,6 +136,34 @@ void main() {
     expect(back.first.session, 'work-sessions/x.work.json');
   });
 
+  test('a span opened by command says who marked it: the watcher\'s auto_start, anything else is your button (DECISIONS 1131)', () async {
+    final r = recorder(FakeFinder([FakeBand('a')]), sleep: false);
+    final running = r.run(restartedBySystem: false);
+    await wait(200);
+    final id = stems().single;
+    Span? open(String kind, [Object? source]) =>
+        r.spanCommand({'kind': 'span', 'op': 'open', 'span_kind': kind, 'source': ?source});
+    expect(open('work', 'auto_start')!.source, 'auto_start');
+    expect(r.closeSpan('$id-1')!.source, 'auto_start', reason: 'the end keeps who marked the start');
+    expect(open('meditate')!.source, 'owner_button');
+    expect(open('nap', 'owner_confirmed')!.source, 'owner_button', reason: 'only the stop sheet may confirm');
+    expect(open('sound', 42)!.source, 'owner_button', reason: 'not a text');
+    expect(open('dream_catcher', 'auto_resume')!.source, 'owner_button', reason: 'the recorder alone resumes');
+    await r.stop();
+    await running;
+    final back = readSpans(spansFileOf(spansDirFor(dir.path), id)).spans;
+    expect(
+      [for (final s in back) (s.kind, s.source)],
+      [
+        ('work', 'auto_start'),
+        ('meditate', 'owner_button'),
+        ('nap', 'owner_button'),
+        ('sound', 'owner_button'),
+        ('dream_catcher', 'owner_button'),
+      ],
+    );
+  });
+
   test('no headband ever found: the spans are kept under the start\'s stamp', () async {
     final r = recorder(FakeFinder([]));
     final running = r.run(restartedBySystem: false);

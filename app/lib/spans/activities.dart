@@ -21,13 +21,16 @@ import '../logs/app_log.dart';
 import '../recorder/status.dart' show RecordingLive;
 import 'span.dart';
 
-/// The recorder's commands for a span (the service applies them with `NightRecorder.spanCommand`).
-Map<String, Object?> openSpanCommand(String kind, {String? session, bool startedRecording = false}) => {
+/// The recorder's commands for a span (the service applies them with `NightRecorder.spanCommand`). [source]: who marked
+/// it; a start by hand says nothing (the recorder reads `owner_button`), the headband watcher's start says `auto_start`
+/// (DECISIONS 1131).
+Map<String, Object?> openSpanCommand(String kind, {String? session, bool startedRecording = false, String source = 'owner_button'}) => {
   'kind': 'span',
   'op': 'open',
   'span_kind': kind,
   'session': ?session,
   if (startedRecording) 'started_recording': true,
+  if (source != 'owner_button') 'source': source,
 };
 
 Map<String, Object?> closeSpanCommand(String id, {String by = 'owner'}) => {'kind': 'span', 'op': 'close', 'id': id, 'by': by};
@@ -122,7 +125,7 @@ class Activities {
   /// Starts the recorder with [kind] as its first span (set by the Record tab, which owns starting and stopping: the
   /// permissions, the share server's hand-over, the lend of a live connection). Null when it started, else why not in
   /// the owner's words.
-  Future<String?> Function(String kind)? startRecording;
+  Future<String?> Function(String kind, {String source})? startRecording;
 
   /// Stop everything: ends the recording as the Record tab's Stop does, and shows its sheet.
   Future<void> Function()? stopRecording;
@@ -159,8 +162,9 @@ class Activities {
   }
 
   /// Starts [kind] as an activity: its span is open on the running recording when this returns (the recorder is
-  /// started first when nothing records). Throws [ActivityRefused] when it could not.
-  Future<ActivityRun> begin(String kind) async {
+  /// started first when nothing records). [source]: who marked it (`owner_button`, or `auto_start` for the headband
+  /// watcher's work session, DECISIONS 1131). Throws [ActivityRefused] when it could not.
+  Future<ActivityRun> begin(String kind, {String source = 'owner_button'}) async {
     final before = current.value;
     if (before != null && !before.over) await end(before, by: 'other_activity');
     ask.value = null; // a new start answers an old question: the recording is wanted
@@ -186,11 +190,11 @@ class Activities {
         if (!other.closed && other.kind != kind) send(closeSpanCommand(other.id, by: leftOpen));
       }
       run = ActivityRun(kind, startedRecording: false);
-      send(openSpanCommand(kind));
+      send(openSpanCommand(kind, source: source));
     } else {
       final start = startRecording;
       if (start == null) throw const ActivityRefused('The recorder cannot be started from here. Press Record first.');
-      final why = await start(kind);
+      final why = await start(kind, source: source);
       if (why != null) throw ActivityRefused(why);
       run = ActivityRun(kind, startedRecording: true);
     }

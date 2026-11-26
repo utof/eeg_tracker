@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:eeg_tracker/auto/work_start.dart';
 import 'package:eeg_tracker/dream/band_link.dart';
 import 'package:eeg_tracker/headband/connection.dart';
 import 'package:eeg_tracker/headband/device_status.dart';
@@ -81,9 +82,10 @@ class Day {
       answerWait: const Duration(seconds: 3),
       askEvery: const Duration(milliseconds: 5),
     );
-    acts.startRecording = (kind) async {
+    acts.startRecording = (kind, {source = 'owner_button'}) async {
       startedBy.add(kind);
-      await record(firstSpan: kind);
+      startedSources.add(source);
+      await record(firstSpan: kind, source: source);
       return null;
     };
     acts.stopRecording = stop;
@@ -105,6 +107,7 @@ class Day {
   NightRecorder? recorder;
   bool stopped = false;
   final List<String> startedBy = [];
+  final List<String> startedSources = [];
   final List<RecorderStatus> statuses = [];
   final MemoryNightStore store = MemoryNightStore();
   late final Directory files = Directory.systemTemp.createTempSync('activities');
@@ -117,7 +120,7 @@ class Day {
   }
 
   /// Record (or Sleep, or an activity's start): the recorder as recorder_service.dart makes it.
-  Future<void> record({bool sleep = false, String? firstSpan}) async {
+  Future<void> record({bool sleep = false, String? firstSpan, String source = 'owner_button'}) async {
     final made = await owner.lendToNight();
     final offer = made == null ? null : LendOffer.fromJson(made.toJson());
     stopped = false;
@@ -132,6 +135,7 @@ class Day {
       spanLog: log,
       sleep: sleep,
       firstSpan: firstSpan,
+      sleepSource: source,
     );
     unawaited(r.run(restartedBySystem: false));
   }
@@ -168,8 +172,8 @@ class Day {
   int get rawSets => dir.listSync().whereType<File>().where((f) => f.path.endsWith('.f32')).length;
 
   /// A session as its screen makes it: the door for its kind, the link, the contact step, the stream.
-  Future<({BrainBitFinder door, BandLink link, List<int> got})> session(String kind) async {
-    final door = BrainBitFinder(activity: kind);
+  Future<({BrainBitFinder door, BandLink link, List<int> got})> session(String kind, {String source = 'owner_button'}) async {
+    final door = BrainBitFinder(activity: kind, activitySource: source);
     final got = <int>[];
     final link = BandLink(finder: door, timing: _quick, onBatch: (_, b) => got.add(b.length));
     expect(await link.connect(), isTrue);
@@ -258,6 +262,40 @@ void main() {
     expect(spans.single.closed, isTrue);
     expect(d.nightFinder.scans + d.nightFinder.directs, 1);
     expect(d.screenFinder.calls, isEmpty);
+  });
+
+  test(
+    "the headband watcher's Work with nothing recording: the recording it starts is the app's guess, not your button (DECISIONS 1131)",
+    () async {
+      final d = Day();
+      addTearDown(d.close);
+      final work = await d.session('work', source: 'auto_start');
+      expect(d.startedBy, ['work']);
+      expect(d.startedSources, ['auto_start'], reason: 'the Record tab starts the recorder: it must be told who marked the first span');
+      await until(() => d.recording && work.got.length > 5, what: 'the recording the watcher started');
+      final span = d.statuses.last.rec.open('work')!;
+      expect((span.startedRecording, span.source), (true, 'auto_start'));
+      await work.link.close();
+      expect(d.log.read(d.recordingId).spans.single.source, 'auto_start', reason: 'the file the laptop reads');
+    },
+  );
+
+  test("the headband watcher's Work on a recording that runs: its span is auto_start, a later session you press is owner_button", () async {
+    final d = Day();
+    addTearDown(d.close);
+    await d.record();
+    await until(() => d.recording, what: 'the recording');
+    final work = await d.session('work', source: 'auto_start');
+    await until(() => work.got.length > 3);
+    expect(d.statuses.last.rec.open('work')?.source, 'auto_start');
+    await work.link.close();
+    await until(() => d.statuses.last.rec.open('work') == null);
+    final med = await d.session('meditate');
+    await until(() => med.got.length > 3);
+    await med.link.close();
+    await until(() => d.statuses.last.rec.open() == null);
+    expect([for (final s in d.spans) (s.kind, s.source)], [('work', 'auto_start'), ('meditate', 'owner_button')]);
+    expect(d.startedSources, isEmpty, reason: 'Record started this recording, not an activity');
   });
 
   test('Keep recording: the activity ends, the recording goes on, and the next activity asks nothing', () async {
@@ -410,9 +448,18 @@ void main() {
     expect(DeviceStatus.fromRecorder(st(const []), now: now).word, 'Recording');
   });
 
+  test('the work page says who started it: the headband watcher or you (DECISIONS 1131)', () {
+    expect(workSpanSource(null), 'owner_button');
+    expect(workSpanSource(const AutoWorkStart()), 'auto_start');
+    expect(workSpanSource(const AutoWorkStart(quiet: false, limit: Duration(minutes: 90))), 'auto_start');
+  });
+
   test('the span commands as plain maps', () {
     expect(openSpanCommand('work'), {'kind': 'span', 'op': 'open', 'span_kind': 'work'});
     expect(openSpanCommand('work', startedRecording: true)['started_recording'], isTrue);
+    // a start by hand says nothing about who marked it; the headband watcher's start names itself
+    expect(openSpanCommand('work', source: 'owner_button').containsKey('source'), isFalse);
+    expect(openSpanCommand('work', source: 'auto_start'), {'kind': 'span', 'op': 'open', 'span_kind': 'work', 'source': 'auto_start'});
     expect(closeSpanCommand('r-1', by: 'activity'), {'kind': 'span', 'op': 'close', 'id': 'r-1', 'by': 'activity'});
   });
 }
